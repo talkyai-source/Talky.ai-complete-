@@ -1,0 +1,182 @@
+FF.F...FF                                                                [100%]
+================================== FAILURES ===================================
+_ test_current_confirmed_contact_keeps_confirmation_evidence_through_both_apis _
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000018AEA098140>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000018AEA083FE0>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_current_confirmed_contact_keeps_confirmation_evidence_through_both_apis(lead_db):
+        state = session()
+        assert await persist(lead_db, state) == 1
+        call = (await details(lead_db))["details"][0]
+        lead = await api.get_contact_lead_details(
+            str(lead_db.leads[0]), SimpleNamespace(tenant_id=str(lead_db.tenants[0]))
+        )
+        for row in (call, lead["details"][0]):
+            assert row["confirmed"] and row["validation_status"] == "confirmed"
+>           assert row["evidence"]["confirmation_evidence"] == "caller_repeatback"
+E           KeyError: 'confirmation_evidence'
+
+tests\integration\test_ag05_lead_evidence.py:144: KeyError
+________ test_additional_contact_withdrawal_removes_only_that_contact _________
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000018AEA0994F0>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000018AEA0AA570>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_additional_contact_withdrawal_removes_only_that_contact(lead_db):
+        state = session(contact("second@example.org"), earlier=(contact(),))
+        assert await persist(lead_db, state) == 2
+        state.captured_slots.email_capture = ContactCaptureState(kind="email", status=CaptureStatus.CANCELLED)
+>       assert await persist(lead_db, state) == 1
+E       assert 0 == 1
+
+tests\integration\test_ag05_lead_evidence.py:153: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.lead_slot_capture:lead_slot_capture.py:482 lead_slot_capture_revoke_failed call=53eeaa89 field=email_2 err=only email/phone can be revoked
+________ test_contact_capture_rejects_foreign_campaign_or_lead_binding ________
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000018AEA09B020>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000018AEA0ABD40>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_contact_capture_rejects_foreign_campaign_or_lead_binding(lead_db):
+>       stored = await lead_db.service.capture(
+            tenant_id=str(lead_db.tenants[0]), call_id=str(lead_db.calls[0]),
+            campaign_id=str(lead_db.campaigns[1]), lead_id=str(lead_db.leads[1]),
+            field_key="identified_need", field_type="notes", value="Synthetic note",
+            source="caller_stated",
+        )
+
+tests\integration\test_ag05_lead_evidence.py:177:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\domain\services\lead_capture_service.py:258: in capture
+    row = await conn.fetchrow(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:749: in fetchrow
+    data = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.ForeignKeyViolationError: insert or update on table "call_lead_details" violates foreign key constraint "call_lead_details_lead_tenant_fk"
+E   DETAIL:  Key is not present in table "leads".
+
+asyncpg\protocol\protocol.pyx:207: ForeignKeyViolationError
+_____ test_hangup_write_failure_retains_final_evidence_for_existing_retry _____
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000018AEA09BE30>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000018AEA0AA6F0>, migration_head='0056_billing_refund_snapshots')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000018AEA0ABE90>
+
+    async def test_hangup_write_failure_retains_final_evidence_for_existing_retry(lead_db, monkeypatch):
+        svc = TranscriptService()
+        buffer_id = str(uuid4())
+        text = "Synthetic final correction before hangup"
+        svc.accumulate_turn(buffer_id, "user", text, turn_index=1)
+        voice = SimpleNamespace(
+            call_id=buffer_id, _dialer_call_id=str(lead_db.calls[0]),
+            _dialer_tenant_id=str(lead_db.tenants[0]), call_session=None,
+        )
+        monkeypatch.setattr(persister, "_schedule_call_summary", lambda *a: None)
+        try:
+            await lead_db.admin.execute(f'REVOKE UPDATE ON calls FROM "{lead_db.role}"')
+            await persister.save_call_transcript_on_hangup(
+                voice_session=voice, transcript_service=svc, db_pool=lead_db.pool,
+            )
+>           assert text in svc.get_transcript_text(buffer_id)
+E           AssertionError: assert 'Synthetic final correction before hangup' in ''
+E            +  where '' = <bound method TranscriptService.get_transcript_text of <app.domain.services.transcript_service.TranscriptService object at 0x0000018AEA0AA4B0>>('9770b05f-1f9a-4f90-b45d-c2f046ea4c66')
+E            +    where <bound method TranscriptService.get_transcript_text of <app.domain.services.transcript_service.TranscriptService object at 0x0000018AEA0AA4B0>> = <app.domain.services.transcript_service.TranscriptService object at 0x0000018AEA0AA4B0>.get_transcript_text
+
+tests\integration\test_ag05_lead_evidence.py:233: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.call_transcript_persister:call_transcript_persister.py:435 save_call_transcript_on_hangup DB write failed calls.id=e6ea8090 err=permission denied for table calls
+_________ test_revision_evidence_is_durable_but_original_is_preserved _________
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000018AEA09B4D0>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000018AEA0A9B80>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_revision_evidence_is_durable_but_original_is_preserved(lead_db):
+        svc = TranscriptService()
+        buffer_id = str(uuid4())
+        try:
+            svc.accumulate_turn(
+                buffer_id, "user", "Original synthetic contact", turn_index=1,
+                metadata={"provider_item_id": "synthetic-item", "caller_turn_order": 1},
+            )
+            assert svc.annotate_turn_revision(
+                buffer_id, turn_index=1, provider_item_id="synthetic-item",
+                caller_turn_order=1, content="Corrected synthetic contact",
+            )
+            await svc.flush_to_database(
+                buffer_id, db_pool=lead_db.pool, tenant_id=str(lead_db.tenants[0]),
+                target_call_id=str(lead_db.calls[0]),
+            )
+            row = await lead_db.admin.fetchrow("SELECT transcript_json FROM calls WHERE id=$1", lead_db.calls[0])
+>           turns = json.loads(row["transcript_json"])
+
+tests\integration\test_ag05_lead_evidence.py:263:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+s = None, cls = None, object_hook = None, parse_float = None, parse_int = None
+parse_constant = None, object_pairs_hook = None, kw = {}
+
+    def loads(s, *, cls=None, object_hook=None, parse_float=None,
+            parse_int=None, parse_constant=None, object_pairs_hook=None, **kw):
+        """Deserialize ``s`` (a ``str``, ``bytes`` or ``bytearray`` instance
+        containing a JSON document) to a Python object.
+
+        ``object_hook`` is an optional function that will be called with the
+        result of any object literal decode (a ``dict``). The return value of
+        ``object_hook`` will be used instead of the ``dict``. This feature
+        can be used to implement custom decoders (e.g. JSON-RPC class hinting).
+
+        ``object_pairs_hook`` is an optional function that will be called with the
+        result of any object literal decoded with an ordered list of pairs.  The
+        return value of ``object_pairs_hook`` will be used instead of the ``dict``.
+        This feature can be used to implement custom decoders.  If ``object_hook``
+        is also defined, the ``object_pairs_hook`` takes priority.
+
+        ``parse_float``, if specified, will be called with the string
+        of every JSON float to be decoded. By default this is equivalent to
+        float(num_str). This can be used to use another datatype or parser
+        for JSON floats (e.g. decimal.Decimal).
+
+        ``parse_int``, if specified, will be called with the string
+        of every JSON int to be decoded. By default this is equivalent to
+        int(num_str). This can be used to use another datatype or parser
+        for JSON integers (e.g. float).
+
+        ``parse_constant``, if specified, will be called with one of the
+        following strings: -Infinity, Infinity, NaN.
+        This can be used to raise an exception if invalid JSON numbers
+        are encountered.
+
+        To use a custom ``JSONDecoder`` subclass, specify it with the ``cls``
+        kwarg; otherwise ``JSONDecoder`` is used.
+        """
+        if isinstance(s, str):
+            if s.startswith('\ufeff'):
+                raise JSONDecodeError("Unexpected UTF-8 BOM (decode using utf-8-sig)",
+                                      s, 0)
+        else:
+            if not isinstance(s, (bytes, bytearray)):
+>               raise TypeError(f'the JSON object must be str, bytes or bytearray, '
+                                f'not {s.__class__.__name__}')
+E               TypeError: the JSON object must be str, bytes or bytearray, not NoneType
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\__init__.py:339: TypeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.transcript_service:transcript_service.py:492 Failed to flush transcript for 9a7981f9-e2c0-4251-afac-507f94bc56b1: permission denied for table campaigns
+============================== warnings summary ===============================
+tests/integration/test_ag05_lead_evidence.py::test_hangup_write_failure_retains_final_evidence_for_existing_retry
+tests/integration/test_ag05_lead_evidence.py::test_revision_evidence_is_durable_but_original_is_preserved
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_ag05_lead_evidence.py::test_current_confirmed_contact_keeps_confirmation_evidence_through_both_apis
+FAILED tests/integration/test_ag05_lead_evidence.py::test_additional_contact_withdrawal_removes_only_that_contact
+FAILED tests/integration/test_ag05_lead_evidence.py::test_contact_capture_rejects_foreign_campaign_or_lead_binding
+FAILED tests/integration/test_ag05_lead_evidence.py::test_hangup_write_failure_retains_final_evidence_for_existing_retry
+FAILED tests/integration/test_ag05_lead_evidence.py::test_revision_evidence_is_durable_but_original_is_preserved
+5 failed, 4 passed, 2 warnings in 17.29s

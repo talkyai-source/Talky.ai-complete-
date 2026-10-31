@@ -7,9 +7,26 @@ from pydantic import BaseModel, EmailStr
 from typing import List, Optional
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
+from app.api.v1.dependencies import get_db_client, CurrentUser
+from app.core.security.rbac import Permission, require_permission
 
 router = APIRouter(prefix="/clients", tags=["clients"])
+
+
+def _tenant_scoped(permission: Permission):
+    """RBAC gate that also guarantees a tenant_id, so no query is ever unfiltered.
+
+    Same contract as ``require_admin_tenant``: a tenant-less caller (only a
+    platform_admin can be one) is refused rather than served every tenant's rows.
+    """
+    permission_gate = require_permission(permission)
+
+    async def _gate(current_user: CurrentUser = Depends(permission_gate)) -> CurrentUser:
+        if not current_user.tenant_id:
+            raise HTTPException(status_code=403, detail="Tenant context required for this operation")
+        return current_user
+
+    return _gate
 
 
 class ClientCreate(BaseModel):
@@ -34,7 +51,7 @@ class ClientResponse(BaseModel):
 
 @router.get("/", response_model=List[ClientResponse])
 async def list_clients(
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_READ)),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -45,10 +62,7 @@ async def list_clients(
     try:
         # Build query
         query = db_client.table("clients").select("id, name, company, phone, email, tags")
-        
-        # Filter by tenant if user has one
-        if current_user.tenant_id:
-            query = query.eq("tenant_id", current_user.tenant_id)
+        query = query.eq("tenant_id", current_user.tenant_id)
         
         response = query.order("name").execute()
         
@@ -75,7 +89,7 @@ async def list_clients(
 @router.post("/", response_model=ClientResponse)
 async def create_client(
     client: ClientCreate,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_UPDATE)),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -127,7 +141,7 @@ async def create_client(
 @router.get("/{client_id}", response_model=ClientResponse)
 async def get_client(
     client_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_READ)),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -136,9 +150,7 @@ async def get_client(
     try:
         query = db_client.table("clients").select("*").eq("id", client_id)
         
-        # Filter by tenant if user has one
-        if current_user.tenant_id:
-            query = query.eq("tenant_id", current_user.tenant_id)
+        query = query.eq("tenant_id", current_user.tenant_id)
         
         response = query.single().execute()
         
@@ -171,7 +183,7 @@ async def get_client(
 @router.delete("/{client_id}")
 async def delete_client(
     client_id: str,
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_UPDATE)),
     db_client: Client = Depends(get_db_client)
 ):
     """
@@ -180,9 +192,7 @@ async def delete_client(
     try:
         query = db_client.table("clients").delete().eq("id", client_id)
         
-        # Filter by tenant if user has one
-        if current_user.tenant_id:
-            query = query.eq("tenant_id", current_user.tenant_id)
+        query = query.eq("tenant_id", current_user.tenant_id)
         
         response = query.execute()
         

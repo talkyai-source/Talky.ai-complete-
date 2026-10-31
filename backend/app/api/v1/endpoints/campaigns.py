@@ -15,19 +15,25 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.dotenv_compat import load_dotenv
 
 from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.campaign_service import (
-    CampaignService, CampaignError, CampaignNotFoundError, CampaignStateError
+    CampaignDirectionError,
+    CampaignError,
+    CampaignNotFoundError,
+    CampaignReadinessError,
+    CampaignService,
+    CampaignStateError,
 )
 from app.domain.services.phone_number_normalizer import (
     normalize_phone_number,
     normalize_phone_number_lenient,
 )
-from app.domain.services.event_emitter import emit_event
+from app.domain.services.event_emitter import emit_event_via_pool
 from app.api.v1.dependencies import (
     get_db_client,
     get_db_read_client,
@@ -45,8 +51,41 @@ from app.api.v1.schemas.campaigns import (
     ContactUpdate,
     ContactListResponse,
 )
+from app.api.v1.endpoints._outbound_campaign import require_owned_outbound_campaign
 
 load_dotenv()
+
+
+def _require_contact_write(response, campaign_id: str, operation: str) -> dict:
+    """Reject adapter errors/zero rows instead of fabricating API success."""
+    error = str(getattr(response, "error", "") or "")
+    if "leads_outbound_campaign_guard" in error:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "The campaign changed to inbound before the contact write "
+                    "completed. Use the inbound campaign lifecycle."
+                ),
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    if error:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to {operation} contact",
+        )
+    data = getattr(response, "data", None)
+    if not data:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "contact_write_conflict",
+                "message": "The contact changed before the write completed. Reload and retry.",
+            },
+        )
+    return data[0]
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +109,232 @@ import json
 router = APIRouter(prefix="/campaigns", tags=["campaigns"])
 
 
+def _reject_inbound_campaign_mutation(
+    db_client: Client,
+    campaign_ids: list[str],
+    *,
+    tenant_id: Optional[str],
+) -> None:
+    """Keep the legacy outbound API from bypassing inbound version/audit rules."""
+
+    if not campaign_ids:
+        return
+    try:
+        query = (
+            db_client.table("campaigns")
+            .select("id, direction")
+            .in_("id", [str(value) for value in campaign_ids])
+        )
+        if tenant_id:
+            query = query.eq("tenant_id", tenant_id)
+        response = query.execute()
+        if getattr(response, "error", None):
+            raise RuntimeError(response.error)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("campaign direction guard unavailable: %s", exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Campaign direction check unavailable",
+        ) from exc
+    inbound_ids = [
+        str(row.get("id"))
+        for row in (response.data or [])
+        if str(row.get("direction") or "outbound").lower() == "inbound"
+    ]
+    if inbound_ids:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "Inbound campaigns must be changed through the inbound "
+                    "campaign versioned lifecycle."
+                ),
+                "campaign_ids": inbound_ids,
+            },
+        )
+
+
+def _update_owned_outbound_campaign(
+    db_client: Client,
+    *,
+    campaign_id: str,
+    tenant_id: str,
+    payload: dict[str, Any],
+    operation: str,
+) -> dict[str, Any]:
+    """Compare-and-set one legacy campaign mutation at its final write.
+
+    The earlier direction read exists for a useful error, but it is not a
+    lock. An inbound conversion that commits while validation/provider calls
+    are in flight must win; matching direction and tenant on the UPDATE makes
+    that decision atomic and prevents downstream outbound side effects.
+    """
+
+    response = (
+        db_client.table("campaigns")
+        .update(payload)
+        .eq("id", campaign_id)
+        .eq("tenant_id", tenant_id)
+        .eq("direction", "outbound")
+        .execute()
+    )
+    error = getattr(response, "error", None)
+    if error:
+        logger.error("Failed to %s %s: %s", operation, campaign_id, error)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to {operation}",
+        )
+    data = getattr(response, "data", None)
+    if not data:
+        # Classify the compare-and-set miss inside the authenticated tenant.
+        # Missing and foreign IDs deliberately share the same 404 response;
+        # only a tenant-owned inbound row earns the lifecycle-specific 409.
+        probe = (
+            db_client.table("campaigns")
+            .select("id, direction")
+            .eq("id", campaign_id)
+            .eq("tenant_id", tenant_id)
+            .execute()
+        )
+        probe_error = getattr(probe, "error", None)
+        if probe_error:
+            logger.error(
+                "Failed to classify zero-row %s for %s: %s",
+                operation,
+                campaign_id,
+                probe_error,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to {operation}",
+            )
+        owned_rows = getattr(probe, "data", None) or []
+        if not owned_rows:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+        if str(owned_rows[0].get("direction") or "outbound").lower() != "inbound":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "campaign_write_conflict",
+                    "message": (
+                        "The campaign changed before the write completed. "
+                        "Reload it and retry."
+                    ),
+                    "campaign_ids": [str(campaign_id)],
+                },
+            )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": (
+                    "The campaign changed before the outbound write completed. "
+                    "Reload it and use the inbound lifecycle if it was converted."
+                ),
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    return dict(data[0])
+
+
+async def _apply_tts_config_atomically(
+    db_client: Client,
+    *,
+    campaign_ids: list[str],
+    tenant_id: str,
+    provider: str,
+    voice_id: str,
+) -> list[str]:
+    """Update one exact tenant-owned outbound campaign set in one transaction."""
+
+    # Preserve request order in the response while treating equivalent UUID
+    # spellings and repeated IDs as a single set member.
+    try:
+        requested_ids = list(
+            dict.fromkeys(str(uuid.UUID(str(value))) for value in campaign_ids)
+        )
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=404,
+            detail="One or more campaigns were not found",
+        ) from exc
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+        # The row locks serialize this bulk update with inbound conversion.
+        rows = await conn.fetch(
+            """
+            SELECT id::text AS id, direction
+              FROM campaigns
+             WHERE tenant_id = $1::uuid
+               AND id::text = ANY($2::text[])
+             ORDER BY id
+             FOR UPDATE
+            """,
+            tenant_id,
+            requested_ids,
+        )
+        owned_by_id = {str(row["id"]): row for row in rows}
+        if set(owned_by_id) != set(requested_ids):
+            # Do not disclose which requested ID belongs to another tenant.
+            raise HTTPException(
+                status_code=404,
+                detail="One or more campaigns were not found",
+            )
+
+        inbound_ids = [
+            campaign_id
+            for campaign_id in requested_ids
+            if str(owned_by_id[campaign_id]["direction"] or "outbound").lower()
+            == "inbound"
+        ]
+        if inbound_ids:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "inbound_campaign_managed_separately",
+                    "message": (
+                        "Inbound campaigns must be changed through the inbound "
+                        "campaign versioned lifecycle."
+                    ),
+                    "campaign_ids": inbound_ids,
+                },
+            )
+
+        updated_rows = await conn.fetch(
+            """
+            UPDATE campaigns
+               SET tts_provider = $3,
+                   voice_id = $4
+             WHERE tenant_id = $1::uuid
+               AND id::text = ANY($2::text[])
+               AND direction = 'outbound'
+             RETURNING id::text AS id
+            """,
+            tenant_id,
+            requested_ids,
+            provider,
+            voice_id,
+        )
+        updated_ids = {str(row["id"]) for row in updated_rows}
+        if updated_ids != set(requested_ids):
+            # This exception is raised before the transaction exits, so every
+            # selected row rolls back instead of exposing a partial update.
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "campaign_write_conflict",
+                    "message": (
+                        "The selected campaigns changed before the write completed. "
+                        "Reload them and retry."
+                    ),
+                },
+            )
+    return requested_ids
+
+
 def _build_validated_script_config(
     *,
     persona_type: str,
@@ -78,6 +343,7 @@ def _build_validated_script_config(
     campaign_slots: dict,
     additional_instructions: str,
     knowledge_driven: bool = False,
+    campaign_brief: Optional[dict[str, Any]] = None,
 ) -> dict[str, Any]:
     """HTTP wrapper around the domain prompt validation service."""
     from app.domain.services.campaign_prompt_service import (
@@ -93,12 +359,13 @@ def _build_validated_script_config(
             campaign_slots=campaign_slots,
             additional_instructions=additional_instructions,
             knowledge_driven=knowledge_driven,
+            campaign_brief=campaign_brief,
         )
     except CampaignPromptValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
-async def _valid_voice_ids_for_provider(provider: str) -> set[str]:
+async def _valid_voice_ids_for_provider(provider: str, *, pool=None, tenant_id=None) -> set[str]:
     """The set of voice ids valid for a given TTS provider.
 
     Single source of truth for create/update/bulk-apply so a campaign's
@@ -119,7 +386,12 @@ async def _valid_voice_ids_for_provider(provider: str) -> set[str]:
         from app.api.v1.endpoints.ai_options._catalog import _get_live_cartesia_voices
         return {v.id for v in await _get_live_cartesia_voices()}
     # default / "elevenlabs"
-    return {v.id for v in await get_elevenlabs_voices_for_current_key()}
+    from app.domain.services.voice_eligibility import VoiceEligibilityError, filter_tenant_voices
+    try:
+        voices = await filter_tenant_voices(pool, tenant_id, await get_elevenlabs_voices_for_current_key())
+    except VoiceEligibilityError as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    return {v.id for v in voices}
 
 
 @router.get("/")
@@ -185,26 +457,77 @@ async def preview_prompt(
     inputs (unknown persona, missing slot, etc.) — same error class
     the create / update flows surface.
     """
+    if body.pipeline_mode == "realtime":
+        from app.realtime.config import RealtimePrompt
+        from app.realtime.prompts import RealtimePersona, build_realtime_instructions
+        prompt = body.realtime_prompt or RealtimePrompt()
+        text = build_realtime_instructions(RealtimePersona(
+            agent_name=body.agent_name, company_name=body.company_name,
+            goal=prompt.goal, campaign_guidance=prompt.instructions, persona_type=prompt.persona,
+            opening_greeting=prompt.opening_greeting, call_direction=body.direction,
+        ))
+        return CampaignPromptPreviewResponse(
+            system_prompt=text, greeting=prompt.opening_greeting,
+            direction=body.direction, has_inbound_directive=body.direction == "inbound",
+            prompt_chars=len(text), opening_mode=body.opening_mode or ("callee_first" if body.direction == "inbound" else "agent_first"),
+            campaign_guidance_chars=len(prompt.instructions), campaign_guidance_budget_chars=6000,
+            over_budget=False,
+            layers=[{"key": "realtime", "label": "Realtime voice prompt", "content": text}],
+        )
+    from app.domain.services.campaign_prompt_service import (
+        guidance_budget_error_message,
+        guidance_budget_violation,
+    )
+    from app.domain.services.campaign_brief import (
+        campaign_guidance_text,
+        normalize_campaign_brief,
+    )
     from app.domain.services.telephony_session_config import (
         build_persona_greeting,
+        campaign_guidance_char_budget,
     )
+    from app.services.scripts.prompts.prompt_safety import sanitize_tenant_text
     from app.services.scripts.prompts.composer import (
         PromptCompositionError,
-        compose_prompt,
+        compose_prompt_document,
     )
     from app.services.scripts.prompts.direction import (
         INBOUND_DIRECTIVE_SENTINEL,
     )
+    from app.services.scripts.prompts.inbound import TRUE_INBOUND_DIRECTIVE
 
+    # Preview uses the exact same normalized campaign brief and the exact same
+    # budget as save/start. It refuses an over-budget draft rather than showing
+    # an elided prompt that could never be saved.
+    guidance = sanitize_tenant_text(body.additional_instructions or "")
     try:
-        system_prompt = compose_prompt(
+        brief = normalize_campaign_brief(
+            body.campaign_brief.model_dump() if body.campaign_brief else None,
+            company_name=body.company_name,
+            agent_names=[body.agent_name],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    violation = guidance_budget_violation(guidance, brief)
+    if violation is not None:
+        raise HTTPException(
+            status_code=400,
+            detail=guidance_budget_error_message(*violation),
+        )
+    opening_mode = body.opening_mode or (
+        "callee_first" if body.direction == "inbound" else "agent_first"
+    )
+    try:
+        document = compose_prompt_document(
             persona_type=body.persona_type,
             agent_name=body.agent_name,
             company_name=body.company_name,
             campaign_slots=body.campaign_slots,
-            additional_instructions=body.additional_instructions,
+            additional_instructions=guidance,
             direction=body.direction,
+            opening_mode=opening_mode,
             knowledge_driven=body.knowledge_driven,
+            campaign_brief=brief,
         )
     except PromptCompositionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -217,11 +540,22 @@ async def preview_prompt(
     )
 
     return CampaignPromptPreviewResponse(
-        system_prompt=system_prompt,
+        system_prompt=document.system_prompt,
         greeting=greeting,
         direction=body.direction,
-        has_inbound_directive=INBOUND_DIRECTIVE_SENTINEL in system_prompt,
-        prompt_chars=len(system_prompt),
+        has_inbound_directive=(
+            document.system_prompt.startswith(TRUE_INBOUND_DIRECTIVE)
+            or document.system_prompt.startswith(INBOUND_DIRECTIVE_SENTINEL)
+        ),
+        prompt_chars=len(document.system_prompt),
+        opening_mode=opening_mode,
+        campaign_guidance_chars=len(campaign_guidance_text(guidance, brief)),
+        campaign_guidance_budget_chars=campaign_guidance_char_budget(),
+        layers=[
+            {"key": layer.key, "label": layer.label, "content": layer.content}
+            for layer in document.layers
+        ],
+        over_budget=False,
     )
 
 
@@ -238,6 +572,60 @@ def _calling_config_from_schedule(schedule) -> Optional[dict]:
         if val not in (None, ""):
             cfg[key] = val
     return cfg
+
+
+# The keys ``_calling_config_from_schedule`` can emit. An edit REPLACES these
+# (an omitted key means "use the tenant default") and leaves every other
+# ``calling_config`` key (trunk pin, batch_size, call_gap_seconds, ...) alone.
+_SCHEDULE_CONFIG_KEYS = (
+    "ignore_schedule", "timezone", "time_window_start", "time_window_end", "allowed_days",
+)
+
+
+def _merge_calling_config_schedule(existing, schedule_cfg: dict) -> dict:
+    """Overlay the schedule keys onto the campaign's existing calling_config.
+
+    The adapter's UPDATE is a full SET of the column, so sending only the
+    schedule keys wiped the line pin, batch size and inter-call gap.
+    """
+    if isinstance(existing, str):
+        try:
+            existing = json.loads(existing)
+        except ValueError:
+            existing = None
+    kept = {
+        key: value
+        for key, value in (existing if isinstance(existing, dict) else {}).items()
+        if key not in _SCHEDULE_CONFIG_KEYS
+    }
+    kept.update(schedule_cfg)
+    return kept
+
+
+def _pinned_tts_provider(requested, ai_config, script_config, voice_id, *, tenant_id, campaign_ref):
+    """TTS provider to store with a campaign's voice_id (aiopt-2).
+
+    An explicit provider is kept as sent. With a voice but no provider, the
+    tenant's CURRENT provider (the one the voice was just validated against) is
+    frozen into the row, so a later tenant switch cannot re-pair the voice with
+    another engine. Realtime campaigns carry a realtime voice, not a TTS voice,
+    and an unresolvable provider keeps today's NULL (runtime heuristic applies).
+    """
+    if requested:
+        return requested
+    if not (voice_id or "").strip():
+        return None
+    if (script_config or {}).get("pipeline_mode") == "realtime":
+        return None
+    raw = getattr(ai_config, "tts_provider", None)
+    resolved = str(getattr(raw, "value", raw) or "").strip().lower()
+    if not resolved:
+        logger.warning(
+            "campaign %s tenant=%s: tenant TTS provider unresolved; storing tts_provider NULL",
+            campaign_ref, tenant_id,
+        )
+        return None
+    return resolved
 
 
 @router.post("/", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_CREATE))])
@@ -258,34 +646,20 @@ async def create_campaign(
 
         selected_voice_id = campaign_data.voice_id.strip()
 
-        async with db_client.pool.acquire() as conn:
+        # tenant_ai_configs is under FORCE RLS: a bare acquire reads zero rows
+        # and silently falls back to the platform default provider below.
+        async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
             ai_config = await _fetch_tenant_config(conn, current_user.tenant_id)
         if ai_config is None:
             ai_config = AIProviderConfig()
 
         # Per-campaign provider: validate the voice against the campaign's chosen
         # provider (NULL falls back to the tenant global).
-        effective_provider = (campaign_data.tts_provider or ai_config.tts_provider or "").strip()
-        valid_voice_ids = await _valid_voice_ids_for_provider(effective_provider)
-        if selected_voice_id not in valid_voice_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Voice '{selected_voice_id}' is not available for TTS provider "
-                    f"'{effective_provider}'. Pick a matching voice or change the provider."
-                ),
-            )
-
-        script_config = _build_validated_script_config(
-            persona_type=campaign_data.persona_type,
-            company_name=campaign_data.company_name,
-            agent_names=campaign_data.agent_names,
-            campaign_slots=campaign_data.campaign_slots,
-            additional_instructions=campaign_data.system_prompt,
-            knowledge_driven=campaign_data.knowledge_driven,
+        from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
+        existing_script = None
+        script_config, selected_voice_id = await build_campaign_voice_config(
+            campaign_data, ai_config, existing=existing_script, pool=db_client.pool, tenant_id=current_user.tenant_id,
         )
-        # Persist per-name gender tags so each call picks a name matching the
-        # selected voice's gender. Backward compatible: absent ⇒ legacy pick.
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders
 
@@ -295,9 +669,13 @@ async def create_campaign(
             "description": campaign_data.description.strip() if campaign_data.description else None,
             "system_prompt": campaign_data.system_prompt.strip(),
             "voice_id": selected_voice_id,
-            "tts_provider": (campaign_data.tts_provider or None),
+            "tts_provider": _pinned_tts_provider(
+                campaign_data.tts_provider, ai_config, script_config, selected_voice_id,
+                tenant_id=current_user.tenant_id, campaign_ref="create",
+            ),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
+            "direction": campaign_data.direction,
         }
         _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
         if _sched is not None:
@@ -345,27 +723,29 @@ async def apply_tts_config(
 
     provider = (body.tts_provider or "").strip()
     voice_id = (body.tts_voice_id or "").strip()
-    valid_voice_ids = await _valid_voice_ids_for_provider(provider)
+    valid_voice_ids = await _valid_voice_ids_for_provider(provider, pool=db_client.pool, tenant_id=current_user.tenant_id)
     if voice_id not in valid_voice_ids:
         raise HTTPException(
             status_code=400,
             detail=f"Voice '{voice_id}' is not available for TTS provider '{provider}'.",
         )
 
-    updated: list[str] = []
-    for cid in body.campaign_ids:
-        try:
-            resp = (
-                db_client.table("campaigns")
-                .update({"tts_provider": provider, "voice_id": voice_id})
-                .eq("id", cid)
-                .eq("tenant_id", current_user.tenant_id)
-                .execute()
-            )
-            if getattr(resp, "data", None):
-                updated.append(str(cid))
-        except Exception as exc:
-            logger.warning("apply_tts_config failed for campaign=%s: %s", cid, exc)
+    try:
+        updated = await _apply_tts_config_atomically(
+            db_client,
+            campaign_ids=[str(value) for value in body.campaign_ids],
+            tenant_id=current_user.tenant_id,
+            provider=provider,
+            voice_id=voice_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("Atomic TTS campaign update failed: %s", exc)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to apply TTS configuration",
+        ) from exc
     return {"updated": updated, "count": len(updated), "tts_provider": provider, "voice_id": voice_id}
 
 
@@ -384,6 +764,11 @@ async def get_campaign(
     rows and the edit page sees "Campaign not found".
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
         campaign = await service.get_campaign(campaign_id)
         # asyncpg returns uuid columns as `uuid.UUID`, but current_user.tenant_id
@@ -394,6 +779,8 @@ async def get_campaign(
         if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
             raise CampaignNotFoundError(campaign_id)
         return {"campaign": campaign}
+    except HTTPException:
+        raise
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
     except Exception as e:
@@ -414,34 +801,31 @@ async def update_campaign(
         if not current_user.tenant_id:
             raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
 
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
+
         # Per-campaign provider: validate the voice against the campaign's chosen
         # provider (NULL falls back to the tenant global) — same gate as create.
         from app.api.v1.endpoints.ai_options import _fetch_tenant_config
         from app.domain.models.ai_config import AIProviderConfig
 
         selected_voice_id = campaign_data.voice_id.strip()
-        async with db_client.pool.acquire() as conn:
+        async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
             ai_config = await _fetch_tenant_config(conn, current_user.tenant_id)
         if ai_config is None:
             ai_config = AIProviderConfig()
-        effective_provider = (campaign_data.tts_provider or ai_config.tts_provider or "").strip()
-        valid_voice_ids = await _valid_voice_ids_for_provider(effective_provider)
-        if selected_voice_id not in valid_voice_ids:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Voice '{selected_voice_id}' is not available for TTS provider "
-                    f"'{effective_provider}'. Pick a matching voice or change the provider."
-                ),
-            )
-
-        script_config = _build_validated_script_config(
-            persona_type=campaign_data.persona_type,
-            company_name=campaign_data.company_name,
-            agent_names=campaign_data.agent_names,
-            campaign_slots=campaign_data.campaign_slots,
-            additional_instructions=campaign_data.system_prompt,
-            knowledge_driven=campaign_data.knowledge_driven,
+        from app.api.v1.endpoints.campaign_voice_config import build_campaign_voice_config
+        previous = db_client.table("campaigns").select("script_config, calling_config").eq("id", campaign_id).eq("tenant_id", current_user.tenant_id).execute()
+        existing_script = (previous.data or [{}])[0].get("script_config") or {}
+        existing_calling_config = (previous.data or [{}])[0].get("calling_config")
+        if isinstance(existing_script, str):
+            import json
+            existing_script = json.loads(existing_script)
+        script_config, selected_voice_id = await build_campaign_voice_config(
+            campaign_data, ai_config, existing=existing_script, pool=db_client.pool, tenant_id=current_user.tenant_id,
         )
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders
@@ -451,28 +835,36 @@ async def update_campaign(
             "description": campaign_data.description.strip() if campaign_data.description else None,
             "system_prompt": campaign_data.system_prompt.strip(),
             "voice_id": selected_voice_id,
-            "tts_provider": (campaign_data.tts_provider or None),
+            "tts_provider": _pinned_tts_provider(
+                campaign_data.tts_provider, ai_config, script_config, selected_voice_id,
+                tenant_id=current_user.tenant_id, campaign_ref=campaign_id,
+            ),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
         }
         _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
         if _sched is not None:
-            update_payload["calling_config"] = _sched
+            # Re-read just before the write: build_campaign_voice_config can
+            # await a provider check over the network, and a line pin assigned
+            # meanwhile must not be overwritten with the earlier snapshot.
+            fresh = (
+                db_client.table("campaigns").select("calling_config")
+                .eq("id", campaign_id).eq("tenant_id", current_user.tenant_id).execute()
+            )
+            if fresh.data:
+                existing_calling_config = fresh.data[0].get("calling_config")
+            update_payload["calling_config"] = _merge_calling_config_schedule(
+                existing_calling_config, _sched,
+            )
 
-        response = (
-            db_client.table("campaigns")
-            .update(update_payload)
-            .eq("id", campaign_id)
-            .eq("tenant_id", current_user.tenant_id)
-            .execute()
+        updated_campaign = _update_owned_outbound_campaign(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=current_user.tenant_id,
+            payload=update_payload,
+            operation="update campaign",
         )
-        if response.error:
-            logger.error(f"Error updating campaign {campaign_id}: {response.error}")
-            raise HTTPException(status_code=500, detail=f"Failed to update campaign: {response.error}")
-        if not response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-
-        return {"campaign": response.data[0]}
+        return {"campaign": updated_campaign}
     except HTTPException:
         raise
     except Exception as e:
@@ -524,6 +916,28 @@ async def list_campaign_calls_with_transcripts(
     return result
 
 
+@router.get("/{campaign_id}/readiness", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_READ))])
+async def get_campaign_readiness(
+    campaign_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Current outbound telephony readiness; no state changes or carrier probes."""
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="No tenant context")
+    try:
+        return await _get_campaign_service(db_client).get_outbound_readiness(
+            str(campaign_id), str(current_user.tenant_id),
+        )
+    except CampaignNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Campaign not found") from exc
+    except CampaignDirectionError as exc:
+        raise HTTPException(status_code=409, detail="Use the inbound campaign readiness controls.") from exc
+    except Exception as exc:
+        logger.warning("campaign_readiness_unavailable campaign=%s error=%s", campaign_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail="Campaign readiness could not be checked. Retry shortly.") from exc
+
+
 @router.post("/{campaign_id}/start", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def start_campaign(
     campaign_id: str,
@@ -546,16 +960,51 @@ async def start_campaign(
     Validates, enqueues jobs, and updates status atomically.
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
+
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
 
         # Trust the authenticated user's tenant_id over any value the
         # client ships in the body — clients shouldn't be able to start
         # someone else's campaign by spoofing tenant_id in JSON.
-        tenant_id = current_user.tenant_id or (
-            start_request.tenant_id if start_request else None
-        )
+        tenant_id = current_user.tenant_id
         priority_override = (start_request.priority_override if start_request else None)
         first_speaker = (start_request.first_speaker if start_request else "agent")
+
+        # Activation gate: guidance saved before the budget was enforced at
+        # save time (or with a larger env budget) must not go live with its
+        # middle silently removed on every call. Same rule, same message as
+        # save; the operator fixes the script once instead of discovering it
+        # in a transcript.
+        try:
+            _existing_for_gate = await service.get_campaign(campaign_id)
+        except Exception:  # noqa: BLE001 — the service's own start raises a clean 404 below
+            _existing_for_gate = None
+        if _existing_for_gate:
+            from app.domain.services.campaign_prompt_service import (
+                guidance_budget_error_message,
+                guidance_budget_violation,
+            )
+            _sc = _existing_for_gate.get("script_config") or {}
+            _violation = guidance_budget_violation(
+                (_sc.get("additional_instructions") if isinstance(_sc, dict) else None)
+                or _existing_for_gate.get("system_prompt"),
+                _sc.get("campaign_brief") if isinstance(_sc, dict) else None,
+            )
+            if _violation is not None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=guidance_budget_error_message(*_violation),
+                )
 
         # Persist the client's pacing choices (batch size + inter-call gap) onto
         # the campaign's calling_config so the dialer's gates read them. None →
@@ -571,9 +1020,20 @@ async def start_campaign(
                     _cfg["batch_size"] = int(_batch_size)
                 if _call_gap is not None:
                     _cfg["call_gap_seconds"] = int(_call_gap)
-                db_client.table("campaigns").update(
-                    {"calling_config": _cfg}
-                ).eq("id", campaign_id).execute()
+                if not tenant_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Current user is not associated with a tenant",
+                    )
+                _update_owned_outbound_campaign(
+                    db_client,
+                    campaign_id=campaign_id,
+                    tenant_id=tenant_id,
+                    payload={"calling_config": _cfg},
+                    operation="update campaign pacing",
+                )
+            except HTTPException:
+                raise
             except Exception as _bs_exc:
                 logger.warning(
                     "failed to persist pacing config for campaign %s: %s",
@@ -588,6 +1048,8 @@ async def start_campaign(
         if tenant_id:
             from app.domain.services.minutes_quota import tenant_minutes_status
             minutes = await tenant_minutes_status(tenant_id)
+            if minutes.state == "unavailable":
+                raise HTTPException(status_code=503, detail={"code": "metering_unavailable", "message": "Minute allowance is temporarily unavailable. Retry later."})
             if minutes.exhausted:
                 raise HTTPException(
                     status_code=402,
@@ -623,27 +1085,46 @@ async def start_campaign(
             await store_idempotent_response(request, 200, json.dumps(response_data))
 
         if tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=tenant_id,
-                    category="campaign",
-                    title="Campaign started",
-                    description=f"Campaign began processing — {result.jobs_enqueued} jobs queued.",
-                    related_campaign_id=str(result.campaign_id),
-                    actor_user_id=current_user.id,
-                    metadata={"jobs_enqueued": result.jobs_enqueued},
-                )
+            # stream_events is under FORCE ROW LEVEL SECURITY (migration 0013);
+            # a bare pool acquisition never sets app.current_tenant_id, so every
+            # insert here was rejected (day0923/DAY.talky-api.errorish.log,
+            # 7x "Campaign started" 09-22/23) and the activity feed stayed
+            # empty. emit_event_via_pool sets the GUC via acquire_with_tenant.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=tenant_id,
+                category="campaign",
+                title="Campaign started",
+                description=f"Campaign began processing — {result.jobs_enqueued} jobs queued.",
+                related_campaign_id=str(result.campaign_id),
+                actor_user_id=current_user.id,
+                metadata={"jobs_enqueued": result.jobs_enqueued},
+            )
 
         return response_data
     except CampaignNotFoundError:
         if idempotency_key:
             await release_idempotency_lock(request)
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except CampaignDirectionError as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": e.message,
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
     except CampaignStateError as e:
         if idempotency_key:
             await release_idempotency_lock(request)
         raise HTTPException(status_code=400, detail=e.message)
+    except CampaignReadinessError as e:
+        if idempotency_key:
+            await release_idempotency_lock(request)
+        raise HTTPException(status_code=409, detail={"error": "campaign_not_ready", "reason_code": e.reason_code, "message": e.message})
     except CampaignError as e:
         if idempotency_key:
             await release_idempotency_lock(request)
@@ -678,24 +1159,73 @@ async def pause_campaign(
     ``start_campaign`` / ``stop_campaign``.
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
-        campaign = await service.pause_campaign(campaign_id)
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
+        campaign = await service.pause_campaign(
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+        )
+        termination = campaign.get("termination_summary") or {}
+        deferred = int(
+            termination.get("deferred", termination.get("unconfirmed", 0)) or 0
+        )
+        termination_status = str(termination.get("status") or "lookup_failed")
+        if termination_status == "confirmed":
+            message = f"Campaign {campaign_id} paused"
+        elif termination_status == "partial":
+            message = (
+                f"Campaign {campaign_id} paused; {deferred} call(s) are still "
+                "ending and will be retried automatically"
+            )
+        else:
+            message = (
+                f"Campaign {campaign_id} paused, but live-call cleanup could "
+                "not be verified"
+            )
 
         if current_user.tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=current_user.tenant_id,
-                    category="user_action",
-                    title="Campaign paused",
-                    description="Operator paused the campaign.",
-                    related_campaign_id=str(campaign_id),
-                    actor_user_id=current_user.id,
-                )
+            # See start_campaign's comment: a bare pool acquisition has no
+            # tenant GUC and FORCE RLS rejects the insert.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=current_user.tenant_id,
+                category="user_action",
+                title="Campaign paused",
+                description=message,
+                related_campaign_id=str(campaign_id),
+                actor_user_id=current_user.id,
+                metadata={"termination_summary": termination},
+            )
 
-        return {"message": f"Campaign {campaign_id} paused", "campaign": campaign}
+        return {
+            "message": message,
+            "campaign": campaign,
+            "termination_summary": termination,
+        }
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except CampaignDirectionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": exc.message,
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    except CampaignStateError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error pausing campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to pause campaign")
@@ -721,29 +1251,78 @@ async def stop_campaign(
         clear_queue: If True, mark pending jobs as skipped
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
         service = _get_campaign_service(db_client)
-        campaign = await service.stop_campaign(campaign_id, clear_queue=clear_queue)
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
+        campaign = await service.stop_campaign(
+            campaign_id,
+            clear_queue=clear_queue,
+            tenant_id=current_user.tenant_id,
+        )
+        termination = campaign.get("termination_summary") or {}
+        deferred = int(
+            termination.get("deferred", termination.get("unconfirmed", 0)) or 0
+        )
+        termination_status = str(termination.get("status") or "lookup_failed")
+        if termination_status == "confirmed":
+            message = f"Campaign {campaign_id} stopped"
+        elif termination_status == "partial":
+            message = (
+                f"Campaign {campaign_id} stopped; {deferred} call(s) are still "
+                "ending and will be retried automatically"
+            )
+        else:
+            message = (
+                f"Campaign {campaign_id} stopped, but live-call cleanup could "
+                "not be verified"
+            )
 
         if current_user.tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=current_user.tenant_id,
-                    category="user_action",
-                    title="Campaign stopped",
-                    description="Operator stopped the campaign."
-                                + (" Pending jobs cleared." if clear_queue else ""),
-                    related_campaign_id=str(campaign_id),
-                    actor_user_id=current_user.id,
-                    metadata={"clear_queue": clear_queue},
-                )
+            # See start_campaign's comment: a bare pool acquisition has no
+            # tenant GUC and FORCE RLS rejects the insert.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=current_user.tenant_id,
+                category="user_action",
+                title="Campaign stopped",
+                description=message
+                            + (" Pending jobs cleared." if clear_queue else ""),
+                related_campaign_id=str(campaign_id),
+                actor_user_id=current_user.id,
+                metadata={
+                    "clear_queue": clear_queue,
+                    "termination_summary": termination,
+                },
+            )
 
         return {
-            "message": f"Campaign {campaign_id} stopped",
-            "campaign": campaign
+            "message": message,
+            "campaign": campaign,
+            "termination_summary": termination,
         }
     except CampaignNotFoundError:
         raise HTTPException(status_code=404, detail="Campaign not found")
+    except CampaignDirectionError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "inbound_campaign_managed_separately",
+                "message": exc.message,
+                "campaign_ids": [str(campaign_id)],
+            },
+        )
+    except CampaignStateError as exc:
+        raise HTTPException(status_code=400, detail=exc.message)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error stopping campaign {campaign_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to stop campaign")
@@ -772,10 +1351,25 @@ async def delete_campaign(
     campaign reappeared on refresh. This is the real delete.
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Current user is not associated with a tenant",
+            )
+        _reject_inbound_campaign_mutation(
+            db_client,
+            [campaign_id],
+            tenant_id=current_user.tenant_id,
+        )
         # Confirm it exists for THIS tenant (RLS-scoped) before mutating.
-        existing = db_client.table("campaigns").select("id, status").eq(
-            "id", campaign_id
-        ).neq("status", "deleted").execute()
+        existing = (
+            db_client.table("campaigns")
+            .select("id, status")
+            .eq("id", campaign_id)
+            .eq("tenant_id", current_user.tenant_id)
+            .neq("status", "deleted")
+            .execute()
+        )
         if not existing.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
 
@@ -783,7 +1377,11 @@ async def delete_campaign(
         # Already-stopped/draft campaigns raise or no-op here — that's fine.
         try:
             service = _get_campaign_service(db_client)
-            await service.stop_campaign(campaign_id, clear_queue=True)
+            await service.stop_campaign(
+                campaign_id,
+                clear_queue=True,
+                tenant_id=current_user.tenant_id,
+            )
         except CampaignNotFoundError:
             raise HTTPException(status_code=404, detail="Campaign not found")
         except Exception as stop_err:
@@ -791,26 +1389,26 @@ async def delete_campaign(
                 f"delete_campaign: stop step skipped for {campaign_id}: {stop_err}"
             )
 
-        updated = db_client.table("campaigns").update(
-            {"status": "deleted"}
-        ).eq("id", campaign_id).execute()
-        if getattr(updated, "error", None):
-            logger.error(
-                f"Error soft-deleting campaign {campaign_id}: {updated.error}"
-            )
-            raise HTTPException(status_code=500, detail="Failed to delete campaign")
+        _update_owned_outbound_campaign(
+            db_client,
+            campaign_id=campaign_id,
+            tenant_id=current_user.tenant_id,
+            payload={"status": "deleted"},
+            operation="delete campaign",
+        )
 
         if current_user.tenant_id:
-            async with db_client.pool.acquire() as conn:
-                await emit_event(
-                    conn,
-                    tenant_id=current_user.tenant_id,
-                    category="user_action",
-                    title="Campaign deleted",
-                    description="Operator deleted the campaign.",
-                    related_campaign_id=str(campaign_id),
-                    actor_user_id=current_user.id,
-                )
+            # See start_campaign's comment: a bare pool acquisition has no
+            # tenant GUC and FORCE RLS rejects the insert.
+            await emit_event_via_pool(
+                db_client.pool,
+                tenant_id=current_user.tenant_id,
+                category="user_action",
+                title="Campaign deleted",
+                description="Operator deleted the campaign.",
+                related_campaign_id=str(campaign_id),
+                actor_user_id=current_user.id,
+            )
 
         logger.info(f"Campaign {campaign_id} soft-deleted by {current_user.id}")
         return {"message": f"Campaign {campaign_id} deleted"}
@@ -842,9 +1440,11 @@ async def get_campaign_jobs(
         if not current_user.tenant_id:
             return {"jobs": [], "total": 0, "page": page, "page_size": page_size}
 
+        # Explicit tenant predicate: the prod app role has bypassed RLS, so a
+        # foreign campaign UUID must not return that tenant's queue rows.
         query = db_client.table("dialer_jobs").select(
             "*", count="exact"
-        ).eq("campaign_id", campaign_id)
+        ).eq("campaign_id", campaign_id).eq("tenant_id", current_user.tenant_id)
         
         if status:
             query = query.eq("status", status)
@@ -877,12 +1477,9 @@ async def get_minutes_status(
     """
     from app.domain.services.minutes_quota import tenant_minutes_status
     tenant_id = current_user.tenant_id
-    if not tenant_id:
-        return {
-            "allocated": 0, "used_minutes": 0, "remaining_minutes": 0,
-            "unlimited": True, "exhausted": False,
-        }
-    status = await tenant_minutes_status(tenant_id)
+    status = await tenant_minutes_status(tenant_id) if tenant_id else None
+    if status is None or status.state == "unavailable":
+        raise HTTPException(status_code=503, detail={"code": "metering_unavailable", "message": "Minute allowance is temporarily unavailable."})
     return status.as_dict()
 
 
@@ -954,6 +1551,35 @@ def _campaign_activity(
     }
 
 
+_STATS_JOBS_SQL = """
+    SELECT status, COUNT(*) AS n
+      FROM dialer_jobs
+     WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
+     GROUP BY status
+"""
+
+_STATS_CALLS_SQL = """
+    SELECT outcome,
+           COUNT(*) AS n,
+           COUNT(*) FILTER (
+               WHERE COALESCE(goal_achieved, FALSE)
+                  OR (jsonb_typeof(summary_json) = 'object'
+                      AND (summary_json->>'outcome') ~* '^[[:space:]]*(qualified|callback)')
+           ) AS goals
+      FROM calls
+     WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
+     GROUP BY outcome
+"""
+
+_STATS_STRING_SUMMARY_SQL = """
+    SELECT summary_json #>> '{}' AS raw
+      FROM calls
+     WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid
+       AND jsonb_typeof(summary_json) = 'string'
+       AND NOT COALESCE(goal_achieved, FALSE)
+"""
+
+
 @router.get("/{campaign_id}/stats")
 async def get_campaign_stats(
     campaign_id: str,
@@ -985,35 +1611,44 @@ async def get_campaign_stats(
         if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
             raise HTTPException(status_code=404, detail="Campaign not found")
         
-        # Get job counts by status
-        jobs_response = db_client.table("dialer_jobs").select("status").eq("campaign_id", campaign_id).execute()
-        
-        status_counts = {}
-        for job in jobs_response.data or []:
-            status = job.get("status", "unknown")
-            status_counts[status] = status_counts.get(status, 0) + 1
-        
-        # Get call outcomes. "goals_achieved" = the live resolver flag OR the
-        # post-call AI verdict reading as a success (qualified/callback). The
-        # goal_achieved flag alone is currently never set on the call path, so
-        # the AI summary verdict is the real success signal — without this the
-        # card sticks at 0 even when calls clearly qualified leads.
+        # Aggregate in SQL (one GROUP BY each) instead of pulling every
+        # dialer_jobs / calls row (with summary_json) into Python on each ~7s
+        # poll. Explicit tenant_id predicates: the prod app role bypasses RLS.
+        scope_tenant = row_tenant_str or current_user.tenant_id
+        if not scope_tenant:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+
+        # "goals_achieved" = the live resolver flag OR the post-call AI verdict
+        # reading as a success (qualified/callback). The goal_achieved flag alone
+        # is currently never set on the call path, so the AI summary verdict is
+        # the real success signal — without this the card sticks at 0 even when
+        # calls clearly qualified leads.
         import json as _json
-        calls_response = db_client.table("calls").select("outcome, goal_achieved, summary_json").eq("campaign_id", campaign_id).execute()
+        async with acquire_with_tenant(db_client.pool, scope_tenant) as conn:
+            job_rows = await conn.fetch(_STATS_JOBS_SQL, campaign_id, scope_tenant)
+            call_rows = await conn.fetch(_STATS_CALLS_SQL, campaign_id, scope_tenant)
+            # A summary_json stored as a JSON *string* (double-encoded) cannot
+            # be read with ->> ; the handful of such rows are parsed here.
+            string_rows = await conn.fetch(_STATS_STRING_SUMMARY_SQL, campaign_id, scope_tenant)
+
+        status_counts = {}
+        for row in job_rows:
+            status = row["status"]
+            status_counts[status] = status_counts.get(status, 0) + int(row["n"])
 
         outcome_counts = {}
         goals_achieved = 0
-        for call in calls_response.data or []:
-            outcome = call.get("outcome", "unknown")
-            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + 1
-            sj = call.get("summary_json")
-            if isinstance(sj, str):
-                try:
-                    sj = _json.loads(sj)
-                except Exception:
-                    sj = None
+        for row in call_rows:
+            outcome = row["outcome"]
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + int(row["n"])
+            goals_achieved += int(row["goals"])
+        for row in string_rows:
+            try:
+                sj = _json.loads(row["raw"])
+            except Exception:
+                sj = None
             verdict = str((sj or {}).get("outcome") or "").strip().lower() if isinstance(sj, dict) else ""
-            if call.get("goal_achieved") or verdict.startswith("qualified") or verdict.startswith("callback"):
+            if verdict.startswith("qualified") or verdict.startswith("callback"):
                 goals_achieved += 1
 
         # Real contact + qualified-lead counts. The campaigns.total_leads column
@@ -1090,6 +1725,78 @@ def _phone_validation_relaxed(user) -> bool:
     return bool(email and email.strip().lower() in _RELAXED_PHONE_EMAILS)
 
 
+def _split_contact_full_name(full_name: Optional[str]) -> tuple[Optional[str], Optional[str]]:
+    """Split the single Full name field used by the UI into the database parts.
+
+    ``leads.full_name`` is generated from first_name + last_name, so write paths
+    must never try to insert it directly. Keeping the split here also makes CSV
+    and manual contacts produce the same stored shape.
+    """
+    parts = (full_name or "").strip().split()
+    if not parts:
+        return None, None
+    return parts[0], " ".join(parts[1:]) or None
+
+
+def _resolved_contact_names(contact: ContactCreate | ContactUpdate) -> tuple[Optional[str], Optional[str]]:
+    first = (contact.first_name or "").strip() or None
+    last = (contact.last_name or "").strip() or None
+    if not first and not last and getattr(contact, "full_name", None):
+        return _split_contact_full_name(contact.full_name)
+    return first, last
+
+
+def _contact_custom_fields(contact: ContactCreate | ContactUpdate, existing: Optional[dict] = None) -> dict:
+    fields = dict(existing or {})
+    supplied = getattr(contact, "custom_fields", None)
+    if isinstance(supplied, dict):
+        fields.update(supplied)
+    # ``mobile_number`` remains an additional contact number while
+    # ``phone_number`` is the canonical number the dialler calls. It lives in
+    # custom_fields until the schema gains an explicit primary-phone selector.
+    if "mobile_number" in contact.model_fields_set:
+        mobile = (getattr(contact, "mobile_number", None) or "").strip()
+        if mobile:
+            fields["mobile_number"] = mobile
+        else:
+            fields.pop("mobile_number", None)
+    return fields
+
+
+def campaign_default_country(campaign: Optional[dict]) -> str:
+    """The ISO country a campaign's national-format numbers belong to.
+
+    Read from ``script_config.default_country_code`` (or the nested
+    ``campaign_slots.default_country_code``), defaulting to ``"US"``.
+
+    Public because the CSV/paste import in ``contacts.py`` must resolve it the
+    SAME way the manual Add-Contact path below does — when only one of the two
+    passed a country, a UK campaign's "07700 900123" normalised to
+    ``+447700900123`` on one path and the un-dialable ``+07700900123`` on the
+    other, for the same contact.
+    """
+    script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
+    if isinstance(script_cfg, dict):
+        candidate = (
+            script_cfg.get("default_country_code")
+            or (script_cfg.get("campaign_slots") or {}).get("default_country_code")
+        )
+        if candidate:
+            return str(candidate).upper()
+    return "US"
+
+
+def _contact_response(row: dict) -> dict:
+    """Expose the user-facing full/mobile values consistently on every path."""
+    out = dict(row or {})
+    custom = out.get("custom_fields") if isinstance(out.get("custom_fields"), dict) else {}
+    out["mobile_number"] = custom.get("mobile_number") or out.get("phone_number")
+    out["full_name"] = out.get("full_name") or " ".join(
+        part for part in (out.get("first_name"), out.get("last_name")) if part
+    ).strip() or None
+    return out
+
+
 @router.post("/{campaign_id}/contacts", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def add_contact_to_campaign(
     campaign_id: str,
@@ -1113,28 +1820,25 @@ async def add_contact_to_campaign(
     """
     db_client = supabase
     try:
-        # 1. Validate campaign exists and belongs to the current tenant
-        campaign_query = db_client.table("campaigns").select("id, name, status, tenant_id").eq("id", campaign_id)
-        if current_user.tenant_id:
-            campaign_query = campaign_query.eq("tenant_id", current_user.tenant_id)
-        campaign_response = campaign_query.execute()
-        if not campaign_response.data:
-            raise HTTPException(status_code=404, detail="Campaign not found")
-        campaign = campaign_response.data[0]
-        
+        # 1. Validate campaign exists, belongs to the current tenant and is an
+        #    outbound campaign before any lead lookup or write.
+        #    `script_config` is selected because step 2 reads the campaign's
+        #    country out of it. It was NOT in this projection before, so
+        #    `campaign.get("script_config")` was always None and T2.5's
+        #    per-campaign country silently never applied on this path — every
+        #    manually added number normalised as US regardless of the campaign.
+        campaign = require_owned_outbound_campaign(
+            db_client,
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+            extra_columns=("name", "status", "script_config"),
+        )
+
         # 2. Normalize phone number — T2.5 uses the campaign's
         # default country (from script_config.campaign_slots or
         # top-level default_country_code) so non-US campaigns route
         # correctly. Falls back to US when not configured.
-        default_country = "US"
-        script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
-        if isinstance(script_cfg, dict):
-            candidate = (
-                script_cfg.get("default_country_code")
-                or (script_cfg.get("campaign_slots") or {}).get("default_country_code")
-            )
-            if candidate:
-                default_country = str(candidate).upper()
+        default_country = campaign_default_country(campaign)
 
         # Phone validation is relaxed for specific accounts (TEMP) so they can
         # add short/odd test numbers; normal numbers still normalize to E.164.
@@ -1155,9 +1859,11 @@ async def add_contact_to_campaign(
         #      row. Re-adding a previously-deleted contact used to orphan all of
         #      its prior calls and lead status behind a fresh lead_id.
         existing = db_client.table("leads").select(
-            "id, status, is_lead"
+            "id, status, is_lead, do_not_call"
         ).eq(
             "campaign_id", campaign_id
+        ).eq(
+            "tenant_id", current_user.tenant_id
         ).eq(
             "phone_number", normalized_phone
         ).execute()
@@ -1170,24 +1876,44 @@ async def add_contact_to_campaign(
             )
 
         deleted_rows = [r for r in (existing.data or []) if r.get("status") == "deleted"]
+        first_name, last_name = _resolved_contact_names(contact)
+        expanded_values = {
+            "first_name": first_name,
+            "last_name": last_name,
+            "email": contact.email,
+            "business_number": contact.business_number,
+            "company_name": contact.company_name,
+            "job_title": contact.job_title,
+            "best_time_to_call": contact.best_time_to_call,
+            "timezone": contact.timezone,
+            "calling_notes": contact.calling_notes,
+            "preferred_contact_method": contact.preferred_contact_method,
+            "do_not_call": contact.do_not_call,
+            "custom_fields": _contact_custom_fields(contact),
+        }
         if deleted_rows:
             # Prefer reviving a row that was a qualified lead so we don't lose it.
             deleted_rows.sort(key=lambda r: (0 if r.get("is_lead") else 1))
             revive_id = deleted_rows[0]["id"]
+            # Never let the form's default (False) erase an existing
+            # do-not-call suppression on the revived row.
+            expanded_values["do_not_call"] = bool(
+                expanded_values["do_not_call"]
+                or any(r.get("do_not_call") for r in deleted_rows)
+            )
             revived = db_client.table("leads").update({
                 "status": "pending",
-                "first_name": contact.first_name,
-                "last_name": contact.last_name,
-                "email": contact.email,
-                "custom_fields": contact.custom_fields or {},
-            }).eq("id", revive_id).execute()
-            if revived.error or not revived.data:
-                logger.error(f"Error reviving lead {revive_id} for campaign {campaign_id}: {getattr(revived, 'error', None)}")
-                raise HTTPException(status_code=500, detail="Failed to add contact")
+                **expanded_values,
+            }).eq("id", revive_id).eq(
+                "tenant_id", current_user.tenant_id
+            ).eq(
+                "campaign_id", campaign_id
+            ).execute()
+            revived_row = _require_contact_write(revived, campaign_id, "revive")
             logger.info(f"Contact revived in campaign {campaign_id}: {normalized_phone} (lead {revive_id})")
             return {
                 "message": "Contact added successfully",
-                "contact": revived.data[0]
+                "contact": _contact_response(revived_row)
             }
 
         # 4. Create lead record
@@ -1197,10 +1923,7 @@ async def add_contact_to_campaign(
             "tenant_id": campaign.get("tenant_id") or current_user.tenant_id,
             "campaign_id": campaign_id,
             "phone_number": normalized_phone,
-            "first_name": contact.first_name,
-            "last_name": contact.last_name,
-            "email": contact.email,
-            "custom_fields": contact.custom_fields or {},
+            **expanded_values,
             "status": "pending",
             "last_call_result": "pending",
             "call_attempts": 0,
@@ -1208,18 +1931,13 @@ async def add_contact_to_campaign(
         }
 
         response = db_client.table("leads").insert(lead_data).execute()
-
-        if response.error:
-            logger.error(f"Error creating lead for campaign {campaign_id}: {response.error}")
-            raise HTTPException(status_code=500, detail=f"Failed to create contact: {response.error}")
-        if not response.data:
-            raise HTTPException(status_code=500, detail="Failed to create contact")
+        created = _require_contact_write(response, campaign_id, "create")
 
         logger.info(f"Contact added to campaign {campaign_id}: {normalized_phone}")
 
         return {
             "message": "Contact added successfully",
-            "contact": response.data[0]
+            "contact": _contact_response(created)
         }
         
     except HTTPException:
@@ -1243,9 +1961,18 @@ async def update_contact_in_campaign(
     """
     db_client = supabase
     try:
+        campaign = require_owned_outbound_campaign(
+            db_client,
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+            extra_columns=("script_config",),
+        )
+        # Same country the Add-Contact and CSV paths use, so all write paths
+        # normalise a national-format number identically.
+        default_country = campaign_default_country(campaign)
         existing = (
             db_client.table("leads")
-            .select("id,phone_number,first_name,last_name,email,campaign_id")
+            .select("*")
             .eq("id", contact_id)
             .eq("campaign_id", campaign_id)
             .eq("tenant_id", current_user.tenant_id)
@@ -1261,7 +1988,9 @@ async def update_contact_in_campaign(
                 if _phone_validation_relaxed(current_user):
                     normalized_phone = normalize_phone_number_lenient(contact.phone_number)
                 else:
-                    normalized_phone = normalize_phone_number(contact.phone_number)
+                    normalized_phone = normalize_phone_number(
+                        contact.phone_number, default_country=default_country,
+                    )
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
 
@@ -1269,6 +1998,7 @@ async def update_contact_in_campaign(
             dupe = (
                 db_client.table("leads").select("id")
                 .eq("campaign_id", campaign_id)
+                .eq("tenant_id", current_user.tenant_id)
                 .eq("phone_number", normalized_phone)
                 .neq("status", "deleted")
                 .neq("id", contact_id)
@@ -1281,26 +2011,70 @@ async def update_contact_in_campaign(
                 )
             update_payload["phone_number"] = normalized_phone
 
-        if contact.first_name is not None:
-            update_payload["first_name"] = contact.first_name
-        if contact.last_name is not None:
-            update_payload["last_name"] = contact.last_name
-        if contact.email is not None:
-            update_payload["email"] = contact.email
+        provided = contact.model_fields_set
+        if "full_name" in provided:
+            first_name, last_name = _split_contact_full_name(contact.full_name)
+            update_payload["first_name"] = first_name
+            update_payload["last_name"] = last_name
+        else:
+            if "first_name" in provided:
+                update_payload["first_name"] = contact.first_name
+            if "last_name" in provided:
+                update_payload["last_name"] = contact.last_name
+
+        for field_name in (
+            "email", "business_number", "company_name", "job_title",
+            "best_time_to_call", "timezone", "calling_notes",
+            "preferred_contact_method", "do_not_call",
+        ):
+            if field_name in provided:
+                update_payload[field_name] = getattr(contact, field_name)
+
+        if "mobile_number" in provided or "custom_fields" in provided:
+            update_payload["custom_fields"] = _contact_custom_fields(
+                contact,
+                existing.data[0].get("custom_fields"),
+            )
 
         if not update_payload:
             raise HTTPException(status_code=400, detail="No fields to update")
+
+        # A queued / retry job carries its own copy of the phone number, so an
+        # edit would leave the OLD number dialled (and retried). Cancel the
+        # lead's not-yet-originated jobs first so start re-queues with the new
+        # number; failing here (rather than swallowing) keeps the edit from
+        # reporting success while the old number is still queued. In-flight
+        # (processing/calling) jobs keep their ownership.
+        phone_changed = (
+            "phone_number" in update_payload
+            and update_payload["phone_number"] != existing.data[0].get("phone_number")
+        )
+        if phone_changed:
+            from app.domain.services.dialer.job_lifecycle import (
+                NOT_ORIGINATED_JOB_STATUSES,
+                REASON_LEAD_REMOVED,
+            )
+            db_client.table("dialer_jobs").update({
+                "status": "cancelled",
+                "failure_reason": REASON_LEAD_REMOVED,
+                "last_error": "contact_phone_changed",
+            }).eq("lead_id", str(contact_id)).eq(
+                "tenant_id", current_user.tenant_id,
+            ).in_(
+                "status", list(NOT_ORIGINATED_JOB_STATUSES),
+            ).execute()
 
         resp = (
             db_client.table("leads")
             .update(update_payload)
             .eq("id", contact_id)
             .eq("tenant_id", current_user.tenant_id)
+            .eq("campaign_id", campaign_id)
             .execute()
         )
-        updated = resp.data[0] if resp.data else {**existing.data[0], **update_payload}
+        updated = _require_contact_write(resp, campaign_id, "update")
         logger.info("Contact %s updated in campaign %s", contact_id, campaign_id)
-        return {"message": "Contact updated successfully", "contact": updated}
+        return {"message": "Contact updated successfully", "contact": _contact_response(updated)}
 
     except HTTPException:
         raise
@@ -1384,7 +2158,7 @@ async def list_campaign_contacts(
         ).execute()
         
         return {
-            "items": response.data or [],
+            "items": [_contact_response(row) for row in (response.data or [])],
             "page": page,
             "page_size": page_size,
             "total": response.count or 0
@@ -1416,11 +2190,18 @@ async def remove_contact_from_campaign(
     preserving history for analytics.
     """
     try:
+        require_owned_outbound_campaign(
+            db_client,
+            campaign_id,
+            tenant_id=current_user.tenant_id,
+        )
         # Verify contact belongs to campaign
         existing = db_client.table("leads").select("id").eq(
             "id", contact_id
         ).eq(
             "campaign_id", campaign_id
+        ).eq(
+            "tenant_id", current_user.tenant_id
         ).execute()
         
         if not existing.data:
@@ -1429,7 +2210,12 @@ async def remove_contact_from_campaign(
         # Soft delete
         response = db_client.table("leads").update({
             "status": "deleted"
-        }).eq("id", contact_id).execute()
+        }).eq("id", contact_id).eq(
+            "tenant_id", current_user.tenant_id
+        ).eq(
+            "campaign_id", campaign_id
+        ).execute()
+        _require_contact_write(response, campaign_id, "remove")
 
         # Soft-delete leaves the leads row, so the FK cascade does NOT remove
         # this lead's dialer jobs — they'd keep dialing a number you just
@@ -1442,6 +2228,7 @@ async def remove_contact_from_campaign(
             )
             cancelled = cancel_active_jobs_for_lead(
                 db_client, contact_id, reason=REASON_LEAD_REMOVED,
+                tenant_id=current_user.tenant_id,
             )
         except Exception as exc:
             logger.warning("remove_contact: job cancel failed for %s: %s", contact_id, exc)

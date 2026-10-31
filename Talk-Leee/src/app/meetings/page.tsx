@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -11,7 +12,7 @@ import { ViewportDrawer } from "@/components/ui/viewport-drawer";
 import { RouteGuard } from "@/components/guards/route-guard";
 import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { useCalendarEvents, useCancelCalendarEvent, useCreateCalendarEvent } from "@/lib/api-hooks";
-import { notificationsStore } from "@/lib/notifications";
+import { useNotificationsActions } from "@/lib/notifications-client";
 import { cn } from "@/lib/utils";
 import {
     splitAndSortMeetings,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/meetings-utils";
 import { isApiClientError } from "@/lib/http-client";
 import { dashboardApi, type Campaign, type Contact } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import type { CalendarEvent } from "@/lib/models";
 import { Copy, Loader2, Plus, XCircle } from "lucide-react";
 
@@ -114,6 +116,7 @@ function localDateTimeInputToIso(value: string) {
 }
 
 function MeetingsContent() {
+    const { create: createNotification } = useNotificationsActions();
     const q = useCalendarEvents();
     const createM = useCreateCalendarEvent();
     const cancelM = useCancelCalendarEvent();
@@ -161,6 +164,10 @@ function MeetingsContent() {
     const [leadId, setLeadId] = useState<string>("");
     const [leadName, setLeadName] = useState<string>("");
     const leadBoxRef = useRef<HTMLDivElement | null>(null);
+    const leadPanelRef = useRef<HTMLDivElement | null>(null);
+    // Portal placement for the suggestion list: fixed to the viewport so an
+    // open list overlays the modal instead of inflating its inner scroll.
+    const [leadPanelStyle, setLeadPanelStyle] = useState<{ left: number; width: number; maxHeight: number; top?: number; bottom?: number } | null>(null);
 
     const [title, setTitle] = useState("");
     const [whenValue, setWhenValue] = useState("");
@@ -257,7 +264,7 @@ function MeetingsContent() {
                 setLeadsLoading(true);
                 setLeadsError(null);
                 const campaignsRes = await dashboardApi.listCampaigns();
-                const campaigns: Campaign[] = campaignsRes.campaigns ?? [];
+                const campaigns: Campaign[] = outboundCampaignsOnly(campaignsRes.campaigns ?? []);
                 const all: LeadOption[] = [];
                 for (const camp of campaigns) {
                     const contactsRes = await dashboardApi.listContacts(camp.id, 1, 200);
@@ -296,6 +303,7 @@ function MeetingsContent() {
 
     useEffect(() => {
         if (!createOpen) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- clears stale validation error and seeds default title/when whenever the create modal opens
         setFormError(null);
         if (title.length > 0) return;
         setTitle("");
@@ -310,6 +318,7 @@ function MeetingsContent() {
             const t = e.target as Node | null;
             if (!t) return;
             if (leadBoxRef.current && leadBoxRef.current.contains(t)) return;
+            if (leadPanelRef.current && leadPanelRef.current.contains(t)) return;
             setLeadOpen(false);
         };
         document.addEventListener("pointerdown", onDown);
@@ -318,15 +327,57 @@ function MeetingsContent() {
         };
     }, [leadOpen]);
 
+    useLayoutEffect(() => {
+        if (!leadOpen || filteredLeads.length === 0) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clearing stale DOM-measured placement on close, not derivable during render
+            setLeadPanelStyle(null);
+            return;
+        }
+        const update = () => {
+            const box = leadBoxRef.current;
+            if (!box) return;
+            const rect = box.getBoundingClientRect();
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            const MARGIN = 8;
+            const GAP = 8; // matches the old mt-2
+            const left = Math.max(MARGIN, Math.min(rect.left, vw - rect.width - MARGIN));
+            const spaceBelow = vh - rect.bottom - GAP - MARGIN;
+            const spaceAbove = rect.top - GAP - MARGIN;
+            const openUp = spaceBelow < 108 && spaceAbove > spaceBelow;
+            const maxHeight = Math.max(36, Math.min(240, openUp ? spaceAbove : spaceBelow));
+            setLeadPanelStyle(
+                openUp
+                    ? { left, width: rect.width, maxHeight, bottom: vh - rect.top + GAP }
+                    : { left, width: rect.width, maxHeight, top: rect.bottom + GAP }
+            );
+        };
+        update();
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, true);
+        return () => {
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update, true);
+        };
+    }, [leadOpen, filteredLeads.length]);
+
     useEffect(() => {
         if (!createOpen) return;
         if (leadOpen) return;
         if (!leadId) return;
         if (!leadSelectedLabel) return;
         if (leadQuery.trim() === leadSelectedLabel.trim()) return;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- syncs the typeahead text back to the selected lead's label once the dropdown closes
         setLeadQuery(leadSelectedLabel);
     }, [createOpen, leadId, leadOpen, leadQuery, leadSelectedLabel]);
 
+    // sanitizeMeetingNotesHtml builds DOM nodes (document.createElement) to
+    // strip disallowed tags/attributes, which the compiler treats as a
+    // render side effect it can't verify as safe to skip re-running — so it
+    // won't preserve this memoization. Re-sanitizing on every render of the
+    // drawer is wasted work for the same notes string, so the manual
+    // memoization is kept intentionally.
+    // eslint-disable-next-line react-hooks/preserve-manual-memoization -- sanitizeMeetingNotesHtml touches document.createElement, which the compiler can't prove is safe to memoize past
     const sanitizedSelectedNotes = useMemo(() => {
         if (!selected?.notes) return "";
         return sanitizeMeetingNotesHtml(selected.notes);
@@ -442,6 +493,10 @@ function MeetingsContent() {
                 size={520}
                 margin={10}
                 ariaLabel="Meeting details"
+                // z-[60]: the fixed chat launcher is z-50 and mounted after this
+                // drawer, so at z-50 it painted over the drawer's bottom-right
+                // (Close / Cancel meeting). One tier up keeps them clickable.
+                className="z-[60]"
                 panelClassName="bg-background/90 border border-border"
             >
                 {selected ? (
@@ -688,8 +743,19 @@ function MeetingsContent() {
                                         {leadsError}
                                     </div>
                                 ) : null}
-                                {leadOpen && filteredLeads.length > 0 ? (
-                                    <div role="listbox" className="absolute z-20 mt-2 w-full overflow-hidden rounded-xl border border-white/10 bg-gray-950/95 shadow-xl">
+                                {leadOpen && filteredLeads.length > 0 && leadPanelStyle && typeof document !== "undefined" ? createPortal(
+                                    <div
+                                        ref={leadPanelRef}
+                                        role="listbox"
+                                        className="fixed z-[1000] overflow-y-auto rounded-xl border border-white/10 bg-gray-950/95 shadow-xl"
+                                        style={{
+                                            left: leadPanelStyle.left,
+                                            top: leadPanelStyle.top,
+                                            bottom: leadPanelStyle.bottom,
+                                            width: leadPanelStyle.width,
+                                            maxHeight: leadPanelStyle.maxHeight,
+                                        }}
+                                    >
                                         {filteredLeads.map((opt, idx) => {
                                             const active = idx === leadActiveIndex;
                                             return (
@@ -717,7 +783,8 @@ function MeetingsContent() {
                                                 </button>
                                             );
                                         })}
-                                    </div>
+                                    </div>,
+                                    document.body
                                 ) : null}
                                 {!leadOpen && leadSelectedLabel ? (
                                     <div className="mt-2 text-xs text-gray-300">
@@ -820,7 +887,7 @@ function MeetingsContent() {
                                     setConfirmCancelId(null);
                                     setDrawerId(null);
                                 } catch (e) {
-                                    notificationsStore.create({ type: "error", title: "Cancel failed", message: formatError(e) });
+                                    createNotification({ type: "error", title: "Cancel failed", message: formatError(e) });
                                 }
                             }}
                         >
@@ -891,6 +958,7 @@ function MeetingRow({ meeting, onOpen }: { meeting: CalendarEvent; onOpen: () =>
 }
 
 function LinkRow({ label, href, variant }: { label: string; href: string; variant: "default" | "secondary" }) {
+    const { create: createNotification } = useNotificationsActions();
     return (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/70 p-3">
             <div className="min-w-0">
@@ -913,9 +981,9 @@ function LinkRow({ label, href, variant }: { label: string; href: string; varian
                     onClick={async () => {
                         try {
                             await copyText(href);
-                            notificationsStore.create({ type: "success", title: "Copied", message: "Link copied to clipboard." });
+                            createNotification({ type: "success", title: "Copied", message: "Link copied to clipboard." });
                         } catch (e) {
-                            notificationsStore.create({ type: "error", title: "Copy failed", message: formatError(e) });
+                            createNotification({ type: "error", title: "Copy failed", message: formatError(e) });
                         }
                     }}
                 >
@@ -928,6 +996,7 @@ function LinkRow({ label, href, variant }: { label: string; href: string; varian
 }
 
 function InfoRow({ label, value }: { label: string; value: string }) {
+    const { create: createNotification } = useNotificationsActions();
     return (
         <div className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background/70 p-3">
             <div className="min-w-0">
@@ -941,9 +1010,9 @@ function InfoRow({ label, value }: { label: string; value: string }) {
                     onClick={async () => {
                         try {
                             await copyText(value);
-                            notificationsStore.create({ type: "success", title: "Copied", message: "Copied to clipboard." });
+                            createNotification({ type: "success", title: "Copied", message: "Copied to clipboard." });
                         } catch (e) {
-                            notificationsStore.create({ type: "error", title: "Copy failed", message: formatError(e) });
+                            createNotification({ type: "error", title: "Copy failed", message: formatError(e) });
                         }
                     }}
                 >

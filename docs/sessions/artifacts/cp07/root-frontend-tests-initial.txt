@@ -1,0 +1,33 @@
+✔ call this list is disabled before a ready route without asking to place calls (349.2988ms)
+✔ call-list success applies the server's authoritative active state without a parent callback (132.2055ms)
+✔ partial 503 applies is_active from structured server details (108.9674ms)
+✔ a pending account-A call-list response cannot publish its private message into B's history (133.7485ms)
+✔ scoped saved lead IDs suppress repeats while fresh leads create in-app alerts (117.4904ms)
+✔ a first load seeds silently without adopting legacy or another identity's seen IDs (75.0354ms)
+✔ stale unseen leads are absorbed silently while fresh ones toast (76.9268ms)
+✔ an initially empty stream still alerts on the next newly qualified lead (155.2691ms)
+✔ late A event response cannot populate B's query or notifications after an identity switch (169.3007ms)
+✔ another tab's scoped seen update prevents a repeated alert (79.7666ms)
+✔ no verified identity means no lead polling or alert hydration (2.4963ms)
+✔ an absent policy is shown as recording OFF (98.3644ms)
+✔ non-admins see the policy but cannot save (56.0728ms)
+✔ changing retention enables Save and sends the full policy (52.7045ms)
+✔ two-party fields are disabled unless the mode is two-party (18.3759ms)
+✔ registration and a successful old probe do not claim calling readiness (348.5983ms)
+✔ editing a saved trunk preserves credentials without asking for its password (309.3836ms)
+✔ switching to IP authentication clears credentials and registration together (291.3673ms)
+✔ changing username without a replacement password is blocked (237.2403ms)
+✔ delete explicitly disables first and retains the server conflict in the dialog (156.9366ms)
+✔ IP trunk can be ready without registration or credentials (55.2907ms)
+✔ an inbound-only IP trunk uses inbound proof despite an unanswered outbound probe (53.1754ms)
+✔ campaign cache commits never rewrite capability objects (5.8195ms)
+✔ a 503 authorization_unavailable is not rendered as no-permission (0.4974ms)
+✔ only auth-context (and allowlisted bridges) read the canonical token (401.7959ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 28974.3704

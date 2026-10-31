@@ -1,0 +1,15 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "argv": [
+    "../tmp/ag02-final-integration.py"
+  ],
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "."
+  },
+  "reproduce": "Copy runner.py into repository tmp/ and choose a new output folder; existing evidence is deliberately not overwritten."
+}

@@ -1,0 +1,39 @@
+{
+  "source_commit": "55895906bd9d7f0bcf48cd75f3e7095dda33b2eb",
+  "base_commit": "458c6798e8e1c6eb5664da938b396f5be7f82a9a",
+  "deleted_files": [
+    "backend/scripts/qualify_ag02_semantic.py",
+    "backend/tests/unit/test_ag02_semantic_qualification.py"
+  ],
+  "deleted_compatibility_symbols": [
+    "kb_tool_mode_enabled",
+    "knowledge_recovery_for",
+    "tool_system_addendum",
+    "NO_KB_FACTS",
+    "KB_UNAVAILABLE"
+  ],
+  "retained": [
+    "manual /knowledge/test lexical source-search diagnostic",
+    "shared load_current_knowledge_nodes and existing search diagnostic helpers",
+    "gold data and historical docs/evidence",
+    "metadata inspection through get_knowledge_tree (not source evidence)"
+  ],
+  "migrated_tests": [
+    "assistant knowledge authorization and current reader schema",
+    "source security on traditional/native section tools",
+    "pure diagnostic relevance checks retained; old live injection assertions removed",
+    "two live guide tests no longer import removed streamer no-op"
+  ],
+  "lint": {
+    "command": "python -m ruff check --select F (11 surviving changed Python paths)",
+    "exit_code": 1,
+    "diagnostics": 16,
+    "all_diagnostics": "F401 in assistant/agent.py; executable AST excluding SYSTEM_PROMPT unchanged against base",
+    "other_changed_paths": "no diagnostics"
+  },
+  "diff_check": {
+    "command": "git diff --check",
+    "exit_code": 0
+  },
+  "integration_note": "Root owns removal of the retired CLI assertion in test_model_driven_voice_turn.py and the streamer no-op itself."
+}

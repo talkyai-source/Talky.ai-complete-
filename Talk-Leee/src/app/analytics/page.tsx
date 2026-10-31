@@ -64,6 +64,7 @@ export default function AnalyticsPage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [groupBy, setGroupBy] = useState<"day" | "week" | "month">("day");
+    const [direction, setDirection] = useState<"outbound" | "inbound" | "all">("outbound");
     const [dateRange, setDateRange] = useState(30);
     const [barTooltip, setBarTooltip] = useState<{ index: number; x: number; y: number } | null>(null);
     const barsWrapRef = useRef<HTMLDivElement>(null);
@@ -79,8 +80,15 @@ export default function AnalyticsPage() {
                     .toISOString()
                     .split("T")[0];
 
-                const response = await extendedApi.getCallAnalytics(fromDate, toDate, groupBy);
+                const response = await extendedApi.getCallAnalytics(
+                    fromDate,
+                    toDate,
+                    groupBy,
+                    direction,
+                    false,
+                );
                 if (cancelled) return;
+                setError("");
                 setData(response.series);
             } catch (err) {
                 if (cancelled) return;
@@ -96,7 +104,7 @@ export default function AnalyticsPage() {
         return () => {
             cancelled = true;
         };
-    }, [groupBy, dateRange]);
+    }, [groupBy, dateRange, direction]);
 
     const totals = data.reduce(
         (acc, item) => ({
@@ -113,12 +121,15 @@ export default function AnalyticsPage() {
     const activeBar = barTooltip ? data[barTooltip.index] : null;
 
     return (
-        <DashboardLayout title="Analytics" description="Call performance over time">
+        <DashboardLayout
+            title="Analytics"
+            description={`${direction === "all" ? "All real" : `Real ${direction}`} call performance over time`}
+        >
             {/* Filters */}
             <motion.div
                 initial={{ opacity: 0, y: -10 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="flex flex-col gap-3 mb-6 sm:flex-row sm:items-center sm:gap-4"
+                className="flex flex-col gap-3 mb-6 sm:flex-row sm:flex-wrap sm:items-center sm:gap-4"
             >
                 <motion.div
                     whileHover={{ scale: 1.02 }}
@@ -137,6 +148,26 @@ export default function AnalyticsPage() {
                         <option value="7">Last 7 days</option>
                         <option value="30">Last 30 days</option>
                         <option value="90">Last 90 days</option>
+                    </Select>
+                </motion.div>
+
+                <motion.div
+                    whileHover={{ scale: 1.02 }}
+                    whileTap={{ scale: 0.99 }}
+                    className="flex items-center gap-2 rounded-xl bg-muted/60 px-3 py-2 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out hover:bg-background hover:shadow-md"
+                >
+                    <Activity className="w-4 h-4 text-muted-foreground" aria-hidden />
+                    <Select
+                        value={direction}
+                        onChange={(value) => setDirection(value as "outbound" | "inbound" | "all")}
+                        ariaLabel="Select call direction"
+                        lightThemeGreen
+                        className="w-40"
+                        selectClassName="border-0 bg-transparent shadow-none h-9 pr-8 focus-visible:ring-0"
+                    >
+                        <option value="outbound">Outbound calls</option>
+                        <option value="inbound">Inbound calls</option>
+                        <option value="all">All directions</option>
                     </Select>
                 </motion.div>
 
@@ -258,7 +289,8 @@ export default function AnalyticsPage() {
                                     ) : null}
 
                                     <div className="overflow-x-auto">
-                                        <div className="min-w-max flex items-end justify-center gap-3 h-40 px-2">
+                                        <div className="min-w-max">
+                                        <div className="flex items-end justify-center gap-3 h-40 px-2">
                                         {data.map((item, index) => (
                                             <motion.div
                                                 key={index}
@@ -325,20 +357,19 @@ export default function AnalyticsPage() {
                                             </motion.div>
                                         ))}
                                         </div>
-                                    </div>
-                                </div>
-
-                                {/* X-axis labels */}
-                                <div className="overflow-x-auto">
-                                    <div className="min-w-max flex items-start justify-center gap-3 px-2">
-                                        {data.map((item, index) => (
-                                            <div
-                                                key={index}
-                                                className={`${barWidthClass} text-center text-xs text-muted-foreground`}
-                                            >
-                                                {formatDate(item.date)}
-                                            </div>
-                                        ))}
+                                        {/* X-axis labels — in the same scroller as the bars so both
+                                            pan together and each date stays under its own bar. */}
+                                        <div className="mt-4 flex items-start justify-center gap-3 px-2">
+                                            {data.map((item, index) => (
+                                                <div
+                                                    key={index}
+                                                    className={`${barWidthClass} text-center text-xs text-muted-foreground`}
+                                                >
+                                                    {formatDate(item.date)}
+                                                </div>
+                                            ))}
+                                        </div>
+                                        </div>
                                     </div>
                                 </div>
 
@@ -362,10 +393,12 @@ export default function AnalyticsPage() {
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.6 }}
-                        className="rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[box-shadow] duration-150 ease-out hover:shadow-md"
+                        className="mb-16 rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[box-shadow] duration-150 ease-out hover:shadow-md"
                     >
                         <h3 className="text-lg font-semibold text-foreground mb-4">Breakdown</h3>
-                        <div className="overflow-x-hidden overflow-y-visible">
+                        {/* Table — 768px and up. Below 768px the stacked cards after it
+                            replace it; five columns cannot fit a phone-width card. */}
+                        <div className="hidden md:block overflow-x-hidden overflow-y-visible">
                             <table className="w-full table-fixed">
                                 <thead className="border-b border-border/60">
                                     <tr>
@@ -414,6 +447,45 @@ export default function AnalyticsPage() {
                                     ))}
                                 </tbody>
                             </table>
+                        </div>
+
+                        {/* Stacked cards — below 768px. One card per date; no hover or
+                            scale animation. The bottom margin on the card above keeps
+                            the last card clear of the fixed chat button. */}
+                        <div className="md:hidden">
+                            {data.length === 0 ? (
+                                <p className="py-8 text-center text-sm text-muted-foreground">No data for the selected period</p>
+                            ) : (
+                                <ul className="space-y-3" aria-label="Breakdown by date">
+                                    {data.map((item, index) => (
+                                        <li key={index} className="rounded-xl border border-border/60 bg-muted/40 p-3">
+                                            <div className="flex items-baseline justify-between gap-3">
+                                                <span className="min-w-0 break-words text-sm font-medium text-muted-foreground">{item.date}</span>
+                                                <span className="shrink-0 text-sm font-semibold text-foreground tabular-nums">
+                                                    <span className="mr-1.5 text-xs font-normal text-muted-foreground">Rate</span>
+                                                    {item.total_calls > 0
+                                                        ? `${Math.round((item.answered / item.total_calls) * 100)}%`
+                                                        : "--"}
+                                                </span>
+                                            </div>
+                                            <dl className="mt-3 grid grid-cols-3 gap-2 border-t border-border/60 pt-3">
+                                                <div className="min-w-0">
+                                                    <dt className="text-xs text-muted-foreground">Total</dt>
+                                                    <dd className="break-all text-sm font-semibold text-foreground tabular-nums">{item.total_calls}</dd>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <dt className="text-xs text-muted-foreground">Answered</dt>
+                                                    <dd className="break-all text-sm text-emerald-600 tabular-nums">{item.answered}</dd>
+                                                </div>
+                                                <div className="min-w-0">
+                                                    <dt className="text-xs text-muted-foreground">Failed</dt>
+                                                    <dd className="break-all text-sm text-red-600 tabular-nums">{item.failed}</dd>
+                                                </div>
+                                            </dl>
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
                         </div>
                     </motion.div>
                 </div>

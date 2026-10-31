@@ -1,27 +1,174 @@
-"""
-Admin Calls Endpoints
-Call monitoring: live calls, call history, call detail, terminate
-"""
-from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
+"""Admin call monitoring, history, detail, and live-call control."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import re
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from typing import Any, List, Literal, Mapping, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Response
+from pydantic import BaseModel, Field
+
 from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_db_client,
+    require_platform_admin,
+)
+from app.core.db_utils import acquire_with_tenant
 from ._serialization import AdminResponseModel
 from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
-from app.domain.services.call_status import CallOutcome, CallState
+from app.domain.services.call_status import CallOutcome
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.infrastructure.connectors.crm.base import AmbiguousCRMCallReference, valid_crm_activity_id
+from app.services.connector_resolver import resolve_active_connector, verify_reviewed_connector
+from app.domain.services.telephony.termination import (
+    finalize_proven_inbound_termination,
+    mark_termination_pending_and_load_context,
+    request_confirmed_hangup,
+)
+
+from app.domain.services.telephony.termination_receipts import (
+    _TERMINATION_RECEIPT_EVENT,
+    _TERMINATION_RECEIPT_SOURCE,
+    persist_termination_receipt as _persist_admin_termination_receipt,
+    receipt_matches as _receipt_matches,
+)
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+def _admin_termination_projection(db_client: Client, call: Mapping[str, Any]) -> dict:
+    projection = {
+        "termination_status": "requested" if call.get("status") == "termination_pending" else "none",
+        "termination_requested_at": call.get("updated_at") if call.get("status") == "termination_pending" else None,
+        "provider_hangup_requested": None, "provider_hangup_confirmed": False,
+        "termination_confirmed_at": None,
+        "termination_reconciliation_error": "No saved all-leg termination confirmation is available.",
+    }
+    try:
+        events = db_client.table("call_events").select("call_id, event_data").eq("call_id", str(call["id"])).eq(
+            "event_type", _TERMINATION_RECEIPT_EVENT).eq("source", _TERMINATION_RECEIPT_SOURCE).order("created_at", desc=True).limit(1).execute()
+        if getattr(events, "error", None) or not isinstance(events.data, list):
+            raise RuntimeError("termination receipt read failed")
+        if not events.data:
+            return projection
+        event = events.data[0]
+        receipt = event.get("event_data")
+        if isinstance(receipt, str):
+            receipt = json.loads(receipt)
+        if str(event.get("call_id")) != str(call["id"]) or not isinstance(receipt, dict):
+            raise ValueError("termination receipt identity invalid")
+        legs = db_client.table("call_legs").select("id, provider, provider_leg_id, status, created_at").eq("call_id", str(call["id"])).execute()
+        if getattr(legs, "error", None) or not isinstance(legs.data, list):
+            raise RuntimeError("termination leg read failed")
+        if not _receipt_matches(call, legs.data, receipt):
+            projection["termination_reconciliation_error"] = "Saved confirmation does not cover the current call and leg identities."
+            return projection
+        projection.update(termination_status="confirmed", provider_hangup_confirmed=True,
+                          provider_hangup_requested=receipt.get("provider_hangup_requested") is True,
+                          termination_confirmed_at=receipt["confirmed_at"], termination_reconciliation_error=None)
+    except Exception:
+        projection["termination_reconciliation_error"] = "Saved termination confirmation could not be read."
+    return projection
+
+
+def _live_duration_seconds(started_at) -> int:
+    """Calculate a live duration from either asyncpg or JSON timestamp values."""
+    if not started_at:
+        return 0
+    try:
+        if isinstance(started_at, datetime):
+            start_dt = started_at
+        else:
+            start_dt = datetime.fromisoformat(str(started_at).replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc) if start_dt.tzinfo else datetime.now()
+        return max(0, int((now - start_dt).total_seconds()))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _display_caller_ani(call: dict) -> str | None:
+    """Return ANI only when the carrier did not mark caller identity private."""
+    if call.get("caller_ani_private"):
+        return None
+    return call.get("caller_ani") or call.get("phone_number")
+
+
+def _admin_call_money_projection(
+    call: Mapping[str, Any],
+    usage_rows: list[Mapping[str, Any]],
+) -> tuple[float | None, str | None]:
+    """Project display money without inventing an inbound currency.
+
+    Outbound rows retain their historical ``calls.cost`` projection. Inbound
+    terminal billing is ledger-authoritative: finalized money is the sum of
+    the parent settlement and any compensating reversal. A missing or mixed
+    currency stays explicit instead of being mislabeled as USD.
+    """
+
+    raw_call_cost = call.get("cost")
+    outbound_cost = float(raw_call_cost) if raw_call_cost is not None else None
+    if str(call.get("direction") or "outbound").strip().lower() != "inbound":
+        return outbound_cost, None
+
+    if str(call.get("billing_status") or "").strip().lower() not in {
+        "finalized",
+        "reversed",
+    }:
+        return None, None
+
+    amounts: list[tuple[Decimal, str | None]] = []
+    for row in usage_rows:
+        if row.get("call_leg_id") is not None:
+            continue
+        if str(row.get("transaction_type") or "").strip().lower() not in {
+            "finalize",
+            "reverse",
+        }:
+            continue
+        raw_amount = row.get("amount")
+        if raw_amount is None:
+            continue
+        try:
+            amount = Decimal(str(raw_amount))
+        except (InvalidOperation, TypeError, ValueError):
+            return None, None
+        if not amount.is_finite():
+            return None, None
+        currency = str(row.get("currency") or "").strip().upper() or None
+        if currency is not None and (
+            len(currency) != 3 or not currency.isascii() or not currency.isalpha()
+        ):
+            return None, None
+        amounts.append((amount, currency))
+
+    if not amounts:
+        return None, None
+    currencies = {currency for _, currency in amounts}
+    if len(currencies) != 1:
+        # Summing unlike/partially-labelled currencies would fabricate a
+        # monetary value. The immutable rows remain available to operators.
+        return None, None
+    total = sum((amount for amount, _ in amounts), Decimal("0"))
+    return float(total), next(iter(currencies))
 
 
 # =============================================================================
 # Response Models
 # =============================================================================
 
-class TimelineEvent(BaseModel):
+
+class TimelineEvent(AdminResponseModel):
     """Timeline event for call detail"""
+
     event: str
     timestamp: str
     status: Optional[str] = None
@@ -29,6 +176,7 @@ class TimelineEvent(BaseModel):
 
 class LiveCallItem(AdminResponseModel):
     """Active call item for live calls table"""
+
     id: str
     tenant_id: str
     tenant_name: str
@@ -37,10 +185,20 @@ class LiveCallItem(AdminResponseModel):
     status: str  # 'in_progress', 'ringing', 'queued'
     started_at: Optional[str] = None
     duration_seconds: int = 0
+    direction: str = "outbound"
+    caller_ani: Optional[str] = None
+    called_did: Optional[str] = None
+    admission_status: Optional[str] = None
+    termination_status: Literal["none", "requested", "confirmed", "failed"] = "none"
+    termination_requested_at: Optional[str] = None
+    termination_error: Optional[str] = None
+    provider_hangup_requested: Optional[bool] = None
+    provider_hangup_confirmed: bool = False
 
 
 class CallHistoryItem(AdminResponseModel):
     """Call history item with tenant info"""
+
     id: str
     tenant_id: str
     tenant_name: str
@@ -52,18 +210,121 @@ class CallHistoryItem(AdminResponseModel):
     started_at: Optional[str] = None
     ended_at: Optional[str] = None
     created_at: str
+    has_recording: Optional[bool] = None
+    has_feedback: Optional[bool] = None
+    feedback_transcript_status: Optional[str] = None
+    direction: str = "outbound"
+    caller_ani: Optional[str] = None
+    called_did: Optional[str] = None
+    admission_status: Optional[str] = None
+    admission_reason: Optional[str] = None
+    consent_status: Optional[str] = None
+    processing_status: Optional[str] = None
+    billing_status: Optional[str] = None
+    billing_hold_reason: Optional[str] = None
 
 
 class CallHistoryResponse(BaseModel):
     """Paginated call history response"""
+
     items: List[CallHistoryItem]
     page: int
     page_size: int
     total: int
 
 
+class AdminCRMReceipt(AdminResponseModel):
+    """Saved evidence only; excludes provider bodies and contact arguments."""
+
+    provider: Literal["hubspot", "salesforce"]
+    status: str
+    phase: str
+    destination_connector_id: Optional[str] = None
+    destination_account_id: Optional[str] = None
+    remote_contact_id: Optional[str] = None
+    remote_call_id: Optional[str] = None
+    updated_at: Optional[str] = None
+    inspection_available: bool = False
+
+
+class AdminCRMInspection(AdminResponseModel):
+    call_id: str
+    provider: Literal["hubspot", "salesforce"]
+    outcome: Literal["observed_reference", "no_match", "ambiguous", "unavailable"]
+    reason: Literal[
+        "reference_observed_only", "absence_is_inconclusive", "multiple_references",
+        "original_receipt_unavailable", "original_authorization_unavailable",
+        "provider_read_unavailable",
+    ]
+    observed_at: str
+    observed_remote_id: Optional[str] = None
+
+
+_CRM_RECEIPT_COLUMNS = (
+    "tenant_id,call_id,provider,status,phase,destination_connector_id,"
+    "destination_account_id,remote_contact_id,remote_call_id,updated_at"
+)
+
+
+def _crm_reference(value: Any) -> str | None:
+    """Bound identifiers without exposing arbitrary stored exception text."""
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_.:@/-]{1,256}", value):
+        return value
+    return None
+
+
+def _crm_inspectable(row: Mapping[str, Any]) -> bool:
+    try:
+        UUID(str(row.get("destination_connector_id")))
+        UUID(str(row.get("call_id")))
+        UUID(str(row.get("tenant_id")))
+    except (ValueError, TypeError):
+        return False
+    return bool(
+        row.get("provider") in {"hubspot", "salesforce"}
+        and row.get("phase") == "creating_call"
+        and row.get("status") in {"unknown", "processing"}
+        and _crm_reference(row.get("destination_account_id"))
+    )
+
+
+def _admin_crm_receipts(db_client: Client, tenant_id: str, call_id: str) -> list[dict]:
+    response = db_client.table("crm_deliveries").select(_CRM_RECEIPT_COLUMNS).eq(
+        "tenant_id", tenant_id).eq("call_id", call_id).order("provider").execute()
+    if getattr(response, "error", None) or not isinstance(response.data, list):
+        raise RuntimeError("CRM receipts unavailable")
+    # Explicit identity checks also protect the projection against malformed
+    # adapter results. No current connector is substituted for saved evidence.
+    if any(str(row.get("tenant_id")) != tenant_id or str(row.get("call_id")) != call_id
+           for row in response.data):
+        raise RuntimeError("CRM receipt identity mismatch")
+    return response.data
+
+
+def _admin_crm_projection(row: dict) -> AdminCRMReceipt:
+    return AdminCRMReceipt(
+        provider=row["provider"],
+        status=row["status"] if row.get("status") in {
+            "pending", "processing", "succeeded", "failed", "unknown", "skipped"
+        } else "unknown",
+        phase=row["phase"] if row.get("phase") in {
+            "pending", "legacy_unverified", "resolving_contact", "creating_contact",
+            "creating_call", "updating_call", "complete",
+        } else "unknown",
+        destination_connector_id=_crm_reference(row.get("destination_connector_id")),
+        destination_account_id=_crm_reference(row.get("destination_account_id")),
+        remote_contact_id=_crm_reference(row.get("remote_contact_id")),
+        remote_call_id=_crm_reference(row.get("remote_call_id")),
+        updated_at=row.get("updated_at"),
+        inspection_available=_crm_inspectable(row),
+    )
+
+
 class AdminCallDetail(AdminResponseModel):
     """Full call detail for admin view"""
+
     id: str
     tenant_id: str
     tenant_name: str
@@ -72,6 +333,12 @@ class AdminCallDetail(AdminResponseModel):
     campaign_name: Optional[str] = None
     lead_id: Optional[str] = None
     status: str
+    termination_status: Literal["none", "requested", "confirmed", "failed"] = "none"
+    termination_requested_at: Optional[str] = None
+    provider_hangup_requested: Optional[bool] = None
+    provider_hangup_confirmed: bool = False
+    termination_confirmed_at: Optional[str] = None
+    termination_reconciliation_error: Optional[str] = None
     outcome: Optional[str] = None
     goal_achieved: bool = False
     started_at: Optional[str] = None
@@ -81,25 +348,47 @@ class AdminCallDetail(AdminResponseModel):
     transcript: Optional[str] = None
     transcript_json: Optional[list] = None
     summary: Optional[str] = None
+    summary_json: Optional[dict] = None
     recording_url: Optional[str] = None
     cost: Optional[float] = None
+    currency: Optional[str] = None
     timeline: List[TimelineEvent]
     created_at: str
     updated_at: Optional[str] = None
+    direction: str = "outbound"
+    provider: Optional[str] = None
+    provider_call_id: Optional[str] = None
+    caller_ani: Optional[str] = None
+    called_did: Optional[str] = None
+    ingress: Optional[str] = None
+    route_version: Optional[int] = None
+    config_version: Optional[int] = None
+    route_snapshot: Optional[dict] = None
+    admission_status: Optional[str] = None
+    admission_reason: Optional[str] = None
+    consent_status: Optional[str] = None
+    processing_status: Optional[str] = None
+    billing_status: Optional[str] = None
+    billing_hold_reason: Optional[str] = None
+    reserved_seconds: Optional[int] = None
+    transfer_legs: List[dict] = Field(default_factory=list)
+    crm_deliveries: List[AdminCRMReceipt] = Field(default_factory=list)
+    crm_receipts_available: bool = False
 
 
 # =============================================================================
 # Endpoints
 # =============================================================================
 
+
 @router.get("/calls/live", response_model=List[LiveCallItem])
 async def get_live_calls(
     admin_user: CurrentUser = Depends(require_platform_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Get list of currently active calls.
-    
+
     Returns calls in any LIVE status (job_states.LIVE_CALL_STATUSES:
     queued, dialing, ringing, answered, in_call, initiated).
     Includes tenant name and campaign name for context.
@@ -109,62 +398,92 @@ async def get_live_calls(
         # Shared vocabulary — the local literal was missing dialing/
         # answered/in_call and contained 'in_progress', which nothing writes.
         active_statuses = list(LIVE_CALL_STATUSES)
-        calls_response = db_client.table("calls").select(
-            "id, tenant_id, phone_number, status, started_at, campaign_id"
-        ).in_("status", active_statuses).order("started_at", desc=True).execute()
-        
+        calls_response = (
+            db_client.table("calls")
+            .select(
+                "id, tenant_id, phone_number, status, started_at, campaign_id, "
+                "direction, caller_ani, caller_ani_private, called_did, "
+                "admission_status, updated_at"
+            )
+            .in_("status", active_statuses)
+            .order("started_at", desc=True)
+            .execute()
+        )
+        if getattr(calls_response, "error", None):
+            raise RuntimeError(calls_response.error)
+
         if not calls_response.data:
             return []
-        
+
         # Collect tenant IDs and campaign IDs for batch lookup
-        tenant_ids = list(set(c.get("tenant_id") for c in calls_response.data if c.get("tenant_id")))
-        campaign_ids = list(set(c.get("campaign_id") for c in calls_response.data if c.get("campaign_id")))
-        
+        tenant_ids = list(
+            set(c.get("tenant_id") for c in calls_response.data if c.get("tenant_id"))
+        )
+        campaign_ids = list(
+            set(c.get("campaign_id") for c in calls_response.data if c.get("campaign_id"))
+        )
+
         # Fetch tenant names
         tenant_map = {}
         if tenant_ids:
-            tenants_response = db_client.table("tenants").select("id, business_name").in_("id", tenant_ids).execute()
-            for t in (tenants_response.data or []):
+            tenants_response = (
+                db_client.table("tenants")
+                .select("id, business_name")
+                .in_("id", tenant_ids)
+                .execute()
+            )
+            if getattr(tenants_response, "error", None):
+                raise RuntimeError(tenants_response.error)
+            for t in tenants_response.data or []:
                 tenant_map[t["id"]] = t["business_name"]
-        
+
         # Fetch campaign names
         campaign_map = {}
         if campaign_ids:
-            campaigns_response = db_client.table("campaigns").select("id, name").in_("id", campaign_ids).execute()
-            for c in (campaigns_response.data or []):
+            campaigns_response = (
+                db_client.table("campaigns").select("id, name").in_("id", campaign_ids).execute()
+            )
+            if getattr(campaigns_response, "error", None):
+                raise RuntimeError(campaigns_response.error)
+            for c in campaigns_response.data or []:
                 campaign_map[c["id"]] = c["name"]
-        
+
         # Calculate duration for active calls
-        now = datetime.utcnow()
         items = []
         for call in calls_response.data:
-            duration = 0
             started_at = call.get("started_at")
-            if started_at:
-                try:
-                    start_dt = datetime.fromisoformat(started_at.replace("Z", "+00:00").replace("+00:00", ""))
-                    duration = int((now - start_dt).total_seconds())
-                except (ValueError, TypeError):
-                    duration = 0
-            
-            items.append(LiveCallItem(
-                id=call["id"],
-                tenant_id=call.get("tenant_id", ""),
-                tenant_name=tenant_map.get(call.get("tenant_id"), "Unknown"),
-                phone_number=call.get("phone_number", ""),
-                campaign_name=campaign_map.get(call.get("campaign_id")),
-                status=call.get("status", "unknown"),
-                started_at=started_at,
-                duration_seconds=max(0, duration)
-            ))
-        
+            duration = _live_duration_seconds(started_at)
+            call_status = str(call.get("status") or "unknown")
+            termination_requested = call_status == "termination_pending"
+
+            items.append(
+                LiveCallItem(
+                    id=call["id"],
+                    tenant_id=call.get("tenant_id", ""),
+                    tenant_name=tenant_map.get(call.get("tenant_id"), "Unknown"),
+                    phone_number=call.get("phone_number", ""),
+                    campaign_name=campaign_map.get(call.get("campaign_id")),
+                    status=call_status,
+                    started_at=started_at,
+                    duration_seconds=max(0, duration),
+                    direction=call.get("direction") or "outbound",
+                    caller_ani=_display_caller_ani(call),
+                    called_did=call.get("called_did"),
+                    admission_status=call.get("admission_status"),
+                    termination_status=("requested" if termination_requested else "none"),
+                    termination_requested_at=(
+                        call.get("updated_at") if termination_requested else None
+                    ),
+                    termination_error=None,
+                    provider_hangup_requested=None,
+                    provider_hangup_confirmed=False,
+                )
+            )
+
         return items
-    
+
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch live calls: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch live calls: {str(e)}")
 
 
 @router.get("/calls/history", response_model=CallHistoryResponse)
@@ -176,12 +495,13 @@ async def get_call_history(
     search: Optional[str] = None,
     status: Optional[str] = None,
     tenant_id: Optional[str] = None,
+    direction: Optional[Literal["inbound", "outbound"]] = None,
     from_date: Optional[str] = None,
-    to_date: Optional[str] = None
+    to_date: Optional[str] = None,
 ):
     """
     Get paginated call history with filters.
-    
+
     Query params:
         - page: Page number (1-indexed)
         - page_size: Items per page (max 100)
@@ -194,95 +514,171 @@ async def get_call_history(
     try:
         # Build query
         query = db_client.table("calls").select(
-            "id, tenant_id, phone_number, campaign_id, status, outcome, duration_seconds, started_at, ended_at, created_at",
-            count="exact"
+            "id, tenant_id, phone_number, campaign_id, status, outcome, duration_seconds, "
+            "started_at, ended_at, created_at, direction, caller_ani, "
+            "caller_ani_private, called_did, "
+            "admission_status, admission_reason, consent_status, processing_status, "
+            "billing_status, billing_hold_reason",
+            count="exact",
         )
-        
+
         # Apply filters
         if search:
             query = query.ilike("phone_number", f"%{search}%")
-        
+
         if status:
             query = query.eq("status", status)
-        
+
         if tenant_id:
             query = query.eq("tenant_id", tenant_id)
-        
+
+        if direction:
+            query = query.eq("direction", direction)
+
         if from_date:
             query = query.gte("created_at", from_date)
-        
+
         if to_date:
             query = query.lte("created_at", to_date + "T23:59:59Z")
-        
+
         # Calculate offset
         offset = (page - 1) * min(page_size, 100)
-        
+
         # Execute with pagination
-        response = query.order("created_at", desc=True).range(offset, offset + min(page_size, 100) - 1).execute()
-        
+        response = (
+            query.order("created_at", desc=True)
+            .range(offset, offset + min(page_size, 100) - 1)
+            .execute()
+        )
+        if getattr(response, "error", None):
+            raise RuntimeError(response.error)
+
         total = response.count if response.count else 0
-        
+
         if not response.data:
             return CallHistoryResponse(items=[], page=page, page_size=page_size, total=total)
-        
+
         # Collect tenant and campaign IDs
         tenant_ids = list(set(c.get("tenant_id") for c in response.data if c.get("tenant_id")))
-        campaign_ids = list(set(c.get("campaign_id") for c in response.data if c.get("campaign_id")))
-        
+        campaign_ids = list(
+            set(c.get("campaign_id") for c in response.data if c.get("campaign_id"))
+        )
+
         # Fetch tenant names
         tenant_map = {}
         if tenant_ids:
-            tenants_response = db_client.table("tenants").select("id, business_name").in_("id", tenant_ids).execute()
-            for t in (tenants_response.data or []):
+            tenants_response = (
+                db_client.table("tenants")
+                .select("id, business_name")
+                .in_("id", tenant_ids)
+                .execute()
+            )
+            if getattr(tenants_response, "error", None):
+                raise RuntimeError(tenants_response.error)
+            for t in tenants_response.data or []:
                 tenant_map[t["id"]] = t["business_name"]
-        
+
         # Fetch campaign names
         campaign_map = {}
         if campaign_ids:
-            campaigns_response = db_client.table("campaigns").select("id, name").in_("id", campaign_ids).execute()
-            for c in (campaigns_response.data or []):
+            campaigns_response = (
+                db_client.table("campaigns").select("id, name").in_("id", campaign_ids).execute()
+            )
+            if getattr(campaigns_response, "error", None):
+                raise RuntimeError(campaigns_response.error)
+            for c in campaigns_response.data or []:
                 campaign_map[c["id"]] = c["name"]
-        
+
+        # Media/review indicators let an operator find calls that actually
+        # need attention without opening every drawer. Each metadata failure
+        # remains unknown independently; it must not hide the call or establish
+        # that no recording/reviewer feedback exists.
+        call_ids = [str(call["id"]) for call in response.data]
+        recording_call_ids: Optional[set[str]] = None
+        feedback_status_by_call: Optional[dict[str, str]] = None
+        try:
+            recordings_response = (
+                db_client.table("recordings_s3")
+                .select("call_id")
+                .in_("call_id", call_ids)
+                .eq("status", "uploaded")
+                .execute()
+            )
+            if getattr(recordings_response, "error", None) or not isinstance(recordings_response.data, list):
+                raise RuntimeError("Recording indicators unavailable")
+            recording_call_ids = {
+                str(row["call_id"])
+                for row in recordings_response.data
+                if row.get("call_id")
+            }
+        except Exception as exc:
+            logger.warning("admin call recording indicators unavailable: %s", exc)
+        try:
+            feedback_response = (
+                db_client.table("call_feedback")
+                .select("call_id, transcript_status")
+                .in_("call_id", call_ids)
+                .execute()
+            )
+            if getattr(feedback_response, "error", None) or not isinstance(feedback_response.data, list):
+                raise RuntimeError("Feedback indicators unavailable")
+            feedback_status_by_call = {
+                str(row["call_id"]): str(row.get("transcript_status") or "pending")
+                for row in feedback_response.data
+                if row.get("call_id")
+            }
+        except Exception as exc:
+            logger.warning("admin call feedback indicators unavailable: %s", exc)
+
         # Build items
         items = []
         for call in response.data:
-            items.append(CallHistoryItem(
-                id=call["id"],
-                tenant_id=call.get("tenant_id", ""),
-                tenant_name=tenant_map.get(call.get("tenant_id"), "Unknown"),
-                phone_number=call.get("phone_number", ""),
-                campaign_name=campaign_map.get(call.get("campaign_id")),
-                status=call.get("status", "unknown"),
-                outcome=call.get("outcome"),
-                duration_seconds=call.get("duration_seconds"),
-                started_at=call.get("started_at"),
-                ended_at=call.get("ended_at"),
-                created_at=call.get("created_at", "")
-            ))
-        
-        return CallHistoryResponse(
-            items=items,
-            page=page,
-            page_size=page_size,
-            total=total
-        )
-    
+            items.append(
+                CallHistoryItem(
+                    id=call["id"],
+                    tenant_id=call.get("tenant_id", ""),
+                    tenant_name=tenant_map.get(call.get("tenant_id"), "Unknown"),
+                    phone_number=call.get("phone_number", ""),
+                    campaign_name=campaign_map.get(call.get("campaign_id")),
+                    status=call.get("status", "unknown"),
+                    outcome=call.get("outcome"),
+                    duration_seconds=call.get("duration_seconds"),
+                    started_at=call.get("started_at"),
+                    ended_at=call.get("ended_at"),
+                    created_at=call.get("created_at", ""),
+                    has_recording=(str(call["id"]) in recording_call_ids
+                                   if recording_call_ids is not None else None),
+                    has_feedback=(str(call["id"]) in feedback_status_by_call
+                                  if feedback_status_by_call is not None else None),
+                    feedback_transcript_status=(feedback_status_by_call.get(str(call["id"]))
+                                                if feedback_status_by_call is not None else None),
+                    direction=call.get("direction") or "outbound",
+                    caller_ani=_display_caller_ani(call),
+                    called_did=call.get("called_did"),
+                    admission_status=call.get("admission_status"),
+                    admission_reason=call.get("admission_reason"),
+                    consent_status=call.get("consent_status"),
+                    processing_status=call.get("processing_status"),
+                    billing_status=call.get("billing_status"),
+                    billing_hold_reason=call.get("billing_hold_reason"),
+                )
+            )
+
+        return CallHistoryResponse(items=items, page=page, page_size=page_size, total=total)
+
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch call history: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to fetch call history: {str(e)}")
 
 
 @router.get("/calls/{call_id}", response_model=AdminCallDetail)
 async def get_admin_call_detail(
     call_id: str,
     admin_user: CurrentUser = Depends(require_platform_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
 ):
     """
     Get full call details for admin view.
-    
+
     Returns complete call information including:
     - Transcript (text and JSON)
     - Timeline of events
@@ -292,63 +688,143 @@ async def get_admin_call_detail(
     try:
         # Fetch call
         call_response = db_client.table("calls").select("*").eq("id", call_id).single().execute()
-        
+        if getattr(call_response, "error", None):
+            raise RuntimeError(call_response.error)
+
         if not call_response.data:
             raise HTTPException(status_code=404, detail="Call not found")
-        
+
         call = call_response.data
-        
+
+        usage_rows: list[dict] = []
+        if str(call.get("direction") or "outbound").strip().lower() == "inbound" and str(
+            call.get("billing_status") or ""
+        ).strip().lower() in {"finalized", "reversed"}:
+            usage_response = (
+                db_client.table("inbound_usage_transactions")
+                .select("call_leg_id, transaction_type, amount, currency")
+                .eq("tenant_id", call.get("tenant_id"))
+                .eq("call_id", call_id)
+                .execute()
+            )
+            if getattr(usage_response, "error", None):
+                raise RuntimeError(usage_response.error)
+            usage_rows = [dict(row) for row in usage_response.data or []]
+        projected_cost, projected_currency = _admin_call_money_projection(
+            call,
+            usage_rows,
+        )
+
         # Fetch tenant name
         tenant_name = "Unknown"
         if call.get("tenant_id"):
-            tenant_response = db_client.table("tenants").select("business_name").eq("id", call["tenant_id"]).single().execute()
+            tenant_response = (
+                db_client.table("tenants")
+                .select("business_name")
+                .eq("id", call["tenant_id"])
+                .single()
+                .execute()
+            )
+            if getattr(tenant_response, "error", None):
+                raise RuntimeError(tenant_response.error)
             if tenant_response.data:
                 tenant_name = tenant_response.data.get("business_name", "Unknown")
-        
+
         # Fetch campaign name
         campaign_name = None
         if call.get("campaign_id"):
-            campaign_response = db_client.table("campaigns").select("name").eq("id", call["campaign_id"]).single().execute()
+            campaign_response = (
+                db_client.table("campaigns")
+                .select("name")
+                .eq("id", call["campaign_id"])
+                .single()
+                .execute()
+            )
+            if getattr(campaign_response, "error", None):
+                raise RuntimeError(campaign_response.error)
             if campaign_response.data:
                 campaign_name = campaign_response.data.get("name")
-        
+
         # Build timeline
         timeline = []
         if call.get("created_at"):
-            timeline.append(TimelineEvent(
-                event="Call Initiated",
-                timestamp=call["created_at"],
-                status="initiated"
-            ))
+            timeline.append(
+                TimelineEvent(
+                    event="Call Initiated", timestamp=call["created_at"], status="initiated"
+                )
+            )
         if call.get("started_at"):
-            timeline.append(TimelineEvent(
-                event="Call Started",
-                timestamp=call["started_at"],
-                status="ringing"
-            ))
+            timeline.append(
+                TimelineEvent(event="Call Started", timestamp=call["started_at"], status="ringing")
+            )
         if call.get("answered_at"):
-            timeline.append(TimelineEvent(
-                event="Call Answered",
-                timestamp=call["answered_at"],
-                status="in_progress"
-            ))
+            timeline.append(
+                TimelineEvent(
+                    event="Call Answered", timestamp=call["answered_at"], status="in_progress"
+                )
+            )
         if call.get("ended_at"):
-            timeline.append(TimelineEvent(
-                event="Call Ended",
-                timestamp=call["ended_at"],
-                status=call.get("status", "completed")
-            ))
-        
+            timeline.append(
+                TimelineEvent(
+                    event="Call Ended",
+                    timestamp=call["ended_at"],
+                    status=call.get("status", "completed"),
+                )
+            )
+
         # Parse transcript_json if string
         transcript_json = call.get("transcript_json")
         if isinstance(transcript_json, str):
-            import json
             try:
                 transcript_json = json.loads(transcript_json)
             except (json.JSONDecodeError, TypeError):
                 transcript_json = None
-        
+
+        summary_json = call.get("summary_json")
+        if isinstance(summary_json, str):
+            try:
+                summary_json = json.loads(summary_json)
+            except (json.JSONDecodeError, TypeError):
+                summary_json = None
+        if not isinstance(summary_json, dict):
+            summary_json = None
+
+        legs_response = (
+            db_client.table("call_legs")
+            .select(
+                "id, leg_type, direction, provider, provider_leg_id, "
+                "from_number, to_number, status, started_at, answered_at, "
+                "ended_at, duration_seconds, metadata"
+            )
+            .eq("call_id", call_id)
+            .eq("leg_type", "transfer")
+            .order("created_at", desc=False)
+            .execute()
+        )
+        if getattr(legs_response, "error", None):
+            raise RuntimeError(legs_response.error)
+        transfer_legs = []
+        for raw_leg in legs_response.data or []:
+            leg = dict(raw_leg)
+            metadata = leg.get("metadata")
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+            leg["metadata"] = metadata if isinstance(metadata, dict) else {}
+            transfer_legs.append(leg)
+
+        crm_receipts_available = True
+        try:
+            crm_deliveries = [_admin_crm_projection(row) for row in _admin_crm_receipts(
+                db_client, str(call["tenant_id"]), str(call["id"]))]
+        except Exception:
+            crm_receipts_available = False
+            crm_deliveries = []
+
         return AdminCallDetail(
+            **_admin_termination_projection(db_client, call),
             id=call["id"],
             tenant_id=call.get("tenant_id", ""),
             tenant_name=tenant_name,
@@ -366,95 +842,427 @@ async def get_admin_call_detail(
             transcript=call.get("transcript"),
             transcript_json=transcript_json,
             summary=call.get("summary"),
+            summary_json=summary_json,
             recording_url=call.get("recording_url"),
-            cost=float(call["cost"]) if call.get("cost") else None,
+            cost=projected_cost,
+            currency=projected_currency,
             timeline=timeline,
             created_at=call.get("created_at", ""),
-            updated_at=call.get("updated_at")
+            updated_at=call.get("updated_at"),
+            direction=call.get("direction") or "outbound",
+            provider=call.get("provider"),
+            provider_call_id=call.get("provider_call_id"),
+            caller_ani=_display_caller_ani(call),
+            called_did=call.get("called_did"),
+            ingress=call.get("ingress"),
+            route_version=call.get("route_version"),
+            config_version=call.get("config_version"),
+            route_snapshot=(
+                call.get("route_snapshot") if isinstance(call.get("route_snapshot"), dict) else None
+            ),
+            admission_status=call.get("admission_status"),
+            admission_reason=call.get("admission_reason"),
+            consent_status=call.get("consent_status"),
+            processing_status=call.get("processing_status"),
+            billing_status=call.get("billing_status"),
+            billing_hold_reason=call.get("billing_hold_reason"),
+            reserved_seconds=call.get("reserved_seconds"),
+            transfer_legs=transfer_legs,
+            crm_deliveries=crm_deliveries,
+            crm_receipts_available=crm_receipts_available,
         )
-    
+
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch call detail: {str(e)}"
+        raise HTTPException(status_code=500, detail=f"Failed to fetch call detail: {str(e)}")
+
+
+@router.get("/calls/{call_id}/crm-deliveries/{provider}/inspection", response_model=AdminCRMInspection)
+async def inspect_admin_crm_delivery(
+    call_id: UUID,
+    provider: Literal["hubspot", "salesforce"],
+    response: Response,
+    admin_user: CurrentUser = Depends(require_platform_admin),
+    db_client: Client = Depends(get_db_client),
+):
+    """Observe a reference in the original account without resolving the receipt.
+
+    A single matching title/subject is not proof of payload, contact or effect
+    ownership. An empty search is inconclusive. No retry, refresh or write.
+    """
+    response.headers["Cache-Control"] = "no-store"
+    saved_call_id = str(call_id)
+
+    def observation(outcome, reason, remote_id=None):
+        return AdminCRMInspection(
+            call_id=saved_call_id, provider=provider, outcome=outcome, reason=reason,
+            observed_at=datetime.now(timezone.utc).isoformat(), observed_remote_id=remote_id,
         )
+
+    try:
+        saved = db_client.table("calls").select("id,tenant_id").eq("id", saved_call_id).single().execute()
+        if getattr(saved, "error", None):
+            raise RuntimeError("Call lookup unavailable")
+        if not saved.data:
+            raise HTTPException(status_code=404, detail="Call not found")
+        if str(saved.data.get("id")) != saved_call_id:
+            raise RuntimeError("Call identity mismatch")
+        tenant_id = str(UUID(str(saved.data.get("tenant_id"))))
+        receipts = [row for row in _admin_crm_receipts(db_client, tenant_id, saved_call_id)
+                    if row.get("provider") == provider]
+        if len(receipts) != 1 or not _crm_inspectable(receipts[0]):
+            return observation("unavailable", "original_receipt_unavailable")
+        receipt = receipts[0]
+    except HTTPException:
+        raise
+    except Exception:
+        return observation("unavailable", "original_receipt_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            connector, connector_id, resolved_provider = await resolve_active_connector(
+                db_client, tenant_id, "crm", provider=receipt["provider"],
+                connector_id=str(receipt["destination_connector_id"]),
+                read_only=True, external_account_id=receipt["destination_account_id"],
+            )
+            verify_reviewed_connector(connector, connector_id, resolved_provider, {
+                "connector_id": str(receipt["destination_connector_id"]),
+                "provider": receipt["provider"],
+                "external_account_id": receipt["destination_account_id"],
+            })
+    except Exception:
+        return observation("unavailable", "original_authorization_unavailable")
+
+    try:
+        async with asyncio.timeout(10):
+            remote_id = await connector.find_call_by_reference(str(receipt["call_id"]))
+        if remote_id is None:
+            return observation("no_match", "absence_is_inconclusive")
+        if not valid_crm_activity_id(remote_id):
+            return observation("unavailable", "provider_read_unavailable")
+        return observation("observed_reference", "reference_observed_only", remote_id)
+    except AmbiguousCRMCallReference:
+        return observation("ambiguous", "multiple_references")
+    except Exception:
+        return observation("unavailable", "provider_read_unavailable")
 
 
 @router.post("/calls/{call_id}/terminate")
 async def terminate_call(
     call_id: str,
     admin_user: CurrentUser = Depends(require_platform_admin),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """
-    Terminate an active call.
-    
-    This sets the call status to 'terminated' and records the end time.
-    Note: This is a database-level change. Actual VoIP disconnection
-    depends on telephony provider integration.
-    """
+    """Terminate a live call only after provider/PBX absence is proven."""
+    confirmed_result: dict | None = None
     try:
-        # Check if call exists and is active
-        call_response = db_client.table("calls").select("id, status").eq("id", call_id).single().execute()
-        
-        if not call_response.data:
+        async with acquire_with_tenant(db_client.pool, None) as conn:
+            call = await conn.fetchrow(
+                """
+                SELECT id, tenant_id, external_call_uuid, provider_call_id,
+                       provider, direction, status, answered_at, campaign_id
+                FROM calls
+                WHERE id = $1::uuid
+                """,
+                call_id,
+            )
+
+        if not call:
             raise HTTPException(status_code=404, detail="Call not found")
-        
-        current_status = call_response.data.get("status", "")
-        # Shared vocabulary — the local literal was missing dialing/
-        # answered/in_call and contained 'in_progress', which nothing writes.
+
+        current_status = str(call["status"] or "")
+        from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+
+        terminal_statuses = TERMINAL_CALL_STATUSES
         active_statuses = list(LIVE_CALL_STATUSES)
-        
-        if current_status not in active_statuses:
+        if current_status not in terminal_statuses and current_status not in active_statuses:
             raise HTTPException(
                 status_code=400,
-                detail=f"Call is not active. Current status: {current_status}"
+                detail=f"Call is not active. Current status: {current_status}",
             )
-        
-        # Update call status.
-        #
-        # Was `status='terminated'` + `outcome='terminated_by_admin'`. Neither
-        # value exists in the shared vocabulary: `terminated` is not a
-        # `CallState`, so the row became invisible to the live panel, the
-        # reapers and every dashboard filter; `terminated_by_admin` is not a
-        # `CallOutcome` and is in neither ANSWERED_OUTCOMES nor
-        # FAILED_OUTCOMES, so the call counted as neither connected nor
-        # failed and `successful + failed` silently stopped equalling the
-        # calls that finished.
-        #
-        # An admin force-terminating a call is the same event as an operator
-        # hanging one up, so it records the same way: ENDED, with the outcome
-        # following whether the call had actually been answered. The admin
-        # attribution is preserved in the audit log, which is where it
-        # belongs — not in a field the analytics pipeline has to classify.
-        now = datetime.utcnow().isoformat() + "Z"
-        was_answered = current_status in ("answered", "in_call")
-        update_response = db_client.table("calls").update({
-            "status": "ended",
-            "ended_at": now,
-            "outcome": (
-                CallOutcome.AGENT_HUNG_UP.value if was_answered
-                else CallOutcome.CANCELLED.value
-            ),
-            "updated_at": now
-        }).eq("id", call_id).execute()
-        
-        if not update_response.data:
-            raise HTTPException(status_code=500, detail="Failed to terminate call")
-        
+
+        external_call_id = call["provider_call_id"] or call["external_call_uuid"]
+        from app.api.v1.endpoints import telephony_bridge
+
+        try:
+            termination_context = await mark_termination_pending_and_load_context(
+                db_client.pool,
+                call_reference=call_id,
+                tenant_id=None,
+            )
+        except Exception as exc:  # noqa: BLE001 - fail closed at DB boundary
+            logger.error(
+                "admin_call_termination_leg_lookup_failed call=%s err_type=%s",
+                call_id,
+                type(exc).__name__,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "error": "termination_context_unavailable",
+                    "call_id": call_id,
+                    "call_status": current_status,
+                    "termination_status": "failed",
+                    "provider_hangup_requested": False,
+                    "provider_hangup_confirmed": False,
+                    "provider_hangup_error": "linked_leg_lookup_failed",
+                },
+            ) from exc
+
+        proof = await request_confirmed_hangup(
+            telephony_bridge._adapter,
+            str(termination_context.provider_call_id or external_call_id or ""),
+            expected_provider=termination_context.provider,
+            expected_backend=termination_context.control_backend,
+            require_backend_identity=True,
+            provider_legs=termination_context.provider_legs,
+            provider_leg_ids=termination_context.provider_leg_ids,
+        )
+        if not proof.confirmed:
+            retry_is_durable = current_status not in terminal_statuses
+            try:
+                await audit_logger.log(
+                    event_type=AuditEvent.CONFIG_CHANGED,
+                    actor_id=admin_user.id,
+                    actor_type="user",
+                    tenant_id=call["tenant_id"],
+                    resource_type="call",
+                    resource_id=call["id"],
+                    action="admin_call_termination_unconfirmed",
+                    description="Platform admin termination could not be confirmed",
+                    metadata={
+                        "previous_status": current_status,
+                        "provider_hangup_requested": proof.requested,
+                        "provider_hangup_confirmed": False,
+                        "reason": proof.code,
+                    },
+                )
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning("admin termination failure audit failed: %s", exc)
+            raise HTTPException(
+                status_code=(
+                    504 if proof.code in {"confirmation_timeout", "hangup_unconfirmed"} else 503
+                ),
+                detail={
+                    "error": "termination_unconfirmed",
+                    "reason": proof.code,
+                    "call_id": call_id,
+                    "call_status": ("termination_pending" if retry_is_durable else current_status),
+                    "termination_status": ("requested" if retry_is_durable else "failed"),
+                    "provider_hangup_requested": proof.requested,
+                    "provider_hangup_confirmed": False,
+                    "provider_hangup_error": proof.error or proof.code,
+                },
+            )
+
+        receipt_result = await _persist_admin_termination_receipt(
+            db_client.pool, termination_context, requested=proof.requested,
+        )
+        if not receipt_result.current_identity_verified:
+            # Old channels were proved absent, but that proof cannot authorize
+            # release of a changed or unreadable current call/leg inventory.
+            raise HTTPException(status_code=503, detail={
+                "error": "termination_identity_unverified", "reason": receipt_result.code,
+                "call_id": call_id,
+                "call_status": "termination_pending" if current_status not in terminal_statuses else current_status,
+                "termination_status": "requested", "settlement_deferred": True,
+                "provider_hangup_requested": proof.requested,
+                "provider_hangup_confirmed": False,
+                "prior_identity_hangup_confirmed": True,
+                "termination_receipt_saved": False,
+                "termination_reconciliation_error": (
+                    "Previously checked provider channels were absent; current call identities could not be verified. "
+                    "Call finalization remains pending."
+                ),
+            })
+        receipt_saved = receipt_result.saved
+        receipt_fields = {
+            "termination_receipt_saved": receipt_saved,
+            "termination_reconciliation_error": None if receipt_saved else "Confirmed provider hangup; durable confirmation could not be saved.",
+        }
+        confirmed_result = {
+            **receipt_fields, "status": "confirmed", "call_id": call_id,
+            "previous_status": current_status, "termination_status": "confirmed",
+            "provider_hangup_requested": proof.requested, "provider_hangup_confirmed": True,
+            "provider_hangup_error": None, "settlement_deferred": True,
+            "detail": "Provider hangup confirmed; durable call finalization needs reconciliation.",
+        }
+
+        # Replay the shared idempotent finalizer even for a terminal parent:
+        # persisted transfer legs and global capacity can remain active after a
+        # crash despite the parent row's terminal-looking label.
+        settlement_deferred = False
+        if call["direction"] == "inbound" and termination_context.provider_call_id:
+            try:
+                from app.core.container import get_container
+
+                try:
+                    redis_client = getattr(get_container(), "redis", None)
+                except Exception:
+                    redis_client = None
+                await finalize_proven_inbound_termination(
+                    db_client.pool,
+                    provider_call_id=termination_context.provider_call_id,
+                    durable_call_id=call_id,
+                    tenant_id=str(call["tenant_id"]),
+                    provider=str(call["provider"] or "asterisk"),
+                    terminal_status="ended",
+                    reason="admin_operator_hangup",
+                    redis_client=redis_client,
+                    campaign_id=(str(call["campaign_id"]) if call.get("campaign_id") else None),
+                )
+            except Exception as exc:  # noqa: BLE001 - durable watchdog retries
+                settlement_deferred = True
+                logger.error(
+                    "admin confirmed termination settlement deferred call=%s: %s",
+                    call_id,
+                    exc,
+                )
+
+        # A terminal database row alone cannot prove that every PBX leg is
+        # absent. It is idempotent only after proof plus shared settlement.
+        if current_status in terminal_statuses:
+            return {
+                **receipt_fields,
+                "status": "already_terminal",
+                "detail": "Call was already terminal and PBX absence was confirmed",
+                "call_id": call_id,
+                "previous_status": current_status,
+                "new_status": current_status,
+                "call_status": current_status,
+                "termination_status": "confirmed",
+                "provider_hangup_requested": proof.requested,
+                "provider_hangup_confirmed": True,
+                "provider_hangup_error": None,
+                "settlement_deferred": settlement_deferred,
+            }
+
+        if settlement_deferred:
+            try:
+                await audit_logger.log(
+                    event_type=AuditEvent.CONFIG_CHANGED,
+                    actor_id=admin_user.id,
+                    actor_type="user",
+                    tenant_id=call["tenant_id"],
+                    resource_type="call",
+                    resource_id=call["id"],
+                    action="admin_call_termination_settlement_deferred",
+                    description=("PBX absence was confirmed; logical settlement is retrying"),
+                    metadata={
+                        "previous_status": current_status,
+                        "provider_hangup_confirmed": True,
+                    },
+                )
+            except Exception as exc:  # pragma: no cover - best effort
+                logger.warning("admin deferred-settlement audit failed: %s", exc)
+            return {
+                **receipt_fields,
+                "status": "confirmed",
+                "detail": "Provider confirmed; call settlement is retrying",
+                "call_id": call_id,
+                "previous_status": current_status,
+                "new_status": "termination_pending",
+                "call_status": "termination_pending",
+                "termination_status": "confirmed",
+                "provider_hangup_requested": proof.requested,
+                "provider_hangup_confirmed": True,
+                "provider_hangup_error": None,
+                "settlement_deferred": True,
+            }
+
+        latest_status = None
+        async with acquire_with_tenant(db_client.pool, None) as conn:
+            updated = await conn.fetchrow(
+                """
+                UPDATE calls
+                   SET status = 'ended',
+                       ended_at = COALESCE(ended_at, NOW()),
+                       outcome = COALESCE(
+                           outcome,
+                           CASE WHEN answered_at IS NOT NULL
+                                      OR status IN ('answered', 'in_call')
+                                THEN $2
+                                ELSE $3
+                           END
+                       ),
+                       duration_seconds = COALESCE(
+                           duration_seconds,
+                           CASE WHEN answered_at IS NOT NULL
+                                THEN GREATEST(
+                                    0,
+                                    EXTRACT(EPOCH FROM (NOW() - answered_at))::int
+                                )
+                                ELSE 0
+                           END
+                       ),
+                       updated_at = NOW()
+                 WHERE id = $1::uuid
+                   AND status = ANY($4::text[])
+                RETURNING status, outcome, duration_seconds
+                """,
+                call_id,
+                CallOutcome.AGENT_HUNG_UP.value,
+                CallOutcome.CANCELLED.value,
+                active_statuses,
+            )
+        if not updated:
+            async with acquire_with_tenant(db_client.pool, None) as conn:
+                latest_status = await conn.fetchval(
+                    "SELECT status FROM calls WHERE id = $1::uuid",
+                    call_id,
+                )
+            if str(latest_status or "") not in terminal_statuses:
+                raise HTTPException(
+                    status_code=409,
+                    detail={"error": "termination_state_conflict", "call_id": call_id},
+                )
+
+        try:
+            await audit_logger.log(
+                event_type=AuditEvent.CONFIG_CHANGED,
+                actor_id=admin_user.id,
+                actor_type="user",
+                tenant_id=call["tenant_id"],
+                resource_type="call",
+                resource_id=call["id"],
+                action="admin_ended_call",
+                description="Platform admin ended a live call",
+                metadata={
+                    "previous_status": current_status,
+                    "provider_hangup_requested": proof.requested,
+                    "provider_hangup_confirmed": True,
+                    "settlement_deferred": settlement_deferred,
+                },
+            )
+        except Exception as exc:  # pragma: no cover - best effort
+            logger.warning("admin call termination audit failed: %s", exc)
+
         return {
-            "detail": "Call terminated successfully",
+            **receipt_fields,
+            "status": "confirmed",
+            "detail": "Provider/PBX termination confirmed and call closed",
             "call_id": call_id,
             "previous_status": current_status,
-            "new_status": CallState.ENDED.value
+            "new_status": str(updated["status"] if updated else latest_status),
+            "call_status": str(updated["status"] if updated else latest_status),
+            "termination_status": "confirmed",
+            "provider_hangup_requested": proof.requested,
+            "provider_hangup_confirmed": True,
+            "provider_hangup_error": None,
+            "settlement_deferred": settlement_deferred,
         }
-    
+
     except HTTPException:
+        if confirmed_result is not None:
+            return confirmed_result
         raise
     except Exception as e:
+        logger.exception("admin call termination failed call=%s", call_id)
+        if confirmed_result is not None:
+            return confirmed_result
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to terminate call: {str(e)}"
-        )
+            detail=f"Failed to terminate call: {str(e)}",
+        ) from e

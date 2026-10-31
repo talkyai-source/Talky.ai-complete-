@@ -1,0 +1,8 @@
+{
+  "tested_file_sha256": "f8da146f17752f387205480c273fe8ea07d013abbb29b991600494085bb569ac",
+  "final_file_sha256": "06034c7fbeb5596961401edb803e7c3f4afbf8415c9ceb4394eff5137abf1e1c",
+  "tested_sql_function_sha256": "0961347057f7e21f74917e651656dd394a7337f501135d597509cdaf4674e2e0",
+  "final_sql_function_sha256": "0961347057f7e21f74917e651656dd394a7337f501135d597509cdaf4674e2e0",
+  "sql_function_exact_utf8_bytes_unchanged": true,
+  "delta": "Two pinned-only lines set coverage=None when content_tokens is empty; SQL not rerun after this delta."
+}

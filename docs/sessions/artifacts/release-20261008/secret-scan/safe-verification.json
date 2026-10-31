@@ -1,0 +1,1956 @@
+{
+  "total": 114,
+  "findings": [
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/verification.json:generic-api-key:91",
+      "file": "docs/sessions/artifacts/op01-03-integration/verification.json",
+      "line": 91,
+      "referenced_path": "frontend-openapi-final.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-openapi-final.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "docs/sessions/artifacts/op01-03-integration/frontend-openapi-final.txt",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:45",
+      "file": "docs/sessions/artifacts/op01/frontend-integrated-command.json",
+      "line": 45,
+      "referenced_path": "Talk-Leee/src/lib/api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:46",
+      "file": "docs/sessions/artifacts/op01/frontend-integrated-command.json",
+      "line": 46,
+      "referenced_path": "Talk-Leee/src/lib/auth-context.tsx",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/auth-context.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/auth-context.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:48",
+      "file": "docs/sessions/artifacts/op01/frontend-integrated-command.json",
+      "line": 48,
+      "referenced_path": "Talk-Leee/src/lib/dashboard-api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/dashboard-api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/dashboard-api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:52",
+      "file": "docs/sessions/artifacts/op01/frontend-integrated-command.json",
+      "line": 52,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/server-auth.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/server-auth.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01/frontend-integrated-command.json:generic-api-key:53",
+      "file": "docs/sessions/artifacts/op01/frontend-integrated-command.json",
+      "line": 53,
+      "referenced_path": "Talk-Leee/src/server/auth-core.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/server/auth-core.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/server/auth-core.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:13",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 13,
+      "referenced_path": "Talk-Leee/src/lib/api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:14",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 14,
+      "referenced_path": "Talk-Leee/src/lib/auth-context.tsx",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/auth-context.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/auth-context.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:16",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 16,
+      "referenced_path": "Talk-Leee/src/lib/dashboard-api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/dashboard-api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/dashboard-api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:20",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 20,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/server-auth.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/server-auth.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:22",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 22,
+      "referenced_path": "Talk-Leee/src/server/auth-core.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/server/auth-core.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/server/auth-core.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:35",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 35,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:53",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 53,
+      "referenced_path": "backend/tests/integration/test_op01_auth_metering.py",
+      "json_paths": [
+        "source_before.backend/tests/integration/test_op01_auth_metering.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/tests/integration/test_op01_auth_metering.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/frontend-command.json:generic-api-key:69",
+      "file": "docs/sessions/artifacts/op01-03-integration/frontend-command.json",
+      "line": 69,
+      "referenced_path": "backend/tests/unit/test_op02_lease_api_boundary.py",
+      "json_paths": [
+        "source_before.backend/tests/unit/test_op02_lease_api_boundary.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/tests/unit/test_op02_lease_api_boundary.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:13",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 13,
+      "referenced_path": "Talk-Leee/src/lib/api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:14",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 14,
+      "referenced_path": "Talk-Leee/src/lib/auth-context.tsx",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/auth-context.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/auth-context.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:16",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 16,
+      "referenced_path": "Talk-Leee/src/lib/dashboard-api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/dashboard-api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/dashboard-api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:20",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 20,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/server-auth.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/server-auth.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:22",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 22,
+      "referenced_path": "Talk-Leee/src/server/auth-core.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/server/auth-core.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/server/auth-core.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:35",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 35,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:53",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 53,
+      "referenced_path": "backend/tests/integration/test_op01_auth_metering.py",
+      "json_paths": [
+        "source_before.backend/tests/integration/test_op01_auth_metering.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/tests/integration/test_op01_auth_metering.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/postgres-command.json:generic-api-key:69",
+      "file": "docs/sessions/artifacts/op01-03-integration/postgres-command.json",
+      "line": 69,
+      "referenced_path": "backend/tests/unit/test_op02_lease_api_boundary.py",
+      "json_paths": [
+        "source_before.backend/tests/unit/test_op02_lease_api_boundary.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/tests/unit/test_op02_lease_api_boundary.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:187",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json",
+      "line": 187,
+      "referenced_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/auth/password_reset.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:199",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json",
+      "line": 199,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:203",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json",
+      "line": 203,
+      "referenced_path": "backend/app/core/security/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/core/security/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/core/security/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:211",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json",
+      "line": 211,
+      "referenced_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+      "json_paths": [
+        "source_before.backend/tests/integration/test_cp08_credential_transactions.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:213",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json",
+      "line": 213,
+      "referenced_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_cp08_passkey_consumption.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json:generic-api-key:217",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-fixture-error-command.json",
+      "line": 217,
+      "referenced_path": "backend/tests/security/test_credential_revocation.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_credential_revocation.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_credential_revocation.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:27",
+      "file": "docs/sessions/artifacts/cp08/postgres-integrated-final-command.json",
+      "line": 27,
+      "referenced_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/auth/password_reset.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:39",
+      "file": "docs/sessions/artifacts/cp08/postgres-integrated-final-command.json",
+      "line": 39,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:43",
+      "file": "docs/sessions/artifacts/cp08/postgres-integrated-final-command.json",
+      "line": 43,
+      "referenced_path": "backend/app/core/security/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/core/security/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/core/security/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:51",
+      "file": "docs/sessions/artifacts/cp08/postgres-integrated-final-command.json",
+      "line": 51,
+      "referenced_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+      "json_paths": [
+        "source_before.backend/tests/integration/test_cp08_credential_transactions.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:53",
+      "file": "docs/sessions/artifacts/cp08/postgres-integrated-final-command.json",
+      "line": 53,
+      "referenced_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_cp08_passkey_consumption.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/postgres-integrated-final-command.json:generic-api-key:57",
+      "file": "docs/sessions/artifacts/cp08/postgres-integrated-final-command.json",
+      "line": 57,
+      "referenced_path": "backend/tests/security/test_credential_revocation.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_credential_revocation.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_credential_revocation.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:65",
+      "file": "docs/sessions/artifacts/cp08/backend-lint-final-command.json",
+      "line": 65,
+      "referenced_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/auth/password_reset.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:77",
+      "file": "docs/sessions/artifacts/cp08/backend-lint-final-command.json",
+      "line": 77,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:81",
+      "file": "docs/sessions/artifacts/cp08/backend-lint-final-command.json",
+      "line": 81,
+      "referenced_path": "backend/app/core/security/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/core/security/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/core/security/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:89",
+      "file": "docs/sessions/artifacts/cp08/backend-lint-final-command.json",
+      "line": 89,
+      "referenced_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+      "json_paths": [
+        "source_before.backend/tests/integration/test_cp08_credential_transactions.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:91",
+      "file": "docs/sessions/artifacts/cp08/backend-lint-final-command.json",
+      "line": 91,
+      "referenced_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_cp08_passkey_consumption.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:95",
+      "file": "docs/sessions/artifacts/cp08/backend-lint-final-command.json",
+      "line": 95,
+      "referenced_path": "backend/tests/security/test_credential_revocation.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_credential_revocation.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_credential_revocation.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-lint-final-command.json:generic-api-key:99",
+      "file": "docs/sessions/artifacts/cp08/backend-lint-final-command.json",
+      "line": 99,
+      "referenced_path": "backend/tests/unit/test_freeswitch_transfer_api.py",
+      "json_paths": [
+        "source_before.backend/tests/unit/test_freeswitch_transfer_api.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/unit/test_freeswitch_transfer_api.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:13",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 13,
+      "referenced_path": "Talk-Leee/src/lib/api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:14",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 14,
+      "referenced_path": "Talk-Leee/src/lib/auth-context.tsx",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/auth-context.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/auth-context.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:16",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 16,
+      "referenced_path": "Talk-Leee/src/lib/dashboard-api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/dashboard-api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/dashboard-api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:20",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 20,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/server-auth.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/lib/server-auth.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:22",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 22,
+      "referenced_path": "Talk-Leee/src/server/auth-core.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/server/auth-core.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "Talk-Leee/src/server/auth-core.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:35",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 35,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:53",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 53,
+      "referenced_path": "backend/tests/integration/test_op01_auth_metering.py",
+      "json_paths": [
+        "source_before.backend/tests/integration/test_op01_auth_metering.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/tests/integration/test_op01_auth_metering.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "b8c429c1037341ba4315ca82d3006db511465371:docs/sessions/artifacts/op01-03-integration/backend-command.json:generic-api-key:69",
+      "file": "docs/sessions/artifacts/op01-03-integration/backend-command.json",
+      "line": 69,
+      "referenced_path": "backend/tests/unit/test_op02_lease_api_boundary.py",
+      "json_paths": [
+        "source_before.backend/tests/unit/test_op02_lease_api_boundary.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "b8c429c1037341ba4315ca82d3006db511465371",
+          "source_path": "backend/tests/unit/test_op02_lease_api_boundary.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:187",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-final-command.json",
+      "line": 187,
+      "referenced_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/auth/password_reset.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:199",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-final-command.json",
+      "line": 199,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:203",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-final-command.json",
+      "line": 203,
+      "referenced_path": "backend/app/core/security/passkeys.py",
+      "json_paths": [
+        "source_before.backend/app/core/security/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/core/security/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:211",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-final-command.json",
+      "line": 211,
+      "referenced_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+      "json_paths": [
+        "source_before.backend/tests/integration/test_cp08_credential_transactions.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:213",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-final-command.json",
+      "line": 213,
+      "referenced_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_cp08_passkey_consumption.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:217",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-final-command.json",
+      "line": 217,
+      "referenced_path": "backend/tests/security/test_credential_revocation.py",
+      "json_paths": [
+        "source_before.backend/tests/security/test_credential_revocation.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_credential_revocation.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/backend-integrated-final-command.json:generic-api-key:221",
+      "file": "docs/sessions/artifacts/cp08/backend-integrated-final-command.json",
+      "line": 221,
+      "referenced_path": "backend/tests/unit/test_freeswitch_transfer_api.py",
+      "json_paths": [
+        "source_before.backend/tests/unit/test_freeswitch_transfer_api.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/unit/test_freeswitch_transfer_api.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:7",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 7,
+      "referenced_path": "Admin/frontend/src/lib/api.ts",
+      "json_paths": [
+        "files_sha256_lf.Admin/frontend/src/lib/api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Admin/frontend/src/lib/api.ts",
+          "normalization": "LF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:16",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 16,
+      "referenced_path": "Talk-Leee/src/components/auth/passkey-login.tsx",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/components/auth/passkey-login.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/components/auth/passkey-login.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:17",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 17,
+      "referenced_path": "Talk-Leee/src/components/auth/passkey-registration.tsx",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/components/auth/passkey-registration.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/components/auth/passkey-registration.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:19",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 19,
+      "referenced_path": "Talk-Leee/src/lib/api.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:20",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 20,
+      "referenced_path": "Talk-Leee/src/lib/auth-context.tsx",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/auth-context.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/auth-context.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:21",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 21,
+      "referenced_path": "Talk-Leee/src/lib/auth-local-route.test.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/auth-local-route.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/auth-local-route.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:26",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 26,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.test.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/server-auth.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/server-auth.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:27",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 27,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/server-auth.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/server-auth.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:30",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 30,
+      "referenced_path": "Talk-Leee/src/lib/structural-auth-isolation.test.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/structural-auth-isolation.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/structural-auth-isolation.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:32",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 32,
+      "referenced_path": "Talk-Leee/src/lib/webauthn-utils.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/webauthn-utils.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/webauthn-utils.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:33",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 33,
+      "referenced_path": "Talk-Leee/src/proxy.auth.test.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/proxy.auth.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/proxy.auth.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:43",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 43,
+      "referenced_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "json_paths": [
+        "files_sha256_lf.backend/app/api/v1/endpoints/auth/password_reset.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/auth/password_reset.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:55",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 55,
+      "referenced_path": "backend/app/api/v1/endpoints/passkeys.py",
+      "json_paths": [
+        "files_sha256_lf.backend/app/api/v1/endpoints/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/api/v1/endpoints/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:59",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 59,
+      "referenced_path": "backend/app/core/security/passkeys.py",
+      "json_paths": [
+        "files_sha256_lf.backend/app/core/security/passkeys.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/app/core/security/passkeys.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:67",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 67,
+      "referenced_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+      "json_paths": [
+        "files_sha256_lf.backend/tests/integration/test_cp08_credential_transactions.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/integration/test_cp08_credential_transactions.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:69",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 69,
+      "referenced_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+      "json_paths": [
+        "files_sha256_lf.backend/tests/security/test_cp08_passkey_consumption.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_cp08_passkey_consumption.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:73",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 73,
+      "referenced_path": "backend/tests/security/test_credential_revocation.py",
+      "json_paths": [
+        "files_sha256_lf.backend/tests/security/test_credential_revocation.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/security/test_credential_revocation.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/source-integrity.json:generic-api-key:77",
+      "file": "docs/sessions/artifacts/cp08/source-integrity.json",
+      "line": 77,
+      "referenced_path": "backend/tests/unit/test_freeswitch_transfer_api.py",
+      "json_paths": [
+        "files_sha256_lf.backend/tests/unit/test_freeswitch_transfer_api.py"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "backend/tests/unit/test_freeswitch_transfer_api.py",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:43",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 43,
+      "referenced_path": "Talk-Leee/src/components/auth/passkey-login.tsx",
+      "json_paths": [
+        "source_before.Talk-Leee/src/components/auth/passkey-login.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/components/auth/passkey-login.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:44",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 44,
+      "referenced_path": "Talk-Leee/src/components/auth/passkey-registration.tsx",
+      "json_paths": [
+        "source_before.Talk-Leee/src/components/auth/passkey-registration.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/components/auth/passkey-registration.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:46",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 46,
+      "referenced_path": "Talk-Leee/src/lib/api.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:47",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 47,
+      "referenced_path": "Talk-Leee/src/lib/auth-context.tsx",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/auth-context.tsx"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/auth-context.tsx",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:48",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 48,
+      "referenced_path": "Talk-Leee/src/lib/auth-local-route.test.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/auth-local-route.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/auth-local-route.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:53",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 53,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.test.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/server-auth.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/server-auth.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:54",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 54,
+      "referenced_path": "Talk-Leee/src/lib/server-auth.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/server-auth.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/server-auth.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:57",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 57,
+      "referenced_path": "Talk-Leee/src/lib/structural-auth-isolation.test.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/structural-auth-isolation.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/structural-auth-isolation.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:59",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 59,
+      "referenced_path": "Talk-Leee/src/lib/webauthn-utils.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/lib/webauthn-utils.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/lib/webauthn-utils.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/frontend-lint-final-command.json:generic-api-key:60",
+      "file": "docs/sessions/artifacts/cp08/frontend-lint-final-command.json",
+      "line": 60,
+      "referenced_path": "Talk-Leee/src/proxy.auth.test.ts",
+      "json_paths": [
+        "source_before.Talk-Leee/src/proxy.auth.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "Talk-Leee/src/proxy.auth.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:101",
+      "file": "docs/sessions/artifacts/ag06/verification.json",
+      "line": 101,
+      "referenced_path": "frontend-openapi-check-final.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-openapi-check-final.txt",
+        "artifacts_sha256_lf.frontend-openapi-check-frozen.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "docs/sessions/artifacts/ag06/frontend-openapi-check-final.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:102",
+      "file": "docs/sessions/artifacts/ag06/verification.json",
+      "line": 102,
+      "referenced_path": "frontend-openapi-check-frozen.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-openapi-check-final.txt",
+        "artifacts_sha256_lf.frontend-openapi-check-frozen.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "docs/sessions/artifacts/ag06/frontend-openapi-check-frozen.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:103",
+      "file": "docs/sessions/artifacts/ag06/verification.json",
+      "line": 103,
+      "referenced_path": "frontend-openapi-final.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-openapi-final.txt",
+        "artifacts_sha256_lf.frontend-openapi-frozen.txt",
+        "artifacts_sha256_lf.frontend-openapi.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "docs/sessions/artifacts/ag06/frontend-openapi-final.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:104",
+      "file": "docs/sessions/artifacts/ag06/verification.json",
+      "line": 104,
+      "referenced_path": "frontend-openapi-frozen.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-openapi-final.txt",
+        "artifacts_sha256_lf.frontend-openapi-frozen.txt",
+        "artifacts_sha256_lf.frontend-openapi.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "docs/sessions/artifacts/ag06/frontend-openapi-frozen.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/verification.json:generic-api-key:105",
+      "file": "docs/sessions/artifacts/ag06/verification.json",
+      "line": 105,
+      "referenced_path": "frontend-openapi.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-openapi-final.txt",
+        "artifacts_sha256_lf.frontend-openapi-frozen.txt",
+        "artifacts_sha256_lf.frontend-openapi.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "docs/sessions/artifacts/ag06/frontend-openapi.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:127",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 127,
+      "referenced_path": "credential-ruff.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.backend-lint-final.txt",
+        "artifacts_sha256_lf.credential-ruff.txt",
+        "artifacts_sha256_lf.principal-ruff.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/credential-ruff.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:128",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 128,
+      "referenced_path": "credential-security-final.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.credential-security-final.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/credential-security-final.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:129",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 129,
+      "referenced_path": "credential-tenant-response.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.credential-tenant-response.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/credential-tenant-response.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:132",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 132,
+      "referenced_path": "credential-verification.json",
+      "json_paths": [
+        "artifacts_sha256_lf.credential-verification.json"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/credential-verification.json",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:137",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 137,
+      "referenced_path": "frontend-auth-first.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-auth-first.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/frontend-auth-first.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:138",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 138,
+      "referenced_path": "frontend-auth-provider-red.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-auth-provider-red.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/frontend-auth-provider-red.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:140",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 140,
+      "referenced_path": "frontend-callback-token-red.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-callback-token-red.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/frontend-callback-token-red.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:149",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 149,
+      "referenced_path": "frontend-openapi-check.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-openapi-check.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/frontend-openapi-check.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:150",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 150,
+      "referenced_path": "frontend-passkeys-first.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-passkeys-first.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/frontend-passkeys-first.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:151",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 151,
+      "referenced_path": "frontend-passkeys-red.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-passkeys-red.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/frontend-passkeys-red.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:154",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 154,
+      "referenced_path": "frontend-token-owner-green.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.frontend-token-owner-green.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/frontend-token-owner-green.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:175",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 175,
+      "referenced_path": "next-auth-final.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.next-auth-final.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/next-auth-final.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:176",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 176,
+      "referenced_path": "next-auth-initial.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.next-auth-initial.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/next-auth-initial.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:177",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 177,
+      "referenced_path": "next-auth-lint.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.admin-lint.txt",
+        "artifacts_sha256_lf.frontend-lint-final.txt",
+        "artifacts_sha256_lf.local-authority-lint.txt",
+        "artifacts_sha256_lf.next-auth-lint.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/next-auth-lint.txt",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:179",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 179,
+      "referenced_path": "passkey-consumption-red.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.passkey-consumption-red.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/passkey-consumption-red.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:180",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 180,
+      "referenced_path": "passkey-focused.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.passkey-focused.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/passkey-focused.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "59718df898f765a20ef99aaf51428028222db5d5:docs/sessions/artifacts/cp08/verification.json:generic-api-key:181",
+      "file": "docs/sessions/artifacts/cp08/verification.json",
+      "line": 181,
+      "referenced_path": "passkey-sdk.txt",
+      "json_paths": [
+        "artifacts_sha256_lf.passkey-sdk.txt"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "59718df898f765a20ef99aaf51428028222db5d5",
+          "source_path": "docs/sessions/artifacts/cp08/passkey-sdk.txt",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:6",
+      "file": "docs/sessions/artifacts/ag06/source-integrity.json",
+      "line": 6,
+      "referenced_path": "Talk-Leee/public/openapi.json",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/public/openapi.json"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "Talk-Leee/public/openapi.json",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:7",
+      "file": "docs/sessions/artifacts/ag06/source-integrity.json",
+      "line": 7,
+      "referenced_path": "Talk-Leee/scripts/generate-openapi.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/scripts/generate-openapi.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "Talk-Leee/scripts/generate-openapi.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:18",
+      "file": "docs/sessions/artifacts/ag06/source-integrity.json",
+      "line": 18,
+      "referenced_path": "Talk-Leee/src/lib/api-hooks.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/api-hooks.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "Talk-Leee/src/lib/api-hooks.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:19",
+      "file": "docs/sessions/artifacts/ag06/source-integrity.json",
+      "line": 19,
+      "referenced_path": "Talk-Leee/src/lib/backend-api.assistant.test.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/backend-api.assistant.test.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "Talk-Leee/src/lib/backend-api.assistant.test.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:20",
+      "file": "docs/sessions/artifacts/ag06/source-integrity.json",
+      "line": 20,
+      "referenced_path": "Talk-Leee/src/lib/backend-api.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/backend-api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "Talk-Leee/src/lib/backend-api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "d8ecd6d0d183e304e21453857619f36330f836bd:docs/sessions/artifacts/ag06/source-integrity.json:generic-api-key:22",
+      "file": "docs/sessions/artifacts/ag06/source-integrity.json",
+      "line": 22,
+      "referenced_path": "Talk-Leee/src/lib/lead-details-api.ts",
+      "json_paths": [
+        "files_sha256_lf.Talk-Leee/src/lib/lead-details-api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "d8ecd6d0d183e304e21453857619f36330f836bd",
+          "source_path": "Talk-Leee/src/lib/lead-details-api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    },
+    {
+      "fingerprint": "8b0c77866fe9539ad557a811ee4a3280d03835c3:docs/sessions/artifacts/ag05/verification.json:generic-api-key:49",
+      "file": "docs/sessions/artifacts/ag05/verification.json",
+      "line": 49,
+      "referenced_path": "api-state-examples.json",
+      "json_paths": [
+        "artifacts_sha256_lf.api-state-examples.json"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "8b0c77866fe9539ad557a811ee4a3280d03835c3",
+          "source_path": "docs/sessions/artifacts/ag05/api-state-examples.json",
+          "normalization": "CRLF"
+        }
+      ]
+    },
+    {
+      "fingerprint": "8b0c77866fe9539ad557a811ee4a3280d03835c3:docs/sessions/artifacts/ag05/source-integrity.json:generic-api-key:8",
+      "file": "docs/sessions/artifacts/ag05/source-integrity.json",
+      "line": 8,
+      "referenced_path": "Talk-Leee/src/lib/lead-details-api.ts",
+      "json_paths": [
+        "files.Talk-Leee/src/lib/lead-details-api.ts"
+      ],
+      "classification": "verified_file_sha256",
+      "proof": [
+        {
+          "ref": "8b0c77866fe9539ad557a811ee4a3280d03835c3",
+          "source_path": "Talk-Leee/src/lib/lead-details-api.ts",
+          "normalization": "raw_git_blob"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,78 @@
+"""Read-only, no-network reproduction of the repository webhook retry boundary.
+
+Run from the worktree root. This compiles only handle_webhook from the current
+repository source; Stripe, the event claim and the failing handler are synthetic.
+It does not import the application, read environment files or write a database.
+"""
+import ast
+import asyncio
+import json
+import logging
+import types
+from pathlib import Path
+
+source = Path('backend/app/domain/services/billing_service.py').read_text(encoding='utf-8')
+tree = ast.parse(source)
+cls = next(n for n in tree.body if isinstance(n, ast.ClassDef) and n.name == 'BillingService')
+method = next(n for n in cls.body if isinstance(n, ast.AsyncFunctionDef) and n.name == 'handle_webhook')
+namespace = {
+    'Dict': dict,
+    'Any': object,
+    'logger': logging.getLogger('offline-proof'),
+    'stripe': types.SimpleNamespace(
+        Webhook=types.SimpleNamespace(construct_event=lambda *_: {
+            'id': 'evt_synthetic',
+            'type': 'customer.subscription.updated',
+            'data': {'object': {}},
+        }),
+        error=types.SimpleNamespace(SignatureVerificationError=ValueError),
+    ),
+}
+exec(compile(ast.fix_missing_locations(ast.Module(body=[method], type_ignores=[])),
+             '<repository-method>', 'exec'), namespace)
+
+
+class Fixture:
+    mock_mode = False
+    webhook_secret = 'synthetic'
+
+    def __init__(self):
+        self.claimed = set()
+        self.attempts = 0
+
+    async def _claim_webhook_event(self, event_id, event_type):
+        if event_id in self.claimed:
+            return False
+        self.claimed.add(event_id)
+        return True
+
+    async def _is_topup_event(self, *_):
+        return False
+
+    async def fail(self, _):
+        self.attempts += 1
+        raise RuntimeError('synthetic temporary storage failure')
+
+    _handle_checkout_completed = _handle_subscription_created = fail
+    _handle_subscription_updated = _handle_subscription_deleted = fail
+    _handle_invoice_paid = _handle_invoice_payment_failed = fail
+    handle_webhook = namespace['handle_webhook']
+
+
+async def main():
+    obj = Fixture()
+    try:
+        await obj.handle_webhook(b'{}', 'synthetic')
+    except RuntimeError:
+        first = 'handler_failed'
+    second = await obj.handle_webhook(b'{}', 'synthetic')
+    print(json.dumps({
+        'first': first,
+        'retry_status': second['status'],
+        'handler_attempts': obj.attempts,
+        'network_calls': 0,
+        'database_writes': 0,
+    }))
+
+
+asyncio.run(main())

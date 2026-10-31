@@ -1,0 +1,10 @@
+........................................................................ [ 63%]
+.........................................                                [100%]
+============================== warnings summary ===============================
+tests/unit/test_latency_tracker.py: 20 warnings
+tests/unit/test_latency_tracker_negative.py: 2 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\latency_tracker.py:255: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    wall_clock_anchor=datetime.utcnow(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+113 passed, 22 warnings in 25.84s

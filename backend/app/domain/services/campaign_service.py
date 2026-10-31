@@ -12,7 +12,7 @@ Day 9+ refactoring: Business logic extracted from campaigns.py endpoints
 """
 import uuid
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional, List, Dict, Any
 from dataclasses import dataclass
 
@@ -53,6 +53,42 @@ class CampaignStateError(CampaignError):
     """Raised when campaign is in invalid state for operation"""
     def __init__(self, message: str):
         super().__init__(message, status_code=400)
+
+
+class CampaignDirectionError(CampaignStateError):
+    """Raised when the inbound lifecycle owns the requested campaign."""
+
+    def __init__(self, message: str = "Inbound campaign requires inbound lifecycle"):
+        CampaignError.__init__(self, message, status_code=409)
+
+
+class CampaignReadinessError(CampaignError):
+    """The current outbound telephony route cannot safely start."""
+
+    def __init__(self, readiness: dict):
+        super().__init__(readiness["reason"], status_code=409)
+        self.reason_code = readiness["reason_code"]
+
+
+class CampaignDispatchError(CampaignError):
+    """A durable dialer job could not be confirmed in the queue.
+
+    ``jobs_enqueued`` counts Redis acknowledgements from this invocation.
+    ``jobs_pending`` counts durable ``pending`` rows that a later start can
+    reconcile.  Keeping both values on the exception lets HTTP callers report
+    a partial dispatch without pretending the whole list was queued.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        jobs_enqueued: int = 0,
+        jobs_pending: int = 0,
+    ) -> None:
+        super().__init__(message, status_code=503)
+        self.jobs_enqueued = max(0, int(jobs_enqueued))
+        self.jobs_pending = max(0, int(jobs_pending))
 
 
 class CampaignService:
@@ -182,9 +218,32 @@ class CampaignService:
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
         response = query.execute()
+        if getattr(response, "error", None):
+            raise CampaignError("Campaign lookup is unavailable", status_code=503)
         if not response.data:
             raise CampaignNotFoundError(campaign_id)
         return response.data[0]
+
+    async def get_outbound_readiness(self, campaign_id: str, tenant_id: str) -> dict:
+        """Read current telephony eligibility without enqueueing or probing carriers."""
+        campaign = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        return await self._evaluate_outbound_readiness(campaign, campaign_id, tenant_id)
+
+    async def _evaluate_outbound_readiness(self, campaign: dict, campaign_id: str, tenant_id: str) -> dict:
+        from app.domain.services.telephony.outbound_readiness import evaluate_outbound_readiness
+        from app.domain.services.telephony.provider_availability import TelephonySelectionError
+
+        if campaign.get("direction", "outbound") != "outbound":
+            raise CampaignDirectionError()
+        try:
+            return await evaluate_outbound_readiness(
+                getattr(self.db_client, "pool", None), tenant_id=str(tenant_id),
+                campaign_id=str(campaign_id), campaign=campaign,
+            )
+        except TelephonySelectionError as exc:
+            # Keep a temporary lookup failure typed across start_campaign's
+            # CampaignError boundary instead of converting it to generic 500.
+            raise CampaignError(exc.message, status_code=exc.status_code) from exc
 
     # =========================================================================
     # Start Campaign
@@ -241,14 +300,27 @@ class CampaignService:
             # 1. Validate campaign
             campaign = await self.get_campaign(campaign_id, tenant_id=scoping_tenant_id)
 
+            # Inbound configurations have their own readiness/activation
+            # lifecycle.  They must never enqueue outbound dialer jobs even if
+            # a stale client calls the legacy campaign start endpoint.
+            if campaign.get("direction", "outbound") != "outbound":
+                raise CampaignDirectionError(
+                    "Inbound campaigns cannot be started by the outbound dialer"
+                )
+
             # ``allow_running`` lets "call this list" enqueue a list's pending
             # leads even while the campaign is already running — the active-job
             # dedup below prevents double-dialing, so re-entry is safe.
-            if campaign.get("status") == "running" and not allow_running:
-                raise CampaignStateError("Campaign is already running")
+            campaign_was_running = campaign.get("status") == "running"
 
             # 2. Resolve tenant_id
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
+
+            # Reject before resetting leads or creating jobs. The bridge repeats
+            # this same admission at originate time because health can change.
+            readiness = await self._evaluate_outbound_readiness(campaign, campaign_id, str(tenant_id))
+            if not readiness["ready"]:
+                raise CampaignReadinessError(readiness)
 
             # 3. Get pending leads (optionally scoped to a single contact list)
             leads = await self._get_pending_leads(
@@ -273,6 +345,8 @@ class CampaignService:
                     )
 
             if not leads:
+                if campaign_was_running and not allow_running:
+                    raise CampaignStateError("Campaign is already running")
                 await self._update_campaign_status(
                     campaign_id, "running", tenant_id=scoping_tenant_id
                 )
@@ -283,42 +357,11 @@ class CampaignService:
                     campaign_id=campaign_id
                 )
 
-            # 4. Update campaign status to 'running' BEFORE enqueuing to Redis.
-            # The dialer worker dequeues jobs and immediately validates campaign
-            # status against the DB.  If status is updated after the Redis push,
-            # the worker sees the old status (e.g. "stopped") and skips every job.
-            #
-            # For a single-list dial we only enqueue that list's leads, so
-            # len(leads) is NOT the campaign's total — don't clobber total_leads
-            # in that case.
-            if list_id is None:
-                await self._update_campaign_status(
-                    campaign_id,
-                    status="running",
-                    total_leads=len(leads),
-                    tenant_id=scoping_tenant_id,
-                )
-            else:
-                await self._update_campaign_status(
-                    campaign_id, status="running", tenant_id=scoping_tenant_id
-                )
-
-            # 5. Get queue service
-            queue_service = await self._get_queue_service()
-
-            # 5b. Reset the inter-call gap clock for this run so the FIRST call
-            # dials immediately — the gap only spaces subsequent calls, never the
-            # opener. The dialer stamps this key on each originate; clearing it on
-            # start means "no previous dial in this run yet". Best-effort.
-            try:
-                _redis = getattr(queue_service, "_redis", None)
-                if _redis is not None:
-                    await _redis.delete(f"dialer:last_dial:{campaign_id}")
-            except Exception as _gap_exc:
-                logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
-
-            # 6. Create and enqueue jobs
-            jobs_created = 0
+            # 4. Build the exact durable job set. PostgreSQL is the dispatch
+            # authority: a Redis payload must never exist before its job row.
+            # ``pending`` is the existing recoverable outbox state and
+            # ``queued`` is written only after Redis acknowledges the payload.
+            jobs_to_dispatch: List[DialerJob] = []
             jobs_data = []
 
             # Agent-name pool lives on the campaign — picked per-call so
@@ -367,13 +410,13 @@ class CampaignService:
             # uq_dialer_jobs_one_active_per_lead is the DB backstop; this
             # app-level pre-filter keeps the Redis queue + batch insert clean.
             from app.domain.services.dialer.job_states import ACTIVE_STATUSES
-            active_lead_ids: set[str] = set()
+            active_jobs_by_lead: Dict[str, Dict[str, Any]] = {}
             try:
                 lead_ids_all = [str(l["id"]) for l in leads]
                 if lead_ids_all:
                     _dj_query = (
                         self.db_client.table("dialer_jobs")
-                        .select("lead_id")
+                        .select("*")
                         .in_("lead_id", lead_ids_all)
                         .in_("status", list(ACTIVE_STATUSES))
                     )
@@ -385,14 +428,51 @@ class CampaignService:
                     if _dj_tenant:
                         _dj_query = _dj_query.eq("tenant_id", _dj_tenant)
                     res = _dj_query.execute()
-                    active_lead_ids = {str(r["lead_id"]) for r in (getattr(res, "data", None) or [])}
+                    if getattr(res, "error", None):
+                        raise CampaignDispatchError(
+                            "Active dialer jobs could not be verified"
+                        )
+                    active_jobs_by_lead = {
+                        str(row["lead_id"]): dict(row)
+                        for row in (getattr(res, "data", None) or [])
+                    }
+            except CampaignDispatchError:
+                raise
             except Exception as exc:
-                logger.warning("active-lead dedup pre-check failed: %s", exc)
+                raise CampaignDispatchError(
+                    "Active dialer jobs could not be verified"
+                ) from exc
 
             skipped_active = 0
+            recovery_only = campaign_was_running and not allow_running
+            lost_job_ids = await self._find_lost_dispatched_jobs(
+                list(active_jobs_by_lead.values()), str(tenant_id)
+            )
             for lead in leads:
-                if str(lead["id"]) in active_lead_ids:
+                active_job = active_jobs_by_lead.get(str(lead["id"]))
+                if active_job is not None:
                     skipped_active += 1
+                    if (
+                        str(active_job.get("id")) in lost_job_ids
+                        and await self._reopen_lost_job(active_job)
+                    ):
+                        active_job = {**active_job, "status": "pending"}
+                    if str(active_job.get("status") or "") == "pending":
+                        jobs_to_dispatch.append(
+                            self._restore_pending_job(
+                                active_job,
+                                lead=lead,
+                                first_speaker=first_speaker,
+                                agent_names_pool=agent_names_pool,
+                                agent_name_genders=agent_name_genders,
+                                voice_gender=voice_gender,
+                            )
+                        )
+                    continue
+                if recovery_only:
+                    # A normal second Start on a running campaign may repair
+                    # its pending outbox, but it must not add new work. The
+                    # contact-list path opts into adding work via allow_running.
                     continue
                 job, job_record = self._create_job_for_lead(
                     campaign_id=campaign_id,
@@ -404,10 +484,8 @@ class CampaignService:
                     agent_name_genders=agent_name_genders,
                     voice_gender=voice_gender,
                 )
-
-                await queue_service.enqueue_job(job)
+                jobs_to_dispatch.append(job)
                 jobs_data.append(job_record)
-                jobs_created += 1
 
             if skipped_active:
                 logger.info(
@@ -415,14 +493,51 @@ class CampaignService:
                     campaign_id, skipped_active,
                 )
 
-            # 7. Store jobs in database (batch insert)
+            if recovery_only and not jobs_to_dispatch:
+                raise CampaignStateError("Campaign is already running")
+
+            # 5. Commit every new row before making any Redis payload visible.
+            # Exact returned IDs are load-bearing: adapter errors arrive in a
+            # PostgREST-style response envelope rather than as exceptions.
             await self._store_jobs_batch(jobs_data)
 
-            # 8. Get queue stats
-            stats = await queue_service.get_queue_stats()
+            # 6. The worker re-checks campaign status as soon as it dequeues a
+            # payload. Set running after the durable insert but before Redis so
+            # it can neither observe a missing job row nor skip valid work as a
+            # stopped campaign. A failed status write leaves only recoverable
+            # ``pending`` rows and exposes no Redis payload.
+            if list_id is None:
+                await self._update_campaign_status(
+                    campaign_id,
+                    status="running",
+                    total_leads=self._restart_total_leads(campaign, len(leads)),
+                    tenant_id=scoping_tenant_id,
+                    stamp_started_at=not campaign.get("started_at"),
+                )
+            else:
+                await self._update_campaign_status(
+                    campaign_id, status="running", tenant_id=scoping_tenant_id
+                )
 
-            # Cleanup if we own the queue service
-            await self._cleanup_queue_service()
+            # 7. Dispatch the durable outbox. A false enqueue result is a real
+            # failure, not a log line; rows that did not reach ``queued`` stay
+            # pending so this same endpoint can reconcile them on retry.
+            queue_service = await self._get_queue_service()
+            try:
+                try:
+                    _redis = getattr(queue_service, "_redis", None)
+                    if _redis is not None:
+                        await _redis.delete(f"dialer:last_dial:{campaign_id}")
+                except Exception as _gap_exc:
+                    logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
+
+                jobs_created = await self._dispatch_durable_jobs(
+                    queue_service,
+                    jobs_to_dispatch,
+                )
+                stats = await queue_service.get_queue_stats()
+            finally:
+                await self._cleanup_queue_service()
 
             logger.info(f"Campaign {campaign_id} started with {jobs_created} jobs")
 
@@ -434,7 +549,7 @@ class CampaignService:
                 queue_stats=stats
             )
 
-        except (CampaignNotFoundError, CampaignStateError):
+        except CampaignError:
             raise
         except Exception as e:
             logger.error(f"Error starting campaign {campaign_id}: {e}")
@@ -463,8 +578,14 @@ class CampaignService:
         just validated the row against, so a successful get_campaign here
         guarantees the filtered UPDATE below matches that same row.
         """
-        # Validate exists (and belongs to this tenant)
-        await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        # Validate exists (and belongs to this tenant). Inbound campaigns have
+        # a separate, versioned lifecycle with readiness and assignment audits;
+        # no internal caller may bypass it through this legacy outbound service.
+        campaign = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        if campaign.get("direction", "outbound") != "outbound":
+            raise CampaignDirectionError(
+                "Inbound campaigns cannot be paused by the outbound dialer"
+            )
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         query = self.db_client.table("campaigns").update({
@@ -472,26 +593,51 @@ class CampaignService:
         }).eq("id", campaign_id)
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
-        response = query.execute()
-        if not response.data:
-            # get_campaign just confirmed the row exists for this tenant, so
-            # an empty result here means the row changed between the two
-            # queries (or a mocked/misbehaving client in tests) — surface it
-            # as not-found rather than raising IndexError below.
-            raise CampaignNotFoundError(campaign_id)
+        response = query.eq("direction", "outbound").execute()
+        if getattr(response, "error", None):
+            raise CampaignError("Failed to pause campaign")
+        if not getattr(response, "data", None):
+            raise CampaignDirectionError(
+                "Campaign direction changed; outbound pause was refused"
+            )
 
-        # Hang up live calls now — best-effort, never roll back the status update.
-        hung_up = 0
+        # Hang up live calls now. The campaign state is already paused, but
+        # provider cleanup has its own explicit outcome: a partial/failed
+        # sweep is returned to the operator and retained as
+        # ``termination_pending`` for watchdog retries.
+        termination: Dict[str, Any] = {
+            "status": "lookup_failed",
+            "total_selected": 0,
+            "requested": 0,
+            "attempted": 0,
+            "confirmed": 0,
+            "deferred": 0,
+            "unconfirmed": 0,
+            "missing_identity": 0,
+            "reasons": {},
+            "lookup_error": "termination_sweep_unavailable",
+        }
         try:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            hung_up = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(campaign_id)
         except Exception as exc:
             logger.warning("pause_campaign hangup sweep failed: %s", exc)
 
-        logger.info(f"Campaign {campaign_id} paused (hung_up={hung_up})")
-        return response.data[0]
+        logger.info(
+            "Campaign %s paused (termination_status=%s selected=%s "
+            "requested=%s confirmed=%s deferred=%s)",
+            campaign_id,
+            termination.get("status"),
+            termination.get("total_selected", 0),
+            termination.get("requested", termination.get("attempted", 0)),
+            termination.get("confirmed", 0),
+            termination.get("deferred", termination.get("unconfirmed", 0)),
+        )
+        result = dict(response.data[0])
+        result["termination_summary"] = termination
+        return result
 
     # =========================================================================
     # Stop Campaign
@@ -513,8 +659,13 @@ class CampaignService:
                 RLS (see ``_resolve_tenant_id``); same value get_campaign
                 just validated the row against.
         """
-        # Validate exists (and belongs to this tenant)
-        await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        # Validate exists (and belongs to this tenant). See pause_campaign for
+        # why direction is checked again at the domain boundary.
+        campaign = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        if campaign.get("direction", "outbound") != "outbound":
+            raise CampaignDirectionError(
+                "Inbound campaigns cannot be stopped by the outbound dialer"
+            )
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         # Update campaign status
@@ -524,22 +675,32 @@ class CampaignService:
         }).eq("id", campaign_id)
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
-        response = query.execute()
-        if not response.data:
-            raise CampaignNotFoundError(campaign_id)
+        response = query.eq("direction", "outbound").execute()
+        if getattr(response, "error", None):
+            raise CampaignError("Failed to stop campaign")
+        if not getattr(response, "data", None):
+            raise CampaignDirectionError(
+                "Campaign direction changed; outbound stop was refused"
+            )
 
-        # Stop = stop now. Cancel EVERY active job for this campaign so nothing
-        # lingers in the pipeline. The previous logic only cleared 'pending'/
-        # 'retry_scheduled', and only when clear_queue was set — which left
-        # 'processing'/'calling' jobs as zombies that kept showing as "dialing".
+        # Cancel only queued/not-yet-originated work immediately. Jobs already
+        # processing/calling remain non-terminal until the PBX sweep below has
+        # proved every leg absent and normal CallService settlement completes;
+        # cancelling them here would release logical ownership before proof.
         from app.domain.services.dialer.job_lifecycle import (
             cancel_active_jobs_for_campaign,
             REASON_CAMPAIGN_STOPPED,
         )
 
+        # Leads whose next attempt is a scheduled retry sit in status 'called'.
+        # Cancelling that retry job below would strand them: neither Start's
+        # pending/calling selection nor the failed/skipped reset picks 'called'
+        # up. Snapshot them first, hand them back to 'pending' after the cancel.
+        retry_lead_ids = self._leads_awaiting_retry(campaign_id, scoped_tenant)
         cleared_jobs = cancel_active_jobs_for_campaign(
             self.db_client, campaign_id, reason=REASON_CAMPAIGN_STOPPED,
         )
+        self._release_leads_to_pending(retry_lead_ids, campaign_id, scoped_tenant)
         # Drain the Redis queue too so jobs already dequeued into Redis don't
         # get processed after the stop. Best-effort — never block the stop.
         try:
@@ -552,28 +713,105 @@ class CampaignService:
         # Always hang up live calls for the campaign, regardless of whether
         # the operator chose to clear the pending queue. Stop = stop now,
         # not "stop after the in-flight calls finish on their own."
-        # Best-effort: a hangup failure must not roll back the status update.
-        hung_up = 0
+        # A hangup failure does not roll back the stopped state, but it is not
+        # hidden: callers receive an explicit partial/lookup-failed summary.
+        termination: Dict[str, Any] = {
+            "status": "lookup_failed",
+            "total_selected": 0,
+            "requested": 0,
+            "attempted": 0,
+            "confirmed": 0,
+            "deferred": 0,
+            "unconfirmed": 0,
+            "missing_identity": 0,
+            "reasons": {},
+            "lookup_error": "termination_sweep_unavailable",
+        }
         try:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            hung_up = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(campaign_id)
         except Exception as exc:
             logger.warning("stop_campaign hangup sweep failed: %s", exc)
 
         logger.info(
-            "Campaign %s stopped (clear_queue=%s, cleared_jobs=%s, hung_up=%s)",
+            "Campaign %s stopped (clear_queue=%s, cleared_jobs=%s, "
+            "termination_status=%s, selected=%s, requested=%s, "
+            "confirmed=%s, deferred=%s)",
             campaign_id,
             clear_queue,
             cleared_jobs,
-            hung_up,
+            termination.get("status"),
+            termination.get("total_selected", 0),
+            termination.get("requested", termination.get("attempted", 0)),
+            termination.get("confirmed", 0),
+            termination.get("deferred", termination.get("unconfirmed", 0)),
         )
-        return response.data[0]
+        result = dict(response.data[0])
+        result["termination_summary"] = termination
+        return result
 
     # =========================================================================
     # Private Helpers
     # =========================================================================
+
+    def _leads_awaiting_retry(
+        self, campaign_id: str, scoped_tenant: Optional[str]
+    ) -> List[str]:
+        """Lead ids whose only pending work is a ``retry_scheduled`` job.
+
+        Best-effort: a failed read must never block a stop.
+        """
+        try:
+            query = (
+                self.db_client.table("dialer_jobs")
+                .select("lead_id")
+                .eq("campaign_id", str(campaign_id))
+                .in_("status", ["retry_scheduled"])
+            )
+            if scoped_tenant:
+                query = query.eq("tenant_id", scoped_tenant)
+            res = query.execute()
+            return [
+                str(r["lead_id"])
+                for r in (getattr(res, "data", None) or [])
+                if r.get("lead_id")
+            ]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stop_campaign: retry-lead snapshot failed: %s", exc)
+            return []
+
+    def _release_leads_to_pending(
+        self, lead_ids: List[str], campaign_id: str, scoped_tenant: Optional[str]
+    ) -> None:
+        """Return leads whose retry job was cancelled to 'pending' so a later
+        Start re-dispatches them. Only 'called' rows move: a lead that turned
+        dnc / deleted / completed meanwhile is never resurrected."""
+        if not lead_ids:
+            return
+        try:
+            query = (
+                self.db_client.table("leads")
+                .update({"status": "pending"})
+                .eq("campaign_id", str(campaign_id))
+                .eq("status", "called")
+                .in_("id", list(lead_ids))
+            )
+            if scoped_tenant:
+                query = query.eq("tenant_id", scoped_tenant)
+            query.execute()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("stop_campaign: releasing retry leads failed: %s", exc)
+
+    @staticmethod
+    def _restart_total_leads(campaign: Dict[str, Any], remaining: int) -> int:
+        """total_leads on a (re)start = leads still to dial + leads already
+        finished, so a resumed campaign never reads 150% progress."""
+        finished = int(campaign.get("calls_completed") or 0) + int(
+            campaign.get("calls_failed") or 0
+        )
+        return remaining + finished
 
     def _inactive_list_ids(self, campaign_id: str, tenant_id: Optional[str] = None) -> set:
         """Return the set of contact_list ids that are toggled OFF for this
@@ -624,13 +862,29 @@ class CampaignService:
         kept. When ``list_id`` is provided the result is additionally scoped to
         that single list ("call this list").
 
+        Leads the customer flagged ``do_not_call`` are excluded here, at the
+        selection boundary, so they are never enqueued at all — and so
+        ``start_campaign``'s ``total_leads`` denominator counts only leads the
+        campaign will actually attempt (the same treatment an inactive list's
+        leads already get, rather than enqueuing them and recording a
+        pseudo-outcome). ``leads.do_not_call`` is the per-contact suppression
+        flag from migration 0020; it is ADDITIVE to the tenant DNC *list*
+        (``dnc_entries``, keyed by normalised phone number and enforced by
+        CallGuard) and never a replacement for it. CallGuard re-checks the
+        flag at dial time so an older queue entry can't slip past this.
+
+        ``IS NOT TRUE`` — not ``COALESCE(do_not_call, false) = false`` — so a
+        NULL reads as "not flagged" while the predicate stays on the bare
+        column and the partial index ``idx_leads_do_not_call`` remains usable.
+
         ``tenant_id`` is applied as an app-level filter alongside RLS
         (defense-in-depth).
         """
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         query = self.db_client.table("leads").select("*")\
             .eq("campaign_id", campaign_id)\
-            .in_("status", ["pending", "calling"])
+            .in_("status", ["pending", "calling"])\
+            .is_("do_not_call", "NOT TRUE")
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
         if list_id is not None:
@@ -639,6 +893,39 @@ class CampaignService:
             .order("created_at")\
             .execute()
         leads = response.data or []
+
+        # The do_not_call exclusion above produces no job, no call row and no
+        # outcome — by design. Count what it suppressed so the decision is
+        # auditable instead of invisible. Best-effort: a failed count must
+        # never stop a campaign starting. ``IS TRUE`` matches the partial
+        # index idx_leads_do_not_call exactly; ``limit(1)`` keeps the exact
+        # COUNT(*) while transferring no rows.
+        try:
+            supp_query = self.db_client.table("leads")\
+                .select("id", count="exact")\
+                .eq("campaign_id", campaign_id)\
+                .in_("status", ["pending", "calling"])\
+                .is_("do_not_call", "TRUE")\
+                .limit(1)
+            if scoped_tenant:
+                supp_query = supp_query.eq("tenant_id", scoped_tenant)
+            if list_id is not None:
+                supp_query = supp_query.eq("list_id", list_id)
+            supp_resp = supp_query.execute()
+            suppressed = getattr(supp_resp, "count", None)
+            if suppressed is None:
+                suppressed = len(getattr(supp_resp, "data", None) or [])
+            if suppressed:
+                logger.info(
+                    "campaign %s: suppressed %d lead(s) flagged do_not_call "
+                    "(not enqueued, not counted as an outcome)",
+                    campaign_id, suppressed,
+                )
+        except Exception as exc:  # noqa: BLE001 — observability only
+            logger.debug(
+                "do_not_call suppression count failed for campaign %s: %s",
+                campaign_id, exc,
+            )
 
         # Exclude leads whose list is toggled off. Skipped entirely when a
         # single list was requested (that list is being explicitly dialed).
@@ -787,16 +1074,263 @@ class CampaignService:
 
         return job, job_record
 
-    async def _store_jobs_batch(self, jobs_data: List[Dict[str, Any]]) -> None:
-        """Store jobs in database as batch insert."""
+    # A queued job's payload can vanish from Redis (restart/flush, racing queue
+    # rewrite) while its row keeps the lead's one-active-job slot. Margins keep
+    # a payload that is merely mid-hop between Redis structures out of scope.
+    _LOST_QUEUED_MIN_AGE = timedelta(minutes=5)
+    _LOST_RETRY_OVERDUE = timedelta(minutes=15)
+    _LIVE_CALL_STATUSES = (
+        "initiated", "dialing", "ringing", "answered", "in_call", "in_progress",
+        "termination_pending",
+    )
+
+    @staticmethod
+    def _as_utc(value: Any) -> Optional[datetime]:
+        if isinstance(value, str):
+            try:
+                value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        if not isinstance(value, datetime):
+            return None
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+    async def _find_lost_dispatched_jobs(
+        self, rows: List[Dict[str, Any]], tenant_id: str
+    ) -> set:
+        """Ids of ``queued``/overdue ``retry_scheduled`` rows provably absent
+        from Redis and without a live call. Any uncertainty returns nothing."""
+        now = datetime.now(timezone.utc)
+        candidates: Dict[str, Dict[str, Any]] = {}
+        for row in rows:
+            status = str(row.get("status") or "")
+            if status == "queued":
+                stamp = self._as_utc(row.get("updated_at")) or self._as_utc(row.get("created_at"))
+                if stamp is None or now - stamp >= self._LOST_QUEUED_MIN_AGE:
+                    candidates[str(row["id"])] = row
+            elif status == "retry_scheduled":
+                due = self._as_utc(row.get("scheduled_at"))
+                if due is not None and now - due >= self._LOST_RETRY_OVERDUE:
+                    candidates[str(row["id"])] = row
+        if not candidates:
+            return set()
+        try:
+            queue_service = await self._get_queue_service()
+            try:
+                finder = getattr(queue_service, "find_present_job_ids", None)
+                if finder is None:
+                    return set()
+                present = await finder(tenant_id, list(candidates))
+            finally:
+                await self._cleanup_queue_service()
+            if present is None:
+                return set()
+            absent = set(candidates) - {str(p) for p in present}
+            if not absent:
+                return set()
+            res = (
+                self.db_client.table("calls")
+                .select("dialer_job_id")
+                .in_("dialer_job_id", list(absent))
+                .in_("status", list(self._LIVE_CALL_STATUSES))
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if getattr(res, "error", None):
+                return set()
+            live = {str(r.get("dialer_job_id")) for r in (getattr(res, "data", None) or [])}
+            return absent - live
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("lost-job check failed; not re-dispatching: %s", exc)
+            return set()
+
+    async def _reopen_lost_job(self, row: Dict[str, Any]) -> bool:
+        """Move one lost row back to the recoverable ``pending`` outbox state."""
+        try:
+            res = (
+                self.db_client.table("dialer_jobs")
+                .update({"status": "pending", "updated_at": datetime.utcnow().isoformat()})
+                .eq("id", str(row["id"]))
+                .eq("tenant_id", str(row["tenant_id"]))
+                .eq("campaign_id", str(row["campaign_id"]))
+                .eq("lead_id", str(row["lead_id"]))
+                .eq("status", str(row["status"]))
+                .execute()
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("lost job %s could not be reopened: %s", row.get("id"), exc)
+            return False
+        if getattr(res, "error", None):
+            return False
+        logger.warning(
+            "re-dispatching dialer job %s (was %s, payload absent from Redis)",
+            row.get("id"), row.get("status"),
+        )
+        return len(getattr(res, "data", None) or []) == 1
+
+    def _restore_pending_job(
+        self,
+        row: Dict[str, Any],
+        *,
+        lead: Dict[str, Any],
+        first_speaker: Literal["agent", "user"],
+        agent_names_pool: Optional[List[str]],
+        agent_name_genders: Optional[Dict[str, str]],
+        voice_gender: Optional[str],
+    ) -> DialerJob:
+        """Rehydrate one durable pending row for at-least-once dispatch.
+
+        The database row owns routing and attempt identity. Optional prompt
+        metadata is recomputed from the same lead/campaign inputs used for a
+        new job (agent-name selection is lead-id seeded and deterministic).
+        """
+        template, _ = self._create_job_for_lead(
+            campaign_id=str(row["campaign_id"]),
+            lead=lead,
+            tenant_id=str(row["tenant_id"]),
+            priority_override=int(row.get("priority") or 5),
+            first_speaker=first_speaker,
+            agent_names_pool=agent_names_pool,
+            agent_name_genders=agent_name_genders,
+            voice_gender=voice_gender,
+        )
+        return template.model_copy(
+            update={
+                "job_id": str(row["id"]),
+                "campaign_id": str(row["campaign_id"]),
+                "lead_id": str(row["lead_id"]),
+                "tenant_id": str(row["tenant_id"]),
+                "phone_number": str(row["phone_number"]),
+                "priority": int(row.get("priority") or 5),
+                "status": JobStatus.PENDING,
+                "attempt_number": int(row.get("attempt_number") or 1),
+                "scheduled_at": row.get("scheduled_at") or datetime.utcnow(),
+                "created_at": row.get("created_at") or datetime.utcnow(),
+            }
+        )
+
+    async def _store_jobs_batch(self, jobs_data: List[Dict[str, Any]]) -> List[str]:
+        """Persist a complete durable batch and verify every returned ID."""
         if not jobs_data:
-            return
+            return []
 
         try:
-            self.db_client.table("dialer_jobs").insert(jobs_data).execute()
-        except Exception as e:
-            # Log but don't fail - jobs are already in Redis queue
-            logger.warning(f"Failed to store jobs in database: {e}")
+            response = self.db_client.table("dialer_jobs").insert(jobs_data).execute()
+        except Exception as exc:
+            raise CampaignDispatchError(
+                "Dialer jobs could not be stored",
+                jobs_pending=len(jobs_data),
+            ) from exc
+
+        if getattr(response, "error", None):
+            raise CampaignDispatchError(
+                "Dialer jobs could not be stored",
+                jobs_pending=len(jobs_data),
+            )
+
+        expected_ids = [str(row["id"]) for row in jobs_data]
+        returned = getattr(response, "data", None)
+        returned_rows = returned if isinstance(returned, list) else []
+        returned_ids = [
+            str(row.get("id"))
+            for row in returned_rows
+            if isinstance(row, dict) and row.get("id") is not None
+        ]
+        if len(returned_ids) != len(expected_ids) or set(returned_ids) != set(expected_ids):
+            raise CampaignDispatchError(
+                "Dialer job persistence could not be confirmed",
+                jobs_pending=len(jobs_data),
+            )
+        return returned_ids
+
+    async def _confirm_job_dispatched(self, job: DialerJob) -> None:
+        """Move one durable outbox row from pending to queued exactly once."""
+        try:
+            response = (
+                self.db_client.table("dialer_jobs")
+                .update(
+                    {
+                        "status": "queued",
+                        "updated_at": datetime.utcnow().isoformat(),
+                    }
+                )
+                .eq("id", str(job.job_id))
+                .eq("tenant_id", str(job.tenant_id))
+                .eq("campaign_id", str(job.campaign_id))
+                .eq("lead_id", str(job.lead_id))
+                .eq("status", "pending")
+                .execute()
+            )
+        except Exception as exc:
+            raise RuntimeError("dialer dispatch acknowledgement failed") from exc
+        if getattr(response, "error", None):
+            raise RuntimeError("dialer dispatch acknowledgement failed")
+        rows = getattr(response, "data", None) or []
+        if len(rows) == 1 and str(rows[0].get("id")) == str(job.job_id):
+            return
+        # The dialer can pop the payload before this ack and move the row on
+        # (e.g. re-defer to retry_scheduled when its batch is full). A row that
+        # has left 'pending' needs no outbox replay, so the dispatch stands.
+        try:
+            current = (
+                self.db_client.table("dialer_jobs")
+                .select("id,status")
+                .eq("id", str(job.job_id))
+                .eq("tenant_id", str(job.tenant_id))
+                .eq("campaign_id", str(job.campaign_id))
+                .eq("lead_id", str(job.lead_id))
+                .execute()
+            )
+        except Exception as exc:
+            raise RuntimeError("dialer dispatch acknowledgement was not exact") from exc
+        current_rows = getattr(current, "data", None) or []
+        status_now = str(current_rows[0].get("status") or "") if len(current_rows) == 1 else ""
+        if status_now and status_now != "pending":
+            logger.info(
+                "dialer_dispatch_ack_already_owned job=%s status=%s",
+                job.job_id, status_now,
+            )
+            return
+        raise RuntimeError("dialer dispatch acknowledgement was not exact")
+
+    async def _dispatch_durable_jobs(
+        self,
+        queue_service,
+        jobs: List[DialerJob],
+    ) -> int:
+        """Dispatch pending rows at least once and expose partial truth."""
+        redis_accepted = 0
+        db_acknowledged = 0
+        for job in jobs:
+            try:
+                accepted = await queue_service.enqueue_job(job)
+            except Exception as exc:
+                raise CampaignDispatchError(
+                    "Dialer queue dispatch failed",
+                    jobs_enqueued=redis_accepted,
+                    jobs_pending=len(jobs) - db_acknowledged,
+                ) from exc
+            if not accepted:
+                raise CampaignDispatchError(
+                    "Dialer queue dispatch failed",
+                    jobs_enqueued=redis_accepted,
+                    jobs_pending=len(jobs) - db_acknowledged,
+                )
+            redis_accepted += 1
+            try:
+                await self._confirm_job_dispatched(job)
+            except Exception as exc:
+                # Redis accepted this payload, but without the DB transition a
+                # later reconciliation must replay it. The downstream durable
+                # (dialer_job_id, attempt_number) fence makes that at-least-once
+                # delivery safe.
+                raise CampaignDispatchError(
+                    "Dialer queue acknowledgement could not be persisted",
+                    jobs_enqueued=redis_accepted,
+                    jobs_pending=len(jobs) - db_acknowledged,
+                ) from exc
+            db_acknowledged += 1
+        return redis_accepted
 
     async def _update_campaign_status(
         self,
@@ -804,6 +1338,7 @@ class CampaignService:
         status: str,
         total_leads: Optional[int] = None,
         tenant_id: Optional[str] = None,
+        stamp_started_at: bool = True,
     ) -> None:
         """Update campaign status and metadata.
 
@@ -814,18 +1349,27 @@ class CampaignService:
         fallback string would not match a real row's tenant_id and would
         silently zero out this update.
         """
-        update_data = {
-            "status": status,
-            "started_at": datetime.utcnow().isoformat()
-        }
+        update_data = {"status": status}
+        if stamp_started_at:
+            update_data["started_at"] = datetime.utcnow().isoformat()
         if total_leads is not None:
             update_data["total_leads"] = total_leads
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
-        query = self.db_client.table("campaigns").update(update_data).eq("id", campaign_id)
+        query = (
+            self.db_client.table("campaigns")
+            .update(update_data)
+            .eq("id", campaign_id)
+        )
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
-        query.execute()
+        response = query.eq("direction", "outbound").execute()
+        if getattr(response, "error", None):
+            raise CampaignError("Failed to update campaign status")
+        if not getattr(response, "data", None):
+            raise CampaignDirectionError(
+                "Campaign direction changed; outbound start was refused"
+            )
 
 
 # =========================================================================

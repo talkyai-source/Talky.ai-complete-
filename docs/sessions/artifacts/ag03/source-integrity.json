@@ -1,0 +1,76 @@
+{
+  "base_revision": "8fa3774c86e3516aa1f0a8a0027f792b92d0b74b",
+  "candidate": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145",
+  "normalization": "CRLF to LF",
+  "file_count": 17,
+  "files": [
+    {
+      "path": "backend/app/domain/services/caller_assertions.py",
+      "sha256_lf": "d839b4967c6dc84d217f84d5a97916edfe7ae6d805480b6511804ab91004d8f7"
+    },
+    {
+      "path": "backend/app/domain/services/transcript_service.py",
+      "sha256_lf": "9f7ece14133561bbf23e3af5c575233c83de006adfcd32a082614c76d03e45c5"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/action_execution.py",
+      "sha256_lf": "cf544b57e739d09db11f4fcdf5f0c69e7f9a5dba5bd3371a785872a970583860"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/conversation_guards.py",
+      "sha256_lf": "8232983711262271747492d13928813df7428c58efafa00508b804a2c6b5bc8a"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/live_structured_state.py",
+      "sha256_lf": "997aec61b27466aef094922c3a4066f5a77b3b7a5745d3cc4deb5e412da98b46"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/transcript_handler.py",
+      "sha256_lf": "5dd21743d8dde5ec1cfedd795ef06ff3d333fc9d63129fb059e78c5c892ddd6d"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/turn_ender.py",
+      "sha256_lf": "6b68b634937ac011bb2c822c3bf32fe8a284567dae321e7e413a7f26ce768a4a"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/turn_streamer.py",
+      "sha256_lf": "7a5d61ef24ace81447625cf04079c43caabf8685cf3b8e538d7b2164c823beb9"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline_service.py",
+      "sha256_lf": "920d2588b4e3db45610947d5d77c63c86ad5c1ad6dab5c51e645734be7e33168"
+    },
+    {
+      "path": "backend/app/realtime/bridge.py",
+      "sha256_lf": "b56f0c03437ea858843d518cc7902d7876df1d09c0c5af11b7aad3fe034bba51"
+    },
+    {
+      "path": "backend/app/realtime/openai.py",
+      "sha256_lf": "c31767e3b03b1327eb34b816aae757c188fad7b0e9028bc0b4bef67b53d5b755"
+    },
+    {
+      "path": "backend/tests/unit/test_ag03_caller_dispatch_order.py",
+      "sha256_lf": "c6d7d777ef5d7fd56fe8f9b8ed6e277dcaaab3e608756a3905d5947ee16b21a2"
+    },
+    {
+      "path": "backend/tests/unit/test_ag03_cascaded_relationship.py",
+      "sha256_lf": "0ff1a6b5f83d2e2675341b23382c9ce28148a47f8fa3b9f4e4b8cb1db896c647"
+    },
+    {
+      "path": "backend/tests/unit/test_ag03_relationship_acceptance.py",
+      "sha256_lf": "0bc62ab36485c986445153d3ed767ed709651c9bf5bc7a49341efadec7c655c2"
+    },
+    {
+      "path": "backend/tests/unit/test_ag03_relationship_state.py",
+      "sha256_lf": "a2e74d8a817106ae94698d8bb308b5f67897ae8d8188cca3053b47648baaafbc"
+    },
+    {
+      "path": "backend/tests/unit/test_realtime_lifecycle_repairs.py",
+      "sha256_lf": "1e553a5effbc97afaa2ba230cfe1631e8cea6866d417651e08bd39e9cb5a81f8"
+    },
+    {
+      "path": "backend/tests/unit/test_realtime_relationship_ownership.py",
+      "sha256_lf": "125a0eac42de82e638452afe5b204f95eb572f320808153896abfbf9034da23f"
+    }
+  ]
+}

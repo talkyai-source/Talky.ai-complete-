@@ -1,0 +1,35 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\contact-contract-tests-20261007",
+  "setup_each_run": "$env:PYTHONUTF8='1'\n$env:PYTHONDONTWRITEBYTECODE='1'\n$env:ENVIRONMENT='test'\n$env:DATABASE_URL='postgresql://test:test@127.0.0.1:1/unavailable_test'\n$env:PYTHONPATH='C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/contact-contract-tests-20261007/backend'",
+  "executed": [
+    {
+      "phase": "baseline",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/contact-contract-tests/run.py baseline *> docs/sessions/artifacts/contact-contract-tests/baseline.txt"
+    },
+    {
+      "phase": "first-final",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/contact-contract-tests/run.py first-final *> docs/sessions/artifacts/contact-contract-tests/first-final.txt"
+    },
+    {
+      "phase": "migration",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/contact-contract-tests/run.py migration *> docs/sessions/artifacts/contact-contract-tests/migration.txt"
+    },
+    {
+      "phase": "shape-baseline",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/contact-contract-tests/run.py shape-baseline *> docs/sessions/artifacts/contact-contract-tests/shape-baseline.txt"
+    },
+    {
+      "phase": "final",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B docs/sessions/artifacts/contact-contract-tests/run.py final *> docs/sessions/artifacts/contact-contract-tests/final.txt"
+    }
+  ],
+  "runner_versions": {
+    "baseline_and_first_final": "initial-run.py",
+    "migration": "migration-run.py",
+    "shape_baseline_and_final": "run.py"
+  },
+  "stopped_run": "Exact Python launcher/child with command line *contact-contract-tests/run.py first-final* were identified and stopped using native PowerShell Stop-Process; process metadata is preserved. No unrelated process was selected.",
+  "verification": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -m ruff check --select F --extend-ignore F401,F841 backend/app/domain/services/voice_pipeline/contact_recording.py backend/tests/unit/test_contact_capture_state_machine.py backend/tests/unit/test_contact_pause_and_punctuation.py backend/tests/unit/test_realtime_relationship_ownership.py backend/tests/unit/test_ag05_native_contact_revision.py",
+  "diff_check": "git diff --check",
+  "limitations": "Existing venv; synthetic ports. One EOF-only post-test cleanup has explicit parity evidence. No provider/DB/browser execution."
+}

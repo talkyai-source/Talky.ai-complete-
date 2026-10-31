@@ -11,10 +11,14 @@ from __future__ import annotations
 import asyncio
 import logging
 from typing import Any, Awaitable, Callable, Dict, Optional, TypeVar
+from uuid import UUID
 
 import httpx
 
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_with_tenant
+from app.services.connector_resolver import ConnectorAuthorizationSnapshot, _authorization_snapshot_for_row
+from app.services.connector_lifecycle import ConnectorActor, ConnectorLifecycle
 from app.infrastructure.assistant.tools.coercion import coerce_bool
 from app.infrastructure.connectors.base import BaseConnector, ConnectorProviderError
 
@@ -22,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_BODY_CHARS = 4000  # keep a single email body well within the LLM context
 _EMAIL_OPERATION_TIMEOUT_SECONDS = 15.0
+_EMAIL_HEALTH_TIMEOUT_SECONDS = 5.0
 _T = TypeVar("_T")
 
 
@@ -36,6 +41,17 @@ def _fmt_dt(value: Any) -> Optional[str]:
 
 def _email_provider_error(exc: Exception, *, opening_message: bool = False) -> Dict[str, Any]:
     """Return an honest user-facing error without leaking provider details."""
+    from app.services.connector_resolver import ReviewedConnectorChanged
+
+    if isinstance(exc, ReviewedConnectorChanged):
+        return {
+            "success": False,
+            "error": (
+                "The original email account could not be verified. Check the "
+                "intended account in Connectors before reading again."
+            ),
+            "error_code": "email_account_changed",
+        }
     if isinstance(exc, ConnectorProviderError):
         logger.error(
             "Gmail provider failure operation=%s category=%s status=%s",
@@ -103,7 +119,34 @@ async def _call_with_one_auth_refresh(
     db_client: Client,
     operation: Callable[[BaseConnector], Awaitable[_T]],
 ) -> _T:
-    """Retry exactly once with a freshly-issued access token after a 401."""
+    """Retry once after a 401, retaining the initial connector and account."""
+    from app.services.connector_resolver import (
+        ConnectorNotConnectedError,
+        ReviewedConnectorChanged,
+        connector_identity,
+        resolve_active_connector,
+        verify_reviewed_connector,
+    )
+
+    # Freeze before the first provider await. OAuth reconnect inserts a new
+    # authorization row; ordinary token refresh retains it. Gmail may have no
+    # external subject ID, so that separate reviewed-effect proof is optional
+    # here. Legacy objects without row proof can read, but cannot refresh/retry.
+    original_authorization = getattr(connector, "_authorization_snapshot", None)
+    initial = {
+        "connector_id": connector_id,
+        "provider": getattr(connector, "provider_name", None),
+        "account_id": getattr(connector, "account_row_id", None),
+    }
+    retry_identity = (
+        {key: value.strip() for key, value in initial.items()}
+        if all(isinstance(value, str) and value.strip() for value in initial.values())
+        else None
+    )
+    try:
+        reviewed = connector_identity(connector, connector_id, initial["provider"])
+    except ReviewedConnectorChanged:
+        reviewed = None
 
     async def invoke(current: BaseConnector) -> _T:
         return await asyncio.wait_for(
@@ -115,63 +158,161 @@ async def _call_with_one_auth_refresh(
     except ConnectorProviderError as exc:
         if exc.category != "authentication":
             raise
+        if retry_identity is None:
+            raise ReviewedConnectorChanged(
+                "The original email authorization cannot be verified for retry"
+            ) from exc
         logger.info(
             "Gmail rejected access token; attempting one forced refresh tenant=%s",
             str(tenant_id)[:8],
         )
-        from app.services.connector_resolver import (
-            ConnectorNotConnectedError,
-            resolve_active_connector,
-        )
-
         try:
             refreshed, refreshed_id, _provider = await resolve_active_connector(
                 db_client,
                 tenant_id,
                 "email",
                 force_refresh=True,
+                connector_id=retry_identity["connector_id"],
+                provider=retry_identity["provider"],
+                account_id=retry_identity["account_id"],
             )
         except ConnectorNotConnectedError as refresh_exc:
+            if (
+                refresh_exc.connector_id != retry_identity["connector_id"]
+                or refresh_exc.reason == "account_unavailable"
+            ):
+                # This failure cannot establish the original account's health
+                # and must not expire another connector in the outer handlers.
+                raise ReviewedConnectorChanged(
+                    "The original email connection is unavailable"
+                ) from refresh_exc
             same_terminal_connector = (
                 refresh_exc.connector_id == connector_id
                 and refresh_exc.reason == "refresh_unavailable"
             )
-            if refresh_exc.provider_confirmed or same_terminal_connector:
-                _mark_email_authorization_expired(
-                    db_client, tenant_id, refresh_exc.connector_id or connector_id
+            if same_terminal_connector and not refresh_exc.provider_confirmed:
+                # No refresh was sent. Only the generation rejected by the
+                # first read is evidence; a newer row lacking refresh is not.
+                await _mark_email_authorization_expired(
+                    db_client, tenant_id, connector_id,
+                    authorization=original_authorization,
                 )
+            # Provider-confirmed refresh failures are handled once by the
+            # outer read boundary, using the generation that refresh attempted.
             raise
+        current = {
+            "connector_id": refreshed_id,
+            "provider": _provider,
+            "account_id": getattr(refreshed, "account_row_id", None),
+        }
+        if current != retry_identity:
+            raise ReviewedConnectorChanged("The original email authorization changed")
+        if reviewed is not None:
+            verify_reviewed_connector(refreshed, refreshed_id, _provider, reviewed)
+        refreshed_authorization = getattr(refreshed, "_authorization_snapshot", None)
         try:
             return await invoke(refreshed)
         except ConnectorProviderError as retry_exc:
             if retry_exc.category == "authentication":
-                _mark_email_authorization_expired(db_client, tenant_id, refreshed_id)
+                await _mark_email_authorization_expired(
+                    db_client, tenant_id, refreshed_id, authorization=refreshed_authorization
+                )
             raise
 
 
-def _mark_email_authorization_expired(db_client: Client, tenant_id: str, connector_id: str) -> None:
-    """Make the dashboard honest after a confirmed, unrecoverable auth failure."""
+async def _mark_email_authorization_expired(
+    db_client: Client,
+    tenant_id: str,
+    connector_id: str,
+    *,
+    authorization: ConnectorAuthorizationSnapshot | None = None,
+) -> bool:
+    """Acknowledge expiry only for the still-current rejected authorization.
+
+    False means no transition was acknowledged; an interrupted commit is not
+    proof that no write occurred. No broad or synchronous fallback is permitted.
+    """
+    if (
+        not isinstance(authorization, ConnectorAuthorizationSnapshot)
+        or authorization.tenant_id != tenant_id
+        or authorization.connector_id != connector_id
+        or not getattr(db_client, "pool", None)
+    ):
+        return False
     try:
-        account_response = (
-            db_client.table("connector_accounts")
-            .update({"status": "expired"})
-            .eq("connector_id", connector_id)
-            .eq("tenant_id", tenant_id)
-            .eq("status", "active")
-            .execute()
-        )
-        connector_response = (
-            db_client.table("connectors")
-            .update({"status": "expired"})
-            .eq("id", connector_id)
-            .eq("tenant_id", tenant_id)
-            .eq("status", "active")
-            .execute()
-        )
-        if getattr(account_response, "error", None) or getattr(connector_response, "error", None):
-            logger.error("Could not persist expired Gmail status connector=%s", connector_id)
+        tenant_uuid, connector_uuid = UUID(tenant_id), UUID(connector_id)
+        account_uuid = UUID(authorization.account_row_id)
+        lifecycle = ConnectorLifecycle(db_client, actor=ConnectorActor.system("inbox_authorization_expiry"))
+        async with asyncio.timeout(_EMAIL_HEALTH_TIMEOUT_SECONDS):
+            async with acquire_with_tenant(
+                db_client.pool, tenant_id, timeout=_EMAIL_HEALTH_TIMEOUT_SECONDS
+            ) as conn:
+                await lifecycle._begin(conn, tenant_id)
+                parent = await conn.fetchrow(
+                    """SELECT id FROM connectors WHERE id=$1 AND tenant_id=$2
+                       AND provider=$3 AND status='active' FOR UPDATE""",
+                    connector_uuid,
+                    tenant_uuid,
+                    authorization.provider,
+                )
+                if parent is None:
+                    return False
+                # Parent lock blocks reconnect FK inserts. Lock every existing
+                # account (including inactive rows), then rank afresh after any
+                # waited-on refresh/activation commits; LIMIT locks are unsafe.
+                await conn.fetch(
+                    """SELECT id FROM connector_accounts WHERE connector_id=$1
+                       AND tenant_id=$2 ORDER BY id FOR UPDATE""",
+                    connector_uuid,
+                    tenant_uuid,
+                )
+                active = await conn.fetch(
+                    """SELECT id, access_token_encrypted, refresh_token_encrypted,
+                              external_account_id, token_expires_at, last_refreshed_at, refresh_state, created_at,
+                              credential_generation
+                       FROM connector_accounts WHERE connector_id=$1 AND tenant_id=$2
+                       AND status='active' ORDER BY created_at DESC LIMIT 2""",
+                    connector_uuid,
+                    tenant_uuid,
+                )
+                if not active or active[0]["refresh_state"] != "idle" or (
+                    len(active) > 1
+                    and active[0]["created_at"] == active[1]["created_at"]
+                ):
+                    return False
+                current = _authorization_snapshot_for_row(
+                    tenant_id, connector_id, authorization.provider, active[0]
+                )
+                if current != authorization:
+                    return False
+                account_ack = await conn.fetchval(
+                    """UPDATE connector_accounts SET status='expired',
+                       credential_generation=credential_generation+1 WHERE id=$1
+                       AND connector_id=$2 AND tenant_id=$3 AND status='active' RETURNING id""",
+                    account_uuid,
+                    connector_uuid,
+                    tenant_uuid,
+                )
+                parent_ack = await conn.fetchval(
+                    """UPDATE connectors SET status='expired' WHERE id=$1
+                       AND tenant_id=$2 AND provider=$3 AND status='active' RETURNING id""",
+                    connector_uuid,
+                    tenant_uuid,
+                    authorization.provider,
+                )
+                if account_ack is None or parent_ack is None:
+                    raise RuntimeError("Authorization expiry was not acknowledged")
+                await lifecycle._record(conn, tenant_id, connector_id, lifecycle.actor,
+                    "connector.authorization_expired", account_id=str(account_uuid),
+                    generation=active[0]["credential_generation"] + 1, local_status="expired")
+        return True
     except Exception as exc:
-        logger.error("Could not persist expired Gmail status connector=%s: %s", connector_id, exc)
+        logger.warning(
+            "Could not acknowledge Gmail authorization expiry connector=%s type=%s",
+            connector_id,
+            type(exc).__name__,
+        )
+        return False
 
 
 async def read_emails(
@@ -198,7 +339,9 @@ async def read_emails(
         return {"success": False, "error": exc.message, "error_code": "email_lookup_error"}
     except ConnectorNotConnectedError as exc:
         if exc.connector_id and exc.provider_confirmed:
-            _mark_email_authorization_expired(db_client, tenant_id, exc.connector_id)
+            await _mark_email_authorization_expired(
+                db_client, tenant_id, exc.connector_id, authorization=exc.authorization_snapshot
+            )
         return {
             "success": False,
             "error": exc.message,
@@ -226,7 +369,9 @@ async def read_emails(
         return {"success": False, "error": exc.message, "error_code": "email_lookup_error"}
     except ConnectorNotConnectedError as exc:
         if exc.connector_id and exc.provider_confirmed:
-            _mark_email_authorization_expired(db_client, tenant_id, exc.connector_id)
+            await _mark_email_authorization_expired(
+                db_client, tenant_id, exc.connector_id, authorization=exc.authorization_snapshot
+            )
         return {
             "success": False,
             "error": exc.message,
@@ -277,7 +422,9 @@ async def read_email(
         return {"success": False, "error": exc.message, "error_code": "email_lookup_error"}
     except ConnectorNotConnectedError as exc:
         if exc.connector_id and exc.provider_confirmed:
-            _mark_email_authorization_expired(db_client, tenant_id, exc.connector_id)
+            await _mark_email_authorization_expired(
+                db_client, tenant_id, exc.connector_id, authorization=exc.authorization_snapshot
+            )
         return {
             "success": False,
             "error": exc.message,
@@ -299,7 +446,9 @@ async def read_email(
         return {"success": False, "error": exc.message, "error_code": "email_lookup_error"}
     except ConnectorNotConnectedError as exc:
         if exc.connector_id and exc.provider_confirmed:
-            _mark_email_authorization_expired(db_client, tenant_id, exc.connector_id)
+            await _mark_email_authorization_expired(
+                db_client, tenant_id, exc.connector_id, authorization=exc.authorization_snapshot
+            )
         return {
             "success": False,
             "error": exc.message,

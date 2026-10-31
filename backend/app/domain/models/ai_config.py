@@ -5,7 +5,9 @@ Defines the configuration structure for LLM, STT, and TTS providers.
 This configuration is used in both the AI Options testing page and actual calls.
 """
 from typing import Any, Optional, List, Dict
-from pydantic import BaseModel, Field
+from app.realtime.config import RealtimeProviderConfig
+from app.domain.models.assemblyai_config import ASSEMBLYAI_MODEL, AssemblyAISettings
+from pydantic import BaseModel, Field, field_validator, model_validator
 from enum import Enum
 
 
@@ -14,11 +16,14 @@ class LLMProvider(str, Enum):
     GROQ = "groq"
     GEMINI = "gemini"
     CEREBRAS = "cerebras"
+    OPENAI = "openai"
+    DEEPSEEK = "deepseek"
 
 
 class STTProvider(str, Enum):
     """Available STT providers"""
     DEEPGRAM = "deepgram"
+    ASSEMBLYAI = "assemblyai"
 
 
 class TTSProvider(str, Enum):
@@ -78,7 +83,6 @@ class GroqModel(str, Enum):
     # behaves strictly better, so we keep only that.
     # Qwen 3.6 27B — reasoning toggles between "default" and "none"; we run it
     # with thinking disabled (reasoning_effort="none") for low-latency voice.
-    QWEN_3_6_27B = "qwen/qwen3.6-27b"
     GPT_OSS_120B = "openai/gpt-oss-120b"
     GPT_OSS_20B = "openai/gpt-oss-20b"
 
@@ -106,6 +110,9 @@ class GeminiModel(str, Enum):
     # GA, newest Flash. Google: balances speed with intelligence, fewer output
     # tokens and fewer tool calls than 3.5 Flash, at a lower price.
     GEMINI_3_6_FLASH = "gemini-3.6-flash"
+    # GA 2026-09-02, newest Flash. Google: "our most intelligent Flash model".
+    # Verified on the production key (ListModels) 2026-10-01.
+    GEMINI_3_8_FLASH = "gemini-3.8-flash"
     # gemini-3.5-flash itself stays OFF the menu (removed 2026-06-25): it
     # NATO-spells emails (S for Sierra…) 3/3 even after the read-back guardrail
     # fix — a model-level quirk prompt rules don't beat, voice-unsafe for
@@ -195,11 +202,13 @@ class VoiceInfo(BaseModel):
     accent_color: str = "#6366f1"  # For UI avatar display
     preview_text: str = "Hello, I am your AI voice assistant. How can I help you today?"
     provider: str = "cartesia"
+    # Server-derived provider metadata, never an ownership claim from a request.
+    provider_is_public: bool = False
     tags: List[str] = []
     preview_url: Optional[str] = None
 
 
-class AIProviderConfig(BaseModel):
+class AIProviderConfig(RealtimeProviderConfig):
     """
     AI Provider Configuration
     
@@ -207,23 +216,52 @@ class AIProviderConfig(BaseModel):
     Stored per-tenant in the database.
     """
     # LLM Configuration
-    llm_provider: LLMProvider = LLMProvider.GROQ
+    # MVP PAIR, 2026-08-24 — see docs/MODEL-SELECTION.md for the measurements.
+    #
     # Was llama-3.1-8b-instant until 2026-08-17, by which time that id 404'd on
-    # this account — so every tenant WITHOUT a saved config defaulted to a model
-    # that could not answer. Qwen 3.6 is what production actually runs today.
-    llm_model: str = GroqModel.QWEN_3_6_27B.value
+    # this account, then Qwen 3.6. Qwen was measured at 640ms p50 first-token
+    # against a production-sized prompt — 2.4x the pair below — and it is the
+    # reason 49 of 51 production turns on 2026-08-23 were tagged [SLOW].
+    #
+    # Cerebras gpt-oss-120b: p50 269ms, p95 566ms, 10/10 on the voice
+    # correctness battery. Groq serves the SAME model as the fallback, so a
+    # mid-call failover does not change how the agent sounds.
+    llm_provider: LLMProvider = LLMProvider.CEREBRAS
+    llm_model: str = CerebrasModel.GPT_OSS_120B.value
     llm_temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=90, ge=1, le=5000)  # ceiling raised for consultative replies; per-turn length still governed by the persona + sentence cap
     
     # STT Configuration
     stt_provider: STTProvider = STTProvider.DEEPGRAM
     stt_model: str = DeepgramModel.NOVA_3.value
-    # STT engine — which Deepgram speech model drives turn-taking:
+    # STT engine — which speech model drives turn-taking:
     #   "deepgram_flux" — Flux, semantic turn-detection (/v2/listen). Default.
     #   "deepgram_nova" — Nova-3, acoustic VAD + endpointing (/v1/listen).
+    #   "assemblyai" — Universal-3.6 Pro, with its own tuning below.
     # Independent of the failover secondary (Flux always falls back to Nova-3).
     stt_engine: str = "deepgram_flux"
     stt_language: str = "en"
+    assemblyai_settings: Optional[AssemblyAISettings] = None
+
+    @field_validator("stt_engine")
+    @classmethod
+    def normalize_stt_engine(cls, value: str) -> str:
+        # Save, credential checks and runtime selection must see one identity.
+        # Keep legacy Nova aliases; their resolution still belongs to runtime.
+        return value.strip().lower()
+
+    @model_validator(mode="after")
+    def validate_assemblyai_selection(self):
+        if self.stt_engine == "assemblyai":
+            if self.stt_language != "en":
+                raise ValueError("AssemblyAI Universal-3.6 Pro is configured for English only")
+            self.stt_provider = STTProvider.ASSEMBLYAI
+            self.stt_model = ASSEMBLYAI_MODEL
+            if self.assemblyai_settings is None:
+                self.assemblyai_settings = AssemblyAISettings()
+        elif self.stt_provider == STTProvider.ASSEMBLYAI:
+            raise ValueError("AssemblyAI requires the assemblyai STT engine")
+        return self
     
     # TTS Configuration - Using Deepgram Aura-2 (fast and high quality)
     tts_provider: TTSProvider = TTSProvider.DEEPGRAM
@@ -248,26 +286,6 @@ class AIProviderConfig(BaseModel):
     #                 code path; does NOT touch the cascaded prompt machinery.
     # NOTE (Phase 1): the field exists and is validated, but the gateway does
     # NOT yet branch on it — wiring lands in Phase 1b once the bridge is proven.
-    pipeline_mode: str = "cascaded"  # "cascaded" | "realtime"
-    # Realtime-only knobs (ignored entirely when pipeline_mode == "cascaded").
-    realtime_model: str = "gpt-realtime-2"
-    realtime_voice: str = "marin"
-    # Optional overrides for turn_detection / noise_reduction etc. Sane
-    # defaults are applied by the session builder, so this may stay None.
-    # Recognised keys: {"turn_detection": {"type","eagerness"},
-    #                   "noise_reduction": {"type"},
-    #                   "transcription_model": str,
-    #                   "provider": "openai" (default) | "xai",
-    #                   "model": str (xai-only model override),
-    #                   "agent_id": str (xai-only: use a console-built agent
-    #                                    instead of a bare model)}
-    # "provider" is the opt-in switch for the xAI Grok Voice adapter (see
-    # app/infrastructure/realtime/xai_realtime.py) — omitted/"openai" keeps
-    # every existing tenant on the OpenAI gpt-realtime-2 path unchanged.
-    realtime_settings: Optional[Dict[str, Any]] = Field(default=None)
-
-    class Config:
-        use_enum_values = True
 
 
 class ProviderListResponse(BaseModel):
@@ -294,8 +312,8 @@ class LatencyTestResult(BaseModel):
 
 class LLMTestRequest(BaseModel):
     """Request for LLM testing"""
-    model: str = GroqModel.QWEN_3_6_27B.value  # was LLAMA_3_3_70B — 404s here
-    message: str
+    model: str = GroqModel.GPT_OSS_20B.value
+    message: str = Field(max_length=4000)
     temperature: float = Field(default=0.6, ge=0.0, le=2.0)
     max_tokens: int = Field(default=150, ge=1, le=5000)
 
@@ -313,7 +331,7 @@ class TTSTestRequest(BaseModel):
     """Request for TTS testing"""
     model: str = CartesiaModel.SONIC_3.value
     voice_id: str
-    text: str
+    text: str = Field(max_length=500)
     sample_rate: int = 24000  # Official Cartesia recommended
 
 
@@ -331,55 +349,54 @@ class TTSTestResponse(BaseModel):
 # GROQ MODELS - Production + Preview
 # =============================================================================
 
+# ── THE MVP MENU (2026-08-24) ────────────────────────────────────────────────
+# ONE model per provider, both the same weights on independent infrastructure.
+# Full measurements and the argument for that choice: docs/MODEL-SELECTION.md
+#
+# Removed here, with reasons, so nobody re-adds one from memory:
+#   qwen/qwen3.6-27b   640ms p50 first-token on a production-sized prompt —
+#                      2.4x the pair below, and no prompt caching on Groq at
+#                      all (it returns no cached_tokens field). It is the
+#                      measured cause of 49/51 prod turns being tagged [SLOW].
+#   openai/gpt-oss-20b 416ms p50. Correct (10/10) but strictly slower than the
+#                      120b on the same provider, so it earns no menu slot.
 GROQ_MODELS = [
-    # Both Llama entries removed 2026-08-17 — they 404 on this account. See the
-    # GroqModel docstring for the /v1/models output and the probe.
-    ModelInfo(
-        id=GroqModel.QWEN_3_6_27B.value,
-        name="Qwen 3.6 27B",
-        description=(
-            "Current default for voice. Toggleable reasoning — run with thinking "
-            "disabled for fast replies. No prompt caching on Groq, so a large "
-            "system prompt is re-read every turn (~630ms of the ~640ms "
-            "time-to-first-token measured in production)."
-        ),
-        speed="~400 tokens/s",
-        price="$0.29 input / $0.59 output per 1M tokens",
-        context_window=131072,
-        is_preview=True,
-        provider="groq",
-    ),
-    ModelInfo(
-        id=GroqModel.GPT_OSS_120B.value,
-        name="GPT-OSS 120B",
-        description=(
-            "Only Groq family with prompt caching: measured 102ms warm "
-            "time-to-first-token vs 672ms for Qwen on an identical 7.3k-token "
-            "prompt (98% of it cached). CAVEAT — removed from this menu in June "
-            "for stacking questions and spelling things out on voice calls; that "
-            "finding predates the current prompt and has not been re-tested. "
-            "Try it on internal calls before pointing a real campaign at it."
-        ),
-        speed="~500 tokens/s",
-        price="$0.15 input / $0.60 output per 1M tokens (50% off cached input)",
-        context_window=131072,
-        is_preview=True,
-        provider="groq",
-    ),
     ModelInfo(
         id=GroqModel.GPT_OSS_20B.value,
-        name="GPT-OSS 20B",
+        name="GPT-OSS 20B (Groq)",
         description=(
-            "Smaller sibling of GPT-OSS 120B; also caches (119ms warm "
-            "time-to-first-token measured). Cheaper and lighter, and the same "
-            "June conversational caveat applies."
+            "MVP fallback, and a DIFFERENT model from the Cerebras primary by "
+            "requirement — the two must never be the same weights. Tightest "
+            "tail measured on any candidate: p50 416ms, p95 449ms, worst turn "
+            "465ms, against a 37k-char prompt. Scored 10/10 on the voice "
+            "battery, including repeating a captured email back EXACTLY — the "
+            "check qwen fails in practice, since it acknowledges an address "
+            "without ever confirming it. Prompt-cached on Groq."
         ),
-        speed="~1000 tokens/s",
-        price="$0.075 input / $0.30 output per 1M tokens (50% off cached input)",
+        speed="416 ms p50 / 449 ms p95 (measured 2026-08-24)",
+        price="See console.groq.com billing",
         context_window=131072,
-        is_preview=True,
+        is_preview=False,
         provider="groq",
     ),
+]
+
+# HIDDEN, NOT FORBIDDEN.
+#
+# These are no longer offered in AI Options, but a tenant who already has one
+# stored must still be able to save their settings. Validation accepts this
+# list; the UI never shows it. Narrowing the OFFERED menu without this would
+# 400 a tenant on a value they never chose to have — locking them out of their
+# own settings page to enforce a menu change.
+#
+# 2026-09-07: qwen/qwen3.6-27b and both llama ids were REMOVED from this list.
+# Every tenant row that stored them was migrated to cerebras/gpt-oss-120b on
+# production that day (backup: tenant_ai_configs_backup_20260907), so nothing
+# is left to hold open, and the Groq request builder no longer carries a Qwen
+# branch. The product runs exactly two models: Cerebras gpt-oss-120b (primary)
+# and Groq openai/gpt-oss-20b (fallback).
+GROQ_MODELS_HIDDEN = [
+    "openai/gpt-oss-120b",    # fast, but the SAME weights as the Cerebras primary
 ]
 
 # =============================================================================
@@ -492,6 +509,22 @@ GEMINI_MODELS = [
         is_preview=False,
         provider="gemini",
     ),
+    ModelInfo(
+        id=GeminiModel.GEMINI_3_8_FLASH.value,
+        name="Gemini 3.8 Flash — newest, smartest Flash",
+        description=(
+            "Google's newest and most intelligent Flash model (GA 2 Sep 2026). "
+            "Measured from the prod host on 2026-10-01 with a short prompt: "
+            "first text in 818-1213 ms (median 856), a little quicker than 3.6 "
+            "Flash and about 0.3 s slower than 3.5 Flash-Lite. Choose it for "
+            "answer quality; for the fastest replies, 3.5 Flash-Lite."
+        ),
+        speed="~860 ms to first text (measured)",
+        price="$0.75 / $3.75 per 1M tokens",
+        context_window=1_048_576,
+        is_preview=False,
+        provider="gemini",
+    ),
 ]
 
 
@@ -537,53 +570,109 @@ GEMINI_MODELS = [
 # For comparison on the same harness: gemini-2.5-flash 186 ms, and Groq
 # llama-3.1-8b-instant ~90 ms TTFT.
 
+# Removed here, with reasons:
+#   gemma-4-31b   Best p50 of any Cerebras model (317ms) and DISQUALIFIED on
+#                 spread: p95 1133ms, worst turn 1671ms, stdev 368. Roughly one
+#                 turn in ten would feel broken. Judged on p50 alone we would
+#                 have shipped it — see docs/MODEL-SELECTION.md §4.
+#   zai-glm-4.7   NOT SERVED BY THIS ACCOUNT. A live /v1/models call on
+#                 2026-08-24 returned exactly two ids: gemma-4-31b and
+#                 gpt-oss-120b. Offering it was the same defect as the dead
+#                 Llama entries — selecting it fails at the first turn and
+#                 failover then silently runs a model the tenant did not pick.
 CEREBRAS_MODELS = [
-    ModelInfo(
-        id=CerebrasModel.GEMMA_4_31B.value,
-        name="Gemma 4 31B (Cerebras)",
-        description=(
-            "Google's Gemma 4 31B on wafer-scale hardware. Reasoning defaults "
-            "to OFF and we pin reasoning_effort='none' explicitly, so no "
-            "thinking tokens are spent before the first word — the behaviour "
-            "voice needs. 500K TPM / 300 RPM on pay-as-you-go."
-        ),
-        speed="402 ms median (measured) — high variance",
-        price="See console.cerebras.ai billing",
-        is_preview=False,
-        provider="cerebras",
-    ),
-    ModelInfo(
-        id=CerebrasModel.ZAI_GLM_4_7.value,
-        name="GLM 4.7 (Cerebras)",
-        description=(
-            "Z.ai GLM 4.7. Reasoning can be switched off outright "
-            "(reasoning_effort='none'), and we also set clear_thinking so "
-            "earlier turns' thinking is not replayed into the prompt — which "
-            "would otherwise grow every turn. 500K TPM / 500 RPM."
-        ),
-        speed="192 ms median (measured) — most consistent",
-        price="~$2.25 in / $2.75 out per 1M tokens",
-        is_preview=False,
-        provider="cerebras",
-    ),
     ModelInfo(
         id=CerebrasModel.GPT_OSS_120B.value,
         name="GPT-OSS 120B (Cerebras)",
         description=(
-            "Cerebras' flagship: highest limits (1M TPM / 1K RPM) and cheapest "
-            "(~$0.35 in / $0.75 out per 1M). ⚠ Thinking CANNOT be disabled on "
-            "this model — 'none' is rejected, so we floor it at 'low'. Also "
-            "note this codebase already found the gpt-oss family misbehaves on "
-            "conversational voice (see groq.py _is_gpt_oss_model); it is a "
-            "strong agentic/tool-calling model, so prefer it for the assistant "
-            "rather than for live calls."
+            "MVP primary. Fastest first token measured on either provider — "
+            "p50 269ms, p95 566ms against a 37k-char prompt — with the second "
+            "tightest spread (stdev 118). Scored 10/10 on the voice battery. "
+            "Highest limits (1M TPM / 1K RPM) and cheapest of the Cerebras "
+            "models. Thinking cannot be disabled on this model: 'none' is "
+            "rejected, so it is floored at reasoning_effort='low'."
         ),
-        speed="269 ms median (measured)",
+        speed="269 ms p50 / 566 ms p95 (measured 2026-08-24)",
         price="~$0.35 in / $0.75 out per 1M tokens",
+        # Verified 2026-09-22 against the source the note above was waiting for:
+        # inference-docs.cerebras.ai/models/openai-oss and /models/overview give
+        # gpt-oss-120b as 65k context on the free tier and 131k on paid. The
+        # WEIGHTS carry 131,072 either way (OpenAI gpt-oss model card,
+        # arXiv:2508.10925; config.json max_position_embeddings=131072, the same
+        # for the 20b). We declare the FREE-TIER floor because this value must
+        # hold whatever billing state the key is in, and nothing in the product
+        # needs more: the live voice prompt is ~9.5k tokens.
+        context_window=65536,
         is_preview=False,
         provider="cerebras",
     ),
 ]
+
+# OpenAI chat models, on the same OPENAI_API_KEY as GPT Realtime (owner
+# request 2026-10-01). Capabilities and context verified against:
+# https://developers.openai.com/api/docs/models/gpt-6-luna
+OPENAI_MODELS = [
+    ModelInfo(
+        id="gpt-6-luna",
+        name="GPT-6 Luna (OpenAI)",
+        description=(
+            "OpenAI text model for the traditional voice pipeline, with streaming "
+            "responses and function calling. Uses reasoning disabled for knowledge "
+            "and action tools."
+        ),
+        speed="Varies with the prompt and network",
+        context_window=1_050_000,
+        is_preview=False,
+        provider="openai",
+    ),
+]
+
+# DeepSeek V4.1 Flash, on DEEPSEEK_API_KEY (owner request 2026-10-06).
+# Verified on the production key (GET /models) and measured from the prod
+# host: see app/infrastructure/llm/deepseek.py.
+DEEPSEEK_MODELS = [
+    ModelInfo(
+        id="deepseek-flash",
+        name="DeepSeek V4.1 Flash",
+        description=(
+            "DeepSeek's fast V4.1 Flash model, run with thinking off. Measured "
+            "from the prod host on 2026-10-06: first text in 446-613 ms on a "
+            "short prompt and 526-771 ms on a prompt the size of a live call."
+        ),
+        speed="~0.45-0.77 s to first text (measured)",
+        price="from $0.15 in / $0.60 out per 1M tokens",
+        context_window=1_000_000,
+        is_preview=False,
+        provider="deepseek",
+    ),
+]
+
+# Hidden, not forbidden — same reasoning as GROQ_MODELS_HIDDEN above.
+CEREBRAS_MODELS_HIDDEN = [
+    "gemma-4-31b",   # p95 1133ms, worst turn 1671ms — too erratic for voice
+    "zai-glm-4.7",   # NOT SERVED by this account (live /v1/models, 2026-08-24)
+]
+
+
+def validate_traditional_llm_selection(provider: str, model: str) -> None:
+    """Use the same offered + saved-legacy contract at save and call startup."""
+    provider = getattr(provider, "value", provider)
+    models_by_provider = {
+        "openai": [item.id for item in OPENAI_MODELS],
+        "deepseek": [item.id for item in DEEPSEEK_MODELS],
+        "groq": [item.id for item in GROQ_MODELS] + GROQ_MODELS_HIDDEN,
+        "gemini": [item.id for item in GEMINI_MODELS],
+        "cerebras": [item.id for item in CEREBRAS_MODELS] + CEREBRAS_MODELS_HIDDEN,
+    }
+    if provider not in models_by_provider:
+        raise ValueError(
+            f"Invalid LLM provider '{provider}'. Supported: {sorted(models_by_provider)}"
+        )
+    if model not in models_by_provider[provider]:
+        raise ValueError(
+            f"Invalid LLM model '{model}' for provider '{provider}'. "
+            f"Must be one of: {models_by_provider[provider]}"
+        )
 
 
 # =============================================================================
@@ -593,24 +682,6 @@ CEREBRAS_MODELS = [
 # can render the realtime card. Voices are OpenAI's gpt-realtime voice set.
 # marin + cedar are the newest expressive voices; the rest are the standard
 # realtime voices. If OpenAI adds/removes voices, edit this list only.
-REALTIME_MODEL = "gpt-realtime-2"
-
-REALTIME_VOICES = [
-    {"id": "marin", "name": "Marin", "description": "Warm, natural, expressive — recommended default.", "gender": "female"},
-    {"id": "cedar", "name": "Cedar", "description": "Warm, grounded, natural male voice.", "gender": "male"},
-    {"id": "alloy", "name": "Alloy", "description": "Neutral, balanced, general-purpose.", "gender": "neutral"},
-    {"id": "ash", "name": "Ash", "description": "Clear, measured, professional.", "gender": "male"},
-    {"id": "ballad", "name": "Ballad", "description": "Soft, expressive, storytelling tone.", "gender": "male"},
-    {"id": "coral", "name": "Coral", "description": "Bright, friendly, upbeat.", "gender": "female"},
-    {"id": "sage", "name": "Sage", "description": "Calm, reassuring, thoughtful.", "gender": "female"},
-    {"id": "verse", "name": "Verse", "description": "Lively, dynamic, conversational.", "gender": "male"},
-]
-
-# Selectable knobs surfaced to the frontend (map 1:1 to session builder options).
-REALTIME_TURN_DETECTION = ["low", "medium", "high"]
-REALTIME_NOISE_REDUCTION = ["near_field", "far_field", "none"]
-
-
 DEEPGRAM_MODELS = [
     ModelInfo(
         id=DeepgramModel.NOVA_3.value,
@@ -629,7 +700,7 @@ DEEPGRAM_MODELS = [
 ]
 
 # Selectable STT engines (the speech model that drives turn-taking). Distinct
-# from DEEPGRAM_MODELS — this is the Flux-vs-Nova choice surfaced in AI Options.
+# from model IDs — these are the adapters surfaced in AI Options.
 STT_ENGINES = [
     ModelInfo(
         id="deepgram_flux",
@@ -640,12 +711,29 @@ STT_ENGINES = [
         provider="deepgram",
     ),
     ModelInfo(
+        id="assemblyai",
+        name="AssemblyAI Universal-3.6 Pro",
+        description="English streaming transcription with fast, balanced, and accuracy modes, plus conversation context for names and contact details.",
+        speed="Streaming",
+        provider="assemblyai",
+    ),
+    ModelInfo(
         id="deepgram_nova",
         name="Deepgram Nova-3",
         description="Acoustic VAD + endpointing — proven and stable; formats emails and numbers natively. Also the automatic failover whenever Flux is unavailable.",
         speed="Streaming",
         is_preview=False,
         provider="deepgram",
+    ),
+]
+
+ASSEMBLYAI_MODELS = [
+    ModelInfo(
+        id=ASSEMBLYAI_MODEL,
+        name="Universal-3.6 Pro",
+        description="English streaming speech recognition with configurable accuracy and latency.",
+        speed="Streaming",
+        provider="assemblyai",
     ),
 ]
 

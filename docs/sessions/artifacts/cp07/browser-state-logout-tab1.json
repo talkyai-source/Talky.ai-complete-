@@ -1,0 +1,19 @@
+{
+  "syntheticIdentity": "none",
+  "scopeKey": null,
+  "generation": 5,
+  "hydrated": false,
+  "persistence": "none",
+  "storeHistory": true,
+  "titles": [],
+  "toastTitles": [],
+  "externalDestination": {
+    "enabled": false,
+    "url": ""
+  },
+  "thirdPartyConsent": false,
+  "networkAttempts": 0,
+  "eventReads": 17,
+  "lateResult": "not captured",
+  "delayStorage": false
+}

@@ -1,0 +1,27 @@
+✔ lead notes preserve negation and show review evidence separately from confirmed contacts (83.7654ms)
+✔ failed or historical analysis is not presented as a conversation with no captured facts (7.5283ms)
+✔ CRM success and uncertain delivery remain separate for each provider (11.8611ms)
+✔ an empty awaiting_confirmation contact does not invent a caller refusal (14.9019ms)
+✔ an empty needs_clarification contact does not invent a caller refusal (14.4862ms)
+✔ an empty invalid contact does not invent a caller refusal (14.8823ms)
+✔ an empty cancelled contact does not invent a caller refusal (12.5056ms)
+✔ an empty legacy contact does not invent a caller refusal (12.5557ms)
+✔ a parsed contact is visible without being labeled confirmed (11.4549ms)
+✔ manual removal is not labeled a verified contact (10.7225ms)
+✔ completed analysis does not hide partial transcript evidence (46.2568ms)
+✔ completed analysis does not hide failed transcript evidence (5.0648ms)
+✔ completed analysis does not hide unknown transcript evidence (5.4808ms)
+✔ the source revision and confirmation turn are separate evidence (13.6818ms)
+✔ a contact with no calls does not show a transcript warning (8.5993ms)
+✔ incomplete legacy source metadata cannot hide the saved field or fabricate a revision (11.719ms)
+✔ withdrawal evidence does not present the old confirmation as current (10.2634ms)
+✔ a failed manual save keeps the original evidence visible and shows the error (106.0576ms)
+✔ campaign lead-field reads and writes use the campaign-scoped contract (30.8853ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4384.2353

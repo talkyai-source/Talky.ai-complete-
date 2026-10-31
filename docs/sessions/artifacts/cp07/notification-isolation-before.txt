@@ -1,0 +1,31 @@
+✖ a confirmed different account never imports legacy unscoped lead history or destination (1084.9771ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5361.5367
+
+✖ failing tests:
+
+test at src\lib\notifications-isolation.test.tsx:2:1969
+✖ a confirmed different account never imports legacy unscoped lead history or destination (1084.9771ms)
+  AssertionError [ERR_ASSERTION]: legacy A history must not appear for authenticated B
+  
+  false !== true
+  
+      at <anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\notifications-isolation.test.tsx:25:32)
+      at runWithExpensiveErrorDiagnosticsDisabled (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\config.js:47:12)
+      at checkCallback (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\wait-for.js:124:77)
+      at Timeout.checkRealTimersCallback [as _onTimeout] (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\wait-for.js:118:16)
+      at listOnTimeout (node:internal/timers:605:17)
+      at process.processTimers (node:internal/timers:541:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

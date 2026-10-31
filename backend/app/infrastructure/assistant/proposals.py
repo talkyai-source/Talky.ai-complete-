@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from copy import deepcopy
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,14 @@ PROPOSAL_TOOLS = {
     "manage_lead",
     "apply_campaign_voice",
     "send_email",
+    "send_sms",
+    "report_issue",
+    "book_meeting",
+    "update_meeting",
+    "cancel_meeting",
+    "schedule_reminder",
+    "execute_action_plan",
+    "initiate_call",
 }
 
 # proposal_id -> proposal dict
@@ -60,15 +69,22 @@ def store_proposal(
     args: Optional[Dict[str, Any]],
     result: Dict[str, Any],
     tenant_id: str,
+    actor_user_id: str,
     conversation_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Register a pending proposal and return it (includes proposal_id)."""
+    actor = str(actor_user_id or "").strip()
+    if not actor:
+        raise ValueError("actor_user_id is required")
     proposal_id = new_proposal_id()
     proposal = {
         "proposal_id": proposal_id,
         "tool": tool,
         # Drop confirm — apply re-adds confirm=true. Keep everything else verbatim.
-        "args": {k: v for k, v in (args or {}).items() if k != "confirm"},
+        "args": deepcopy({
+            k: v for k, v in (result.get("_apply_args") or args or {}).items()
+            if k not in {"confirm", "actor_user_id", "trusted_proposal_apply", "proposal_id"}
+        }),
         "changes": result.get("changes") or [],
         "campaigns": result.get("campaigns") or [],
         "note": result.get("note") or "",
@@ -79,14 +95,19 @@ def store_proposal(
         # client-echoed campaign id).
         "duplicate": result.get("duplicate"),
         "tenant_id": tenant_id,
+        "actor_user_id": actor,
         "conversation_id": conversation_id,
     }
     _PENDING[proposal_id] = proposal
     return proposal
 
 
-def get_proposal(proposal_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-    """Return the proposal iff it exists AND belongs to this tenant.
+def get_proposal(
+    proposal_id: str,
+    tenant_id: str,
+    actor_user_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Return a proposal only to its authenticated tenant/user owner.
 
     Read-only (does NOT consume). Prefer :func:`pop_proposal` on the APPLY path
     so a proposal can be applied exactly once — get+later-clear leaves a window
@@ -96,36 +117,48 @@ def get_proposal(proposal_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
     p = _PENDING.get(proposal_id)
     if p is None:
         return None
-    if p.get("tenant_id") != tenant_id:
+    actor = str(actor_user_id or "").strip()
+    if p.get("tenant_id") != tenant_id or p.get("actor_user_id") != actor:
         logger.warning(
-            "proposal tenant mismatch: proposal=%s asked_by=%s owner=%s",
-            proposal_id, tenant_id, p.get("tenant_id"),
+            "proposal principal mismatch: proposal=%s tenant=%s actor=%s",
+            proposal_id,
+            tenant_id,
+            actor[:8],
         )
         return None
     return p
 
 
-def pop_proposal(proposal_id: str, tenant_id: str) -> Optional[Dict[str, Any]]:
-    """Atomically fetch AND remove the proposal (tenant-checked), or None.
+def pop_proposal(
+    proposal_id: str,
+    tenant_id: str,
+    actor_user_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Atomically fetch/remove a proposal after tenant and actor checks.
 
     ``dict.pop`` is atomic under the GIL and talky-api runs a single worker, so
     exactly one caller wins the pop; a concurrent second apply of the same
     proposal_id gets None and is told "no longer available" — closing the
     two-tab / double-click double-insert race (Case 4 hardening). A tenant
-    mismatch re-inserts the entry (it was not this tenant's to consume).
+    principal mismatch re-inserts the entry (it was not this user's to consume).
     """
     p = _PENDING.pop(proposal_id, None)
     if p is None:
         return None
-    if p.get("tenant_id") != tenant_id:
+    actor = str(actor_user_id or "").strip()
+    if p.get("tenant_id") != tenant_id or p.get("actor_user_id") != actor:
         _PENDING[proposal_id] = p  # not ours — put it back
         logger.warning(
-            "proposal tenant mismatch on pop: proposal=%s asked_by=%s owner=%s",
-            proposal_id, tenant_id, p.get("tenant_id"),
+            "proposal principal mismatch on pop: proposal=%s tenant=%s actor=%s",
+            proposal_id,
+            tenant_id,
+            actor[:8],
         )
         return None
     return p
 
 
-def clear_proposal(proposal_id: str) -> None:
-    _PENDING.pop(proposal_id, None)
+def clear_proposal(proposal_id: str, tenant_id: str, actor_user_id: str) -> bool:
+    """Reject only a proposal owned by this authenticated tenant principal."""
+
+    return pop_proposal(proposal_id, tenant_id, actor_user_id) is not None

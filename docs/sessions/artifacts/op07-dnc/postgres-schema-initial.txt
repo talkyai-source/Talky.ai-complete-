@@ -1,0 +1,67 @@
+FFFFFFF                                                                  [100%]
+================================== FAILURES ===================================
+_ test_native_continued_question_blocks_future_contact_and_keeps_live_owner[queued] _
+tests\integration\test_op07_native_dnc.py:88: in test_native_continued_question_blocks_future_contact_and_keeps_live_owner
+    assert db.voice._opt_out_purged is True
+E   AttributeError: 'types.SimpleNamespace' object has no attribute '_opt_out_purged'
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=661efee8-635e-48ed-8ef5-1b7f6cc02100 number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:92 opt_out_purge: job cancel failed lead=0865fa2a-9e6a-4393-9031-15ba3aec7856 err=permission denied for table campaigns
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:106 opt_out_purge: lead DNC mark failed lead=0865fa2a-9e6a-4393-9031-15ba3aec7856 err=permission denied for table campaigns
+_ test_native_continued_question_blocks_future_contact_and_keeps_live_owner[processing] _
+tests\integration\test_op07_native_dnc.py:88: in test_native_continued_question_blocks_future_contact_and_keeps_live_owner
+    assert db.voice._opt_out_purged is True
+E   AttributeError: 'types.SimpleNamespace' object has no attribute '_opt_out_purged'
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=a991a8de-84bd-42c2-b46a-20b7edbd3146 number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:106 opt_out_purge: lead DNC mark failed lead=accc6d34-0b30-47d9-b4da-6b405a2395d6 err=permission denied for table campaigns
+_ test_native_continued_question_blocks_future_contact_and_keeps_live_owner[calling] _
+tests\integration\test_op07_native_dnc.py:88: in test_native_continued_question_blocks_future_contact_and_keeps_live_owner
+    assert db.voice._opt_out_purged is True
+E   AttributeError: 'types.SimpleNamespace' object has no attribute '_opt_out_purged'
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=62eed375-ab00-4f59-9f6f-b867ec5db874 number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:106 opt_out_purge: lead DNC mark failed lead=64aa9307-c0c0-46e2-9089-baf5e03864c3 err=permission denied for table campaigns
+____________ test_actual_cleanup_failure_retries_after_dnc_commit _____________
+tests\integration\test_op07_native_dnc.py:106: in test_actual_cleanup_failure_retries_after_dnc_commit
+    assert await opt_out.purge_opt_out_before_farewell(db.session) is True
+E   assert False is True
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=75c8e466-8e0f-48b2-a904-69a911f8f3ab number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:92 opt_out_purge: job cancel failed lead=cac94bed-02a4-4d77-9b59-2670239ef412 err=permission denied for table dialer_jobs
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:106 opt_out_purge: lead DNC mark failed lead=cac94bed-02a4-4d77-9b59-2670239ef412 err=permission denied for table leads
+_________ test_foreign_lead_zero_row_never_acknowledges_full_cleanup __________
+tests\integration\test_op07_native_dnc.py:119: in test_foreign_lead_zero_row_never_acknowledges_full_cleanup
+    assert await opt_out.purge_opt_out_before_farewell(db.session) is True
+E   assert False is True
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=c3e310e6-11b8-4618-9008-f9106b5acfdd number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+___ test_concurrent_shared_attempts_are_idempotent_and_no_lead_is_supported ___
+tests\integration\test_op07_native_dnc.py:128: in test_concurrent_shared_attempts_are_idempotent_and_no_lead_is_supported
+    assert await asyncio.gather(*(opt_out.purge_opt_out_before_farewell(db.session) for _ in range(2))) == [True, True]
+E   assert [False, False] == [True, True]
+E     At index 0 diff: False != True
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=ebb5fa7f-9813-49b0-a182-1fb780345d61 number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=ebb5fa7f-9813-49b0-a182-1fb780345d61 number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+_________ test_database_timeout_does_not_manufacture_acknowledgement __________
+tests\integration\test_op07_native_dnc.py:143: in test_database_timeout_does_not_manufacture_acknowledgement
+    assert await opt_out.purge_opt_out_before_farewell(db.session)
+E   assert False
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=6d718c10-60c3-41e4-bea4-d0110149b907 number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:92 opt_out_purge: job cancel failed lead=841fc366-ca70-4f12-97eb-d664474cbbb3 err=permission denied for table campaigns
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:106 opt_out_purge: lead DNC mark failed lead=841fc366-ca70-4f12-97eb-d664474cbbb3 err=permission denied for table campaigns
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:69 opt_out_purge: DNC add failed tenant=6d718c10-60c3-41e4-bea4-d0110149b907 number=[redacted digits=11 ..07] err=column "added_by" of relation "dnc_entries" does not exist
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:92 opt_out_purge: job cancel failed lead=841fc366-ca70-4f12-97eb-d664474cbbb3 err=permission denied for table campaigns
+WARNING  app.domain.services.dialer.opt_out:opt_out.py:106 opt_out_purge: lead DNC mark failed lead=841fc366-ca70-4f12-97eb-d664474cbbb3 err=permission denied for table campaigns
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op07_native_dnc.py::test_native_continued_question_blocks_future_contact_and_keeps_live_owner[queued]
+FAILED tests/integration/test_op07_native_dnc.py::test_native_continued_question_blocks_future_contact_and_keeps_live_owner[processing]
+FAILED tests/integration/test_op07_native_dnc.py::test_native_continued_question_blocks_future_contact_and_keeps_live_owner[calling]
+FAILED tests/integration/test_op07_native_dnc.py::test_actual_cleanup_failure_retries_after_dnc_commit
+FAILED tests/integration/test_op07_native_dnc.py::test_foreign_lead_zero_row_never_acknowledges_full_cleanup
+FAILED tests/integration/test_op07_native_dnc.py::test_concurrent_shared_attempts_are_idempotent_and_no_lead_is_supported
+FAILED tests/integration/test_op07_native_dnc.py::test_database_timeout_does_not_manufacture_acknowledgement
+7 failed in 7.71s

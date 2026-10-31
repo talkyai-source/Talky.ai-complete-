@@ -11,6 +11,7 @@
 import { useMemo } from "react";
 import { AlertTriangle, Clock } from "lucide-react";
 
+import { Select } from "@/components/ui/select";
 import type { CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { checkCallingWindow } from "@/lib/calling-window";
 
@@ -70,18 +71,19 @@ export function CallingScheduleEditor({
             {/* Timezone */}
             <div>
                 <label className="mb-1 block text-xs font-medium text-muted-foreground">Timezone</label>
-                <select
+                <Select
+                    ariaLabel="Calling timezone"
                     value={tz}
-                    onChange={(e) => set({ timezone: e.target.value })}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    onChange={(next) => set({ timezone: next })}
+                    selectClassName="h-auto rounded-lg border-border px-3 py-2 pr-9 text-sm"
                 >
                     {!TZ_OPTIONS.some((o) => o.value === browserTz) && (
-                        <option value={browserTz}>My timezone ({browserTz})</option>
+                        <option value={browserTz}>{`My timezone (${browserTz})`}</option>
                     )}
                     {TZ_OPTIONS.map((o) => (
                         <option key={o.value} value={o.value}>{o.label}</option>
                     ))}
-                </select>
+                </Select>
             </div>
 
             {/* Window */}

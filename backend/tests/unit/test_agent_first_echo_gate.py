@@ -140,8 +140,12 @@ def test_real_interrupt_cuts_agent_first_greeting():
 
 def test_no_permanent_immunity_after_grace_expiry():
     """Scenario 3: once the greeting window is closed and its grace has
-    expired, a bare greeting is a normal barge-in again — handle_barge_in arms
-    the event (no time-only permanent suppression)."""
+    expired, the echo gate no longer swallows anything, and a real interruption
+    of a later agent turn arms the event (no time-only permanent suppression).
+
+    A BARE greeting over a later turn is deliberately not an interruption any
+    more (first_line_guard, owner decision 2026-10-22: the agent's speech is the
+    answer to "Hello?"), so the interruption here carries real words."""
     s = _session()
     svc = _make_svc()
     event = svc._barge_in_event_for(s)
@@ -151,7 +155,7 @@ def test_no_permanent_immunity_after_grace_expiry():
     s.tts_active = True  # some later agent turn is now audibly playing
 
     assert not is_opener_echo(s, "hello")          # outside the window: not echo
-    asyncio.run(svc.handle_barge_in(s, None, transcript_text="hello"))
+    asyncio.run(svc.handle_barge_in(s, None, transcript_text="hello, who is this?"))
     assert event.is_set()                          # armed → real interrupt
 
 

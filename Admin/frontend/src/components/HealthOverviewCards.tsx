@@ -1,35 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
 import { Clock, Cpu, HardDrive, Server, Loader2, RefreshCw } from 'lucide-react';
 import { api } from '../lib/api';
-import type { DetailedHealthResponse } from '../lib/api';
+import { useAdminRead } from '../lib/use-admin-read';
+import { validDetailedHealth } from '../lib/health-contracts';
+import { observedAt } from '../lib/health-display';
+
+const loadHealthOverviewCards = () => api.getDetailedHealth();
 
 export function HealthOverviewCards() {
-    const [health, setHealth] = useState<DetailedHealthResponse | null>(null);
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState<string | null>(null);
-
-    const fetchHealth = useCallback(async () => {
-        try {
-            const response = await api.getDetailedHealth();
-            if (response.data) {
-                setHealth(response.data);
-                setError(null);
-            } else if (response.error) {
-                setError(response.error.message);
-            }
-        } catch (err) {
-            setError('Failed to fetch health data');
-        } finally {
-            setLoading(false);
-        }
-    }, []);
-
-    useEffect(() => {
-        fetchHealth();
-        // Auto-refresh every 30 seconds
-        const interval = setInterval(fetchHealth, 30000);
-        return () => clearInterval(interval);
-    }, [fetchHealth]);
+    const { data: health, loading, error, refresh: fetchHealth } = useAdminRead(loadHealthOverviewCards, 30000, validDetailedHealth);
 
     if (loading) {
         return (
@@ -46,7 +24,7 @@ export function HealthOverviewCards() {
         return (
             <div className="health-overview-cards">
                 <div className="error-state">
-                    <span>Unable to load system metrics</span>
+                    <span role="alert">System metrics unavailable: {error ?? 'No data returned'}</span>
                     <button className="btn btn-sm btn-secondary" onClick={fetchHealth}>
                         <RefreshCw size={14} /> Retry
                     </button>
@@ -58,7 +36,7 @@ export function HealthOverviewCards() {
     const cards = [
         {
             icon: <Clock size={24} />,
-            label: 'Uptime',
+            label: 'API Process Uptime',
             value: health.uptime_display,
             subtext: `${Math.floor(health.uptime_seconds / 3600)} hours`,
             color: 'var(--accent-green)'
@@ -87,6 +65,8 @@ export function HealthOverviewCards() {
     ];
 
     return (
+        <>
+        <p className="text-muted">{health.metrics_scope}. Observed {observedAt(health.checked_at)}.</p>
         <div className="health-overview-cards">
             {cards.map((card, index) => (
                 <div className="health-card" key={index}>
@@ -101,5 +81,6 @@ export function HealthOverviewCards() {
                 </div>
             ))}
         </div>
+        </>
     );
 }

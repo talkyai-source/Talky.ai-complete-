@@ -1,5 +1,5 @@
 # Talky.ai Backend - Production Dockerfile
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # Set working directory
 WORKDIR /app
@@ -10,18 +10,26 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies
+# Install system dependencies and refresh inherited OpenSSL/PCRE2 security packages.
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     curl \
+    libpcre2-8-0 \
+    libssl3t64 \
+    openssl \
+    openssl-provider-legacy \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+# Install Python dependencies.  The base image's setuptools vendor bundle is
+# part of the final runtime filesystem, so pin the patched bundle explicitly:
+# setuptools 83 vendors jaraco.context 6.1.0 and wheel 0.46.3.
+RUN python -m pip install --no-cache-dir --upgrade "setuptools==83.0.0" \
+    && python -m pip install --no-cache-dir -r requirements.txt \
+    && python -m pip check
 
 # Copy application code
 COPY . .

@@ -12,10 +12,20 @@ two questions:
     anytime")? When true the worker skips the window gate entirely so the
     client is never blocked — the UI still shows the out-of-hours warning.
 
-Pure logic, no DB — the worker passes in the already-loaded config dict.
+Pure logic, no DB — the worker passes in the already-loaded config dict. The
+one exception is the platform kill switch below, read from the environment.
+
+Platform kill switch ``DIALER_ALLOW_IGNORE_SCHEDULE`` (default ``true``): the
+"call anytime" override is tenant-settable, so a tenant can dial around the
+clock. Set it to ``false`` (also ``0`` / ``no`` / ``off``) in the dialer's
+environment and :func:`schedule_ignored` returns False for every campaign, so
+the calling window is enforced again whatever the campaign stored. It is read
+on every call, so a systemd ``Environment=`` change needs only a restart.
 """
 from __future__ import annotations
 
+import logging
+import os
 from typing import Optional
 
 from app.domain.models.calling_rules import CallingRules
@@ -48,8 +58,33 @@ def effective_rules(tenant_rules: CallingRules, calling_config: Optional[dict]) 
         return tenant_rules
 
 
+_SWITCH_OFF = {"0", "false", "no", "off"}
+_SWITCH_ON = {"1", "true", "yes", "on"}
+_warned_switch_values: set = set()
+
+
+def _ignore_schedule_allowed() -> bool:
+    """Platform kill switch: False when ``DIALER_ALLOW_IGNORE_SCHEDULE`` is off.
+
+    An unrecognised value keeps today's behaviour (allowed) but is logged once,
+    so a typo such as ``flase`` is visible in the dialer log.
+    """
+    value = os.getenv("DIALER_ALLOW_IGNORE_SCHEDULE", "true").strip().lower()
+    if value not in _SWITCH_OFF | _SWITCH_ON and value not in _warned_switch_values:
+        _warned_switch_values.add(value)
+        logging.getLogger(__name__).warning(
+            "DIALER_ALLOW_IGNORE_SCHEDULE=%r is not a recognised value; "
+            "'call anytime' stays allowed (use false/0/no/off to disable it)",
+            value,
+        )
+    return value not in _SWITCH_OFF
+
+
 def schedule_ignored(calling_config: Optional[dict]) -> bool:
-    """True when the client chose to dial regardless of the window."""
+    """True when the client chose to dial regardless of the window — and the
+    platform still allows that (``DIALER_ALLOW_IGNORE_SCHEDULE``)."""
     if not calling_config:
+        return False
+    if not _ignore_schedule_allowed():
         return False
     return bool(calling_config.get(_IGNORE_KEY, False))

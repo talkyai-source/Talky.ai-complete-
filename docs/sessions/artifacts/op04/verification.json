@@ -1,0 +1,55 @@
+{
+  "package_id": "OP04",
+  "status": "in_progress",
+  "base_revision": "76adb005094ec6c8fc9f04f4c8dbebd3bb64b45b",
+  "candidate_revision": "56cf4ad61124a3b237759a17a64cf50257337113",
+  "application_changes": false,
+  "source_sha256_lf": {
+    "Talk-Leee/src/components/inbound/inbound-trunk-readiness.test.tsx": "414c3dfc5806447e461f7782bc722ed6e537a82aba4d28c47403ee1d0c77ba68",
+    "backend/tests/integration/test_op04_trunk_lifecycle.py": "9114a0d78b404b8ee826cd05965ad5c70b195a4c5dca49f44cfb4f97453e10d2"
+  },
+  "backend": {
+    "passed": 302,
+    "skipped": 1,
+    "skip_reason": "POSIX file modes only; running on Windows",
+    "modules": 16,
+    "exit_code": 0
+  },
+  "postgres": {
+    "passed": 6,
+    "skipped": 0,
+    "schema": "actual public0059",
+    "role": "NOSUPERUSER NOBYPASSRLS",
+    "command": "python -m pytest tests/integration/test_op04_trunk_lifecycle.py -q --tb=short",
+    "environment": "TEST_DATABASE_URL=disposable loopback cp04_acceptance_test; PYTHONDONTWRITEBYTECODE=1",
+    "exit_code": 0
+  },
+  "frontend": {
+    "passed": 8,
+    "skipped": 0,
+    "typecheck": "passed",
+    "scoped_lint": "passed",
+    "command": "node --test --import tsx --import ./src/test-utils/setup.ts src/components/inbound/inbound-trunk-readiness.test.tsx src/components/settings/sip-trunks-list.test.tsx"
+  },
+  "backend_lint": "python -m ruff check --select F --ignore F401,F841 tests/integration/test_op04_trunk_lifecycle.py; passed",
+  "independent_review": "No material defect found; no HTTP-auth/quota/live-PBX proof inferred from synthetic boundaries.",
+  "not_run": [
+    "actual PJSIP reload/delete",
+    "live SIP probes",
+    "carrier caller-ID display",
+    "deployed timer and measured failure-detection deadline",
+    "production migration or release"
+  ],
+  "artifacts_sha256_lf": {
+    "backend-lint.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "baseline-command.json": "cb2607c61218a007cb5384c40e39406315ed872861bb0bdd75e841ee3e00b170",
+    "baseline.txt": "f356215dd0b326cb545c7d01b77e1af16fe522f013efcf7d62d48947c9e5dc5b",
+    "fixture-retention.json": "461240e87bbc0cb695e7e4e0620e75f8980aa733b75d982b7fc9d03b9aff18df",
+    "frontend-fixture-error.txt": "e3da6f79f2279d2ab3b0998f26f2354a6e66f3073fe886425ea03ffe5f0c6bc5",
+    "frontend-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "frontend-trunks.txt": "d543e3e33dccebc548bc1294086644b6fe2b1f02380394244fa605ef04c4c833",
+    "frontend-typecheck.txt": "23a4fc9cc3ca5fc836c01c9cbdb8579db1f7631471716e4aba1a9d777284a6d6",
+    "postgres-final.txt": "961ccffb8a636fe6c5b9aea473eb1726c2c705568cedf53e6a502cf4f56dddd1",
+    "postgres-first.txt": "40d439f5a7b182648c436b4f1576065fe3f173d88ea3ecd4f70b45af5eee8347"
+  }
+}

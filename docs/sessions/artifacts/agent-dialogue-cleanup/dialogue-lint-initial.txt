@@ -1,0 +1,118 @@
+backend\app\domain\services\telephony\modes\agent_first.py:40:5: F401 [*] `app.domain.services.telephony.config._build_outbound_greeting` imported but unused
+   |
+39 | from app.domain.services.telephony.config import (
+40 |     _build_outbound_greeting,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^ F401
+41 |     _build_call_greeting,
+42 | )
+   |
+   = help: Remove unused import: `app.domain.services.telephony.config._build_outbound_greeting`
+
+backend\tests\unit\test_opening_nudge_words_without_start_of_turn.py:15:8: F401 [*] `os` imported but unused
+   |
+14 | import asyncio
+15 | import os
+   |        ^^ F401
+16 | from unittest.mock import AsyncMock, patch
+   |
+   = help: Remove unused import: `os`
+
+backend\tests\unit\test_opening_nudge_words_without_start_of_turn.py:16:38: F401 [*] `unittest.mock.patch` imported but unused
+   |
+14 | import asyncio
+15 | import os
+16 | from unittest.mock import AsyncMock, patch
+   |                                      ^^^^^ F401
+17 | 
+18 | import pytest
+   |
+   = help: Remove unused import: `unittest.mock.patch`
+
+backend\tests\unit\test_opening_nudge_words_without_start_of_turn.py:20:61: F401 [*] `app.domain.services.voice_pipeline.audio_ingest.AudioIngest` imported but unused
+   |
+18 | import pytest
+19 | 
+20 | from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+   |                                                             ^^^^^^^^^^^ F401
+21 | from tests.unit.test_audio_ingest_caller_first_silence import (
+22 |     _instant_yield,
+   |
+   = help: Remove unused import: `app.domain.services.voice_pipeline.audio_ingest.AudioIngest`
+
+backend\tests\unit\test_opening_nudge_words_without_start_of_turn.py:22:5: F401 [*] `tests.unit.test_audio_ingest_caller_first_silence._instant_yield` imported but unused
+   |
+20 | from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+21 | from tests.unit.test_audio_ingest_caller_first_silence import (
+22 |     _instant_yield,
+   |     ^^^^^^^^^^^^^^ F401
+23 |     _make_pipeline,
+24 |     _make_session,
+   |
+   = help: Remove unused import: `tests.unit.test_audio_ingest_caller_first_silence._instant_yield`
+
+backend\tests\unit\test_phantom_goodbye_recovery.py:10:44: F401 [*] `app.domain.models.conversation.Message` imported but unused
+   |
+ 8 | import pytest
+ 9 | 
+10 | from app.domain.models.conversation import Message, MessageRole
+   |                                            ^^^^^^^ F401
+11 | from app.domain.services.voice_pipeline import capture_mode
+12 | from app.domain.services.voice_pipeline.turn_runner import (
+   |
+   = help: Remove unused import: `app.domain.models.conversation.Message`
+
+backend\tests\unit\test_regreet_ladder_over_open_caller_turn.py:5:8: F401 [*] `os` imported but unused
+  |
+4 | import asyncio
+5 | import os
+  |        ^^ F401
+6 | import time
+7 | from unittest.mock import AsyncMock, patch
+  |
+  = help: Remove unused import: `os`
+
+backend\tests\unit\test_regreet_ladder_over_open_caller_turn.py:6:8: F401 [*] `time` imported but unused
+  |
+4 | import asyncio
+5 | import os
+6 | import time
+  |        ^^^^ F401
+7 | from unittest.mock import AsyncMock, patch
+  |
+  = help: Remove unused import: `time`
+
+backend\tests\unit\test_regreet_ladder_over_open_caller_turn.py:7:38: F401 [*] `unittest.mock.patch` imported but unused
+  |
+5 | import os
+6 | import time
+7 | from unittest.mock import AsyncMock, patch
+  |                                      ^^^^^ F401
+8 | 
+9 | import pytest
+  |
+  = help: Remove unused import: `unittest.mock.patch`
+
+backend\tests\unit\test_regreet_ladder_over_open_caller_turn.py:11:61: F401 [*] `app.domain.services.voice_pipeline.audio_ingest.AudioIngest` imported but unused
+   |
+ 9 | import pytest
+10 | 
+11 | from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+   |                                                             ^^^^^^^^^^^ F401
+12 | from tests.unit.test_audio_ingest_caller_first_silence import (
+13 |     _instant_yield,
+   |
+   = help: Remove unused import: `app.domain.services.voice_pipeline.audio_ingest.AudioIngest`
+
+backend\tests\unit\test_regreet_ladder_over_open_caller_turn.py:13:5: F401 [*] `tests.unit.test_audio_ingest_caller_first_silence._instant_yield` imported but unused
+   |
+11 | from app.domain.services.voice_pipeline.audio_ingest import AudioIngest
+12 | from tests.unit.test_audio_ingest_caller_first_silence import (
+13 |     _instant_yield,
+   |     ^^^^^^^^^^^^^^ F401
+14 |     _make_pipeline,
+15 |     _make_session,
+   |
+   = help: Remove unused import: `tests.unit.test_audio_ingest_caller_first_silence._instant_yield`
+
+Found 11 errors.
+[*] 11 fixable with the `--fix` option.

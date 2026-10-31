@@ -26,6 +26,9 @@ mkdir -p "$EVIDENCE_DIR"
   ctest --test-dir "$BUILD_DIR" --output-on-failure
 } >"$BUILD_OUT" 2>&1
 
+# shellcheck source=gateway_test_env.sh
+source "$REPO_ROOT/telephony/scripts/gateway_test_env.sh"
+provision_voice_gateway_test_env
 "$BUILD_DIR/voice_gateway" --host "$HOST" --port "$PORT" >"$LOG_FILE" 2>&1 &
 GW_PID=$!
 

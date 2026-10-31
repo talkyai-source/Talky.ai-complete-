@@ -88,7 +88,7 @@ class _FakeLLMProvider:
         self._primary = None
         self._secondary = None
 
-    def stream_chat_with_timeout(self, messages, *, system_prompt, temperature, max_tokens):
+    def stream_chat_with_timeout(self, messages, *, system_prompt, temperature, max_tokens, **_kwargs):
         text = self._text
 
         async def _gen():
@@ -117,12 +117,11 @@ class _FakePipeline:
     def _supports_llm_end_session_action(self, session):
         return False
 
-    def _response_max_sentences_for_turn(self, session, text, has_custom_prompt):
-        return None
 
     @staticmethod
-    def _find_sentence_end(buf, allow_clause=False):
-        return buf.find(".")
+    def _find_sentence_end(buf, allow_clause=False, *, known_hosts=()):
+        from app.domain.services.voice_pipeline.sentence_segmentation import find_sentence_end
+        return find_sentence_end(buf, allow_clause=allow_clause, known_hosts=known_hosts)
 
     async def synthesize_and_send_audio(self, session, sentence, websocket, track_latency=False):
         self._calls += 1

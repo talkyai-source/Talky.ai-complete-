@@ -1,0 +1,12 @@
+✔ all actual durable action states remain distinct in the frontend (2.7859ms)
+✔ an unknown provider result stays unresolved without an Apply or retry button (57.889ms)
+✔ provider-accepted email is not presented as delivered (13.8877ms)
+✔ scheduled callback is not presented as a completed call (6.7836ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5435.3531

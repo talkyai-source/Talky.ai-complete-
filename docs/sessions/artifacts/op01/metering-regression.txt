@@ -1,0 +1,14 @@
+........................................................................ [ 83%]
+..............                                                           [100%]
+============================== warnings summary ===============================
+tests/unit/test_op01_metering_unavailable.py::test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+tests/unit/test_op01_metering_unavailable.py::test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_call_metrics_persist.py::test_compute_duration_handles_naive_datetime
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op01-20261005\backend\tests\unit\test_call_metrics_persist.py:112: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow() - timedelta(seconds=125)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+86 passed, 3 warnings in 13.50s

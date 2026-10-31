@@ -26,7 +26,7 @@ from app.domain.models.calling_rules import CallingRules
 from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.dialer.block_reasons import BlockCode
 from app.domain.services.dialer.testing_override import TESTING_OVERRIDE_ENV
-from app.workers.dialer_worker import DialerWorker
+from app.workers.dialer_worker import DialerCallIntent, DialerWorker
 
 
 def _job() -> DialerJob:
@@ -55,6 +55,8 @@ def _worker(*, campaign_cfg: dict | None = None) -> DialerWorker:
     w._db_pool = None
 
     w._get_campaign_status = AsyncMock(return_value="running")
+    w._stale_payload_reason = AsyncMock(return_value=None)
+    w._load_existing_call_intent = AsyncMock(return_value=None)
     w._tenant_minutes_exhausted = AsyncMock(return_value=False)
     w._get_tenant_rules = AsyncMock(return_value=_incident_rules())
     w._get_campaign_calling_config = AsyncMock(return_value=campaign_cfg or {})
@@ -72,7 +74,10 @@ def _worker(*, campaign_cfg: dict | None = None) -> DialerWorker:
     w._evaluate_call_guard = AsyncMock(return_value="allow")
     w._update_job_status = AsyncMock()
     w._make_call = AsyncMock(return_value="provider-call-1")
-    w._create_call_record = AsyncMock(return_value=("call-1", "tk-1", "leg-1"))
+    intent = DialerCallIntent("call-1", "tk-1", "leg-1", "initiated", None, True)
+    w._create_call_intent = AsyncMock(return_value=intent)
+    w._bind_call_intent = AsyncMock()
+    w._mark_call_intent_not_originated = AsyncMock(return_value=True)
     w._update_lead_status = AsyncMock()
     w._mark_campaign_dialed = AsyncMock()
     w._emit_progress_event_throttled = AsyncMock()
@@ -161,9 +166,10 @@ async def test_day_block_sleeps_until_the_next_window_not_five_minutes(monkeypat
 
     await w.process_job(_job())
 
-    w.queue_service.schedule_retry.assert_awaited_once()
-    _, kwargs = w.queue_service.schedule_retry.call_args
+    w.queue_service._redefer_inflight.assert_awaited_once()
+    _, kwargs = w.queue_service._redefer_inflight.call_args
     assert kwargs["delay_seconds"] == 66_000  # the next-window delay, not 300
+    w.queue_service.schedule_retry.assert_not_awaited()
     w.rules_engine.get_delay_until_next_window.assert_called_once()
 
 
@@ -266,8 +272,25 @@ async def test_override_is_stamped_on_the_call_record(monkeypatch):
     executed: list[tuple] = []
 
     class _Conn:
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
         async def execute(self, sql, *args):
             executed.append((sql, args))
+
+        async def fetchrow(self, sql, *args):
+            executed.append((sql, args))
+            if "regexp_replace" in sql:
+                return None  # no other live call on this number
+            if "INSERT INTO calls" in sql:
+                return {
+                    "id": args[0],
+                    "talklee_call_id": args[5],
+                    "status": "initiated",
+                    "provider_call_id": None,
+                }
+            raise AssertionError(sql)
 
     class _Pool:
         @asynccontextmanager
@@ -285,23 +308,21 @@ async def test_override_is_stamped_on_the_call_record(monkeypatch):
         "schedule": "Mon & Fri, 14:00-17:00 Europe/London",
     }
 
-    call_id, talklee_id, leg_id = await DialerWorker._create_call_record(
-        w, _job(), "provider-call-9",
-    )
-    assert call_id and talklee_id and leg_id
+    intent = await DialerWorker._create_call_intent(w, _job())
+    assert intent.call_id and intent.talklee_call_id and intent.leg_id
 
     legs = [a for sql, a in executed if "INSERT INTO call_legs" in sql]
     assert legs, "no call_legs insert captured"
-    leg_meta = json.loads(legs[0][9])
+    leg_meta = json.loads(legs[0][4])
     assert leg_meta["schedule_override"] is True
     assert leg_meta["schedule_override_blocked_reason"] == "calling_not_allowed_on_Tue"
 
     override_events = [
         a for sql, a in executed
-        if "INSERT INTO call_events" in sql and "schedule_override" in a
+        if "INSERT INTO call_events" in sql and "schedule_override" in sql
     ]
     assert len(override_events) == 1
-    audit = json.loads(override_events[0][5])
+    audit = json.loads(override_events[0][3])
     assert audit["schedule_override_source"].endswith(TESTING_OVERRIDE_ENV)
 
 
@@ -311,8 +332,25 @@ async def test_normal_call_record_carries_no_override_marker():
     executed: list[tuple] = []
 
     class _Conn:
+        @asynccontextmanager
+        async def transaction(self):
+            yield self
+
         async def execute(self, sql, *args):
             executed.append((sql, args))
+
+        async def fetchrow(self, sql, *args):
+            executed.append((sql, args))
+            if "regexp_replace" in sql:
+                return None  # no other live call on this number
+            if "INSERT INTO calls" in sql:
+                return {
+                    "id": args[0],
+                    "talklee_call_id": args[5],
+                    "status": "initiated",
+                    "provider_call_id": None,
+                }
+            raise AssertionError(sql)
 
     class _Pool:
         @asynccontextmanager
@@ -326,10 +364,10 @@ async def test_normal_call_record_carries_no_override_marker():
     w._db_pool = _Pool()
     w._schedule_override = None
 
-    await DialerWorker._create_call_record(w, _job(), "provider-call-10")
+    await DialerWorker._create_call_intent(w, _job())
 
     legs = [a for sql, a in executed if "INSERT INTO call_legs" in sql]
-    assert "schedule_override" not in json.loads(legs[0][9])
+    assert "schedule_override" not in json.loads(legs[0][4])
     assert not [
         a for sql, a in executed
         if "INSERT INTO call_events" in sql and "schedule_override" in a

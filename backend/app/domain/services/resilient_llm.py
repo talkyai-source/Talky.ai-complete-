@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from contextlib import suppress
 from dataclasses import dataclass
 from typing import AsyncIterator, List, Optional
 
@@ -63,6 +64,11 @@ class LLMFailoverPolicy:
     first_token_deadline_seconds: float = 2.5
     # One good primary turn re-closes a HALF_OPEN breaker (fast recovery).
     success_threshold: int = 1
+    # Hedged start (2026-10-02): when set (and below the deadline), the
+    # secondary is started alongside a primary that has produced no first
+    # token after this long, and whichever speaks first wins. None keeps the
+    # sequential behaviour for every caller that does not opt in.
+    hedge_after_seconds: Optional[float] = None
 
 
 class _FirstTokenMiss(Exception):
@@ -119,6 +125,10 @@ class ResilientLLMProvider(LLMProvider):
     @property
     def supports_streaming(self) -> bool:
         return self._primary.supports_streaming
+
+    @property
+    def supports_tools(self) -> bool:
+        return self._primary.supports_tools
 
     def __getattr__(self, item):
         """Delegate any un-wrapped attribute (set_deterministic_mode,
@@ -193,6 +203,16 @@ class ResilientLLMProvider(LLMProvider):
                 yield tok
             return
 
+        hedge = self._policy.hedge_after_seconds
+        if (
+            hedge is not None
+            and 0 < hedge < self._policy.first_token_deadline_seconds
+            and self._breaker.state.value != "open"
+        ):
+            async for tok in self._hedged(messages, timeout_seconds, hedge, **kwargs):
+                yield tok
+            return
+
         # Primary under the breaker — which raises CircuitOpenError instantly
         # when it's been failing, so a degraded primary costs no deadline tax.
         try:
@@ -229,6 +249,162 @@ class ResilientLLMProvider(LLMProvider):
                 "both LLM providers missed the first-token deadline"
             ) from miss
 
+    async def _hedged(
+        self,
+        messages: List[Message],
+        timeout_seconds: float,
+        hedge: float,
+        **kwargs,
+    ) -> AsyncIterator[str]:
+        """Race the secondary against a slow primary for the first token.
+
+        Stability audit 2026-10-02: the sequential failover waited the full
+        first-token deadline (1.5 s) in silence before the secondary even
+        started, so each of the 26 failovers in 14 days cost ~1.5 s plus the
+        secondary's own first token. Now the secondary starts at ``hedge``
+        seconds if the primary has said nothing; the primary still wins
+        whenever it has a token. Breaker accounting matches the sequential
+        path: a primary error or a primary past the full deadline is a
+        failure; losing the race is not.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = self._policy.first_token_deadline_seconds
+        t0 = loop.time()
+        p_gen = self._primary.stream_chat_with_timeout(
+            messages, timeout_seconds=timeout_seconds, **kwargs
+        )
+        p_task = asyncio.ensure_future(p_gen.__anext__())
+        s_gen = None
+        s_task = None
+        s_start = None
+        p_out = None  # None pending | ("tok", t) | ("empty",) | ("err", exc)
+        s_out = None
+        winner = None
+
+        def _classify(task):
+            if task.cancelled():
+                return ("err", asyncio.CancelledError())
+            exc = task.exception()
+            if isinstance(exc, StopAsyncIteration):
+                return ("empty",)
+            if exc is not None:
+                return ("err", exc)
+            return ("tok", task.result())
+
+        async def _drop(task, gen):
+            """Stop a losing provider now, not when the winner's reply ends."""
+            if task is not None and not task.done():
+                task.cancel()
+                try:
+                    await task
+                except BaseException:  # noqa: BLE001 - draining a cancelled read
+                    pass
+            if gen is not None:
+                await _safe_aclose(gen)
+
+        def _start_secondary():
+            nonlocal s_gen, s_task, s_start
+            s_gen = self._secondary.stream_chat_with_timeout(
+                messages, timeout_seconds=timeout_seconds, **kwargs
+            )
+            s_task = asyncio.ensure_future(s_gen.__anext__())
+            s_start = loop.time()
+
+        try:
+            while winner is None:
+                now = loop.time()
+                if s_task is None and (now - t0 >= hedge or (p_out is not None and p_out[0] != "tok")):
+                    _start_secondary()
+                    logger.info(
+                        "llm_hedge_started primary=%s secondary=%s after_ms=%.0f",
+                        self._primary.name, self._secondary.name, (now - t0) * 1000,
+                    )
+                wake = []
+                if s_task is None:
+                    wake.append(t0 + hedge)
+                if p_out is None:
+                    wake.append(t0 + deadline)
+                if s_task is not None and s_out is None:
+                    wake.append(s_start + deadline)
+                pending = [
+                    t for t, out in ((p_task, p_out), (s_task, s_out))
+                    if t is not None and out is None
+                ]
+                if not pending and not wake:
+                    break
+                if pending:
+                    done, _ = await asyncio.wait(
+                        pending,
+                        timeout=max(0.0, min(wake) - loop.time()) if wake else None,
+                        return_when=asyncio.FIRST_COMPLETED,
+                    )
+                else:
+                    done = set()
+                    await asyncio.sleep(max(0.0, min(wake) - loop.time()))
+                for task in done:
+                    if task is p_task:
+                        p_out = _classify(task)
+                    elif task is s_task:
+                        s_out = _classify(task)
+                now = loop.time()
+                if p_out is None and now - t0 >= deadline:
+                    p_task.cancel()
+                    p_out = ("err", asyncio.TimeoutError("primary first-token deadline"))
+                if s_task is not None and s_out is None and now - s_start >= deadline:
+                    s_task.cancel()
+                    s_out = ("err", asyncio.TimeoutError("secondary first-token deadline"))
+
+                if p_out is not None and p_out[0] == "tok":
+                    winner = "primary"
+                elif s_out is not None and s_out[0] == "tok":
+                    winner = "secondary"
+                elif p_out is not None and s_out is not None:
+                    break  # both resolved without a token
+
+            # Primary breaker accounting (same rule as the sequential path).
+            if p_out is not None and p_out[0] == "tok":
+                await self._breaker._on_success()
+            elif p_out is not None and p_out[0] == "err" and not isinstance(
+                p_out[1], asyncio.CancelledError
+            ):
+                await self._breaker._on_failure()
+
+            if winner == "primary":
+                if s_task is not None:
+                    logger.info("llm_hedge_primary_won primary=%s", self._primary.name)
+                await _drop(s_task, s_gen)
+                s_task = s_gen = None
+                yield p_out[1]
+                async for tok in p_gen:
+                    yield tok
+                return
+            if winner == "secondary":
+                outcome = "primary_missed" if p_out is not None else "primary_hedged"
+                record_llm_failover(outcome)
+                logger.warning(
+                    "llm_failover outcome=%s reason=%s primary=%s → secondary=%s",
+                    outcome,
+                    repr(p_out[1]) if p_out and p_out[0] == "err" else "slower than hedge",
+                    self._primary.name, self._secondary.name,
+                )
+                await _drop(p_task, p_gen)
+                p_task = p_gen = None
+                yield s_out[1]
+                async for tok in s_gen:
+                    yield tok
+                return
+            if (p_out or ("",))[0] == "empty" and (s_out or ("",))[0] == "empty":
+                return  # both ended cleanly with nothing to say
+            record_llm_failover("secondary_missed")
+            logger.error(
+                "llm_failover_exhausted secondary=%s — speaking fallback",
+                self._secondary.name,
+            )
+            raise LLMTimeoutError("both LLM providers missed the first-token deadline")
+        finally:
+            await _drop(p_task, p_gen)
+            await _drop(s_task, s_gen)
+
     async def _attempt(
         self,
         provider: LLMProvider,
@@ -260,7 +436,16 @@ class ResilientLLMProvider(LLMProvider):
                 raise _FirstTokenMiss(repr(exc)) from exc
 
             if not has_token:
-                return  # clean zero-token completion — nothing to say, no failover
+                # A clean zero-token completion means the provider ended the
+                # stream without a single visible token — on a reasoning model
+                # that is almost always a budget exhausted by thinking
+                # (finish_reason=length, empty content), not "nothing to say".
+                # Nothing has been spoken yet, so failing over is safe (2026-09-06
+                # audit, F02). The secondary is the last resort: if IT is empty
+                # too we end cleanly and the turn streamer speaks its recovery line.
+                if use_breaker and self._secondary is not None:
+                    raise _FirstTokenMiss("empty completion (no visible tokens)")
+                return
 
             # Committed: this provider owns the turn from here.
             yield token
@@ -287,8 +472,67 @@ class ResilientLLMProvider(LLMProvider):
     # ──────────────────────────────────────────────────────────────────
 
     async def stream_chat_with_tools(self, *args, **kwargs) -> AsyncIterator[str]:
-        async for tok in self._primary.stream_chat_with_tools(*args, **kwargs):
-            yield tok
+        # A tool may commit before it returns or before the model speaks. Never
+        # replay that turn on another model once any execution has started.
+        execution_started = False
+        spoken = False
+        runner = kwargs.get("tool_runner")
+
+        async def tracked_runner(*tool_args, **tool_kwargs):
+            nonlocal execution_started
+            execution_started = True
+            return await runner(*tool_args, **tool_kwargs)
+
+        primary_kwargs = dict(kwargs)
+        if runner is not None:
+            primary_kwargs["tool_runner"] = tracked_runner
+        gen = self._primary.stream_chat_with_tools(*args, **primary_kwargs)
+        has_secondary = self._secondary is not None and self._secondary.supports_tools
+        deadline = self._policy.first_token_deadline_seconds
+        try:
+            async with self._breaker:
+                # The first-token deadline applies until a tool starts running
+                # (a stalled primary must not mean ~10 s of dead air); once a
+                # tool executes, nothing may cancel or replay the turn.
+                stream = gen.__aiter__()
+                loop = asyncio.get_running_loop()
+                started = loop.time()
+                while True:
+                    step = asyncio.ensure_future(stream.__anext__())
+                    try:
+                        while not step.done():
+                            if execution_started or spoken or not has_secondary:
+                                await asyncio.wait({step})
+                                break
+                            remaining = started + deadline - loop.time()
+                            if remaining <= 0:
+                                raise asyncio.TimeoutError("tool turn: no first token before the deadline")
+                            await asyncio.wait({step}, timeout=remaining)
+                        tok = step.result()
+                    except StopAsyncIteration:
+                        break
+                    finally:
+                        if not step.done():
+                            step.cancel()
+                            with suppress(asyncio.CancelledError, Exception):
+                                await step
+                    spoken = True
+                    yield tok
+            return
+        except Exception:
+            if spoken or execution_started or self._secondary is None or not self._secondary.supports_tools:
+                raise
+            record_llm_failover("tool_primary_missed")
+        finally:
+            await _safe_aclose(gen)
+        # Provider wait and execution budgets are owned by the tool loop. A
+        # first-text deadline here would cancel healthy in-flight tool writes.
+        secondary = self._secondary.stream_chat_with_tools(*args, **kwargs)
+        try:
+            async for tok in secondary:
+                yield tok
+        finally:
+            await _safe_aclose(secondary)
 
     # ──────────────────────────────────────────────────────────────────
     # Startup / handshake failover (original Phase 4.1 — preserved).

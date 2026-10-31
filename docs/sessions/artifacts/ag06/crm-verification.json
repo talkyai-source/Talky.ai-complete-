@@ -1,0 +1,111 @@
+{
+  "scope": "AG06 CRM source evidence, immutable contact intent, account and recipient admission",
+  "base_revision": "8b0c77866fe9539ad557a811ee4a3280d03835c3",
+  "uncommitted_candidate": true,
+  "sources_sha256": "8c9bf051b5290e5d1f527eddbf06f87c9d186aa2f54fdb1c4553a27a1c6ea0ea",
+  "source_files": [
+    "backend/app/services/crm_sync_service.py",
+    "backend/app/services/crm_delivery_store.py",
+    "backend/app/domain/services/lead_capture_service.py",
+    "backend/Alembic/versions/0058_crm_contact_effect.py"
+  ],
+  "test_files": [
+    "backend/tests/unit/test_ag06_crm_evidence.py",
+    "backend/tests/unit/test_crm_sync_service.py",
+    "backend/tests/integration/test_crm_deliveries.py",
+    "backend/tests/integration/test_ag06_crm_admission.py"
+  ],
+  "reproductions": [
+    {
+      "log": "crm-source-initial.txt",
+      "failed": 2,
+      "cases": [
+        "revised transcript still published obsolete summary",
+        "unknown create reconciled against a changed recipient"
+      ]
+    },
+    {
+      "log": "crm-recipient-initial.txt",
+      "failed": 5,
+      "passed": 2,
+      "cases": [
+        "manual withdrawal and unconfirmed primary reused old import",
+        "manual primary correction ignored",
+        "changed recipient updated old remote association"
+      ]
+    },
+    {
+      "log": "crm-withdrawal-race-initial.txt",
+      "failed": 1,
+      "cases": [
+        "withdrawal during awaited search allowed subsequent create"
+      ]
+    },
+    {
+      "log": "crm-final-review-red.txt",
+      "failed": 3,
+      "cases": [
+        "withdrawal during connector lookup or forced refresh allowed stale contact write",
+        "metadata-only call version change stranded an identical definitively rejected create"
+      ]
+    }
+  ],
+  "verification": {
+    "focused_unit": {
+      "passed": 105,
+      "failed": 0,
+      "seconds": 4.38,
+      "log": "crm-focused.txt",
+      "cwd": "backend",
+      "command": "python -m pytest tests/unit/test_ag06_crm_evidence.py tests/unit/test_crm_sync_service.py tests/unit/test_crm_sync_hooks.py tests/unit/test_lead_capture_service.py -q --tb=short"
+    },
+    "isolated_postgresql": {
+      "passed": 17,
+      "failed": 0,
+      "log": "crm-postgres-final.txt",
+      "scope": "Fresh UUID schema/restricted role, actual0048/0051/0058 migration and receipt SQL; part of28-case combined45.96s run."
+    },
+    "lint": {
+      "exit_code": 0,
+      "log": "crm-lint.txt",
+      "cwd": "backend",
+      "command": "python -m ruff check app/services/crm_sync_service.py app/services/crm_delivery_store.py app/domain/services/lead_capture_service.py Alembic/versions/0058_crm_contact_effect.py tests/unit/test_ag06_crm_evidence.py tests/unit/test_crm_sync_service.py tests/integration/test_crm_deliveries.py --select F tests/integration/test_ag06_crm_admission.py"
+    },
+    "owned_diff_check": {
+      "exit_code": 0
+    },
+    "public_postgresql": {
+      "passed": 11,
+      "failed": 0,
+      "log": "crm-postgres-final.txt",
+      "scope": "Actual public schema at0058, synthetic tenant/call/connector rows and NOSUPERUSER NOBYPASSRLS role. Real admission SQL and lead projection, fake provider writes. Account/config/scopes/call/lead/contact insert-delete-withdrawal race negatives, token-only rotation positive, tenant negative. Combined28 cases45.96s. Final following config comparison delta affects only HubSpot ignored raw settings and is covered by2unit controls; final root aggregate remains separate.",
+      "cwd": "backend",
+      "command": "python -m pytest tests/integration/test_ag06_crm_admission.py tests/integration/test_crm_deliveries.py -q --tb=short",
+      "env": [
+        "TEST_DATABASE_URL=explicit localhost *_test",
+        "TALKY_CRM_TEST_DATABASE_URL=same explicit disposable database"
+      ]
+    }
+  },
+  "behavior": [
+    "Only a summary matching the current canonical transcript/action digest is submitted.",
+    "Primary current source-matched confirmed caller evidence may replace an import. Strongest manual evidence on the same lead prevails; pending/withdrawn/revised evidence suppresses that channel. Numbered or unrelated older caller contacts are not promoted.",
+    "Original prepared contact arguments, recipient, provider/account, source versions and digest are committed before resolution/create, and cannot be overwritten by retry.",
+    "Unknown contact creates never auto-adopt a broad search result or repeat create; legacy missing snapshots remain held.",
+    "Known call-create outcomes retain existing UUID-reference reconciliation in the original pinned account.",
+    "Current source/contact authority and fresh pinned connector identity are rechecked before external writes and before a bounded authentication retry.",
+    "Existing lead receipt projection exposes original references, phase, sanitized status/error and digest only, never raw effect arguments.",
+    "Final admission uses one bounded SQL stamp before and after awaited semantic validation: current call/lead versions, at most2current primary rows plus2winning manual rows, active pinned connector/config and the resolver-selected newest active account/scopes. Absence/insert/delete changes are detected; token-only rotation fields are excluded.",
+    "A known safe pre-effect rejection may retry unchanged exact prepared arguments/primary evidence using a fresh call-version CAS. Original contact_effect remains immutable; unknown create is never reopened."
+  ],
+  "limitations": [
+    "No real provider, paid telephone call or external write was run; connector operations in fixtures are synthetic.",
+    "No provider-neutral explicit contact-ID readback exists in the current CRM contract. Unknown contact creation remains unresolved for original-account support review; this package does not add a blind operator retry or fabricated nonexecution decision.",
+    "A write already admitted or submitted cannot be undone by a later correction. Existing effects and original receipts remain historical; uncertain results stay held.",
+    "Migration0058 is required before the new receipt projection. No destructive downgrade or legacy snapshot backfill is supported.",
+    "The final SQL snapshot is the admission point, not a distributed transaction. A later external account revocation or caller correction cannot atomically cancel an already-admitted remote request.",
+    "Missing durable external_account_id cannot be validated by the final stamp even if a legacy runtime lookup discovers an identity; such rows require account reconciliation/reconnection, not a guessed stored identity.",
+    "The DB effect snapshot contains bounded original provider arguments, potentially the existing transcript excerpt in Salesforce description; the public receipt projection exposes only availability/digest and provider references.",
+    "The final full candidate aggregate is owned by the root agent and is distinct from this scoped evidence."
+  ]
+}

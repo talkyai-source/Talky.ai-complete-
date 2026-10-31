@@ -1,0 +1,513 @@
+{
+  "review_date": "2026-10-01",
+  "scanner": "gitleaks 8.24.3 (official release archive checksum verified)",
+  "source_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75",
+  "finding_counts": {
+    "generic-api-key": 78,
+    "sentry-access-token": 3,
+    "total": 81
+  },
+  "classification": "Every detected value equals the SHA-256 of its named committed source file. None is a credential.",
+  "verification": "Read each finding location, resolve its JSON source path under backend/, then compare the value to hashlib.sha256(subprocess.check_output([git, show, commit + colon + source_file])).hexdigest(). All 81 matched without displaying detected values.",
+  "exception_scope": "Exact commit:path:rule:line fingerprints only; default rules retained. Historical credential exceptions remain commented out.",
+  "validation": {
+    "exact_ci_range": "--no-merges --first-parent 81edb3df31f66c1b2e2e51b5d1c8cbf4efb43faf^..2b3a570b84e2dfd8598c6c0959932ee4387fde75",
+    "commits_scanned": 4,
+    "history_scan_exit_code": 0,
+    "remaining_findings": 0,
+    "new_commit_canary": "Two random synthetic values at the same artifact path, source keys and line positions, committed only in an isolated temporary test repository.",
+    "canary_exit_code": 2,
+    "canary_detected_rules": [
+      "generic-api-key",
+      "sentry-access-token"
+    ]
+  },
+  "verified_findings": [
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2695",
+      "source_file": "backend/app/api/v1/endpoints/api_keys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2704",
+      "source_file": "backend/app/api/v1/endpoints/auth/passkey.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2705",
+      "source_file": "backend/app/api/v1/endpoints/auth/password.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2706",
+      "source_file": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2733",
+      "source_file": "backend/app/api/v1/endpoints/emergency_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2746",
+      "source_file": "backend/app/api/v1/endpoints/passkeys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2757",
+      "source_file": "backend/app/api/v1/endpoints/secrets.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2781",
+      "source_file": "backend/app/api/v1/endpoints/tenant_ai_credentials.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2812",
+      "source_file": "backend/app/core/rate_limit_keys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2818",
+      "source_file": "backend/app/core/security/api_security.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2822",
+      "source_file": "backend/app/core/security/emergency_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2824",
+      "source_file": "backend/app/core/security/internal_auth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2826",
+      "source_file": "backend/app/core/security/passkeys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2827",
+      "source_file": "backend/app/core/security/password.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2830",
+      "source_file": "backend/app/core/security/refresh_tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2836",
+      "source_file": "backend/app/core/security/sessions/tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2838",
+      "source_file": "backend/app/core/security/telephony_webhook_auth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2841",
+      "source_file": "backend/app/core/security/verification_tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2842",
+      "source_file": "backend/app/core/security/webauthn_config.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2908",
+      "source_file": "backend/app/domain/services/campaign_knowledge_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2914",
+      "source_file": "backend/app/domain/services/credential_resolver.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:2955",
+      "source_file": "backend/app/domain/services/secrets_manager.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3093",
+      "source_file": "backend/app/infrastructure/connectors/oauth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3110",
+      "source_file": "backend/app/infrastructure/providers/key_pool.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3155",
+      "source_file": "backend/app/realtime/credentials.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:generic-api-key:3219",
+      "source_file": "backend/app/services/token_rotation_service.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-final.json:sentry-access-token:2845",
+      "source_file": "backend/app/core/sentry_init.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:229",
+      "source_file": "backend/app/api/v1/endpoints/api_keys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:238",
+      "source_file": "backend/app/api/v1/endpoints/auth/passkey.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:239",
+      "source_file": "backend/app/api/v1/endpoints/auth/password.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:240",
+      "source_file": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:267",
+      "source_file": "backend/app/api/v1/endpoints/emergency_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:280",
+      "source_file": "backend/app/api/v1/endpoints/passkeys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:291",
+      "source_file": "backend/app/api/v1/endpoints/secrets.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:315",
+      "source_file": "backend/app/api/v1/endpoints/tenant_ai_credentials.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:346",
+      "source_file": "backend/app/core/rate_limit_keys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:352",
+      "source_file": "backend/app/core/security/api_security.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:356",
+      "source_file": "backend/app/core/security/emergency_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:358",
+      "source_file": "backend/app/core/security/internal_auth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:360",
+      "source_file": "backend/app/core/security/passkeys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:361",
+      "source_file": "backend/app/core/security/password.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:364",
+      "source_file": "backend/app/core/security/refresh_tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:370",
+      "source_file": "backend/app/core/security/sessions/tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:372",
+      "source_file": "backend/app/core/security/telephony_webhook_auth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:375",
+      "source_file": "backend/app/core/security/verification_tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:376",
+      "source_file": "backend/app/core/security/webauthn_config.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:442",
+      "source_file": "backend/app/domain/services/campaign_knowledge_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:448",
+      "source_file": "backend/app/domain/services/credential_resolver.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:489",
+      "source_file": "backend/app/domain/services/secrets_manager.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:627",
+      "source_file": "backend/app/infrastructure/connectors/oauth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:644",
+      "source_file": "backend/app/infrastructure/providers/key_pool.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:689",
+      "source_file": "backend/app/realtime/credentials.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:generic-api-key:753",
+      "source_file": "backend/app/services/token_rotation_service.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-groq-incomplete-tool-contract-retry.json:sentry-access-token:379",
+      "source_file": "backend/app/core/sentry_init.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2505",
+      "source_file": "backend/app/api/v1/endpoints/api_keys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2514",
+      "source_file": "backend/app/api/v1/endpoints/auth/passkey.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2515",
+      "source_file": "backend/app/api/v1/endpoints/auth/password.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2516",
+      "source_file": "backend/app/api/v1/endpoints/auth/password_reset.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2543",
+      "source_file": "backend/app/api/v1/endpoints/emergency_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2556",
+      "source_file": "backend/app/api/v1/endpoints/passkeys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2567",
+      "source_file": "backend/app/api/v1/endpoints/secrets.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2591",
+      "source_file": "backend/app/api/v1/endpoints/tenant_ai_credentials.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2622",
+      "source_file": "backend/app/core/rate_limit_keys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2628",
+      "source_file": "backend/app/core/security/api_security.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2632",
+      "source_file": "backend/app/core/security/emergency_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2634",
+      "source_file": "backend/app/core/security/internal_auth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2636",
+      "source_file": "backend/app/core/security/passkeys.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2637",
+      "source_file": "backend/app/core/security/password.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2640",
+      "source_file": "backend/app/core/security/refresh_tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2646",
+      "source_file": "backend/app/core/security/sessions/tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2648",
+      "source_file": "backend/app/core/security/telephony_webhook_auth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2651",
+      "source_file": "backend/app/core/security/verification_tokens.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2652",
+      "source_file": "backend/app/core/security/webauthn_config.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2718",
+      "source_file": "backend/app/domain/services/campaign_knowledge_access.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2724",
+      "source_file": "backend/app/domain/services/credential_resolver.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2765",
+      "source_file": "backend/app/domain/services/secrets_manager.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2903",
+      "source_file": "backend/app/infrastructure/connectors/oauth.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2920",
+      "source_file": "backend/app/infrastructure/providers/key_pool.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:2965",
+      "source_file": "backend/app/realtime/credentials.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:generic-api-key:3029",
+      "source_file": "backend/app/services/token_rotation_service.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    },
+    {
+      "fingerprint": "2b3a570b84e2dfd8598c6c0959932ee4387fde75:docs/sessions/artifacts/2026-10-01-traditional-conversation-eval-no-end-tool-schema.json:sentry-access-token:2655",
+      "source_file": "backend/app/core/sentry_init.py",
+      "classification": "SHA-256 of committed source file",
+      "verified_commit": "2b3a570b84e2dfd8598c6c0959932ee4387fde75"
+    }
+  ]
+}

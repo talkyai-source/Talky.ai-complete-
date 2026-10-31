@@ -1,0 +1,51 @@
+FEFE                                                                     [100%]
+=================================== ERRORS ====================================
+_ ERROR at teardown of test_exact_provider_reference_is_read_only_and_encoded[google_calendar] _
+tests\unit\test_admin_calendar_inspection.py:45: in denied
+    raise AssertionError("No real network or DB connection is permitted")
+E   AssertionError: No real network or DB connection is permitted
+_ ERROR at teardown of test_exact_provider_reference_is_read_only_and_encoded[outlook_calendar] _
+tests\unit\test_admin_calendar_inspection.py:45: in denied
+    raise AssertionError("No real network or DB connection is permitted")
+E   AssertionError: No real network or DB connection is permitted
+================================== FAILURES ===================================
+___ test_exact_provider_reference_is_read_only_and_encoded[google_calendar] ___
+tests\unit\test_admin_calendar_inspection.py:90: in test_exact_provider_reference_is_read_only_and_encoded
+    connector = PROVIDERS[provider]({})
+E   TypeError: BaseConnector.__init__() missing 1 required positional argument: 'connector_id'
+__ test_exact_provider_reference_is_read_only_and_encoded[outlook_calendar] ___
+tests\unit\test_admin_calendar_inspection.py:90: in test_exact_provider_reference_is_read_only_and_encoded
+    connector = PROVIDERS[provider]({})
+E   TypeError: BaseConnector.__init__() missing 1 required positional argument: 'connector_id'
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\calendar-receipt-inspection-20261006\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_admin_calendar_inspection.py::test_exact_provider_reference_is_read_only_and_encoded[google_calendar]
+FAILED tests/unit/test_admin_calendar_inspection.py::test_exact_provider_reference_is_read_only_and_encoded[outlook_calendar]
+ERROR tests/unit/test_admin_calendar_inspection.py::test_exact_provider_reference_is_read_only_and_encoded[google_calendar]
+ERROR tests/unit/test_admin_calendar_inspection.py::test_exact_provider_reference_is_read_only_and_encoded[outlook_calendar]
+2 failed, 83 deselected, 1 warning, 2 errors in 9.94s
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000025A27FC68E0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x0000025A27FC68E0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'

@@ -1,0 +1,32 @@
+{
+  "scope": "Fake curl/kubectl/load harness only; no network or telephony",
+  "returncode": 7,
+  "elapsed_seconds": 5.235000000000582,
+  "cleanup_calls": [
+    "apply -f infra/chaos/pod-kill.yaml -n talky",
+    "apply -f infra/chaos/redis-partition.yaml -n talky",
+    "delete -f infra/chaos/pod-kill.yaml -n talky --ignore-not-found",
+    "delete -f infra/chaos/redis-partition.yaml -n talky --ignore-not-found"
+  ],
+  "selected_trace": [
+    "+1791119987.409809 STAMP=20261004T131947Z",
+    "+1791119987.410267 LOAD_PID=",
+    "+1791119987.410324 LOAD_RC=",
+    "+1791119987.738400 capture_snapshot '/c/Users/AL AZIZ TECH/AppData/Local/Temp/cp01-fake-soak-dmoeob0n/results/20261004T131947Z/snap_0.json'",
+    "+1791119988.955532 kubectl apply -f infra/chaos/pod-kill.yaml -n talky",
+    "+1791119989.176501 kubectl apply -f infra/chaos/redis-partition.yaml -n talky",
+    "+1791119989.422096 LOAD_PID=1891",
+    "+1791119989.862596 reap_load_if_exited",
+    "+1791119989.862862 kill -0 1891",
+    "+1791119989.983059 sleep 1",
+    "+1791119991.354806 reap_load_if_exited",
+    "+1791119991.354989 kill -0 1891",
+    "+1791119991.359959 wait 1891",
+    "+1791119991.360089 LOAD_RC=7",
+    "+1791119991.360133 LOAD_PID=",
+    "+1791119991.362425 kubectl delete -f infra/chaos/pod-kill.yaml -n talky --ignore-not-found",
+    "+1791119991.590750 kubectl delete -f infra/chaos/redis-partition.yaml -n talky --ignore-not-found",
+    "+1791119991.815443 exit 7",
+    "+1791119991.816380 exit 7"
+  ]
+}

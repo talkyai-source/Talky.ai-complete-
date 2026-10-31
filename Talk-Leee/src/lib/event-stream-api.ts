@@ -11,6 +11,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { backendApi } from "@/lib/backend-api";
 import type { EventQuickFilter, StreamEvent } from "@/lib/campaign-performance";
+import { useNotificationsState } from "@/lib/notifications-client";
+import { notificationScopeKey, notificationsStore } from "@/lib/notifications";
 
 type RawStreamEvent = {
     id: string;
@@ -67,18 +69,33 @@ function mapEvent(raw: RawStreamEvent): StreamEvent {
 }
 
 export const eventsQueryKeys = {
-    list: (filter: EventQuickFilter) => ["events", "list", filter] as const,
+    list: (filter: EventQuickFilter, scopeKey: string | null, generation: number) =>
+        ["events", scopeKey, generation, "list", filter] as const,
 };
 
 export function useEventStream(filter: EventQuickFilter) {
+    const { scopeKey, generation, hydrated } = useNotificationsState();
     return useQuery({
-        queryKey: eventsQueryKeys.list(filter),
+        queryKey: eventsQueryKeys.list(filter, scopeKey, generation),
+        enabled: Boolean(scopeKey) && hydrated,
         queryFn: async ({ signal }): Promise<StreamEvent[]> => {
+            const origin = notificationsStore.capture();
+            if (!origin.isCurrent() || origin.scopeKey !== scopeKey || origin.generation !== generation) {
+                throw new DOMException("Account changed", "AbortError");
+            }
             const categories = FILTER_TO_BACKEND[filter];
             const data = await backendApi.events.list(
                 { categories, limit: 100 },
-                signal,
+                AbortSignal.any([signal, origin.signal]),
             );
+            if (!origin.isCurrent()) throw new DOMException("Account changed", "AbortError");
+            // A cookie can change in another tab before its lifecycle marker
+            // reaches this one. Bind server facts to the authenticated recipient,
+            // never just to the browser identity that initiated the request.
+            if (typeof data?.tenant_id !== "string" || typeof data?.user_id !== "string"
+                || notificationScopeKey({ tenantId: data.tenant_id, userId: data.user_id }) !== origin.scopeKey) {
+                throw new DOMException("Event response owner could not be verified", "AbortError");
+            }
             return data.items.map(mapEvent);
         },
         refetchInterval: () => {
@@ -88,8 +105,8 @@ export function useEventStream(filter: EventQuickFilter) {
         refetchOnWindowFocus: true,
         refetchOnReconnect: true,
         staleTime: 5_000,
-        // First failure surfaces a toast via the http-client's session-expired
-        // path; don't retry indefinitely against a broken backend.
-        retry: 1,
+        // Identity rejection is final for this observation; wait for the actual
+        // account lifecycle change rather than retrying under unverified cookies.
+        retry: (failureCount, error) => error.name !== "AbortError" && failureCount < 1,
     });
 }

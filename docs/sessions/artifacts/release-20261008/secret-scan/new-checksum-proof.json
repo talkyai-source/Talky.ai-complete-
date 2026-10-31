@@ -1,0 +1,141 @@
+{
+  "verified_count": 17,
+  "findings": [
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-process-split/manifest.json:generic-api-key:6",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/deploy/infra/nginx/api.talkleeai.com.conf",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-process-split/manifest.json:generic-api-key:7",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/tests/unit/test_api_process_split.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined-first.json:generic-api-key:161",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/app/domain/services/credential_resolver.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined-first.json:generic-api-key:232",
+      "proof": {
+        "ref": "602a263a",
+        "source_path": "backend/systemd/talky-api.service",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined-first.json:generic-api-key:293",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/tests/unit/test_explicit_secret_boundary.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:165",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/app/domain/services/credential_resolver.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:229",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/deploy/infra/nginx/api.talkleeai.com.conf",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:239",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/systemd/talky-api-web.service",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:240",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/systemd/talky-api.service",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:269",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/tests/unit/test_api_process_split.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-20261008/backend-combined.json:generic-api-key:303",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/tests/unit/test_explicit_secret_boundary.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:49",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/Alembic/versions/0002_add_refresh_tokens.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:52",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/Alembic/versions/0005_tenant_telephony_credentials.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:74",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/Alembic/versions/0027_media_delete_request_keys.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:1144",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/Alembic/versions/0002_add_refresh_tokens.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:1147",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/Alembic/versions/0005_tenant_telephony_credentials.py",
+        "normalization": "raw"
+      }
+    },
+    {
+      "fingerprint": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270:docs/sessions/artifacts/release-migration-merge/result.json:generic-api-key:1169",
+      "proof": {
+        "ref": "e1010fd2bf9f2366f3c893cb6ea848e6ac9b1270",
+        "source_path": "backend/Alembic/versions/0027_media_delete_request_keys.py",
+        "normalization": "raw"
+      }
+    }
+  ]
+}

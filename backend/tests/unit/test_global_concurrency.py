@@ -15,17 +15,22 @@ Behaviours covered:
 from __future__ import annotations
 
 import os
+import asyncio
 import time
 from typing import Any
 
 import pytest
 
 from app.domain.services.global_concurrency import (
+    _ACQUIRE_SCRIPT,
+    _ACQUIRE_CLEANUP_SCRIPT,
+    _RECONCILE_SCRIPT,
     acquire_lease,
     current_count,
     reconcile_orphans,
     refresh_lease,
     release_lease,
+    release_lease_strict,
     resolve_global_cap,
 )
 
@@ -105,6 +110,35 @@ class _FakeRedis:
                 self.expires.pop(key, None)
                 n += 1
         return n
+
+    async def eval(self, script, numkeys, active_key, lease_key, *args):
+        """Atomic command model only; actual Lua/Redis is a separate test."""
+        assert numkeys == 2
+        call_id = args[0]
+        self._expired(lease_key)
+        members = self.sets.setdefault(active_key, set())
+        if script == _ACQUIRE_SCRIPT:
+            _, pod_id, cap, ttl = args
+            present, lease_present = call_id in members, lease_key in self.strings
+            if not present and not lease_present and len(members) >= int(cap):
+                return [0, len(members)]
+            members.add(call_id)
+            if not lease_present:
+                self.strings[lease_key] = "refreshed" if present else pod_id
+            self.expires[lease_key] = self.clock + int(ttl)
+            return [1, len(members)]
+        if script == _ACQUIRE_CLEANUP_SCRIPT:
+            if self.strings.get(lease_key) == args[1]:
+                members.discard(call_id)
+                self.strings.pop(lease_key, None)
+                self.expires.pop(lease_key, None)
+                return 1
+            return 0
+        assert script == _RECONCILE_SCRIPT
+        if lease_key not in self.strings and call_id in members:
+            members.remove(call_id)
+            return 1
+        return 0
 
     # Pipeline is simple — queue operations then execute sequentially.
     def pipeline(self, transaction: bool = True) -> "_FakePipeline":
@@ -204,6 +238,122 @@ async def test_no_redis_falls_through_for_acquire():
 
 
 @pytest.mark.asyncio
+async def test_strict_acquire_rejects_when_redis_is_unavailable():
+    """Pre-answer inbound admission must never fall through without a lease."""
+    result = await acquire_lease(
+        None,
+        call_id="inbound-1",
+        pod_id="pod-a",
+        cap=10,
+        fail_closed=True,
+    )
+    assert result.acquired is False
+    assert result.reason == "redis_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_strict_acquire_rejects_redis_errors_while_legacy_is_fail_open():
+    class BrokenRedis:
+        def pipeline(self, transaction=True):
+            raise ConnectionError("redis partition")
+
+    strict = await acquire_lease(
+        BrokenRedis(),
+        call_id="inbound-1",
+        pod_id="pod-a",
+        cap=10,
+        fail_closed=True,
+    )
+    legacy = await acquire_lease(
+        BrokenRedis(),
+        call_id="outbound-1",
+        pod_id="pod-a",
+        cap=10,
+    )
+    assert strict.acquired is False
+    assert strict.reason == "redis_error"
+    assert legacy.acquired is True
+    assert legacy.reason == "redis_error_fallback"
+
+
+@pytest.mark.asyncio
+async def test_cancelled_strict_acquire_removes_partial_set_membership():
+    class BlockingLeaseRedis(_FakeRedis):
+        def __init__(self):
+            super().__init__()
+            self.lease_write_started = asyncio.Event()
+            self.never = asyncio.Event()
+
+        async def eval(self, script, numkeys, active_key, lease_key, *args):
+            result = await super().eval(script, numkeys, active_key, lease_key, *args)
+            if script == _ACQUIRE_SCRIPT and lease_key == "telephony:lease:inbound-1":
+                self.lease_write_started.set()
+                await self.never.wait()
+            return result
+
+    redis = BlockingLeaseRedis()
+    task = asyncio.create_task(
+        acquire_lease(
+            redis,
+            call_id="inbound-1",
+            pod_id="pod-a",
+            cap=10,
+            fail_closed=True,
+        )
+    )
+    await redis.lease_write_started.wait()
+    assert await current_count(redis) == 1
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert await current_count(redis) == 0
+    assert await redis.exists("telephony:lease:inbound-1") == 0
+
+
+@pytest.mark.asyncio
+async def test_cancelled_strict_acquire_cleanup_is_bounded_when_redis_stalls():
+    class StalledCleanupRedis(_FakeRedis):
+        def __init__(self):
+            super().__init__()
+            self.lease_write_started = asyncio.Event()
+            self.never = asyncio.Event()
+
+        async def eval(self, script, numkeys, active_key, lease_key, *args):
+            if script == _ACQUIRE_CLEANUP_SCRIPT:
+                await self.never.wait()
+            result = await super().eval(script, numkeys, active_key, lease_key, *args)
+            if script == _ACQUIRE_SCRIPT and lease_key == "telephony:lease:inbound-stalled":
+                self.lease_write_started.set()
+                await self.never.wait()
+            return result
+
+        async def srem(self, key: str, *values: str) -> int:
+            # Simulate the same Redis partition persisting into rollback.
+            await self.never.wait()
+            return 0
+
+    redis = StalledCleanupRedis()
+    task = asyncio.create_task(
+        acquire_lease(
+            redis,
+            call_id="inbound-stalled",
+            pod_id="pod-a",
+            cap=10,
+            fail_closed=True,
+        )
+    )
+    await redis.lease_write_started.wait()
+    started = time.monotonic()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=2.0)
+
+    assert time.monotonic() - started < 1.5
+    # Failing closed may temporarily over-count; TTL/reconciliation repairs it.
+    assert "inbound-stalled" in redis.sets["telephony:active_call_ids"]
+
+
+@pytest.mark.asyncio
 async def test_release_is_idempotent():
     r = _FakeRedis()
     await acquire_lease(r, call_id="c1", pod_id="pod-a", cap=10)
@@ -211,6 +361,20 @@ async def test_release_is_idempotent():
     # Second release is a no-op, not an error.
     await release_lease(r, call_id="c1")
     assert await current_count(r) == 0
+
+
+@pytest.mark.asyncio
+async def test_strict_release_propagates_ambiguous_redis_failure():
+    class BrokenPipeline(_FakePipeline):
+        async def execute(self):
+            raise ConnectionError("lost before commit response")
+
+    class BrokenRedis(_FakeRedis):
+        def pipeline(self, transaction=True):
+            return BrokenPipeline(self)
+
+    with pytest.raises(ConnectionError, match="lost before commit response"):
+        await release_lease_strict(BrokenRedis(), call_id="proof-owned-inbound")
 
 
 @pytest.mark.asyncio

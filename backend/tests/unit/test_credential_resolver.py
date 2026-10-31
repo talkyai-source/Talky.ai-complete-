@@ -5,11 +5,14 @@ the fail-safe behaviours (bad ciphertext, DB down, missing pool).
 """
 from __future__ import annotations
 
+from uuid import uuid4
+
 from typing import Any, Optional
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import app.domain.services.credential_resolver as credential_resolver_module
 from app.domain.services.credential_resolver import (
     CredentialResolver,
     env_var_for_provider,
@@ -21,6 +24,20 @@ from app.domain.services.credential_resolver import (
 # Fakes
 # ──────────────────────────────────────────────────────────────────────────
 
+class _FakeTxn:
+    """asyncpg transaction double — see the note in test_recording_policy.py.
+
+    ``acquire_with_tenant`` wraps the connection in a transaction so its
+    ``SET LOCAL app.current_tenant_id`` cannot leak back to the pool.
+    """
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return False
+
+
 class _FakeConn:
     def __init__(self, row: Any = None, raise_on_fetch: Optional[Exception] = None):
         self._row = row
@@ -31,6 +48,9 @@ class _FakeConn:
 
     async def __aexit__(self, *_):
         return False
+
+    def transaction(self):
+        return _FakeTxn()
 
     async def fetchrow(self, *args, **kwargs):
         if self._raise:
@@ -66,6 +86,34 @@ class _FakeEncryption:
 # ──────────────────────────────────────────────────────────────────────────
 # Env resolution (the old single-tenant path)
 # ──────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.asyncio
+async def test_metadata_preserves_real_tenant_row_and_same_cache_selection(monkeypatch):
+    tenant, row_id = str(uuid4()), str(uuid4())
+    pool = _FakePool({"id": row_id, "encrypted_key": "synthetic ciphertext"})
+    resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("tenant-secret"))
+    value = await resolver.resolve_with_metadata("groq", tenant_id=tenant)
+    assert value.secret == "tenant-secret"
+    assert value.observation_context == {"source": "tenant", "tenant_id": tenant, "credential_id": row_id}
+    assert "tenant-secret" not in repr(value)
+    resolver._resolve_tenant = AsyncMock(side_effect=AssertionError("cache should be shared"))
+    assert await resolver.resolve("groq", tenant_id=tenant) == "tenant-secret"
+    assert await resolver.resolve_with_metadata("groq", tenant_id=tenant) is value
+
+
+@pytest.mark.asyncio
+async def test_metadata_platform_rotation_does_not_invent_tenant_row(monkeypatch):
+    tenant = str(uuid4())
+    resolver = CredentialResolver(db_pool=_FakePool(None))
+    keys = iter(("platform-first", "platform-second"))
+    monkeypatch.setattr(credential_resolver_module, "resolve_sync_env_only", lambda *_a, **_kw: next(keys))
+    first = await resolver.resolve_with_metadata("groq", tenant_id=tenant)
+    second = await resolver.resolve_with_metadata("groq", tenant_id=tenant)
+    assert (first.secret, second.secret) == ("platform-first", "platform-second")
+    assert first.observation_context == second.observation_context == {
+        "source": "platform", "tenant_id": tenant, "credential_id": None,
+    }
+
 
 def test_env_lookup_returns_stripped_value(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "  env-key-123  ")
@@ -105,8 +153,36 @@ async def test_tenant_row_wins_over_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool({"id": "c1", "encrypted_key": "ENC:tenant-real"})
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("tenant-real"))
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "tenant-real"
+
+
+@pytest.mark.asyncio
+async def test_cache_scope_cannot_be_reused_by_a_different_pool(monkeypatch):
+    """A new pool must never inherit credentials cached by a disposed pool.
+
+    CPython may reuse a freed object's numeric ``id``.  Force that collision
+    here so the lifecycle bug is deterministic instead of allocator-dependent.
+    """
+    monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
+    monkeypatch.setattr(credential_resolver_module, "id", lambda _: 17, raising=False)
+    tenant_id = "11111111-1111-4111-8111-111111111111"
+
+    old_pool = _FakePool({"id": "c1", "encrypted_key": "ENC:tenant-real"})
+    old_resolver = CredentialResolver(
+        db_pool=old_pool,
+        encryption_service=_FakeEncryption("tenant-real"),
+    )
+    assert await old_resolver.resolve("groq", tenant_id=tenant_id) == "tenant-real"
+
+    replacement_resolver = CredentialResolver(
+        db_pool=_FakePool(None),
+        encryption_service=_FakeEncryption(),
+    )
+    assert (
+        await replacement_resolver.resolve("groq", tenant_id=tenant_id)
+        == "env-fallback"
+    )
 
 
 @pytest.mark.asyncio
@@ -114,7 +190,7 @@ async def test_env_fallback_when_no_tenant_row(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool(None)  # no row
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption())
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "env-fallback"
 
 
@@ -145,7 +221,7 @@ async def test_db_failure_falls_back_to_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool(raise_on_fetch=RuntimeError("db down"))
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption())
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "env-fallback"
 
 
@@ -157,7 +233,7 @@ async def test_decrypt_failure_falls_back_to_env(monkeypatch):
     monkeypatch.setenv("GROQ_API_KEY", "env-fallback")
     pool = _FakePool({"id": "c1", "encrypted_key": "corrupted"})
     resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption(plaintext=None))
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "env-fallback"
 
 
@@ -179,7 +255,7 @@ async def test_resolver_lowercases_provider(monkeypatch):
             return _LoggingConn()
 
     resolver = CredentialResolver(db_pool=_LoggingPool(), encryption_service=_FakeEncryption())
-    await resolver.resolve("GROQ", tenant_id="t1")
+    await resolver.resolve("GROQ", tenant_id="11111111-1111-4111-8111-111111111111")
     assert call_log["provider"] == "groq"
 
 
@@ -192,5 +268,85 @@ async def test_resolver_trims_plaintext(monkeypatch):
         db_pool=pool,
         encryption_service=_FakeEncryption("  tenant-key  \n"),
     )
-    key = await resolver.resolve("groq", tenant_id="t1")
+    key = await resolver.resolve("groq", tenant_id="11111111-1111-4111-8111-111111111111")
     assert key == "tenant-key"
+
+
+# AssemblyAI availability is inspected before operators enter their first key.
+# Its per-request lookup must observe credential changes without a restart or
+# an in-process invalidation (the dashboard and call worker are separate).
+_ASSEMBLY_TENANT = "22222222-2222-4222-8222-222222222222"
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_missing_key_then_registration_is_visible_to_all_resolvers(monkeypatch):
+    monkeypatch.delenv("ASSEMBLYAI_API_KEY", raising=False)
+    pool = _FakePool(None)
+    encryption = _FakeEncryption("new-tenant-key")
+    resolvers = [CredentialResolver(db_pool=pool, encryption_service=encryption) for _ in range(2)]
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) is None
+
+    pool._row = {"id": "new-credential", "encrypted_key": "ENC:new-tenant-key"}
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == "new-tenant-key"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform_key", [None, "platform-fallback"])
+async def test_assemblyai_rotation_and_revocation_are_visible_without_cache_invalidation(monkeypatch, platform_key):
+    if platform_key is None:
+        monkeypatch.delenv("ASSEMBLYAI_API_KEY", raising=False)
+    else:
+        monkeypatch.setenv("ASSEMBLYAI_API_KEY", platform_key)
+    pool = _FakePool({"id": "initial", "encrypted_key": "ENC:old-tenant-key"})
+    encryption = _FakeEncryption("old-tenant-key")
+    resolvers = [CredentialResolver(db_pool=pool, encryption_service=encryption) for _ in range(2)]
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == "old-tenant-key"
+
+    pool._row = {"id": "rotated", "encrypted_key": "ENC:rotated-tenant-key"}
+    encryption._plaintext = "rotated-tenant-key"
+    for resolver in resolvers:
+        assert await resolver.resolve(" ASSEMBLYAI ", tenant_id=_ASSEMBLY_TENANT) == "rotated-tenant-key"
+
+    # The SELECT filters disabled credentials, so a revoked key yields no row.
+    pool._row = None
+    for resolver in resolvers:
+        assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == platform_key
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stale_entry", ["stale-key", CredentialResolver._SENTINEL_USE_ENV])
+async def test_assemblyai_ignores_both_stale_positive_and_negative_cache_entries(monkeypatch, stale_entry):
+    monkeypatch.setenv("ASSEMBLYAI_API_KEY", "platform-fallback")
+    pool = _FakePool({"id": "current", "encrypted_key": "ENC:current-key"})
+    resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("current-key"))
+    cache_key = (pool, _ASSEMBLY_TENANT, "assemblyai", "api_key")
+    monkeypatch.setitem(CredentialResolver._CACHE, cache_key, stale_entry)
+    assert await resolver.resolve("assemblyai", tenant_id=_ASSEMBLY_TENANT) == "current-key"
+
+
+@pytest.mark.asyncio
+async def test_assemblyai_lookup_failure_preserves_env_fallback_and_recovers(monkeypatch):
+    monkeypatch.setenv("CUSTOM_ASSEMBLYAI_KEY", "platform-fallback")
+    pool = _FakePool(raise_on_fetch=RuntimeError("synthetic database unavailable"))
+    resolver = CredentialResolver(db_pool=pool, encryption_service=_FakeEncryption("tenant-key"))
+    assert await resolver.resolve(
+        "assemblyai", tenant_id=_ASSEMBLY_TENANT, env_var="CUSTOM_ASSEMBLYAI_KEY",
+    ) == "platform-fallback"
+    pool._raise = None
+    pool._row = {"id": "recovered", "encrypted_key": "ENC:tenant-key"}
+    assert await resolver.resolve(
+        "assemblyai", tenant_id=_ASSEMBLY_TENANT, env_var="CUSTOM_ASSEMBLYAI_KEY",
+    ) == "tenant-key"
+
+
+@pytest.mark.asyncio
+async def test_other_providers_keep_existing_credential_cache_behavior():
+    resolver = CredentialResolver(db_pool=object())
+    # _resolve_tenant returns (outcome, value) since the bug-hunt cache rework.
+    resolver._resolve_tenant = AsyncMock(side_effect=[("found", "first-key"), ("found", "second-key")])
+    assert await resolver.resolve("deepgram", tenant_id=_ASSEMBLY_TENANT) == "first-key"
+    assert await resolver.resolve("deepgram", tenant_id=_ASSEMBLY_TENANT) == "first-key"
+    resolver._resolve_tenant.assert_awaited_once()

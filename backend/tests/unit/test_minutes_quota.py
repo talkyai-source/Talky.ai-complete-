@@ -15,15 +15,21 @@ class FakeConn:
     """Returns canned values for the two fetchval queries the helper
     runs: the first SELECT (minutes_allocated) then the SUM(duration)."""
 
-    def __init__(self, allocated, used_seconds):
+    def __init__(self, allocated, used_seconds, plan_minutes=30):
         self._allocated = allocated
+        self._plan_minutes = plan_minutes
         self._used = used_seconds
         self._calls = 0
+        self.queries = []
+
+    async def fetchrow(self, query, *args):
+        self.queries.append((query,args))
+        return {"minutes_allocated": self._allocated, "plan_minutes": self._plan_minutes}
 
     async def fetchval(self, query, *args):
-        self._calls += 1
-        # First call = allocation lookup; second = used-seconds sum.
-        return self._allocated if self._calls == 1 else self._used
+        self.queries.append((query,args))
+        return self._used
+
 
 
 @pytest.mark.asyncio
@@ -54,16 +60,17 @@ async def test_over_quota_is_exhausted_remaining_clamped():
 
 @pytest.mark.asyncio
 async def test_zero_allocation_is_unlimited_never_exhausted():
-    s = await compute_minutes_status(FakeConn(0, 999999), "t1")
+    s = await compute_minutes_status(FakeConn(0, 999999, plan_minutes=0), "t1")
     assert s.unlimited is True
     assert s.exhausted is False               # unlimited is never blocked
     assert s.remaining_minutes == 0           # callers branch on `unlimited`
 
 
 @pytest.mark.asyncio
-async def test_null_allocation_treated_as_unlimited():
+async def test_null_allocation_is_unavailable():
     s = await compute_minutes_status(FakeConn(None, 600), "t1")
-    assert s.unlimited is True
+    assert s.unlimited is False
+    assert s.state == "unavailable"
     assert s.exhausted is False
 
 
@@ -73,3 +80,21 @@ async def test_seconds_floor_to_whole_minutes():
     s = await compute_minutes_status(FakeConn(10, 119), "t1")
     assert s.used_minutes == 1
     assert s.exhausted is False
+
+
+@pytest.mark.asyncio
+async def test_used_total_includes_only_finalized_transfer_actual_seconds():
+    conn = FakeConn(10, 179)
+
+    status = await compute_minutes_status(conn, "t1")
+
+    assert status.used_minutes == 2
+    usage_sql = " ".join(conn.queries[1][0].split()).lower()
+    assert "from call_legs leg" in usage_sql
+    assert "join calls parent on parent.id=leg.call_id" in usage_sql
+    assert "leg.leg_type='transfer'" in usage_sql
+    assert "leg.billing_status='finalized'" in usage_sql
+    assert "leg.billing_status='reserved'" not in usage_sql
+    assert "leg.billing_status='held'" not in usage_sql
+    assert "c.direction is distinct from 'inbound'" in usage_sql
+    assert "c.billing_status='finalized'" in usage_sql

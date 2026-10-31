@@ -1,0 +1,31 @@
+{
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "version": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-input-repairs-20261007",
+  "pytest_argv": [
+    "backend/tests/unit/test_agent_input_repairs.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings",
+    "-o",
+    "addopts="
+  ],
+  "source_before": {
+    "backend/app/domain/services/voice_pipeline/turn_ender.py": "d43bf0269b258caccf3a35e5bbdfcbdea740d0615b88264c96c68201cb591ed0",
+    "backend/app/domain/services/voice_pipeline/turn_helpers.py": "c123f85195cc747e2e7b3563a11277ddb5e28e79c7373d9b59dbe35ac32425aa",
+    "backend/app/domain/services/end_session_action.py": "110c98a39ed64b4b85a31e703a579f277d0b03779cf5c96ccd40c58a32fa7c0b",
+    "backend/tests/unit/test_agent_input_repairs.py": "00135fed10695651f571582fcdc8079cebad4c20f33240f5e43283c75ae7c320"
+  },
+  "source_after": {
+    "backend/app/domain/services/voice_pipeline/turn_ender.py": "d43bf0269b258caccf3a35e5bbdfcbdea740d0615b88264c96c68201cb591ed0",
+    "backend/app/domain/services/voice_pipeline/turn_helpers.py": "c123f85195cc747e2e7b3563a11277ddb5e28e79c7373d9b59dbe35ac32425aa",
+    "backend/app/domain/services/end_session_action.py": "110c98a39ed64b4b85a31e703a579f277d0b03779cf5c96ccd40c58a32fa7c0b",
+    "backend/tests/unit/test_agent_input_repairs.py": "00135fed10695651f571582fcdc8079cebad4c20f33240f5e43283c75ae7c320"
+  },
+  "source_unchanged": true,
+  "network": {
+    "internal_socketpairs": 37,
+    "prohibited_attempts": 0
+  },
+  "pytest_exit_code": 1
+}

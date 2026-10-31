@@ -16,13 +16,7 @@ from app.services.scripts.transcript_formatting import (
     format_transcript_turn,
     format_transcript_turns,
 )
-from app.services.scripts.spoken_email_normalizer import (
-    extract_email_from_speech,
-)
-from app.services.scripts.call_state_tracker import (
-    CallState,
-    update_state_from_user_turn,
-)
+from app.services.scripts.call_state_tracker import CallState
 from app.services.scripts.prompt_builder import (
     compose_system_prompt,
 )
@@ -38,7 +32,6 @@ from app.services.scripts.prompts import (
     PERSONAS,
     PromptCompositionError,
     compose_prompt,
-    model_prompt_addendum,
     pick_agent_name,
     validate_pool,
 )
@@ -52,13 +45,10 @@ __all__ = [
     "fetch_campaign_transcripts",
     "format_transcript_turn",
     "format_transcript_turns",
-    "extract_email_from_speech",
     "CallState",
-    "update_state_from_user_turn",
     "compose_system_prompt",
     "is_backchannel",
     "compose_prompt",
-    "model_prompt_addendum",
     "pick_agent_name",
     "validate_pool",
     "PromptCompositionError",

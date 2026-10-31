@@ -1,0 +1,24 @@
+...................F.................................................... [ 24%]
+........................................................................ [ 48%]
+........................................................................ [ 72%]
+........................................................................ [ 97%]
+........                                                                 [100%]
+================================== FAILURES ===================================
+_ test_required_live_identity_is_pending_but_legacy_imported_name_keeps_existing_policy _
+tests\unit\test_model_identity_recording.py:203: in test_required_live_identity_is_pending_but_legacy_imported_name_keeps_existing_policy
+    assert await service.missing_required("tenant", "call") == ["full_name"]
+app\domain\services\lead_capture_service.py:699: in missing_required
+    async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\contextlib.py:210: in __aenter__
+    return await anext(self.gen)
+app\core\db_utils.py:97: in acquire_with_tenant
+    _validate_uuid(str(tenant_id))
+app\core\db_utils.py:56: in _validate_uuid
+    uuid.UUID(value)  # raises ValueError for non-UUIDs
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\uuid.py:178: in __init__
+    raise ValueError('badly formed hexadecimal UUID string')
+E   ValueError: badly formed hexadecimal UUID string
+=========================== short test summary info ===========================
+FAILED tests/unit/test_model_identity_recording.py::test_required_live_identity_is_pending_but_legacy_imported_name_keeps_existing_policy
+1 failed, 295 passed, 181 warnings in 8.25s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 339, 'prohibited': 0}

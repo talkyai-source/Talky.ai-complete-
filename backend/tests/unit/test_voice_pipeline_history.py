@@ -103,8 +103,23 @@ async def test_llm_exception_rolls_back_user_message(pipeline_service, fake_sess
 
 
 @pytest.mark.asyncio
-async def test_cancellation_rolls_back_user_message(pipeline_service, fake_session):
-    """asyncio.CancelledError: user message rolled back, error re-raised."""
+async def test_cancellation_before_any_sentence_keeps_user_message(
+    pipeline_service, fake_session
+):
+    """asyncio.CancelledError with nothing spoken yet: the user message is
+    KEPT (only what the cancelled task itself appended after it is
+    dropped), error re-raised.
+
+    UPDATED 2026-09-24 — this test used to assert the OPPOSITE (full
+    rollback, discarding the caller's own utterance), which was the
+    production defect itself: each Flux EndOfTurn dispatches only its own
+    segment, and nothing downstream re-queues a rolled-back fragment into a
+    later turn, so a caller who spoke in fragments had their words silently
+    erased (51450718: "I want full body checkup" never engaged with;
+    b97ce4c5: 8 turns lost this way in one call). See
+    tests/unit/test_bargein_cancel_keeps_caller_turn.py for the full
+    production evidence and an end-to-end (real task-cancellation) proof.
+    """
     pipeline_service._stream_llm_and_tts = AsyncMock(
         side_effect=asyncio.CancelledError()
     )
@@ -115,9 +130,12 @@ async def test_cancellation_rolls_back_user_message(pipeline_service, fake_sessi
             websocket=None, turn_id=1,
         )
 
-    assert len(fake_session.conversation_history) == 0, (
-        f"Expected empty history after cancel, got {[m.role for m in fake_session.conversation_history]}"
+    assert len(fake_session.conversation_history) == 1, (
+        f"Expected the user message to survive, got "
+        f"{[m.role for m in fake_session.conversation_history]}"
     )
+    assert fake_session.conversation_history[0].role == MessageRole.USER
+    assert fake_session.conversation_history[0].content == "Can you help me?"
 
 
 @pytest.mark.asyncio

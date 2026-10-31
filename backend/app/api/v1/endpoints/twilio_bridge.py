@@ -73,14 +73,30 @@ def _get_orchestrator():
 # ---------------------------------------------------------------------------
 # Feature gate — DEFAULT DENY
 # ---------------------------------------------------------------------------
-# Production runs active_telephony_provider="sip"; Twilio is not in live use.
-# An unset env var therefore means CLOSED, so this bridge is not attack surface
-# for deployments that never enabled it.
+# These legacy callbacks do not carry the canonical tenant/campaign admission
+# used by supported SIP origination. Explicit opt-in is for nonproduction
+# qualification only; a signed callee number is not outbound tenant ownership.
 
 def _bridge_enabled() -> bool:
+    if os.getenv("ENVIRONMENT", "development").strip().lower() == "production":
+        return False
     return os.getenv("TWILIO_BRIDGE_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }
+
+
+_TWILIO_OUTBOUND_DIRECTIONS = {"outbound", "outbound-api", "outbound-dial"}
+
+
+def _is_supported_answer_direction(value: object) -> bool:
+    """Only provider-originated OUTBOUND answers use this legacy bridge.
+
+    True inbound must enter through the Asterisk pre-answer admission path,
+    which commits the tenant-scoped call row and reservations before Answer.
+    Treat a missing/unknown direction as inbound-risk ambiguity and fail closed.
+    """
+
+    return str(value or "").strip().lower() in _TWILIO_OUTBOUND_DIRECTIONS
 
 
 # ---------------------------------------------------------------------------
@@ -228,7 +244,11 @@ async def _build_twilio_session_config(to_number: str | None = None):
         resolve_ai_config_for_did,
     )
 
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+    from app.domain.services.voice_tuning import get_voice_tuning_resolver
+
     tenant_id, config = await resolve_ai_config_for_did(to_number)
+    tuning = await get_voice_tuning_resolver().for_tenant_async(tenant_id, require_available=bool(tenant_id))
     llm_provider_type = (
         getattr(config.llm_provider, "value", None)
         or str(config.llm_provider)
@@ -236,15 +256,16 @@ async def _build_twilio_session_config(to_number: str | None = None):
     )
     return VoiceSessionConfig(
         gateway_type="twilio",
-        stt_provider_type="deepgram_flux",
+        **resolve_stt_selection(config, campaign_id="twilio"),
         llm_provider_type=llm_provider_type,
         tts_provider_type=config.tts_provider,
-        stt_model="flux-general-en",
         stt_sample_rate=8000,          # Twilio Media Streams = 8 kHz
         stt_encoding="linear16",       # we decode mu-law -> linear16 before STT
-        stt_eot_threshold=0.85,
-        stt_eot_timeout_ms=1500,
-        stt_eager_eot_threshold=None,
+        stt_eot_threshold=tuning.stt_eot_threshold,
+        stt_eot_timeout_ms=tuning.stt_eot_timeout_ms,
+        stt_eager_eot_threshold=tuning.stt_eager_eot_threshold,
+        turn_0_min_confidence=tuning.turn_0_min_confidence,
+        turn_0_min_alpha_chars=tuning.turn_0_min_alpha_chars,
         llm_model=config.llm_model,
         llm_temperature=config.llm_temperature,
         llm_max_tokens=config.llm_max_tokens,
@@ -270,7 +291,6 @@ async def _build_twilio_session_config(to_number: str | None = None):
         realtime_settings=getattr(config, "realtime_settings", None),
     )
 
-
 def _twiml_stream_response(
     call_sid: str,
     from_number: str,
@@ -287,8 +307,6 @@ def _twiml_stream_response(
     """
     ws_base = _public_base().replace("https://", "wss://").replace("http://", "ws://")
     stream_url = f"{ws_base}/api/v1/twilio/media-stream"
-    if token:
-        stream_url = f"{stream_url}?token={token}"
     token_param = (
         f'<Parameter name="token" value={quoteattr(token)}/>' if token else ""
     )
@@ -300,7 +318,7 @@ def _twiml_stream_response(
         f'<Parameter name="from" value={quoteattr(from_number)}/>'
         f'<Parameter name="to" value={quoteattr(to_number)}/>'
         f"{token_param}"
-        "</Stream></Connect>"
+        "</Stream></Connect><Hangup/>"
         "</Response>"
     )
 
@@ -314,7 +332,7 @@ async def twilio_answer(request: Request):
     """Twilio fetches TwiML here on call connect. We return a
     ``<Connect><Stream>`` that opens a bidirectional Media Streams WebSocket."""
     if not _bridge_enabled():
-        logger.warning("twilio_answer rejected: TWILIO_BRIDGE_ENABLED is not set")
+        logger.warning("twilio_answer rejected: bridge disabled or unavailable in production")
         return Response(status_code=404)
     # Minting a media-stream token off an UNVERIFIED webhook would hand the
     # credential to anyone who can POST here, so require the signature secret.
@@ -337,6 +355,13 @@ async def twilio_answer(request: Request):
     call_sid = params.get("CallSid", "unknown")
     from_number = params.get("From", "unknown")
     to_number = params.get("To", "unknown")
+    if not _is_supported_answer_direction(params.get("Direction")):
+        logger.error(
+            "twilio_answer refused: direction=%s has no durable pre-answer "
+            "inbound admission path",
+            str(params.get("Direction") or "missing")[:32],
+        )
+        return Response(status_code=503)
     logger.info(
         "Twilio answer webhook: callSid=%s from=%s to=%s",
         call_sid[:16], from_number, to_number,
@@ -358,6 +383,11 @@ async def twilio_event(request: Request):
     """Call lifecycle status callbacks. The Media Streams WebSocket lifecycle
     is the source of truth for session teardown, so this is informational —
     we normalise + log the status."""
+    if not _bridge_enabled():
+        return Response(status_code=404)
+    if not (os.getenv("TWILIO_AUTH_TOKEN") or "").strip():
+        logger.error("twilio_event refused: TWILIO_AUTH_TOKEN unset")
+        return Response(status_code=503)
     form = await request.form()
     params = {k: str(v) for k, v in form.items()}
     if not verify_twilio_signature(
@@ -395,13 +425,13 @@ async def twilio_media_stream(
     Outbound audio + barge-in ``clear`` frames are emitted by TwilioMediaGateway.
 
     Refuses the upgrade unless the bridge is explicitly enabled, and does no work
-    until the /answer-minted token verifies (query string preferred so we can
-    reject pre-accept; ``start.customParameters.token`` as the fallback, since
-    Twilio does not sign the handshake).
+    until the /answer-minted ``start.customParameters.token`` verifies. Twilio
+    Stream URLs cannot contain a query string; legacy clients may still supply
+    a query token for the same verification before accepting media.
     """
     if not _bridge_enabled():
         logger.warning(
-            "twilio media-stream rejected: TWILIO_BRIDGE_ENABLED is not set"
+            "twilio media-stream rejected: bridge disabled or unavailable in production"
         )
         await websocket.close(code=1008, reason="Twilio bridge disabled")
         return
@@ -491,6 +521,10 @@ async def twilio_media_stream(
                     if hasattr(gw, "feed_twilio_media"):
                         await gw.feed_twilio_media(voice_session.call_id, ulaw)
 
+                elif event == "mark" and voice_session is not None:
+                    voice_session.media_gateway.mark_playback_complete(
+                        voice_session.call_id, (data.get("mark") or {}).get("name"))
+
                 elif event == "dtmf":
                     digit = (data.get("dtmf", {}) or {}).get("digit")
                     logger.info(
@@ -500,7 +534,7 @@ async def twilio_media_stream(
 
                 elif event == "stop":
                     break
-                # "connected" and "mark" frames are ignored.
+                # "connected" is informational only.
 
     except asyncio.TimeoutError:
         logger.warning("twilio media-stream closed: no authenticated start frame")

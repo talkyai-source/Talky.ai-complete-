@@ -244,13 +244,13 @@ class TestCoerceUserPartial:
         })
         assert result == {"stt_eot_timeout_ms": 1500}
 
-    def test_drops_wrong_typed_values_keeps_valid_ones(self):
+    def test_rejects_wrong_typed_user_values_instead_of_saving_different_config(self):
         resolver = VoiceTuningResolver()
-        result = resolver.coerce_user_partial({
-            "stt_eot_timeout_ms": "not-a-number",
-            "turn_0_min_confidence": 0.55,
-        })
-        assert result == {"turn_0_min_confidence": 0.55}
+        with pytest.raises(ValueError, match="stt_eot_timeout_ms"):
+            resolver.coerce_user_partial({
+                "stt_eot_timeout_ms": "not-a-number",
+                "turn_0_min_confidence": 0.55,
+            })
 
     def test_empty_input_returns_empty(self):
         resolver = VoiceTuningResolver()

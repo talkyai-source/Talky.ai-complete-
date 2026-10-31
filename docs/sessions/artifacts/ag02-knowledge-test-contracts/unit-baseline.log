@@ -1,0 +1,522 @@
+................FF....FFFF..FFFFFFFFFFFF.FFFFFFFFFFFF.FF.F.FFFFF..F...F. [ 63%]
+FFFFFFFFFFFFFFF.FFFFFFFFFFFFFF..FFFFFFFFFF                               [100%]
+================================== FAILURES ===================================
+_________________ test_tool_and_injection_use_same_deep_fact __________________
+tests\unit\test_agent_knowledge_repairs.py:91: in test_tool_and_injection_use_same_deep_fact
+    assert "two years" in result
+E   AssertionError: assert 'two years' in 'Company source knowledge is unavailable for this call; do not invent company facts.'
+_________________ test_knowledge_block_respects_total_budget __________________
+tests\unit\test_kb_injection_budget.py:50: in test_knowledge_block_respects_total_budget
+    assert len(block) <= ts._KB_TOTAL_CHARS + 600   # header + a little slack
+E   AttributeError: module 'app.domain.services.voice_pipeline.turn_streamer' has no attribute '_KB_TOTAL_CHARS'
+_________ test_every_delivery_path_uses_authored_source[True-inject] __________
+tests\unit\test_kb_source_first_all_paths.py:103: in test_every_delivery_path_uses_authored_source
+    text, status = await _delivered_source(path, with_source=with_source)
+tests\unit\test_kb_source_first_all_paths.py:96: in _delivered_source
+    return text, session._knowledge_evidence["status"]
+E   AttributeError: 'types.SimpleNamespace' object has no attribute '_knowledge_evidence'
+__________ test_every_delivery_path_uses_authored_source[True-tool] ___________
+tests\unit\test_kb_source_first_all_paths.py:106: in test_every_delivery_path_uses_authored_source
+    assert status == "matched"
+E   AssertionError: assert 'unavailable' == 'matched'
+E     - matched
+E     + unavailable
+________ test_every_delivery_path_uses_authored_source[True-realtime] _________
+tests\unit\test_kb_source_first_all_paths.py:106: in test_every_delivery_path_uses_authored_source
+    assert status == "matched"
+E   AssertionError: assert 'unavailable' == 'matched'
+E     - matched
+E     + unavailable
+_________ test_every_delivery_path_uses_authored_source[False-inject] _________
+tests\unit\test_kb_source_first_all_paths.py:103: in test_every_delivery_path_uses_authored_source
+    text, status = await _delivered_source(path, with_source=with_source)
+tests\unit\test_kb_source_first_all_paths.py:96: in _delivered_source
+    return text, session._knowledge_evidence["status"]
+E   AttributeError: 'types.SimpleNamespace' object has no attribute '_knowledge_evidence'
+___________________ test_price_guard_reaches_the_tool_path ____________________
+tests\unit\test_kb_source_first_all_paths.py:119: in test_price_guard_reaches_the_tool_path
+    assert status == "matched"
+E   AssertionError: assert 'unavailable' == 'matched'
+E     - matched
+E     + unavailable
+_ test_default_failed_literal_search_gets_existing_model_lookup[What is the recurring charge for Starter?-weak_match] _
+tests\unit\test_knowledge_default_recovery.py:64: in test_default_failed_literal_search_gets_existing_model_lookup
+    assert session._knowledge_evidence["status"] == status
+..\..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'CallSession' object has no attribute '_knowledge_evidence'
+_ test_default_failed_literal_search_gets_existing_model_lookup[What is the recurring charge?-no_match] _
+tests\unit\test_knowledge_default_recovery.py:64: in test_default_failed_literal_search_gets_existing_model_lookup
+    assert session._knowledge_evidence["status"] == status
+..\..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: in __getattr__
+    raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E   AttributeError: 'CallSession' object has no attribute '_knowledge_evidence'
+_______ test_existing_non_recovery_path_stays_one_model_round[matched] ________
+tests\unit\test_knowledge_default_recovery.py:88: in test_existing_non_recovery_path_stays_one_model_round
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_____ test_existing_non_recovery_path_stays_one_model_round[backchannel] ______
+tests\unit\test_knowledge_default_recovery.py:88: in test_existing_non_recovery_path_stays_one_model_round
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+________ test_existing_non_recovery_path_stays_one_model_round[inline] ________
+tests\unit\test_knowledge_default_recovery.py:88: in test_existing_non_recovery_path_stays_one_model_round
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+____________ test_recovery_withholds_prelookup_claim_before_speech ____________
+tests\unit\test_knowledge_default_recovery.py:95: in test_recovery_withholds_prelookup_claim_before_speech
+    assert await _speak(service, session) == [ANSWER]
+E   AssertionError: assert ['Starter cos...0 per month.'] == ['Starter cos...0 per month.']
+E     At index 0 diff: 'Starter costs $999 per month.' != 'Starter costs $20 per month.'
+E     Left contains 3 more items, first extra item: 'Starter costs $999 per month.'
+E     Use -v to get more diff
+__________ test_wrong_intent_rewrite_is_not_original_question_proof ___________
+tests\unit\test_knowledge_default_recovery.py:106: in test_wrong_intent_rewrite_is_not_original_question_proof
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+____________ test_original_prior_caller_context_survives_recovery _____________
+tests\unit\test_knowledge_default_recovery.py:120: in test_original_prior_caller_context_survives_recovery
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_ test_unavailable_initial_lookup_does_not_start_model_recovery[missing_container] _
+tests\unit\test_knowledge_default_recovery.py:133: in test_unavailable_initial_lookup_does_not_start_model_recovery
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+____ test_unavailable_initial_lookup_does_not_start_model_recovery[error] _____
+tests\unit\test_knowledge_default_recovery.py:133: in test_unavailable_initial_lookup_does_not_start_model_recovery
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+___ test_unavailable_initial_lookup_does_not_start_model_recovery[timeout] ____
+tests\unit\test_knowledge_default_recovery.py:133: in test_unavailable_initial_lookup_does_not_start_model_recovery
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_________ test_ineligible_session_or_provider_keeps_plain_path[none] __________
+tests\unit\test_knowledge_default_recovery.py:147: in test_ineligible_session_or_provider_keeps_plain_path
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+______ test_failed_recovery_revokes_prior_facts[no_match-quasar nebula] _______
+tests\unit\test_knowledge_default_recovery.py:174: in test_failed_recovery_revokes_prior_facts
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_ test_failed_recovery_revokes_prior_facts[weak_match-Starter international warranty insurance] _
+tests\unit\test_knowledge_default_recovery.py:174: in test_failed_recovery_revokes_prior_facts
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_ test_failed_recovery_revokes_prior_facts[unavailable-Starter monthly price] _
+tests\unit\test_knowledge_default_recovery.py:174: in test_failed_recovery_revokes_prior_facts
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_______ test_only_one_actual_recovery_lookup_per_turn[Enterprise price] _______
+tests\unit\test_knowledge_default_recovery.py:194: in test_only_one_actual_recovery_lookup_per_turn
+    assert queries == ["What is the recurring charge?", "Starter monthly price"]
+E   AssertionError: assert [] == ['What is the...onthly price']
+E     Right contains 2 more items, first extra item: 'What is the recurring charge?'
+E     Use -v to get more diff
+____ test_only_one_actual_recovery_lookup_per_turn[Starter monthly price] _____
+tests\unit\test_knowledge_default_recovery.py:194: in test_only_one_actual_recovery_lookup_per_turn
+    assert queries == ["What is the recurring charge?", "Starter monthly price"]
+E   AssertionError: assert [] == ['What is the...onthly price']
+E     Right contains 2 more items, first extra item: 'What is the recurring charge?'
+E     Use -v to get more diff
+_____________ test_shared_recovery_helper_reuses_copied_evidence ______________
+tests\unit\test_knowledge_default_recovery.py:213: in test_shared_recovery_helper_reuses_copied_evidence
+    result = await recovery.lookup("Starter monthly price")
+E   AttributeError: 'NoneType' object has no attribute 'lookup'
+________________ test_recovery_limit_is_per_turn_not_per_call _________________
+tests\unit\test_knowledge_default_recovery.py:227: in test_recovery_limit_is_per_turn_not_per_call
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+___________ test_recovery_keeps_authorized_action_tool_and_dispatch ___________
+tests\unit\test_knowledge_default_recovery.py:240: in test_recovery_keeps_authorized_action_tool_and_dispatch
+    assert names == [KB_TOOL_NAME, "send_email"]
+E   AssertionError: assert ['send_email', 'end_call'] == ['lookup_comp... 'send_email']
+E     At index 0 diff: 'send_email' != 'lookup_company_knowledge'
+E     Use -v to get more diff
+_____________ test_ambiguous_recovery_can_clarify_without_lookup ______________
+tests\unit\test_knowledge_default_recovery.py:252: in test_ambiguous_recovery_can_clarify_without_lookup
+    assert session._knowledge_evidence["status"] == "no_match"
+E   AssertionError: assert 'unavailable' == 'no_match'
+E     - no_match
+E     + unavailable
+_______ test_existing_topic_map_remains_navigation_only_during_recovery _______
+tests\unit\test_knowledge_default_recovery.py:257: in test_existing_topic_map_remains_navigation_only_during_recovery
+    from app.services.scripts.knowledge.session_inject import _MAP_HEADER, _bake_inline_knowledge
+E   ImportError: cannot import name '_MAP_HEADER' from 'app.services.scripts.knowledge.session_inject' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag02-knowledge-test-contracts-20261007\backend\app\services\scripts\knowledge\session_inject.py)
+_____ test_default_matched_source_does_not_claim_original_intent_verified _____
+tests\unit\test_knowledge_default_recovery.py:271: in test_default_matched_source_does_not_claim_original_intent_verified
+    assert len(plan["rounds"]) == 1
+E   AssertionError: assert 4 == 1
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_________________________ test_tools_on_when_flag_set _________________________
+tests\unit\test_knowledge_tool.py:47: in test_tools_on_when_flag_set
+    assert tools and tools[0]["function"]["name"] == "lookup_company_knowledge"
+E   assert (None)
+__________________________ test_tools_on_for_gemini ___________________________
+tests\unit\test_knowledge_tool.py:54: in test_tools_on_for_gemini
+    assert tools and tools[0]["function"]["name"] == "lookup_company_knowledge"
+E   assert (None)
+_________________________ test_tools_support_gpt_oss __________________________
+tests\unit\test_knowledge_tool.py:71: in test_tools_support_gpt_oss
+    assert kt.knowledge_tools_for(_Session(), p)
+E   assert None
+E    +  where None = <function knowledge_tools_for at 0x00000277230E6660>(<tests.unit.test_knowledge_tool._Session object at 0x0000027732B08050>, <tests.unit.test_knowledge_tool._GroqProvider object at 0x0000027732B09940>)
+E    +    where <function knowledge_tools_for at 0x00000277230E6660> = kt.knowledge_tools_for
+E    +    and   <tests.unit.test_knowledge_tool._Session object at 0x0000027732B08050> = _Session()
+_________________________ test_addendum_mentions_tool _________________________
+tests\unit\test_knowledge_tool.py:83: in test_addendum_mentions_tool
+    assert "lookup_company_knowledge" in text
+E   AssertionError: assert 'lookup_company_knowledge' in 'Choose exact section_ids from the call catalog and read their authored source before answering company questions.'
+________________________ test_lookup_budget_and_format ________________________
+tests\unit\test_knowledge_tool.py:120: in test_lookup_budget_and_format
+    assert len(out) <= kt._KB_TOTAL_CHARS + fixed_overhead
+E   AttributeError: module 'app.domain.services.voice_pipeline.knowledge_tool' has no attribute '_KB_TOTAL_CHARS'
+_____________________ test_lookup_passes_bump_hits_false ______________________
+tests\unit\test_knowledge_tool.py:146: in test_lookup_passes_bump_hits_false
+    assert seen["kwargs"].get("bump_hits") is False
+E   KeyError: 'kwargs'
+__________________ test_lookup_empty_query_returns_sentinel ___________________
+tests\unit\test_knowledge_tool.py:151: in test_lookup_empty_query_returns_sentinel
+    assert out == kt.NO_KB_FACTS
+E   assert '<company_kno...ny_knowledge>' == 'No confirmed...ny knowledge.'
+E     - No confirmed answer in company knowledge.
+E     + <company_knowledge>
+E     + {"status": "unavailable", "source_policy": null, "reason": "invalid_arguments"}
+E     + </company_knowledge>
+_____ test_weak_surviving_evidence_is_distinct_from_provider_unavailable ______
+tests\unit\test_knowledge_tool.py:158: in test_weak_surviving_evidence_is_distinct_from_provider_unavailable
+    monkeypatch.setattr(kt, "prepare_knowledge_evidence", lambda *a, **k: {
+E   AttributeError: <module 'app.domain.services.voice_pipeline.knowledge_tool' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend\\app\\domain\\services\\voice_pipeline\\knowledge_tool.py'> has no attribute 'prepare_knowledge_evidence'
+____________________ test_lookup_no_hits_returns_sentinel _____________________
+tests\unit\test_knowledge_tool.py:243: in test_lookup_no_hits_returns_sentinel
+    assert out == kt.NO_KB_FACTS
+E   assert '<company_kno...ny_knowledge>' == 'No confirmed...ny knowledge.'
+E     - No confirmed answer in company knowledge.
+E     + <company_knowledge>
+E     + {"status": "unavailable", "source_policy": null, "reason": "invalid_arguments"}
+E     + </company_knowledge>
+______________________ test_tool_path_runs_then_answers _______________________
+tests\unit\test_knowledge_tool.py:347: in test_tool_path_runs_then_answers
+    assert seen["query"] == "price"
+E   AssertionError: assert None == 'price'
+_________ test_knowledge_only_turn_withholds_prose_until_tool_result __________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:81: in test_knowledge_only_turn_withholds_prose_until_tool_result
+    assert await _speak(service, session) == [PRICE]
+E   AssertionError: assert ['Starter cos...0 per month.'] == ['Starter cos...0 per month.']
+E     At index 0 diff: 'Starter costs $999 per month.' != 'Starter costs $20 per month.'
+E     Left contains 3 more items, first extra item: 'Starter costs $999 per month.'
+E     Use -v to get more diff
+_ test_latest_lookup_supersedes_earlier_facts_in_same_turn[Starter international installation warranty cancellation-weak_match] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:99: in test_latest_lookup_supersedes_earlier_facts_in_same_turn
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_ test_latest_lookup_supersedes_earlier_facts_in_same_turn[quasar nebula-no_match] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:99: in test_latest_lookup_supersedes_earlier_facts_in_same_turn
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_ test_latest_lookup_supersedes_earlier_facts_in_same_turn[Enterprise billing-matched] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:99: in test_latest_lookup_supersedes_earlier_facts_in_same_turn
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+____________ test_prior_turn_price_requires_current_lookup[False] _____________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:116: in test_prior_turn_price_requires_current_lookup
+    assert session._knowledge_evidence["status"] == "matched"
+E   AssertionError: assert 'unavailable' == 'matched'
+E     - matched
+E     + unavailable
+_____________ test_prior_turn_price_requires_current_lookup[True] _____________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:116: in test_prior_turn_price_requires_current_lookup
+    assert session._knowledge_evidence["status"] == "matched"
+E   AssertionError: assert 'unavailable' == 'matched'
+E     - matched
+E     + unavailable
+_ test_tool_success_comes_from_admitted_evidence[Starter price-nodes0-matched-True] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:145: in test_tool_success_comes_from_admitted_evidence
+    assert len(plan["rounds"]) == 2
+E   AssertionError: assert 4 == 2
+E    +  where 4 = len([{'campaign_id': 'campaign-a', 'max_tokens': None, 'system_prompt': 'Answer using the company knowledge and available ...truction.\nidentity_introduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', ...}])
+_ test_tool_success_comes_from_admitted_evidence[Starter international installation warranty cancellation-nodes1-weak_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:144: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_ test_tool_success_comes_from_admitted_evidence[quasar nebula-nodes2-no_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:144: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_ test_tool_success_comes_from_admitted_evidence[Starter price-nodes3-no_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:144: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_ test_tool_success_comes_from_admitted_evidence[   -nodes4-unavailable-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:144: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_ test_tool_success_comes_from_admitted_evidence[Starter price-nodes5-no_match-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:144: in test_tool_success_comes_from_admitted_evidence
+    assert await _speak(service, session) == [PRICE if success else UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_________ test_unavailable_lookup_is_not_a_success[missing_container] _________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:164: in test_unavailable_lookup_is_not_a_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_______________ test_unavailable_lookup_is_not_a_success[error] _______________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:164: in test_unavailable_lookup_is_not_a_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+______________ test_unavailable_lookup_is_not_a_success[timeout] ______________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:164: in test_unavailable_lookup_is_not_a_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+_________ test_current_non_tool_source_still_authorizes_price[inject] _________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:199: in test_current_non_tool_source_still_authorizes_price
+    assert PRICE in " ".join(session._knowledge_grounding)
+E   AssertionError: assert 'Starter costs $20 per month.' in ''
+E    +  where '' = <built-in method join of str object at 0x00007FFFB5BDD210>([])
+E    +    where <built-in method join of str object at 0x00007FFFB5BDD210> = ' '.join
+E    +    and   [] = CallSession(call_id='synthetic-evidence-call', campaign_id='campaign-a', lead_id='synthetic-lead', tenant_id='tenant-a...e, audio_input_buffer=None, audio_output_buffer=None, transcript_buffer=None, barge_in_event=None, captured_slots=None)._knowledge_grounding
+_________ test_current_non_tool_source_still_authorizes_price[inline] _________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:199: in test_current_non_tool_source_still_authorizes_price
+    assert PRICE in " ".join(session._knowledge_grounding)
+E   AssertionError: assert 'Starter costs $20 per month.' in ''
+E    +  where '' = <built-in method join of str object at 0x00007FFFB5BDD210>([])
+E    +    where <built-in method join of str object at 0x00007FFFB5BDD210> = ' '.join
+E    +    and   [] = CallSession(call_id='synthetic-evidence-call', campaign_id='campaign-a', lead_id='synthetic-lead', tenant_id='tenant-a...e, audio_input_buffer=None, audio_output_buffer=None, transcript_buffer=None, barge_in_event=None, captured_slots=None)._knowledge_grounding
+__________ test_malformed_tool_evidence_cannot_record_success[None] ___________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:213: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+________ test_malformed_tool_evidence_cannot_record_success[evidence1] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:213: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+________ test_malformed_tool_evidence_cannot_record_success[evidence2] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:213: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+________ test_malformed_tool_evidence_cannot_record_success[evidence3] ________
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:213: in test_malformed_tool_evidence_cannot_record_success
+    assert await _speak(service, session) == [UNCERTAIN]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+__ test_actual_retrieval_fallback_cannot_instruct_unavailable_followup[None] __
+tests\unit\test_knowledge_uncertainty_contract.py:36: in test_actual_retrieval_fallback_cannot_instruct_unavailable_followup
+    assert "NO CONFIRMED ANSWER" in block
+E   AssertionError: assert 'NO CONFIRMED ANSWER' in 'Company source knowledge is unavailable for this call; do not invent company facts.'
+__ test_actual_retrieval_fallback_cannot_instruct_unavailable_followup[0.1] ___
+tests\unit\test_knowledge_uncertainty_contract.py:36: in test_actual_retrieval_fallback_cannot_instruct_unavailable_followup
+    assert "NO CONFIRMED ANSWER" in block
+E   AssertionError: assert 'NO CONFIRMED ANSWER' in 'Company source knowledge is unavailable for this call; do not invent company facts.'
+_______ test_inline_missing_fact_instruction_does_not_promise_followup ________
+tests\unit\test_knowledge_uncertainty_contract.py:48: in test_inline_missing_fact_instruction_does_not_promise_followup
+    )
+E   AttributeError: module 'app.services.scripts.knowledge.session_inject' has no attribute '_bake_inline_knowledge'
+_ test_weak_lookup_uses_canonical_status_and_does_not_log_private_content[inject] _
+tests\unit\test_knowledge_uncertainty_contract.py:73: in test_weak_lookup_uses_canonical_status_and_does_not_log_private_content
+    assert session._knowledge_evidence["status"] == "weak_match"
+E   AttributeError: 'types.SimpleNamespace' object has no attribute '_knowledge_evidence'
+_ test_weak_lookup_uses_canonical_status_and_does_not_log_private_content[tool] _
+tests\unit\test_knowledge_uncertainty_contract.py:73: in test_weak_lookup_uses_canonical_status_and_does_not_log_private_content
+    assert session._knowledge_evidence["status"] == "weak_match"
+E   AssertionError: assert 'unavailable' == 'weak_match'
+E     - weak_match
+E     + unavailable
+____ test_inline_filter_cannot_remove_a_price_condition_and_keep_its_price ____
+tests\unit\test_knowledge_uncertainty_contract.py:84: in test_inline_filter_cannot_remove_a_price_condition_and_keep_its_price
+    monkeypatch.setattr(session_inject, "compact_tree", AsyncMock(return_value=(
+E   AttributeError: <module 'app.services.scripts.knowledge.session_inject' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend\\app\\services\\scripts\\knowledge\\session_inject.py'> has no attribute 'compact_tree'
+___________ test_outbound_does_not_load_other_call_scope[tenant_id] ___________
+tests\unit\test_knowledge_uncertainty_contract.py:101: in test_outbound_does_not_load_other_call_scope
+    monkeypatch.setattr(session_inject, "compact_tree", load)
+E   AttributeError: <module 'app.services.scripts.knowledge.session_inject' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend\\app\\services\\scripts\\knowledge\\session_inject.py'> has no attribute 'compact_tree'
+______________ test_outbound_does_not_load_other_call_scope[id] _______________
+tests\unit\test_knowledge_uncertainty_contract.py:101: in test_outbound_does_not_load_other_call_scope
+    monkeypatch.setattr(session_inject, "compact_tree", load)
+E   AttributeError: <module 'app.services.scripts.knowledge.session_inject' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-knowledge-test-contracts-20261007\\backend\\app\\services\\scripts\\knowledge\\session_inject.py'> has no attribute 'compact_tree'
+_ test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result0-no_match] _
+tests\unit\test_knowledge_uncertainty_contract.py:150: in test_live_lookup_rechecks_current_version_and_clears_old_authorization
+    assert "$20" in first
+E   AssertionError: assert '$20' in 'Company source knowledge is unavailable for this call; do not invent company facts.'
+_ test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result1-unavailable] _
+tests\unit\test_knowledge_uncertainty_contract.py:150: in test_live_lookup_rechecks_current_version_and_clears_old_authorization
+    assert "$20" in first
+E   AssertionError: assert '$20' in 'Company source knowledge is unavailable for this call; do not invent company facts.'
+_ test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result2-unavailable] _
+tests\unit\test_knowledge_uncertainty_contract.py:150: in test_live_lookup_rechecks_current_version_and_clears_old_authorization
+    assert "$20" in first
+E   AssertionError: assert '$20' in 'Company source knowledge is unavailable for this call; do not invent company facts.'
+_ test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result3-matched] _
+tests\unit\test_knowledge_uncertainty_contract.py:150: in test_live_lookup_rechecks_current_version_and_clears_old_authorization
+    assert "$20" in first
+E   AssertionError: assert '$20' in 'Company source knowledge is unavailable for this call; do not invent company facts.'
+_ test_assembled_prompt_and_submitted_speech_use_current_evidence[1.0-Starter costs $20 per month.-Starter costs $20 per month.] _
+tests\unit\test_knowledge_uncertainty_contract.py:229: in test_assembled_prompt_and_submitted_speech_use_current_evidence
+    assert profiles[-1]["knowledge_status"] == (
+E   AssertionError: assert 'unavailable' == 'matched'
+E     - matched
+E     + unavailable
+------------------------------ Captured log call ------------------------------
+INFO     app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:279 voice_turn_profile {"instructions_sha256": "e27c0b568066a7489999d8746617e5e62385753feff75335719a045b40e5b51b", "knowledge_block_sha256": "849460eaae100f8696e06030155935c698887b9c83d6c2e239c7f3483d0ef486", "knowledge_mode": "retrieve", "knowledge_passage_count": 0, "knowledge_snapshot_checksum": null, "knowledge_status": "unavailable", "knowledge_version_status": "unversioned", "knowledge_versions_sha256": null}
+_ test_assembled_prompt_and_submitted_speech_use_current_evidence[0.1-Starter costs $20 per month.-I can't confirm that figure from the information available.] _
+tests\unit\test_knowledge_uncertainty_contract.py:220: in test_assembled_prompt_and_submitted_speech_use_current_evidence
+    assert speech == [expected_speech]
+E   assert ['Starter cos...0 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $20 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+INFO     app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:279 voice_turn_profile {"instructions_sha256": "e27c0b568066a7489999d8746617e5e62385753feff75335719a045b40e5b51b", "knowledge_block_sha256": "849460eaae100f8696e06030155935c698887b9c83d6c2e239c7f3483d0ef486", "knowledge_mode": "retrieve", "knowledge_passage_count": 0, "knowledge_snapshot_checksum": null, "knowledge_status": "unavailable", "knowledge_version_status": "unversioned", "knowledge_versions_sha256": null}
+_ test_assembled_prompt_and_submitted_speech_use_current_evidence[None-Starter costs $999 per month.-I can't confirm that figure from the information available.] _
+tests\unit\test_knowledge_uncertainty_contract.py:220: in test_assembled_prompt_and_submitted_speech_use_current_evidence
+    assert speech == [expected_speech]
+E   assert ['Starter cos...9 per month.'] == ["I can't con...n available."]
+E     At index 0 diff: 'Starter costs $999 per month.' != "I can't confirm that figure from the information available."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+INFO     app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:279 voice_turn_profile {"instructions_sha256": "e27c0b568066a7489999d8746617e5e62385753feff75335719a045b40e5b51b", "knowledge_block_sha256": "849460eaae100f8696e06030155935c698887b9c83d6c2e239c7f3483d0ef486", "knowledge_mode": "retrieve", "knowledge_passage_count": 0, "knowledge_snapshot_checksum": null, "knowledge_status": "unavailable", "knowledge_version_status": "unversioned", "knowledge_versions_sha256": null}
+_ test_assembled_prompt_and_submitted_speech_use_current_evidence[None-I've sent the email.-I can't confirm that the email was sent.] _
+tests\unit\test_knowledge_uncertainty_contract.py:220: in test_assembled_prompt_and_submitted_speech_use_current_evidence
+    assert speech == [expected_speech]
+E   assert ["I've sent the email."] == ["I can't con...il was sent."]
+E     At index 0 diff: "I've sent the email." != "I can't confirm that the email was sent."
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+INFO     app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:279 voice_turn_profile {"instructions_sha256": "e27c0b568066a7489999d8746617e5e62385753feff75335719a045b40e5b51b", "knowledge_block_sha256": "849460eaae100f8696e06030155935c698887b9c83d6c2e239c7f3483d0ef486", "knowledge_mode": "retrieve", "knowledge_passage_count": 0, "knowledge_snapshot_checksum": null, "knowledge_status": "unavailable", "knowledge_version_status": "unversioned", "knowledge_versions_sha256": null}
+_ test_assembled_prompt_and_submitted_speech_use_current_evidence[None-I cannot confirm that detail from the information available.-I cannot confirm that detail from the information available.] _
+tests\unit\test_knowledge_uncertainty_contract.py:229: in test_assembled_prompt_and_submitted_speech_use_current_evidence
+    assert profiles[-1]["knowledge_status"] == (
+E   AssertionError: assert 'unavailable' == 'no_match'
+E     - no_match
+E     + unavailable
+------------------------------ Captured log call ------------------------------
+INFO     app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:279 voice_turn_profile {"instructions_sha256": "e27c0b568066a7489999d8746617e5e62385753feff75335719a045b40e5b51b", "knowledge_block_sha256": "849460eaae100f8696e06030155935c698887b9c83d6c2e239c7f3483d0ef486", "knowledge_mode": "retrieve", "knowledge_passage_count": 0, "knowledge_snapshot_checksum": null, "knowledge_status": "unavailable", "knowledge_version_status": "unversioned", "knowledge_versions_sha256": null}
+____________________ test_kb_fetch_still_serial_no_overlap ____________________
+tests\unit\voice_pipeline\test_turn_streamer_kb_prefetch.py:144: in test_kb_fetch_still_serial_no_overlap
+    kb_resolved_at = next(t for name, t in call_log if name == "kb_resolved")
+E   StopIteration
+
+The above exception was the direct cause of the following exception:
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:430: in runtest
+    super().runtest()
+..\..\..\backend\.venv\Lib\site-packages\pytest_asyncio\plugin.py:887: in inner
+    _loop.run_until_complete(task)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py:691: in run_until_complete
+    return future.result()
+E   RuntimeError: coroutine raised StopIteration
+=========================== short test summary info ===========================
+FAILED tests/unit/test_agent_knowledge_repairs.py::test_tool_and_injection_use_same_deep_fact
+FAILED tests/unit/test_kb_injection_budget.py::test_knowledge_block_respects_total_budget
+FAILED tests/unit/test_kb_source_first_all_paths.py::test_every_delivery_path_uses_authored_source[True-inject]
+FAILED tests/unit/test_kb_source_first_all_paths.py::test_every_delivery_path_uses_authored_source[True-tool]
+FAILED tests/unit/test_kb_source_first_all_paths.py::test_every_delivery_path_uses_authored_source[True-realtime]
+FAILED tests/unit/test_kb_source_first_all_paths.py::test_every_delivery_path_uses_authored_source[False-inject]
+FAILED tests/unit/test_kb_source_first_all_paths.py::test_price_guard_reaches_the_tool_path
+FAILED tests/unit/test_knowledge_default_recovery.py::test_default_failed_literal_search_gets_existing_model_lookup[What is the recurring charge for Starter?-weak_match]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_default_failed_literal_search_gets_existing_model_lookup[What is the recurring charge?-no_match]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_existing_non_recovery_path_stays_one_model_round[matched]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_existing_non_recovery_path_stays_one_model_round[backchannel]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_existing_non_recovery_path_stays_one_model_round[inline]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_recovery_withholds_prelookup_claim_before_speech
+FAILED tests/unit/test_knowledge_default_recovery.py::test_wrong_intent_rewrite_is_not_original_question_proof
+FAILED tests/unit/test_knowledge_default_recovery.py::test_original_prior_caller_context_survives_recovery
+FAILED tests/unit/test_knowledge_default_recovery.py::test_unavailable_initial_lookup_does_not_start_model_recovery[missing_container]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_unavailable_initial_lookup_does_not_start_model_recovery[error]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_unavailable_initial_lookup_does_not_start_model_recovery[timeout]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_ineligible_session_or_provider_keeps_plain_path[none]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_failed_recovery_revokes_prior_facts[no_match-quasar nebula]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_failed_recovery_revokes_prior_facts[weak_match-Starter international warranty insurance]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_failed_recovery_revokes_prior_facts[unavailable-Starter monthly price]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_only_one_actual_recovery_lookup_per_turn[Enterprise price]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_only_one_actual_recovery_lookup_per_turn[Starter monthly price]
+FAILED tests/unit/test_knowledge_default_recovery.py::test_shared_recovery_helper_reuses_copied_evidence
+FAILED tests/unit/test_knowledge_default_recovery.py::test_recovery_limit_is_per_turn_not_per_call
+FAILED tests/unit/test_knowledge_default_recovery.py::test_recovery_keeps_authorized_action_tool_and_dispatch
+FAILED tests/unit/test_knowledge_default_recovery.py::test_ambiguous_recovery_can_clarify_without_lookup
+FAILED tests/unit/test_knowledge_default_recovery.py::test_existing_topic_map_remains_navigation_only_during_recovery
+FAILED tests/unit/test_knowledge_default_recovery.py::test_default_matched_source_does_not_claim_original_intent_verified
+FAILED tests/unit/test_knowledge_tool.py::test_tools_on_when_flag_set - asser...
+FAILED tests/unit/test_knowledge_tool.py::test_tools_on_for_gemini - assert (...
+FAILED tests/unit/test_knowledge_tool.py::test_tools_support_gpt_oss - assert...
+FAILED tests/unit/test_knowledge_tool.py::test_addendum_mentions_tool - Asser...
+FAILED tests/unit/test_knowledge_tool.py::test_lookup_budget_and_format - Att...
+FAILED tests/unit/test_knowledge_tool.py::test_lookup_passes_bump_hits_false
+FAILED tests/unit/test_knowledge_tool.py::test_lookup_empty_query_returns_sentinel
+FAILED tests/unit/test_knowledge_tool.py::test_weak_surviving_evidence_is_distinct_from_provider_unavailable
+FAILED tests/unit/test_knowledge_tool.py::test_lookup_no_hits_returns_sentinel
+FAILED tests/unit/test_knowledge_tool.py::test_tool_path_runs_then_answers - ...
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_knowledge_only_turn_withholds_prose_until_tool_result
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_lookup_supersedes_earlier_facts_in_same_turn[Starter international installation warranty cancellation-weak_match]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_lookup_supersedes_earlier_facts_in_same_turn[quasar nebula-no_match]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_latest_lookup_supersedes_earlier_facts_in_same_turn[Enterprise billing-matched]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_prior_turn_price_requires_current_lookup[False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_prior_turn_price_requires_current_lookup[True]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter price-nodes0-matched-True]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter international installation warranty cancellation-nodes1-weak_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[quasar nebula-nodes2-no_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter price-nodes3-no_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[   -nodes4-unavailable-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_success_comes_from_admitted_evidence[Starter price-nodes5-no_match-False]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[missing_container]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[error]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_unavailable_lookup_is_not_a_success[timeout]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_current_non_tool_source_still_authorizes_price[inject]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_current_non_tool_source_still_authorizes_price[inline]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[None]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence1]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence2]
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_malformed_tool_evidence_cannot_record_success[evidence3]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_actual_retrieval_fallback_cannot_instruct_unavailable_followup[None]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_actual_retrieval_fallback_cannot_instruct_unavailable_followup[0.1]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_inline_missing_fact_instruction_does_not_promise_followup
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_weak_lookup_uses_canonical_status_and_does_not_log_private_content[inject]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_weak_lookup_uses_canonical_status_and_does_not_log_private_content[tool]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_inline_filter_cannot_remove_a_price_condition_and_keep_its_price
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_outbound_does_not_load_other_call_scope[tenant_id]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_outbound_does_not_load_other_call_scope[id]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result0-no_match]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result1-unavailable]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result2-unavailable]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_live_lookup_rechecks_current_version_and_clears_old_authorization[next_result3-matched]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_assembled_prompt_and_submitted_speech_use_current_evidence[1.0-Starter costs $20 per month.-Starter costs $20 per month.]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_assembled_prompt_and_submitted_speech_use_current_evidence[0.1-Starter costs $20 per month.-I can't confirm that figure from the information available.]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_assembled_prompt_and_submitted_speech_use_current_evidence[None-Starter costs $999 per month.-I can't confirm that figure from the information available.]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_assembled_prompt_and_submitted_speech_use_current_evidence[None-I've sent the email.-I can't confirm that the email was sent.]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_assembled_prompt_and_submitted_speech_use_current_evidence[None-I cannot confirm that detail from the information available.-I cannot confirm that detail from the information available.]
+FAILED tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py::test_kb_fetch_still_serial_no_overlap
+79 failed, 35 passed, 104 warnings in 7.74s

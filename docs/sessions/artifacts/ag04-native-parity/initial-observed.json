@@ -1,0 +1,3310 @@
+{
+  "source_base": "be44bf72",
+  "blocked_network_attempts": [],
+  "rows": [
+    {
+      "scenario_id": "probe.failed_action",
+      "profile": {
+        "provider": "openai",
+        "model": "gpt-realtime-2",
+        "voice": "ash",
+        "settings": {
+          "reasoning_effort": "low"
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": false
+      },
+      "raw_output": [
+        {
+          "response_id": "response-2",
+          "text": "The email was sent to you.",
+          "status": "completed"
+        },
+        {
+          "response_id": "response-3",
+          "text": "The email could not be sent.",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [],
+      "history": [
+        {
+          "role": "user",
+          "content": "Please email the details.",
+          "timestamp": "2026-10-05T06:35:47.424770",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "request",
+            "caller_turn_order": 1
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [],
+      "observed": {
+        "submissions": 0,
+        "clears": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_message_ids": {
+          "send_email": null
+        },
+        "repair_requests": 1,
+        "normal_continuations": 1,
+        "failure": true,
+        "connection_lost": false,
+        "tool_statuses": [
+          "failed"
+        ],
+        "last_tool_success": false,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [
+          "send_email"
+        ],
+        "accepted": 0,
+        "executor_attempts": [
+          {
+            "action": "send_email",
+            "arguments": {},
+            "receipt": {
+              "version": 1,
+              "action": "send_email",
+              "success": false,
+              "status": "failed",
+              "confirmation_allowed": false,
+              "provider": "synthetic-email",
+              "request_id": "synthetic-failed-request-1",
+              "message_id": null,
+              "message": "Synthetic provider rejected the send request."
+            },
+            "origin": "synthetic connected executor; no provider send"
+          }
+        ],
+        "recorded_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        },
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [
+          {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        ],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 640,
+        "submitted_bytes": 0,
+        "submissions": [],
+        "receipts": [],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 0,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.failed_action",
+      "profile": {
+        "provider": "xai",
+        "model": "grok-voice-think-fast-1.0",
+        "voice": "eve",
+        "settings": {
+          "reasoning_effort": "high",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.85
+          }
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": true
+      },
+      "raw_output": [
+        {
+          "response_id": "response-2",
+          "text": "The email was sent to you.",
+          "status": "completed"
+        },
+        {
+          "response_id": "response-3",
+          "text": "The email could not be sent.",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [],
+      "history": [
+        {
+          "role": "user",
+          "content": "Please email the details.",
+          "timestamp": "2026-10-05T06:35:47.491184",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "request",
+            "caller_turn_order": 1
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [],
+      "observed": {
+        "submissions": 0,
+        "clears": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_message_ids": {
+          "send_email": null
+        },
+        "repair_requests": 1,
+        "normal_continuations": 1,
+        "failure": true,
+        "connection_lost": false,
+        "tool_statuses": [
+          "failed"
+        ],
+        "last_tool_success": false,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [
+          "send_email"
+        ],
+        "accepted": 0,
+        "executor_attempts": [
+          {
+            "action": "send_email",
+            "arguments": {},
+            "receipt": {
+              "version": 1,
+              "action": "send_email",
+              "success": false,
+              "status": "failed",
+              "confirmation_allowed": false,
+              "provider": "synthetic-email",
+              "request_id": "synthetic-failed-request-1",
+              "message_id": null,
+              "message": "Synthetic provider rejected the send request."
+            },
+            "origin": "synthetic connected executor; no provider send"
+          }
+        ],
+        "recorded_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        },
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [
+          {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        ],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 640,
+        "submitted_bytes": 0,
+        "submissions": [],
+        "receipts": [],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 0,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.third_party_literal",
+      "profile": {
+        "provider": "openai",
+        "model": "gpt-realtime-2",
+        "voice": "ash",
+        "settings": {
+          "reasoning_effort": "low"
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": false
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your email is alex@example.com, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your email is alex@example.com, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "My colleague's email is other@example.com.",
+          "timestamp": "2026-10-05T06:35:47.495211",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.495211",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My email is alex@example.com.",
+          "timestamp": "2026-10-05T06:35:47.498182",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your email is alex@example.com, correct?",
+          "timestamp": "2026-10-05T06:35:47.715191",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.718196",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": "alex@example.com",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 2,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": true,
+        "email": "alex@example.com",
+        "email_capture_status": "confirmed",
+        "email_value_source": {
+          "provider_item_id": "own-source",
+          "caller_turn_order": 3,
+          "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+        },
+        "email_confirmation_source": {
+          "provider_item_id": "own-confirmation",
+          "caller_turn_order": 4,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "email_readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        },
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your email is alex@example.com, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 2,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.third_party_literal",
+      "profile": {
+        "provider": "xai",
+        "model": "grok-voice-think-fast-1.0",
+        "voice": "eve",
+        "settings": {
+          "reasoning_effort": "high",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.85
+          }
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": true
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your email is alex@example.com, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your email is alex@example.com, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "My colleague's email is other@example.com.",
+          "timestamp": "2026-10-05T06:35:47.721197",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.721197",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My email is alex@example.com.",
+          "timestamp": "2026-10-05T06:35:47.722198",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your email is alex@example.com, correct?",
+          "timestamp": "2026-10-05T06:35:47.722198",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.723199",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": "alex@example.com",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 2,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": true,
+        "email": "alex@example.com",
+        "email_capture_status": "confirmed",
+        "email_value_source": {
+          "provider_item_id": "own-source",
+          "caller_turn_order": 3,
+          "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+        },
+        "email_confirmation_source": {
+          "provider_item_id": "own-confirmation",
+          "caller_turn_order": 4,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "email_readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        },
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your email is alex@example.com, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 2,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.third_party_reported",
+      "profile": {
+        "provider": "openai",
+        "model": "gpt-realtime-2",
+        "voice": "ash",
+        "settings": {
+          "reasoning_effort": "low"
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": false
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your email is alex@example.com, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your email is alex@example.com, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "He said \"My email is other@example.com\".",
+          "timestamp": "2026-10-05T06:35:47.725201",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.726201",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My email is alex@example.com.",
+          "timestamp": "2026-10-05T06:35:47.727198",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your email is alex@example.com, correct?",
+          "timestamp": "2026-10-05T06:35:47.727198",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.728199",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": "alex@example.com",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 2,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": true,
+        "email": "alex@example.com",
+        "email_capture_status": "confirmed",
+        "email_value_source": {
+          "provider_item_id": "own-source",
+          "caller_turn_order": 3,
+          "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+        },
+        "email_confirmation_source": {
+          "provider_item_id": "own-confirmation",
+          "caller_turn_order": 4,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "email_readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        },
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your email is alex@example.com, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 2,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.third_party_reported",
+      "profile": {
+        "provider": "xai",
+        "model": "grok-voice-think-fast-1.0",
+        "voice": "eve",
+        "settings": {
+          "reasoning_effort": "high",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.85
+          }
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": true
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your email is alex@example.com, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your email is alex@example.com, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "He said \"My email is other@example.com\".",
+          "timestamp": "2026-10-05T06:35:47.730201",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.730201",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My email is alex@example.com.",
+          "timestamp": "2026-10-05T06:35:47.731198",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your email is alex@example.com, correct?",
+          "timestamp": "2026-10-05T06:35:47.731198",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.732199",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": "alex@example.com",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": "alex@example.com",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 2,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": true,
+        "email": "alex@example.com",
+        "email_capture_status": "confirmed",
+        "email_value_source": {
+          "provider_item_id": "own-source",
+          "caller_turn_order": 3,
+          "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+        },
+        "email_confirmation_source": {
+          "provider_item_id": "own-confirmation",
+          "caller_turn_order": 4,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "email_readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        },
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your email is alex@example.com, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 2,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.unclear_phone_invalid",
+      "profile": {
+        "provider": "openai",
+        "model": "gpt-realtime-2",
+        "voice": "ash",
+        "settings": {
+          "reasoning_effort": "low"
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": false
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your phone number is +1 415 555 2671, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your phone number is +1 415 555 2671, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "My phone number is +123",
+          "timestamp": "2026-10-05T06:35:47.735197",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.735197",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My phone number is +1 415 555 2671.",
+          "timestamp": "2026-10-05T06:35:47.820741",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your phone number is +1 415 555 2671, correct?",
+          "timestamp": "2026-10-05T06:35:47.820741",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.822741",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": "+14155552671",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 4,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your phone number is +1 415 555 2671, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 4,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.unclear_phone_invalid",
+      "profile": {
+        "provider": "xai",
+        "model": "grok-voice-think-fast-1.0",
+        "voice": "eve",
+        "settings": {
+          "reasoning_effort": "high",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.85
+          }
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": true
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your phone number is +1 415 555 2671, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your phone number is +1 415 555 2671, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "My phone number is +123",
+          "timestamp": "2026-10-05T06:35:47.824743",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.825739",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My phone number is +1 415 555 2671.",
+          "timestamp": "2026-10-05T06:35:47.826736",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your phone number is +1 415 555 2671, correct?",
+          "timestamp": "2026-10-05T06:35:47.826736",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.828741",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": "+14155552671",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 4,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your phone number is +1 415 555 2671, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 4,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.unclear_phone_incomplete",
+      "profile": {
+        "provider": "openai",
+        "model": "gpt-realtime-2",
+        "voice": "ash",
+        "settings": {
+          "reasoning_effort": "low"
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": false
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your phone number is +1 415 555 2671, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your phone number is +1 415 555 2671, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "My number ends in seven three, I cannot remember the rest.",
+          "timestamp": "2026-10-05T06:35:47.830734",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.831733",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My phone number is +1 415 555 2671.",
+          "timestamp": "2026-10-05T06:35:47.832734",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your phone number is +1 415 555 2671, correct?",
+          "timestamp": "2026-10-05T06:35:47.832734",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.833733",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": "+14155552671",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 4,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your phone number is +1 415 555 2671, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 4,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.unclear_phone_incomplete",
+      "profile": {
+        "provider": "xai",
+        "model": "grok-voice-think-fast-1.0",
+        "voice": "eve",
+        "settings": {
+          "reasoning_effort": "high",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.85
+          }
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": true
+      },
+      "raw_output": [
+        {
+          "response_id": "response-1",
+          "text": "Your phone number is +1 415 555 2671, correct?",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [
+        "Your phone number is +1 415 555 2671, correct?"
+      ],
+      "history": [
+        {
+          "role": "user",
+          "content": "My number ends in seven three, I cannot remember the rest.",
+          "timestamp": "2026-10-05T06:35:47.836734",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "unusable-source",
+            "caller_turn_order": 1
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.837733",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 1,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "bare-confirmation",
+            "caller_turn_order": 2
+          }
+        },
+        {
+          "role": "user",
+          "content": "My phone number is +1 415 555 2671.",
+          "timestamp": "2026-10-05T06:35:47.838733",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 2,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3
+          }
+        },
+        {
+          "role": "assistant",
+          "content": "Your phone number is +1 415 555 2671, correct?",
+          "timestamp": "2026-10-05T06:35:47.838733",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 3,
+          "event_type": "utterance",
+          "is_final": null,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "delivery": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played",
+              "played_ms": 40
+            }
+          }
+        },
+        {
+          "role": "user",
+          "content": "Yes.",
+          "timestamp": "2026-10-05T06:35:47.839733",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 4,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": "+14155552671",
+          "confirmed": true,
+          "capture_status": "confirmed",
+          "confirmation_evidence": "readback_and_caller_affirmation",
+          "value_source": {
+            "provider_item_id": "own-source",
+            "caller_turn_order": 3,
+            "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+          },
+          "confirmation_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "status_source": {
+            "provider_item_id": "own-confirmation",
+            "caller_turn_order": 4,
+            "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+          },
+          "readback": {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played"
+          }
+        }
+      },
+      "contact_checkpoints": [
+        {
+          "id": "unusable",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "bare-yes",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": "needs_clarification",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "unusable-source",
+                "caller_turn_order": 1,
+                "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-pending",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": false,
+              "capture_status": "awaiting_confirmation",
+              "confirmation_evidence": null,
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": null,
+              "status_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "readback": null
+            }
+          }
+        },
+        {
+          "id": "own-confirmed",
+          "contacts": {
+            "email": {
+              "value": null,
+              "confirmed": false,
+              "capture_status": null,
+              "confirmation_evidence": null,
+              "value_source": null,
+              "confirmation_source": null,
+              "status_source": null,
+              "readback": null
+            },
+            "phone": {
+              "value": "+14155552671",
+              "confirmed": true,
+              "capture_status": "confirmed",
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "value_source": {
+                "provider_item_id": "own-source",
+                "caller_turn_order": 3,
+                "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+              },
+              "confirmation_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "status_source": {
+                "provider_item_id": "own-confirmation",
+                "caller_turn_order": 4,
+                "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+              },
+              "readback": {
+                "utterance_id": "rt-1",
+                "status": "completed",
+                "evidence": "transport_played"
+              }
+            }
+          }
+        }
+      ],
+      "observed": {
+        "submissions": 1,
+        "clears": 4,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "action_message_ids": {},
+        "repair_requests": 0,
+        "normal_continuations": 2,
+        "failure": false,
+        "connection_lost": false,
+        "tool_statuses": [],
+        "last_tool_success": null,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [],
+        "accepted": 0,
+        "executor_attempts": [],
+        "recorded_results": {},
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 320,
+        "submitted_bytes": 640,
+        "submissions": [
+          {
+            "utterance_id": "rt-1",
+            "candidate_text": "Your phone number is +1 415 555 2671, correct?",
+            "pcm_bytes": 640,
+            "sha256": "9e132485d5107211de325a45e7917cbe3e4b5b9cde3e4ee91d7d2102317759ee"
+          }
+        ],
+        "receipts": [
+          {
+            "utterance_id": "rt-1",
+            "status": "completed",
+            "evidence": "transport_played",
+            "played_ms": 40
+          }
+        ],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 4,
+        "truncate_events": []
+      }
+    }
+  ]
+}

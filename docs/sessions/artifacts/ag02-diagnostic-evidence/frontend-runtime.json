@@ -1,0 +1,38 @@
+{
+  "node": "v25.8.1",
+  "executable": "C:\\Program Files\\nodejs\\node.exe",
+  "dependencies": {
+    "react": {
+      "version": "19.2.1",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\react\\package.json"
+    },
+    "react-dom": {
+      "version": "19.2.1",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\react-dom\\package.json"
+    },
+    "next": {
+      "version": "16.3.3",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\next\\package.json"
+    },
+    "typescript": {
+      "version": "5.9.3",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\typescript\\package.json"
+    },
+    "tsx": {
+      "version": "4.21.0",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\tsx\\package.json"
+    },
+    "zod": {
+      "version": "3.25.76",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\zod\\package.json"
+    },
+    "eslint": {
+      "version": "9.39.1",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\eslint\\package.json"
+    },
+    "@testing-library/react": {
+      "version": "16.3.1",
+      "location": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\Talk-Leee\\node_modules\\@testing-library\\react\\package.json"
+    }
+  }
+}

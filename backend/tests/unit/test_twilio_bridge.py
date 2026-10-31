@@ -99,6 +99,8 @@ async def test_build_twilio_session_config_is_8khz(monkeypatch):
         "app.domain.services.tenant_ai_config_resolver.resolve_ai_config_for_did",
         AsyncMock(return_value=("tenant-x", resolved)),
     )
+    from app.domain.services.voice_tuning import VoiceTuning, VoiceTuningResolver
+    monkeypatch.setattr(VoiceTuningResolver, "for_tenant_async", AsyncMock(return_value=VoiceTuning()))
     cfg = await tb._build_twilio_session_config("+15553334444")
     assert cfg.gateway_type == "twilio"
     assert cfg.session_type == "twilio"

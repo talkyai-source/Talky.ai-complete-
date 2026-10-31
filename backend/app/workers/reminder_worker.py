@@ -7,6 +7,7 @@ Run as separate process:
 
 Day 27: Timed Communication System
 """
+
 import asyncio
 import logging
 import os
@@ -14,10 +15,12 @@ import signal
 import sys
 import json
 import time
-from datetime import datetime
-from typing import Optional, List, Dict, Any
+from datetime import datetime, timedelta, timezone
+from typing import Optional, Dict, Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from app.core.dotenv_compat import load_dotenv
+from app.core.db_utils import acquire_with_tenant
 
 # Load environment variables
 load_dotenv()
@@ -28,40 +31,40 @@ try:
 except ImportError as e:
     raise ImportError(f"Required dependency not installed: {e}")
 
-from app.core.db import init_db_pool, close_db_pool, Database
+from app.core.db import init_db_pool, close_db_pool
+from app.domain.services.dnc_service import DNCService
 
 logger = logging.getLogger(__name__)
 
 # Configure logging for worker
 logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
 
 
 class ReminderWorker:
     """
     Background worker for processing scheduled reminders.
-    
+
     Responsibilities:
     - Scan for pending reminders due to be sent
     - Send SMS if lead has phone number, email otherwise
     - Handle retries with exponential backoff
     - Enforce idempotency (no duplicate sends)
-    
+
     Follows the pattern from DialerWorker.
     """
-    
+
     # Worker configuration
     POLL_INTERVAL = 30.0  # Seconds between queue scans
     MAX_CONSECUTIVE_ERRORS = 10
     BATCH_SIZE = 50  # Max reminders to process per scan
-    
+
     # Retry configuration
     MAX_RETRIES = 3
     RETRY_BACKOFF_MULTIPLIER = 2  # Exponential backoff
     INITIAL_RETRY_DELAY = 60  # 1 minute
-    
+
     def __init__(self):
         self.running = False
         self._db_pool: Optional[asyncpg.Pool] = None
@@ -92,9 +95,7 @@ class ReminderWorker:
             self._redis = await redis.from_url(redis_url, decode_responses=True)
             await self._redis.ping()
         except Exception as exc:  # noqa: BLE001
-            logger.warning(
-                "Reminder Worker could not connect to Redis for heartbeat: %s", exc
-            )
+            logger.warning("Reminder Worker could not connect to Redis for heartbeat: %s", exc)
             self._redis = None
 
         # Initialize services
@@ -107,11 +108,11 @@ class ReminderWorker:
         self._email_service = get_email_service(self._db_pool)
 
         logger.info("Reminder Worker initialized successfully")
-    
+
     async def run(self) -> None:
         """
         Main worker loop.
-        
+
         Continuously:
         1. Fetch pending reminders due to be sent
         2. Process each reminder (SMS or Email)
@@ -130,12 +131,17 @@ class ReminderWorker:
         # Mirrors DialerWorker.run() — started before the main loop so
         # READY=1 is reachable on the normal startup path.
         heartbeat_task = asyncio.create_task(self._heartbeat())
+        crm_task = asyncio.create_task(self._crm_delivery_loop())
+        callback_task = asyncio.create_task(self._voice_callback_loop())
+        billing_task = asyncio.create_task(self._billing_delivery_loop())
+        topup_usage_task = asyncio.create_task(self._topup_usage_loop())
 
         try:
             while self.running:
                 try:
                     # Process due reminders
                     processed = await self._process_due_reminders()
+
 
                     if processed > 0:
                         logger.info(f"Processed {processed} reminders")
@@ -158,13 +164,33 @@ class ReminderWorker:
                         # of the loop and lingering as a live but idle unit
                         # that no monitor can distinguish from healthy.
                         logger.critical(
-                            "Too many consecutive errors (%d) — exiting for "
-                            "systemd restart", consecutive_errors,
+                            "Too many consecutive errors (%d) — exiting for " "systemd restart",
+                            consecutive_errors,
                         )
                         sys.exit(1)
 
                     await asyncio.sleep(min(5 * consecutive_errors, 60))
         finally:
+            topup_usage_task.cancel()
+            try:
+                await topup_usage_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            billing_task.cancel()
+            try:
+                await billing_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            callback_task.cancel()
+            try:
+                await callback_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            crm_task.cancel()
+            try:
+                await crm_task
+            except (asyncio.CancelledError, Exception):
+                pass
             heartbeat_task.cancel()
             try:
                 await heartbeat_task
@@ -172,39 +198,91 @@ class ReminderWorker:
                 pass
 
         await self.shutdown()
-    
+
+    async def _billing_delivery_loop(self):
+        """Billing email delivery is independent of financial webhook retries."""
+        from app.domain.services.billing_webhook_notifications import drain_billing_notifications
+        while self.running:
+            try:
+                await drain_billing_notifications(self._db_pool)
+            except Exception as exc:
+                logger.warning("Billing notification scan failed: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
+
+    async def _topup_usage_loop(self):
+        """Record top-up minutes used in closed months (see ``topup_usage``).
+
+        The meter already subtracts unrecorded months, so this only makes them
+        durable; every ten minutes is plenty.
+        """
+        from app.domain.services.topup_usage import record_all_topup_usage
+        while self.running:
+            try:
+                recorded = await record_all_topup_usage(self._db_pool)
+                if recorded:
+                    logger.info("Recorded %d used top-up minutes", recorded)
+            except Exception as exc:
+                logger.warning("Top-up usage scan failed: %s", type(exc).__name__)
+            await asyncio.sleep(600)
+
+    async def _voice_callback_loop(self):
+        from app.services.voice_callback_service import drain_voice_callbacks
+        from app.domain.services.queue_service import DialerQueueService
+        queue = DialerQueueService(redis_client=self._redis)
+        while self.running:
+            try:
+                await drain_voice_callbacks(self._db_pool, queue)
+            except Exception as exc:
+                logger.warning("Voice callback scan failed: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
+
+    async def _crm_delivery_loop(self):
+        """Reuse this worker process; slow CRM calls never delay reminders."""
+        from app.core.postgres_adapter import PostgresClient
+        from app.services.crm_sync_service import drain_crm_deliveries
+        client = PostgresClient(self._db_pool)
+        while self.running:
+            try:
+                await drain_crm_deliveries(client, self._db_pool)
+            except Exception as exc:
+                logger.warning("CRM delivery scan failed: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
+
     async def _process_due_reminders(self) -> int:
         """
         Fetch and process all due reminders.
-        
+
         Returns:
             Number of reminders processed
         """
         # Fetch pending reminders that are due
         try:
-            async with self._db_pool.acquire() as conn:
+            # Scheduler scans due reminders across all tenants.
+            async with acquire_with_tenant(self._db_pool, None) as conn:
                 # Need to join meetings and leads to get all info
                 query = """
                 SELECT 
                     r.*,
                     m.id as meeting_id, m.title as meeting_title, m.start_time, m.end_time, m.join_link,
-                    l.id as lead_id, l.first_name, l.last_name, l.phone_number, l.email
+                    m.status as meeting_status, m.timezone as meeting_timezone,
+                    l.id as lead_id, l.first_name, l.last_name, l.phone_number, l.email,
+                    l.status as lead_status, l.do_not_call as lead_do_not_call
                 FROM reminders r
-                LEFT JOIN meetings m ON r.meeting_id = m.id
-                LEFT JOIN leads l ON r.lead_id = l.id
+                LEFT JOIN meetings m ON r.meeting_id = m.id AND r.tenant_id = m.tenant_id
+                LEFT JOIN leads l ON r.lead_id = l.id AND r.tenant_id = l.tenant_id
                 WHERE r.status = 'pending' 
                 AND r.scheduled_at <= NOW()
                 LIMIT $1
                 """
                 rows = await conn.fetch(query, self.BATCH_SIZE)
-                
+
                 reminders = [dict(r) for r in rows]
-                
+
                 if not reminders:
                     return 0
-                
+
                 logger.info(f"Found {len(reminders)} due reminders")
-                
+
                 processed = 0
                 for reminder in reminders:
                     try:
@@ -212,81 +290,137 @@ class ReminderWorker:
                         processed += 1
                     except Exception as e:
                         logger.error(f"Failed to process reminder {reminder['id']}: {e}")
-                
+
                 return processed
-                
+
         except Exception as e:
             logger.error(f"Failed to fetch due reminders: {e}")
             return 0
-    
+
     async def _process_reminder(self, reminder: Dict[str, Any]) -> None:
         """
         Process a single reminder.
         """
         reminder_id = str(reminder["id"])
         tenant_id = str(reminder["tenant_id"]) if reminder["tenant_id"] else None
-        
+
         # Extract contact info from joined fields
         phone_number = reminder.get("phone_number")
         email = reminder.get("email")
-        lead_name = f"{reminder.get('first_name', '')} {reminder.get('last_name', '')}".strip() or "there"
+        # Joined columns arrive as None (not missing) for NULLs, so .get() defaults don't apply.
+        lead_name = (
+            f"{reminder.get('first_name') or ''} {reminder.get('last_name') or ''}".strip() or "there"
+        )
         lead_id = str(reminder["lead_id"]) if reminder["lead_id"] else None
         meeting_id = str(reminder["meeting_id"]) if reminder["meeting_id"] else None
-        
+
         # Get meeting details
-        meeting_title = reminder.get("meeting_title", "Your meeting")
         start_time = reminder.get("start_time")
         join_link = reminder.get("join_link")
-        
+        content = reminder.get("content") or {}
+        if isinstance(content, str):
+            try:
+                content = json.loads(content)
+            except (ValueError, TypeError):
+                content = {}
+        meeting_title = (
+            reminder.get("meeting_title")
+            or (content.get("title") if isinstance(content, dict) else None)
+            or "Meeting"
+        )
+        message = content.get("message") if isinstance(content, dict) else None
+        requested_channel = reminder.get("type")
+        # Legacy rows without a channel retain their original contact preference.
+        requested_channel = requested_channel or ("sms" if phone_number else "email")
+        # New reviewed reminders carry the approved address. A later lead edit
+        # must not redirect an already scheduled message. Still require the
+        # tenant-qualified lead join, so a removed/foreign contact is not used.
+        approved_recipient = content.get('recipient') if isinstance(content, dict) else None
+        if lead_id and approved_recipient:
+            if requested_channel == 'email':
+                email = approved_recipient
+            elif requested_channel == 'sms':
+                phone_number = approved_recipient
+
+        # A lead who opted out (purge sets leads.status='dnc') or is flagged
+        # do-not-call must not be messaged by a reminder scheduled earlier.
+        verdict = await self._opt_out_verdict(
+            reminder, tenant_id, phone_number if requested_channel == "sms" else None
+        )
+        if verdict == "opted_out":
+            await self._cancel_pending(tenant_id, reminder_id, "recipient_opted_out")
+            logger.info(f"Reminder {reminder_id} cancelled: recipient opted out")
+            return
+        if verdict == "unknown":
+            return  # Fail closed: stays pending, re-evaluated on the next scan.
+
+        # A cancelled/completed meeting, or one that has already started (late
+        # scan after downtime, long retries), gets no reminder. Lead-only
+        # reminders (no meeting) are never stale.
+        if meeting_id and self._meeting_is_past(reminder):
+            await self._cancel_pending(tenant_id, reminder_id, "meeting_no_longer_upcoming")
+            logger.info(f"Reminder {reminder_id} cancelled: meeting is not upcoming")
+            return
+
         # Determine reminder type from content or timing
         reminder_type = self._determine_reminder_type(reminder)
-        
+
         # Format time for display
-        time_str = self._format_time(start_time) if start_time else "soon"
-        
+        time_str = (
+            self._format_time(start_time, reminder.get("meeting_timezone")) if start_time else "soon"
+        )
+
         # Generate idempotency key
         idempotency_key = reminder.get("idempotency_key") or f"reminder-{reminder_id}"
-        
+        # The durable receipt replays a stored definitive failure for the same
+        # key, so each retry attempt gets its own send key (the stored reminder
+        # key stays stable). Ambiguous outcomes are never retried at all.
+        attempt = reminder.get("retry_count") or 0
+        send_key = f"{idempotency_key}:{attempt}" if attempt else idempotency_key
+
         logger.info(f"Processing reminder {reminder_id}: {reminder_type} for {meeting_title}")
-        
-        async with self._db_pool.acquire() as conn:
+
+        async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
             # Mark as processing
-            await conn.execute(
-                "UPDATE reminders SET status = 'processing', idempotency_key = $1 WHERE id = $2",
-                idempotency_key, reminder_id
+            claimed = await conn.execute(
+                "UPDATE reminders SET status = 'processing', idempotency_key = $1 WHERE id = $2 AND status = 'pending'",
+                idempotency_key,
+                reminder_id,
             )
-            
+            if claimed != "UPDATE 1":
+                return  # Cancelled or already claimed by another worker.
+
             success = False
             channel = None
             external_message_id = None
             error = None
-            
+            result = {}
+
             try:
-                # Try SMS first if phone number exists
-                if phone_number:
+                if requested_channel == "sms" and phone_number:
                     channel = "sms"
-                    # Assume SMS service is updated to use asyncpg or handle its own connections
-                    result = await self._sms_service.send_meeting_reminder(
-                        tenant_id=tenant_id,
-                        to_number=phone_number,
-                        reminder_type=reminder_type,
-                        name=lead_name,
-                        title=meeting_title,
-                        time=time_str,
-                        join_link=join_link,
-                        lead_id=lead_id,
-                        meeting_id=meeting_id,
-                        reminder_id=reminder_id,
-                        idempotency_key=idempotency_key
-                    )
-                    
+                    if message:
+                        result = await self._sms_service.send_sms(
+                            tenant_id=tenant_id, to_number=phone_number, message=message,
+                            lead_id=lead_id, meeting_id=meeting_id, reminder_id=reminder_id,
+                            idempotency_key=send_key, triggered_by="reminder",
+                        )
+                    else:
+                        result = await self._sms_service.send_meeting_reminder(
+                            tenant_id=tenant_id, to_number=phone_number, reminder_type=reminder_type,
+                            name=self._clip(lead_name, 20), title=self._clip(meeting_title, 40),
+                            time=time_str, join_link=join_link,
+                            lead_id=lead_id, meeting_id=meeting_id, reminder_id=reminder_id,
+                            idempotency_key=send_key,
+                        )
+
                     success = result.get("success", False)
                     external_message_id = result.get("message_id")
                     if not success:
                         error = result.get("error")
-                
-                # Fall back to email if no phone or SMS failed
-                elif email:
+
+                # Honour the approved channel even when the lead has both addresses.
+                elif requested_channel == "email" and email:
                     channel = "email"
                     result = await self._send_email_reminder(
                         tenant_id=tenant_id,
@@ -297,22 +431,24 @@ class ReminderWorker:
                         time=time_str,
                         join_link=join_link,
                         lead_id=lead_id,
-                        meeting_id=meeting_id
+                        meeting_id=meeting_id,
+                        idempotency_key=send_key,
+                        message=message,
                     )
-                    
+
                     success = result.get("success", False)
                     external_message_id = result.get("message_id")
                     if not success:
                         error = result.get("error")
-                
+
                 else:
-                    error = "No phone number or email available for lead"
+                    error = f"No recipient available for the approved {requested_channel} reminder channel"
                     logger.warning(f"Reminder {reminder_id}: {error}")
-            
+
             except Exception as e:
                 error = str(e)
                 logger.error(f"Exception processing reminder {reminder_id}: {e}")
-            
+
             # Update reminder status
             if success:
                 await conn.execute(
@@ -321,49 +457,106 @@ class ReminderWorker:
                         status = 'sent', sent_at = NOW(), channel = $1, external_message_id = $2
                     WHERE id = $3
                     """,
-                    channel, external_message_id, reminder_id
+                    channel,
+                    external_message_id,
+                    reminder_id,
                 )
-                
+
                 self._reminders_sent += 1
                 if channel == "email":
                     self._emails_sent += 1
-                
+
                 logger.info(f"Reminder {reminder_id} sent successfully via {channel}")
-            
+
             else:
                 # Handle retry
                 retry_count = (reminder.get("retry_count") or 0) + 1
                 max_retries = reminder.get("max_retries") or self.MAX_RETRIES
-                
-                if retry_count < max_retries:
+
+                # An accepted request may have lost its response. Its durable
+                # action receipt fences retries; expose review instead of resend.
+                uncertain = result.get("status") in {"unknown", "in_progress", "request_conflict"}
+                if uncertain:
+                    error = "Outcome unknown; review saved action receipt before retrying"
+                if retry_count < max_retries and not uncertain:
                     # Schedule retry with exponential backoff
                     # Note: Using simple calculation here, might need datetime calc
                     # Assuming next_retry_at logic in SQL or python
-                    import datetime as dt
                     delay_Seconds = 60 * (2 ** (retry_count - 1))
-                    
+
                     await conn.execute(
                         """
                         UPDATE reminders SET 
-                            status = 'pending', retry_count = $1, next_retry_at = NOW() + interval '$2 seconds',
-                            last_error = $3, scheduled_at = NOW() + interval '$2 seconds'
+                            status = 'pending', retry_count = $1, next_retry_at = NOW() + $2 * interval '1 second',
+                            last_error = $3, scheduled_at = NOW() + $2 * interval '1 second'
                         WHERE id = $4
                         """,
-                        retry_count, delay_Seconds, error, reminder_id
+                        retry_count,
+                        delay_Seconds,
+                        error,
+                        reminder_id,
                     )
-                    
-                    logger.info(f"Reminder {reminder_id} scheduled for retry {retry_count}/{max_retries}")
-                
+
+                    logger.info(
+                        f"Reminder {reminder_id} scheduled for retry {retry_count}/{max_retries}"
+                    )
+
                 else:
                     # Max retries exceeded, mark as failed
                     await conn.execute(
                         "UPDATE reminders SET status = 'failed', retry_count = $1, last_error = $2 WHERE id = $3",
-                        retry_count, error, reminder_id
+                        retry_count,
+                        error,
+                        reminder_id,
                     )
-                    
+
                     self._reminders_failed += 1
-                    logger.error(f"Reminder {reminder_id} failed after {retry_count} attempts: {error}")
-    
+                    logger.error(
+                        f"Reminder {reminder_id} failed after {retry_count} attempts: {error}"
+                    )
+
+    async def _opt_out_verdict(
+        self, reminder: Dict[str, Any], tenant_id: Optional[str], sms_number: Optional[str]
+    ) -> str:
+        """'opted_out', 'ok' or 'unknown' (the DNC lookup failed: do not send)."""
+        if reminder.get("lead_status") == "dnc" or reminder.get("lead_do_not_call"):
+            return "opted_out"
+        if sms_number:
+            try:
+                # Same normaliser/lookup CallGuard uses, so list entries match.
+                if await DNCService(self._db_pool).is_on_dnc(tenant_id=tenant_id, e164=sms_number):
+                    return "opted_out"
+            except Exception as exc:
+                logger.error(f"Reminder {reminder.get('id')}: DNC lookup failed, not sending: {exc}")
+                return "unknown"
+        return "ok"
+
+    @staticmethod
+    def _meeting_is_past(reminder: Dict[str, Any]) -> bool:
+        if reminder.get("meeting_status") in ("cancelled", "completed"):
+            return True
+        start = reminder.get("start_time")
+        if isinstance(start, str):
+            try:
+                start = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            except ValueError:
+                return False
+        if isinstance(start, datetime):
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            return start <= datetime.now(timezone.utc)
+        return False
+
+    async def _cancel_pending(self, tenant_id: Optional[str], reminder_id: str, reason: str) -> None:
+        async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
+            await conn.execute(
+                "UPDATE reminders SET status = 'cancelled', last_error = $1 "
+                "WHERE id = $2 AND tenant_id = $3 AND status = 'pending'",
+                reason,
+                reminder_id,
+                tenant_id,
+            )
+
     def _determine_reminder_type(self, reminder: Dict[str, Any]) -> str:
         """Determine reminder type (24h, 1h, 10m) from content or context."""
         content = reminder.get("content")
@@ -373,25 +566,44 @@ class ReminderWorker:
             except:
                 content = {}
         content = content or {}
-        
+
         # Check if type is stored in content
         if "reminder_type" in content:
             return content["reminder_type"]
-        
-        # Infer from template name
-        template = content.get("template", "")
+
+        # A non-default template name is an explicit choice.
+        template = content.get("template") or ""
         if "24h" in template:
             return "24h"
-        elif "1h" in template:
-            return "1h"
         elif "10m" in template:
             return "10m"
-        
-        # Default to 1h
+
+        # The scheduler stamps every row with the default 1h template, so the
+        # wording must follow the real lead time (meeting start - scheduled time).
+        start, scheduled = reminder.get("start_time"), reminder.get("scheduled_at")
+        if isinstance(start, datetime) and isinstance(scheduled, datetime):
+            try:
+                lead = start - scheduled
+            except TypeError:  # naive vs aware: fall through to the template
+                lead = None
+            if lead is not None:
+                if lead >= timedelta(hours=12):
+                    return "24h"
+                if lead >= timedelta(minutes=30):
+                    return "1h"
+                return "10m"
+
+        if "1h" in template:
+            return "1h"
         return "1h"
-    
-    def _format_time(self, start_time: Any) -> str:
-        """Format ISO time string or datetime for display."""
+
+    @staticmethod
+    def _clip(text: str, limit: int) -> str:
+        """Keep SMS template fields short enough for a single 160-char message."""
+        return text if len(text) <= limit else text[: limit - 3].rstrip() + "..."
+
+    def _format_time(self, start_time: Any, tz_name: Optional[str] = None) -> str:
+        """Format a meeting start in its own timezone, labelled (UTC when unknown)."""
         try:
             if isinstance(start_time, str):
                 dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
@@ -399,10 +611,18 @@ class ReminderWorker:
                 dt = start_time
             else:
                 return str(start_time)
-            return dt.strftime("%I:%M %p")
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            zone = timezone.utc
+            if tz_name:
+                try:
+                    zone = ZoneInfo(tz_name)
+                except (ZoneInfoNotFoundError, ValueError):
+                    zone = timezone.utc
+            return dt.astimezone(zone).strftime("%I:%M %p %Z")
         except Exception:
             return str(start_time)
-    
+
     async def _send_email_reminder(
         self,
         tenant_id: str,
@@ -413,42 +633,47 @@ class ReminderWorker:
         time: str,
         join_link: Optional[str],
         lead_id: Optional[str],
-        meeting_id: Optional[str]
+        meeting_id: Optional[str],
+        idempotency_key: str,
+        message: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Send email reminder using EmailService."""
         # Map reminder type to email template
-        template_map = {
-            "24h": "reminder",
-            "1h": "reminder",
-            "10m": "reminder"
-        }
-        
+        template_map = {"24h": "reminder", "1h": "reminder", "10m": "reminder"}
+
         template_name = template_map.get(reminder_type, "reminder")
-        
+
         # Build template context
         context = {
             "recipient_name": name,
             "title": title,
             "time": time,
-            "is_tomorrow": reminder_type == "24h"
+            "is_tomorrow": reminder_type == "24h",
         }
-        
+
         if join_link:
             context["join_link"] = join_link
-        
+
         try:
-            return await self._email_service.send_templated_email(
-                tenant_id=tenant_id,
-                template_name=template_name,
-                recipients=[to_email],
-                context=context,
-                lead_ids=[lead_id] if lead_id else None,
-                triggered_by="reminder"
+            from app.services.action_execution import DurableActionExecutor
+            return await DurableActionExecutor(self._db_pool).execute(
+                tenant_id=tenant_id, idempotency_key="email-reminder:" + idempotency_key,
+                action="send_email", triggered_by="reminder", lead_id=lead_id,
+                payload={"recipients": [to_email], "template": template_name,
+                         "context": context, "meeting_id": meeting_id, "message": message},
+                executor=(lambda: self._email_service.send_email(
+                    tenant_id=tenant_id, to=[to_email], subject=f"Reminder: {title}", body=message,
+                    lead_ids=[lead_id] if lead_id else None, triggered_by="reminder",
+                )) if message else (lambda: self._email_service.send_templated_email(
+                    tenant_id=tenant_id, template_name=template_name,
+                    recipients=[to_email], context=context,
+                    lead_ids=[lead_id] if lead_id else None, triggered_by="reminder",
+                )),
             )
         except Exception as e:
             logger.error(f"Email send failed: {e}")
             return {"success": False, "error": str(e)}
-    
+
     async def shutdown(self) -> None:
         """Graceful shutdown."""
         logger.info("Shutting down Reminder Worker...")
@@ -470,14 +695,14 @@ class ReminderWorker:
             f"Emails Sent: {self._emails_sent}, "
             f"Failed: {self._reminders_failed}"
         )
-    
+
     def get_stats(self) -> dict:
         """Get worker statistics."""
         return {
             "running": self.running,
             "reminders_sent": self._reminders_sent,
             "emails_sent": self._emails_sent,
-            "reminders_failed": self._reminders_failed
+            "reminders_failed": self._reminders_failed,
         }
 
     # Redis key the health API (/api/v1/healthz/workers) watches to tell a
@@ -538,19 +763,19 @@ class ReminderWorker:
 async def main():
     """Entry point for running reminder worker as separate process."""
     logging.basicConfig(level=logging.INFO)
-    
+
     worker = ReminderWorker()
-    
+
     # Handle shutdown signals
     loop = asyncio.get_event_loop()
-    
+
     def signal_handler():
         logger.info("Received shutdown signal")
         worker.running = False
-    
+
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, signal_handler)
-    
+
     try:
         await worker.run()
     except KeyboardInterrupt:

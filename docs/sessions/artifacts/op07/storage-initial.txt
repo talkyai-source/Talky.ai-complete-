@@ -1,0 +1,609 @@
+.F.F...F.F.FFFFFFFFFFFFFFFFF                                             [100%]
+================================== FAILURES ===================================
+__ test_no_storage_entry_retains_unapproved_or_unbound_audio[disabled-local] __
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2552A5FA0>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_1'))
+entry = 'local', failure = 'disabled'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[disabled-legacy] __
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25583CD10>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_3'))
+entry = 'legacy', failure = 'disabled'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '20000000-0000-4000-8000-000000000007/30000000-0000-4000-8000-000000000007/10000000-0000-4000-8000-000000000007.wav' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[disclosure-failed-legacy] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C255889340>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_7'))
+entry = 'legacy', failure = 'disclosure-failed'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '20000000-0000-4000-8000-000000000007/30000000-0000-4000-8000-000000000007/10000000-0000-4000-8000-000000000007.wav' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[policy-unavailable-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C255849340>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_9'))
+entry = 'local', failure = 'policy-unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[policy-unavailable-legacy] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25582B350>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_11'))
+entry = 'legacy', failure = 'policy-unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '20000000-0000-4000-8000-000000000007/30000000-0000-4000-8000-000000000007/10000000-0000-4000-8000-000000000007.wav' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-cloud] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25579CAA0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_12'))
+entry = 'cloud', failure = 'foreign-call'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25576C2F0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_13'))
+entry = 'local', failure = 'foreign-call'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-configured-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558CD310>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_14'))
+entry = 'configured-local', failure = 'foreign-call'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-legacy] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558AA0C0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_15'))
+entry = 'legacy', failure = 'foreign-call'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '20000000-0000-4000-8000-000000000007/30000000-0000-4000-8000-000000000007/10000000-0000-4000-8000-000000000007.wav' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-cloud] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25578E1E0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_16'))
+entry = 'cloud', failure = 'binding-unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25582BBC0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_17'))
+entry = 'local', failure = 'binding-unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-configured-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25583D2B0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_18'))
+entry = 'configured-local', failure = 'binding-unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-legacy] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25584B620>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_19'))
+entry = 'legacy', failure = 'binding-unavailable'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '20000000-0000-4000-8000-000000000007/30000000-0000-4000-8000-000000000007/10000000-0000-4000-8000-000000000007.wav' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-cloud] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558800E0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_20'))
+entry = 'cloud', failure = 'unknown-tenant'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25585DDC0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_21'))
+entry = 'local', failure = 'unknown-tenant'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-configured-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25583D130>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_22'))
+entry = 'configured-local', failure = 'unknown-tenant'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert '40000000-0000-4000-8000-000000000007' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+_ test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-legacy] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558292B0>, conn=namespac...ry=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_no_storage_entry_retains_23'))
+entry = 'legacy', failure = 'unknown-tenant'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    @pytest.mark.parametrize("failure", ["disabled", "disclosure-failed", "policy-unavailable", "foreign-call", "binding-unavailable", "unknown-tenant"])
+    async def test_no_storage_entry_retains_unapproved_or_unbound_audio(fixture, entry, failure):
+        tenant = TENANT
+        if failure == "disabled":
+            fixture.decide.return_value = policy.RecordingDecision(False, False, None, None, 90, "tenant_policy_disabled")
+            policy.record_disclosure_state(policy.DISCLOSURE_NOT_REQUIRED, CALL)
+        elif failure == "disclosure-failed":
+            fixture.decide.return_value = policy.RecordingDecision(True, True, "notice", None, 90, "two_party")
+            policy.record_disclosure_state(policy.DISCLOSURE_FAILED, CALL)
+        elif failure == "policy-unavailable":
+            fixture.decide.side_effect = RuntimeError("synthetic policy read failed")
+        elif failure == "foreign-call":
+            fixture.conn.fetchrow.return_value = None
+        elif failure == "binding-unavailable":
+            fixture.conn.fetchrow.side_effect = RuntimeError("synthetic binding read failed")
+        else:
+            tenant = "unknown"
+        result = await invoke(fixture, entry, tenant)
+>       assert result is None
+E       AssertionError: assert 'unknown/30000000-0000-4000-8000-000000000007/10000000-0000-4000-8000-000000000007.wav' is None
+
+tests\unit\test_op07_recording_retention.py:81: AssertionError
+______ test_explicit_policy_and_owned_call_allow_existing_storage[cloud] ______
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25579EAE0>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned0'))
+entry = 'cloud'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    async def test_explicit_policy_and_owned_call_allow_existing_storage(fixture, entry):
+        result = await invoke(fixture, entry)
+        assert result
+>       assert fixture.conn.fetchrow.await_count >= 1
+E       AssertionError: assert 0 >= 1
+E        +  where 0 = <AsyncMock id='1934164118464'>.await_count
+E        +    where <AsyncMock id='1934164118464'> = namespace(fetchrow=<AsyncMock id='1934164118464'>).fetchrow
+E        +      where namespace(fetchrow=<AsyncMock id='1934164118464'>) = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C25579EAE0>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned0')).conn
+
+tests\unit\test_op07_recording_retention.py:93: AssertionError
+______ test_explicit_policy_and_owned_call_allow_existing_storage[local] ______
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558A8290>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned1'))
+entry = 'local'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    async def test_explicit_policy_and_owned_call_allow_existing_storage(fixture, entry):
+        result = await invoke(fixture, entry)
+        assert result
+>       assert fixture.conn.fetchrow.await_count >= 1
+E       AssertionError: assert 0 >= 1
+E        +  where 0 = <AsyncMock id='1934169134512'>.await_count
+E        +    where <AsyncMock id='1934169134512'> = namespace(fetchrow=<AsyncMock id='1934169134512'>).fetchrow
+E        +      where namespace(fetchrow=<AsyncMock id='1934169134512'>) = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558A8290>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned1')).conn
+
+tests\unit\test_op07_recording_retention.py:93: AssertionError
+_ test_explicit_policy_and_owned_call_allow_existing_storage[configured-local] _
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C255919BB0>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned2'))
+entry = 'configured-local'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    async def test_explicit_policy_and_owned_call_allow_existing_storage(fixture, entry):
+        result = await invoke(fixture, entry)
+        assert result
+>       assert fixture.conn.fetchrow.await_count >= 1
+E       AssertionError: assert 0 >= 1
+E        +  where 0 = <AsyncMock id='1934170860304'>.await_count
+E        +    where <AsyncMock id='1934170860304'> = namespace(fetchrow=<AsyncMock id='1934170860304'>).fetchrow
+E        +      where namespace(fetchrow=<AsyncMock id='1934170860304'>) = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C255919BB0>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned2')).conn
+
+tests\unit\test_op07_recording_retention.py:93: AssertionError
+_____ test_explicit_policy_and_owned_call_allow_existing_storage[legacy] ______
+
+fixture = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558A9070>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned3'))
+entry = 'legacy'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("entry", ["cloud", "local", "configured-local", "legacy"])
+    async def test_explicit_policy_and_owned_call_allow_existing_storage(fixture, entry):
+        result = await invoke(fixture, entry)
+        assert result
+>       assert fixture.conn.fetchrow.await_count >= 1
+E       AssertionError: assert 0 >= 1
+E        +  where 0 = <AsyncMock id='1934170325936'>.await_count
+E        +    where <AsyncMock id='1934170325936'> = namespace(fetchrow=<AsyncMock id='1934170325936'>).fetchrow
+E        +      where namespace(fetchrow=<AsyncMock id='1934170325936'>) = namespace(service=<app.domain.services.recording_service.RecordingService object at 0x000001C2558A9070>, conn=namespac...ory=WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-763/test_explicit_policy_and_owned3')).conn
+
+tests\unit\test_op07_recording_retention.py:93: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_op07_recording_retention.py: 28 warnings
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_recording_retention.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:774: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-cloud]
+tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-cloud]
+tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-cloud]
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:642: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_started = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-cloud]
+tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-cloud]
+tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-cloud]
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:660: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_finished = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[disabled-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[disabled-legacy]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[disclosure-failed-legacy]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[policy-unavailable-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[policy-unavailable-legacy]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-cloud]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-configured-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[foreign-call-legacy]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-cloud]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-configured-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[binding-unavailable-legacy]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-cloud]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-configured-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_no_storage_entry_retains_unapproved_or_unbound_audio[unknown-tenant-legacy]
+FAILED tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+FAILED tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[local]
+FAILED tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[configured-local]
+FAILED tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[legacy]
+21 failed, 7 passed, 46 warnings in 3.49s

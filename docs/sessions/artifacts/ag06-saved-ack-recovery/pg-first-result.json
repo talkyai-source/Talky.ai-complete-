@@ -1,0 +1,975 @@
+{
+  "source_head": "fe1ad226f8e68ba1042d5b3df880db7c08d434fa",
+  "source_before": {
+    "backend/app/services/saved_acknowledgement.py": "8e4d7645fb1ad2d2c9b9e89f687fc825711e0b15faeb376499c0e226f29ac82b",
+    "backend/app/api/v1/endpoints/admin/actions.py": "0c44cbd1733d2809922c75049976ba4fc2e6414bac57d3d25b52d21ea6527061",
+    "backend/Alembic/versions/0062_saved_acknowledgement.py": "e28f287ebf38a192f912cd648aa6bca78e72d6aeaac5eaf54c31aa0c94b15337",
+    "backend/tests/unit/test_saved_acknowledgement.py": "e7b920082304b9cc8ee709de4806c2af5df999bfbe1b35f9c3fadfc64c5229d9",
+    "backend/tests/integration/test_saved_acknowledgement.py": "10f3629328c5a08437369e9b00443d5c57d48e9787053efe9e21d9eb5c490e4f",
+    "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+    "backend/app/services/email_service.py": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+    "backend/app/core/db_utils.py": "e58351113da50a0821e8327b06a14271c97778075b74786838f25d4ba5a4fb3a",
+    "backend/app/core/security/principal.py": "b92254a403c14b9b4590e450ea70a1132243b849a6f002f46eafaad1c15f618b",
+    "backend/app/core/security/sessions/queries.py": "0f9cae156656a903419874052859f43a3535fc62e8efd5e39293866a899661f2"
+  },
+  "role": "ack_probe_8373a623bf40419f99e53fbb3573864a",
+  "scope": "Synthetic partial-schema SQL and actual 0062 migration proof; not full migrated acceptance or live Gmail.",
+  "network": {
+    "database_connections": 0,
+    "internal_socketpairs": 18,
+    "prohibited_attempts": 0
+  },
+  "public_before": {
+    "head": "0061_dnc_runtime_contract",
+    "tables": {
+      "abuse_detection_rules": {
+        "count": 8,
+        "data_hash": "1b62df9126631773c371932e839cbc80"
+      },
+      "abuse_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "action_plans": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_intents": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_request_keys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "ai_config_migrations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "alembic_version": {
+        "count": 1,
+        "data_hash": "9135024a1f9169b8e151d689545ffbfa"
+      },
+      "assistant_actions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "assistant_conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "audit_logs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_checkout_attempts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_ledger": {
+        "count": 761,
+        "data_hash": "c6e769e88e78d84cfba6effe8c17f321"
+      },
+      "billing_refund_snapshots": {
+        "count": 18,
+        "data_hash": "e16b2f47da9cc8cf8dab4aa5c1f0a15c"
+      },
+      "billing_webhook_notifications": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_webhook_review_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_feedback": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_guard_decisions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_lead_details": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_legs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_velocity_snapshots": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "calls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_nodes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_sources": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_lead_fields": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaigns": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "clients": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "cloned_voices": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connector_accounts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connectors": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "contact_lists": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversation_reviews": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "crm_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dialer_jobs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dnc_entries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_audit_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_billing_hold_finalize_approvals": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_campaign_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_did_assignments": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_operation_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_reassignment_requests": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_rejections": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_usage_transactions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "invoice_snapshots": {
+        "count": 120,
+        "data_hash": "88fad5f926f8df9217dded1fb0a29840"
+      },
+      "invoices": {
+        "count": 65,
+        "data_hash": "efa55e1daffcb043d83e20f18a745acb"
+      },
+      "leads": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "login_attempts": {
+        "count": 72,
+        "data_hash": "25840bb8f000f073e13544f8799f13aa"
+      },
+      "meetings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "mfa_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "partner_limits": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "permissions": {
+        "count": 42,
+        "data_hash": "637bc15dc82a0d44728a69f9193166e3"
+      },
+      "plan_price_options": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "plans": {
+        "count": 170,
+        "data_hash": "c1123fcdec0739c1fb2ffc87040f1082"
+      },
+      "platform_runtime_controls": {
+        "count": 1,
+        "data_hash": "7b7bab55f025160a20409aa4e507e5b1"
+      },
+      "processed_webhook_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "prompt_template_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "public_contact_enquiries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings_s3": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recovery_codes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "refresh_tokens": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "reminders": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "review_reward_ledger": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "role_permissions": {
+        "count": 150,
+        "data_hash": "9c023bb140e49d652c5d5c88f078b20c"
+      },
+      "roles": {
+        "count": 5,
+        "data_hash": "7745847c5b5bea8b97c752a7cc96fad3"
+      },
+      "secret_access_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_sessions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "subscriptions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "suspension_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "talky_0041_contact_lists_adoption": {
+        "count": 1,
+        "data_hash": "9e43cdf99b84df9a2ca9feb300b72404"
+      },
+      "tenant_ai_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_call_limits": {
+        "count": 105,
+        "data_hash": "624be810a07f227fc7dac0dbe18dee9e"
+      },
+      "tenant_codec_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_inbound_controls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_phone_numbers": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_policy_audit_log": {
+        "count": 142,
+        "data_hash": "dbd92fe761753b9734a5e12b602c72a9"
+      },
+      "tenant_quota_usage": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_quotas": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_route_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_secrets": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_settings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trunks": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trust_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_leases": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_quota_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_threshold_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_users": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenants": {
+        "count": 301,
+        "data_hash": "da26d5b003644b449032690a9ee7b204"
+      },
+      "topup_orders": {
+        "count": 108,
+        "data_hash": "b6b0ec443c5dd51d1e5da3b4d6015bc9"
+      },
+      "topup_packages": {
+        "count": 3,
+        "data_hash": "8755a0548dc296564feae99a24ce185b"
+      },
+      "transcripts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "usage_records": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_mfa": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_passkeys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_permissions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_profiles": {
+        "count": 4,
+        "data_hash": "109d28109f7d54d3c6925bfc9e01b2db"
+      },
+      "webauthn_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_endpoints": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "white_label_partners": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    },
+    "schema": {
+      "relations": {
+        "count": 520,
+        "sha256": "62de6290330b76a7c2e9551dc991a0879b8086ad6f6236370fb06a6baa329754"
+      },
+      "columns": {
+        "count": 1624,
+        "sha256": "fd2b967d072422ae50405eaa52be723d9e5b7bc76274d8ea0fe2619c5d7c0306"
+      },
+      "constraints": {
+        "count": 601,
+        "sha256": "c4607d796433350d68d8edf78d9d2ec66c45f74a32aac9eb79c79fe8130dbc53"
+      },
+      "policies": {
+        "count": 106,
+        "sha256": "3f4df52fdab6ea8ce6a4995a2f3f39a6063b02218cf3f25a427a29eaa1b18c65"
+      },
+      "functions": {
+        "count": 98,
+        "sha256": "88e35a20a4496bf75eb7bf84f172392b709563a0c95e8d0902874bbce80c7640"
+      },
+      "triggers": {
+        "count": 1024,
+        "sha256": "366566c94172a534dbf5261efc4fbf8fbc206af865df1adf24e84b0ac32cfd4e"
+      }
+    }
+  },
+  "role_created": true,
+  "public_write_grants": 0,
+  "pytest_argv": [
+    "tests/integration/test_saved_acknowledgement.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings",
+    "-o",
+    "addopts="
+  ],
+  "pytest_exit_code": 0,
+  "fixture_schema_leftovers": [],
+  "role_removed": true,
+  "public_after": {
+    "head": "0061_dnc_runtime_contract",
+    "tables": {
+      "abuse_detection_rules": {
+        "count": 8,
+        "data_hash": "1b62df9126631773c371932e839cbc80"
+      },
+      "abuse_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "action_plans": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_intents": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "admin_media_deletion_request_keys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "ai_config_migrations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "alembic_version": {
+        "count": 1,
+        "data_hash": "9135024a1f9169b8e151d689545ffbfa"
+      },
+      "assistant_actions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "assistant_conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "audit_logs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_checkout_attempts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_ledger": {
+        "count": 761,
+        "data_hash": "c6e769e88e78d84cfba6effe8c17f321"
+      },
+      "billing_refund_snapshots": {
+        "count": 18,
+        "data_hash": "e16b2f47da9cc8cf8dab4aa5c1f0a15c"
+      },
+      "billing_webhook_notifications": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "billing_webhook_review_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_feedback": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_guard_decisions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_lead_details": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_legs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "call_velocity_snapshots": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "calls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_nodes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_knowledge_sources": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaign_lead_fields": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "campaigns": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "clients": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "cloned_voices": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connector_accounts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "connectors": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "contact_lists": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversation_reviews": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "conversations": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "crm_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dialer_jobs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "dnc_entries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_audit_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_billing_hold_finalize_approvals": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_campaign_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_did_assignments": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_operation_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_reassignment_requests": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_rejections": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "inbound_usage_transactions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "invoice_snapshots": {
+        "count": 120,
+        "data_hash": "88fad5f926f8df9217dded1fb0a29840"
+      },
+      "invoices": {
+        "count": 65,
+        "data_hash": "efa55e1daffcb043d83e20f18a745acb"
+      },
+      "leads": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "login_attempts": {
+        "count": 72,
+        "data_hash": "25840bb8f000f073e13544f8799f13aa"
+      },
+      "meetings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "mfa_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "partner_limits": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "permissions": {
+        "count": 42,
+        "data_hash": "637bc15dc82a0d44728a69f9193166e3"
+      },
+      "plan_price_options": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "plans": {
+        "count": 170,
+        "data_hash": "c1123fcdec0739c1fb2ffc87040f1082"
+      },
+      "platform_runtime_controls": {
+        "count": 1,
+        "data_hash": "7b7bab55f025160a20409aa4e507e5b1"
+      },
+      "processed_webhook_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "prompt_template_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "public_contact_enquiries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recordings_s3": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "recovery_codes": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "refresh_tokens": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "reminders": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "review_reward_ledger": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "role_permissions": {
+        "count": 150,
+        "data_hash": "9c023bb140e49d652c5d5c88f078b20c"
+      },
+      "roles": {
+        "count": 5,
+        "data_hash": "7745847c5b5bea8b97c752a7cc96fad3"
+      },
+      "secret_access_log": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "security_sessions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "subscriptions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "suspension_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "talky_0041_contact_lists_adoption": {
+        "count": 1,
+        "data_hash": "9e43cdf99b84df9a2ca9feb300b72404"
+      },
+      "tenant_ai_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_call_limits": {
+        "count": 105,
+        "data_hash": "624be810a07f227fc7dac0dbe18dee9e"
+      },
+      "tenant_codec_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_inbound_controls": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_phone_numbers": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_policy_audit_log": {
+        "count": 142,
+        "data_hash": "dbd92fe761753b9734a5e12b602c72a9"
+      },
+      "tenant_quota_usage": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_quotas": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_route_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_runtime_policy_versions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_secrets": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_settings": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trunks": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_sip_trust_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_leases": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_concurrency_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_idempotency": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_quota_events": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_telephony_threshold_policies": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenant_users": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "tenants": {
+        "count": 301,
+        "data_hash": "da26d5b003644b449032690a9ee7b204"
+      },
+      "topup_orders": {
+        "count": 108,
+        "data_hash": "b6b0ec443c5dd51d1e5da3b4d6015bc9"
+      },
+      "topup_packages": {
+        "count": 3,
+        "data_hash": "8755a0548dc296564feae99a24ce185b"
+      },
+      "transcripts": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "usage_records": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_mfa": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_passkeys": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_permissions": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "user_profiles": {
+        "count": 4,
+        "data_hash": "109d28109f7d54d3c6925bfc9e01b2db"
+      },
+      "webauthn_challenges": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_configs": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_deliveries": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "webhook_endpoints": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      },
+      "white_label_partners": {
+        "count": 0,
+        "data_hash": "d41d8cd98f00b204e9800998ecf8427e"
+      }
+    },
+    "schema": {
+      "relations": {
+        "count": 520,
+        "sha256": "62de6290330b76a7c2e9551dc991a0879b8086ad6f6236370fb06a6baa329754"
+      },
+      "columns": {
+        "count": 1624,
+        "sha256": "fd2b967d072422ae50405eaa52be723d9e5b7bc76274d8ea0fe2619c5d7c0306"
+      },
+      "constraints": {
+        "count": 601,
+        "sha256": "c4607d796433350d68d8edf78d9d2ec66c45f74a32aac9eb79c79fe8130dbc53"
+      },
+      "policies": {
+        "count": 106,
+        "sha256": "3f4df52fdab6ea8ce6a4995a2f3f39a6063b02218cf3f25a427a29eaa1b18c65"
+      },
+      "functions": {
+        "count": 98,
+        "sha256": "88e35a20a4496bf75eb7bf84f172392b709563a0c95e8d0902874bbce80c7640"
+      },
+      "triggers": {
+        "count": 1024,
+        "sha256": "366566c94172a534dbf5261efc4fbf8fbc206af865df1adf24e84b0ac32cfd4e"
+      }
+    }
+  },
+  "public_unchanged": true,
+  "source_after": {
+    "backend/app/services/saved_acknowledgement.py": "8e4d7645fb1ad2d2c9b9e89f687fc825711e0b15faeb376499c0e226f29ac82b",
+    "backend/app/api/v1/endpoints/admin/actions.py": "0c44cbd1733d2809922c75049976ba4fc2e6414bac57d3d25b52d21ea6527061",
+    "backend/Alembic/versions/0062_saved_acknowledgement.py": "e28f287ebf38a192f912cd648aa6bca78e72d6aeaac5eaf54c31aa0c94b15337",
+    "backend/tests/unit/test_saved_acknowledgement.py": "e7b920082304b9cc8ee709de4806c2af5df999bfbe1b35f9c3fadfc64c5229d9",
+    "backend/tests/integration/test_saved_acknowledgement.py": "10f3629328c5a08437369e9b00443d5c57d48e9787053efe9e21d9eb5c490e4f",
+    "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+    "backend/app/services/email_service.py": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+    "backend/app/core/db_utils.py": "e58351113da50a0821e8327b06a14271c97778075b74786838f25d4ba5a4fb3a",
+    "backend/app/core/security/principal.py": "b92254a403c14b9b4590e450ea70a1132243b849a6f002f46eafaad1c15f618b",
+    "backend/app/core/security/sessions/queries.py": "0f9cae156656a903419874052859f43a3535fc62e8efd5e39293866a899661f2"
+  },
+  "source_unchanged": true
+}

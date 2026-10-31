@@ -1,0 +1,14 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+___ test_lost_challenge_consume_cannot_authorize_credentials[registration] ____
+tests\security\test_cp08_passkey_consumption.py:21: in test_lost_challenge_consume_cannot_authorize_credentials
+    with pytest.raises(ValueError):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+__ test_lost_challenge_consume_cannot_authorize_credentials[authentication] ___
+tests\security\test_cp08_passkey_consumption.py:21: in test_lost_challenge_consume_cannot_authorize_credentials
+    with pytest.raises(ValueError):
+E   Failed: DID NOT RAISE <class 'ValueError'>
+=========================== short test summary info ===========================
+FAILED tests/security/test_cp08_passkey_consumption.py::test_lost_challenge_consume_cannot_authorize_credentials[registration]
+FAILED tests/security/test_cp08_passkey_consumption.py::test_lost_challenge_consume_cannot_authorize_credentials[authentication]
+2 failed in 1.45s

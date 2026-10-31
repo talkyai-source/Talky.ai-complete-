@@ -1,0 +1,218 @@
+FFFFFFFFFFF.F                                                            [100%]
+================================== FAILURES ===================================
+_ test_guide_preserves_campaign_details_without_staged_scripts[lead_gen-slots0] _
+
+persona = 'lead_gen'
+slots = {'calendar_booking_type': 'a free home assessment', 'call_reason': 'we noticed homes in your area upgrading', 'company_differentiator': '10-year warranty', 'coverage_area': 'greater Austin', ...}
+
+    @pytest.mark.parametrize("persona,slots", [
+        ("lead_gen", LEAD_GEN_SLOTS), ("customer_support", SUPPORT_SLOTS),
+        ("receptionist", RECEPTIONIST_SLOTS),
+    ])
+    def test_guide_preserves_campaign_details_without_staged_scripts(persona, slots):
+        guidance = "Offer a demonstration only if the caller requests one."
+        text = compose_prompt(persona, "Ava", "Northwind", slots, additional_instructions=guidance)
+        assert "Ava" in text and "Northwind" in text and guidance in text
+        for script in ("STAGE 1", "STAGE 2", "DIAGNOSIS LOOP", "CROSS-NICHE", "AGENT:", "under twenty words"):
+>           assert script not in text
+E           AssertionError: assert 'STAGE 1' not in '## HARD RUL...ack to them.'
+E             'STAGE 1' is contained here:
+E               untime.
+E               
+E               
+E               STAGE 1 — OPEN
+E               A bare pickup greeting already played. Wait for the caller's reply, then give
+E               your introduction in one breath, under twenty words: your name, company, reason...
+E             
+E             ...Full output truncated (137 lines hidden), use '-vv' to show
+
+tests\unit\test_agent_conversation_guide.py:24: AssertionError
+_ test_guide_preserves_campaign_details_without_staged_scripts[customer_support-slots1] _
+
+persona = 'customer_support'
+slots = {'business_hours': 'M-F 9-6', 'cancellation_policy': 'anytime', 'common_issues': [{'issue': 'cannot login', 'solution': 'send password reset'}], 'complaint_policy': 'reviewed in 48h', ...}
+
+    @pytest.mark.parametrize("persona,slots", [
+        ("lead_gen", LEAD_GEN_SLOTS), ("customer_support", SUPPORT_SLOTS),
+        ("receptionist", RECEPTIONIST_SLOTS),
+    ])
+    def test_guide_preserves_campaign_details_without_staged_scripts(persona, slots):
+        guidance = "Offer a demonstration only if the caller requests one."
+        text = compose_prompt(persona, "Ava", "Northwind", slots, additional_instructions=guidance)
+        assert "Ava" in text and "Northwind" in text and guidance in text
+        for script in ("STAGE 1", "STAGE 2", "DIAGNOSIS LOOP", "CROSS-NICHE", "AGENT:", "under twenty words"):
+>           assert script not in text
+E           assert 'DIAGNOSIS LOOP' not in '## HARD RUL...ack to them.'
+E             'DIAGNOSIS LOOP' is contained here:
+E               or you?"
+E               
+E               DIAGNOSIS LOOP:
+E                 Use this order: identify the issue, collect the minimum detail, apply the
+E                 known resolution, confirm the caller is satisfied. One step per turn — don't
+E                 ask for every possible detail up front....
+E             
+E             ...Full output truncated (134 lines hidden), use '-vv' to show
+
+tests\unit\test_agent_conversation_guide.py:24: AssertionError
+_ test_guide_preserves_campaign_details_without_staged_scripts[receptionist-slots2] _
+
+persona = 'receptionist'
+slots = {'business_address': '123 Main St', 'business_email': 'hello@bright.com', 'business_phone': '555-0100', 'business_type': 'dental practice', ...}
+
+    @pytest.mark.parametrize("persona,slots", [
+        ("lead_gen", LEAD_GEN_SLOTS), ("customer_support", SUPPORT_SLOTS),
+        ("receptionist", RECEPTIONIST_SLOTS),
+    ])
+    def test_guide_preserves_campaign_details_without_staged_scripts(persona, slots):
+        guidance = "Offer a demonstration only if the caller requests one."
+        text = compose_prompt(persona, "Ava", "Northwind", slots, additional_instructions=guidance)
+        assert "Ava" in text and "Northwind" in text and guidance in text
+        for script in ("STAGE 1", "STAGE 2", "DIAGNOSIS LOOP", "CROSS-NICHE", "AGENT:", "under twenty words"):
+>           assert script not in text
+E           assert 'CROSS-NICHE' not in '## HARD RUL...ack to them.'
+E             'CROSS-NICHE' is contained here:
+E               g else?"
+E               
+E               CROSS-NICHE ROUTING MAP:
+E                 Use this as a routing safety net when the campaign is in a specific niche.
+E                 Always prefer the campaign's own emergency protocol and department list.
+E               ...
+E             
+E             ...Full output truncated (143 lines hidden), use '-vv' to show
+
+tests\unit\test_agent_conversation_guide.py:24: AssertionError
+___________ test_pending_contact_is_context_not_a_compulsory_script ___________
+
+    def test_pending_contact_is_context_not_a_compulsory_script():
+        state = CallState(email="alex@example.test", email_confirmed=False)
+        prompt = compose_system_prompt("BASE", state)
+>       assert "alex@example.test" in prompt and "pending" in prompt.lower()
+E       assert ('alex@example.test' in 'ACTION THIS TURN — confirm before you rely on it:\n- Say EXACTLY: "So that\'s alex at example dot test — did I get th...quest until an available booking tool confirms it.\n------------------------------------------------------------\nBASE' and 'pending' in 'action this turn — confirm before you rely on it:\n- say exactly: "so that\'s alex at example dot test — did i get th...quest until an available booking tool confirms it.\n------------------------------------------------------------\nbase')
+E        +  where 'action this turn — confirm before you rely on it:\n- say exactly: "so that\'s alex at example dot test — did i get th...quest until an available booking tool confirms it.\n------------------------------------------------------------\nbase' = <built-in method lower of str object at 0x00000292E8435140>()
+E        +    where <built-in method lower of str object at 0x00000292E8435140> = 'ACTION THIS TURN — confirm before you rely on it:\n- Say EXACTLY: "So that\'s alex at example dot test — did I get th...quest until an available booking tool confirms it.\n------------------------------------------------------------\nBASE'.lower
+
+tests\unit\test_agent_conversation_guide.py:33: AssertionError
+____ test_runtime_identity_is_state_without_a_forced_opening[False-False] _____
+
+introduced = False, interrupted = False
+
+    @pytest.mark.parametrize("introduced,interrupted", [(False, False), (True, False), (False, True)])
+    def test_runtime_identity_is_state_without_a_forced_opening(introduced, interrupted):
+        block = build_live_state_block(agent_name="Ava", company_name="Northwind", has_introduced=introduced,
+                                      opening_interrupted=interrupted, direction="inbound")
+        assert "Ava" in block and "Northwind" in block
+>       assert "direction=inbound" in block
+E       assert 'direction=inbound' in "LIVE STATE — current call status, read this before you reply:\n- You're on this call as Ava, for Northwind. Keep this...iscovery, qualification or next step. Current caller intent and confirmed runtime state override campaign assumptions."
+
+tests\unit\test_agent_conversation_guide.py:46: AssertionError
+_____ test_runtime_identity_is_state_without_a_forced_opening[True-False] _____
+
+introduced = True, interrupted = False
+
+    @pytest.mark.parametrize("introduced,interrupted", [(False, False), (True, False), (False, True)])
+    def test_runtime_identity_is_state_without_a_forced_opening(introduced, interrupted):
+        block = build_live_state_block(agent_name="Ava", company_name="Northwind", has_introduced=introduced,
+                                      opening_interrupted=interrupted, direction="inbound")
+        assert "Ava" in block and "Northwind" in block
+>       assert "direction=inbound" in block
+E       assert 'direction=inbound' in "LIVE STATE — current call status, read this before you reply:\n- You're on this call as Ava, for Northwind. Keep this...iscovery, qualification or next step. Current caller intent and confirmed runtime state override campaign assumptions."
+
+tests\unit\test_agent_conversation_guide.py:46: AssertionError
+_____ test_runtime_identity_is_state_without_a_forced_opening[False-True] _____
+
+introduced = False, interrupted = True
+
+    @pytest.mark.parametrize("introduced,interrupted", [(False, False), (True, False), (False, True)])
+    def test_runtime_identity_is_state_without_a_forced_opening(introduced, interrupted):
+        block = build_live_state_block(agent_name="Ava", company_name="Northwind", has_introduced=introduced,
+                                      opening_interrupted=interrupted, direction="inbound")
+        assert "Ava" in block and "Northwind" in block
+>       assert "direction=inbound" in block
+E       assert 'direction=inbound' in "LIVE STATE — current call status, read this before you reply:\n- You're on this call as Ava, for Northwind. Keep this...iscovery, qualification or next step. Current caller intent and confirmed runtime state override campaign assumptions."
+
+tests\unit\test_agent_conversation_guide.py:46: AssertionError
+_ test_cleaner_preserves_ordinary_qualifiers_and_conversation[Starter costs \xa319 (excluding VAT).] _
+
+text = 'Starter costs £19 (excluding VAT).'
+
+    @pytest.mark.parametrize("text", [
+        "Starter costs £19 (excluding VAT).", "Support runs on weekdays (except bank holidays).",
+        "Of course, take your time.", "Sure, we can explain the options.",
+    ])
+    def test_cleaner_preserves_ordinary_qualifiers_and_conversation(text):
+>       assert get_guardrails().clean_response(text) == text
+E       AssertionError: assert 'Starter costs £19 .' == 'Starter cost...cluding VAT).'
+E         - Starter costs £19 (excluding VAT).
+E         + Starter costs £19 .
+
+tests\unit\test_agent_conversation_guide.py:56: AssertionError
+_ test_cleaner_preserves_ordinary_qualifiers_and_conversation[Support runs on weekdays (except bank holidays).] _
+
+text = 'Support runs on weekdays (except bank holidays).'
+
+    @pytest.mark.parametrize("text", [
+        "Starter costs £19 (excluding VAT).", "Support runs on weekdays (except bank holidays).",
+        "Of course, take your time.", "Sure, we can explain the options.",
+    ])
+    def test_cleaner_preserves_ordinary_qualifiers_and_conversation(text):
+>       assert get_guardrails().clean_response(text) == text
+E       AssertionError: assert 'Support runs on weekdays .' == 'Support runs...nk holidays).'
+E         - Support runs on weekdays (except bank holidays).
+E         + Support runs on weekdays .
+
+tests\unit\test_agent_conversation_guide.py:56: AssertionError
+_ test_cleaner_preserves_ordinary_qualifiers_and_conversation[Of course, take your time.] _
+
+text = 'Of course, take your time.'
+
+    @pytest.mark.parametrize("text", [
+        "Starter costs £19 (excluding VAT).", "Support runs on weekdays (except bank holidays).",
+        "Of course, take your time.", "Sure, we can explain the options.",
+    ])
+    def test_cleaner_preserves_ordinary_qualifiers_and_conversation(text):
+>       assert get_guardrails().clean_response(text) == text
+E       AssertionError: assert 'Take your time.' == 'Of course, take your time.'
+E         - Of course, take your time.
+E         + Take your time.
+
+tests\unit\test_agent_conversation_guide.py:56: AssertionError
+_ test_cleaner_preserves_ordinary_qualifiers_and_conversation[Sure, we can explain the options.] _
+
+text = 'Sure, we can explain the options.'
+
+    @pytest.mark.parametrize("text", [
+        "Starter costs £19 (excluding VAT).", "Support runs on weekdays (except bank holidays).",
+        "Of course, take your time.", "Sure, we can explain the options.",
+    ])
+    def test_cleaner_preserves_ordinary_qualifiers_and_conversation(text):
+>       assert get_guardrails().clean_response(text) == text
+E       AssertionError: assert 'We can explain the options.' == 'Sure, we can... the options.'
+E         - Sure, we can explain the options.
+E         ? ^^^ ----
+E         + We can explain the options.
+E         ? ^
+
+tests\unit\test_agent_conversation_guide.py:56: AssertionError
+________ test_native_guide_is_separate_and_uses_the_contact_tool_truth ________
+
+    def test_native_guide_is_separate_and_uses_the_contact_tool_truth():
+        text = build_realtime_instructions(RealtimePersona(agent_name="Ava", company_name="Northwind", campaign_guidance="Use the approved demo offer."))
+        assert "Ava" in text and "Use the approved demo offer." in text
+>       assert "record_contact" in text and "saved" in text
+E       AssertionError: assert ('record_contact' in 'WHO YOU ARE\nYou are Ava, a friendly voice assistant for Northwind. Your goal on this call: have a helpful, natural c...next_action=unknown\nconfirmed_contacts=none\nlast_tool_result=unknown\nsales_stage=opening\nEND LIVE STRUCTURED STATE')
+
+tests\unit\test_agent_conversation_guide.py:69: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_agent_conversation_guide.py::test_guide_preserves_campaign_details_without_staged_scripts[lead_gen-slots0]
+FAILED tests/unit/test_agent_conversation_guide.py::test_guide_preserves_campaign_details_without_staged_scripts[customer_support-slots1]
+FAILED tests/unit/test_agent_conversation_guide.py::test_guide_preserves_campaign_details_without_staged_scripts[receptionist-slots2]
+FAILED tests/unit/test_agent_conversation_guide.py::test_pending_contact_is_context_not_a_compulsory_script
+FAILED tests/unit/test_agent_conversation_guide.py::test_runtime_identity_is_state_without_a_forced_opening[False-False]
+FAILED tests/unit/test_agent_conversation_guide.py::test_runtime_identity_is_state_without_a_forced_opening[True-False]
+FAILED tests/unit/test_agent_conversation_guide.py::test_runtime_identity_is_state_without_a_forced_opening[False-True]
+FAILED tests/unit/test_agent_conversation_guide.py::test_cleaner_preserves_ordinary_qualifiers_and_conversation[Starter costs \xa319 (excluding VAT).]
+FAILED tests/unit/test_agent_conversation_guide.py::test_cleaner_preserves_ordinary_qualifiers_and_conversation[Support runs on weekdays (except bank holidays).]
+FAILED tests/unit/test_agent_conversation_guide.py::test_cleaner_preserves_ordinary_qualifiers_and_conversation[Of course, take your time.]
+FAILED tests/unit/test_agent_conversation_guide.py::test_cleaner_preserves_ordinary_qualifiers_and_conversation[Sure, we can explain the options.]
+FAILED tests/unit/test_agent_conversation_guide.py::test_native_guide_is_separate_and_uses_the_contact_tool_truth
+12 failed, 1 passed in 6.53s

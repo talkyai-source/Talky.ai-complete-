@@ -1,0 +1,39 @@
+{
+  "source": "c9d3f87e6dd7c9011008f886419e17888a1a6825",
+  "scope": "actual lease-loss helper, actual force helper and Asterisk DELETE404 proof; synthetic persisted SQL/DB outage/ARI ports and logical finalizer. No actual DB, hidden live channel, carrier call, or settlement effect. Empty adapter transfer mapping is explicit.",
+  "blocked_network_attempts": [],
+  "rows": [
+    {
+      "db_available": true,
+      "synthetic_persisted_child": "synthetic-persisted-child",
+      "adapter_local_transfer_mapping": "empty",
+      "ari_requests": [
+        [
+          "DELETE",
+          "/channels/synthetic-parent"
+        ],
+        [
+          "DELETE",
+          "/channels/synthetic-persisted-child"
+        ]
+      ],
+      "logical_finalizer_calls": 1,
+      "completed": true,
+      "child_received_proof_request": true
+    },
+    {
+      "db_available": false,
+      "synthetic_persisted_child": "synthetic-persisted-child",
+      "adapter_local_transfer_mapping": "empty",
+      "ari_requests": [
+        [
+          "DELETE",
+          "/channels/synthetic-parent"
+        ]
+      ],
+      "logical_finalizer_calls": 1,
+      "completed": true,
+      "child_received_proof_request": false
+    }
+  ]
+}

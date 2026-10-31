@@ -1,20 +1,25 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
 import { api } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
+import { markFreshLogin } from "@/lib/http-client";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
 
 type Step = "form" | "otp" | "password";
 
 export default function RegisterClientPage() {
     const router = useRouter();
-    const searchParams = useSearchParams();
+    const { applyLoginResult } = useAuth();
     const [step, setStep] = useState<Step>("form");
     const [formData, setFormData] = useState({
         email: "",
@@ -53,7 +58,9 @@ export default function RegisterClientPage() {
     function extractError(err: unknown, fallback: string): string {
         if (err instanceof Error) return err.message;
         if (typeof err === "object" && err !== null) {
-            return (err as { detail?: string }).detail || fallback;
+            const detail = (err as { detail?: unknown }).detail;
+            if (typeof detail === "string") return detail;
+            if (typeof detail === "object" && detail !== null && "message" in detail && typeof detail.message === "string") return detail.message;
         }
         return fallback;
     }
@@ -70,6 +77,8 @@ export default function RegisterClientPage() {
                 formData.businessName.trim(),
                 formData.email.trim(),
             );
+            setFormData((current) => ({ ...current, email: response.email }));
+            setOtpCode("");
             setMessage(response.message || "Verification code sent! Check your email.");
             setStep("otp");
         } catch (err) {
@@ -81,6 +90,10 @@ export default function RegisterClientPage() {
 
     async function handleOtpSubmit(e: React.FormEvent) {
         e.preventDefault();
+        if (!/^\d{6}$/.test(otpCode)) {
+            setError("Enter the 6-digit verification code from your email.");
+            return;
+        }
         setLoading(true);
         setError("");
         setMessage("");
@@ -115,17 +128,41 @@ export default function RegisterClientPage() {
             );
             api.setToken(response.access_token);
 
-            const rawNext = searchParams.get("next");
-            const safeNext = rawNext && rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : null;
+            // Account creation returns everything needed to seed the shared
+            // auth state. Commit it before navigating; otherwise the dashboard
+            // layout mounts with user=null and sends a brand-new account back
+            // to login while its first /auth/me request is still in flight.
+            flushSync(() => {
+                applyLoginResult({
+                    user_id: response.user_id,
+                    tenant_id: response.tenant_id,
+                    email: response.email,
+                    role: response.role,
+                    business_name: response.business_name,
+                    minutes_remaining: response.minutes_remaining,
+                        minutes_state: response.minutes_state,
+                    access_token: response.access_token,
+                });
+            });
+            markFreshLogin();
 
-            // Use the role straight from the signup response. Calling
-            // /auth/me here triggered the same "back to /auth/login" bug
-            // that the login flow already documented: a transient 401 on
-            // that round-trip trips the http-client's session-expired
-            // handler, which clears the just-stored token and redirects.
-            const role = (response as { role?: string | null }).role ?? null;
-
-            router.push(role === "white_label_admin" ? "/white-label/dashboard" : safeNext ?? "/dashboard");
+            // Same rule as login-client.tsx: an Ask AI arrival (per-tab session
+            // flag) returns to the homepage, everyone else opens their
+            // dashboard. Read the flag BEFORE clearing it; the notice must not
+            // survive a successful signup.
+            const fromAskAi = hasAskAiSignInFlag();
+            clearAskAiSignInFlag();
+            const destination =
+                fromAskAi && response.role !== "white_label_admin"
+                    ? "/"
+                    : postAuthDashboard(response.role);
+            if (typeof window !== "undefined") {
+                // A hard navigation guarantees the auth cookies are committed
+                // before the dashboard's first protected request.
+                window.location.assign(destination);
+            } else {
+                router.push(destination);
+            }
         } catch (err) {
             setError(extractError(err, "Could not create account. Please try again."));
         } finally {
@@ -161,6 +198,8 @@ export default function RegisterClientPage() {
                 formData.businessName.trim(),
                 formData.email.trim(),
             );
+            setFormData((current) => ({ ...current, email: response.email }));
+            setOtpCode("");
             setMessage(response.message || "New verification code sent!");
         } catch (err) {
             setError(extractError(err, "Failed to resend code. Please try again."));
@@ -194,6 +233,7 @@ export default function RegisterClientPage() {
             </div>
 
             <div className="relative z-10 w-full max-w-md">
+                <AskAiSignInNotice />
                 <div className="text-center mb-8">
                     <Link href="/" className="inline-block">
                         <p className="text-3xl font-bold tracking-tight text-foreground">Talk-Lee</p>
@@ -317,14 +357,14 @@ export default function RegisterClientPage() {
                                             type="text"
                                             placeholder="Enter verification code"
                                             value={otpCode}
-                                            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                                            onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
                                             className="pl-10 text-center text-lg tracking-widest font-mono"
                                             required
                                             disabled={loading}
-                                            maxLength={8}
+                                            maxLength={6}
                                             autoComplete="one-time-code"
                                             inputMode="numeric"
-                                            pattern="[0-9]*"
+                                            pattern="[0-9]{6}"
                                             ref={otpInputRef}
                                             aria-invalid={error ? true : undefined}
                                             aria-describedby={[message ? messageId : null, error ? errorId : null, otpHelpId].filter(Boolean).join(" ")}
@@ -349,7 +389,7 @@ export default function RegisterClientPage() {
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
-                                <Button type="submit" className="w-full" disabled={loading || otpCode.length < 6}>
+                                <Button type="submit" className="w-full" disabled={loading || otpCode.length !== 6}>
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />

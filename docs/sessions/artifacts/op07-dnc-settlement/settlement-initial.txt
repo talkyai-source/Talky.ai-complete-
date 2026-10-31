@@ -1,0 +1,123 @@
+FFFF.FF                                                                  [100%]
+================================== FAILURES ===================================
+_ test_active_opt_out_preserves_projection_without_rewriting_call_outcome[answered] _
+
+outcome = <CallOutcome.ANSWERED: 'answered'>
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("outcome", [CallOutcome.ANSWERED, CallOutcome.GOAL_ACHIEVED, CallOutcome.FAILED])
+    async def test_active_opt_out_preserves_projection_without_rewriting_call_outcome(outcome):
+        conn = SuppressionConn()
+        service = _service(conn)
+        service._effective_attempt_number = AsyncMock(return_value=1)
+        execution = await service._handle_call_status_pooled("call-1", outcome, outcome.value, 42)
+        assert conn.calls_row["outcome"] == outcome.value
+        assert conn.calls_row["duration_seconds"] == 42
+>       assert conn.leads_row["status"] == "dnc"
+E       AssertionError: assert 'contacted' == 'dnc'
+E         - dnc
+E         + contacted
+
+tests\unit\test_dnc_settlement_truth.py:74: AssertionError
+_ test_active_opt_out_preserves_projection_without_rewriting_call_outcome[goal_achieved] _
+
+outcome = <CallOutcome.GOAL_ACHIEVED: 'goal_achieved'>
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("outcome", [CallOutcome.ANSWERED, CallOutcome.GOAL_ACHIEVED, CallOutcome.FAILED])
+    async def test_active_opt_out_preserves_projection_without_rewriting_call_outcome(outcome):
+        conn = SuppressionConn()
+        service = _service(conn)
+        service._effective_attempt_number = AsyncMock(return_value=1)
+        execution = await service._handle_call_status_pooled("call-1", outcome, outcome.value, 42)
+        assert conn.calls_row["outcome"] == outcome.value
+        assert conn.calls_row["duration_seconds"] == 42
+>       assert conn.leads_row["status"] == "dnc"
+E       AssertionError: assert 'completed' == 'dnc'
+E         - dnc
+E         + completed
+
+tests\unit\test_dnc_settlement_truth.py:74: AssertionError
+_ test_active_opt_out_preserves_projection_without_rewriting_call_outcome[failed] _
+
+outcome = <CallOutcome.FAILED: 'failed'>
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("outcome", [CallOutcome.ANSWERED, CallOutcome.GOAL_ACHIEVED, CallOutcome.FAILED])
+    async def test_active_opt_out_preserves_projection_without_rewriting_call_outcome(outcome):
+        conn = SuppressionConn()
+        service = _service(conn)
+        service._effective_attempt_number = AsyncMock(return_value=1)
+        execution = await service._handle_call_status_pooled("call-1", outcome, outcome.value, 42)
+        assert conn.calls_row["outcome"] == outcome.value
+        assert conn.calls_row["duration_seconds"] == 42
+>       assert conn.leads_row["status"] == "dnc"
+E       AssertionError: assert 'called' == 'dnc'
+E         - dnc
+E         + called
+
+tests\unit\test_dnc_settlement_truth.py:74: AssertionError
+________ test_opt_out_blocks_pending_outbox_replay_without_recounting _________
+
+    @pytest.mark.asyncio
+    async def test_opt_out_blocks_pending_outbox_replay_without_recounting():
+        conn = SuppressionConn(settled=True)
+        execution = await _service(conn)._handle_call_status_pooled("call-1", CallOutcome.FAILED, "failed", 42)
+>       assert execution.retry_args is None
+E       AssertionError: assert ('job-1', {'phone_number': '+15555550107'}, <CallOutcome.FAILED: 'failed'>, 'camp-1', 'lead-1', '20000000-0000-4000-8000-000000000017', ...) is None
+E        +  where ('job-1', {'phone_number': '+15555550107'}, <CallOutcome.FAILED: 'failed'>, 'camp-1', 'lead-1', '20000000-0000-4000-8000-000000000017', ...) = _CallStatusExecution(result=CallStatusResult(call_id='call-1', found=True, applied=False, durable=False, terminal_status='completed', terminal_outcome='failed', error='retry_enqueue_pending'), job_id='job-1', campaign_id='camp-1').retry_args
+
+tests\unit\test_dnc_settlement_truth.py:89: AssertionError
+_________ test_unavailable_suppression_proof_cannot_book_retry[conn0] _________
+
+conn = <tests.unit.test_dnc_settlement_truth.SuppressionConn object at 0x00000179C4899DF0>
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("conn", [SuppressionConn(suppression=RuntimeError("synthetic storage outage")),
+                                      SuppressionConn(phone="not a number")])
+    async def test_unavailable_suppression_proof_cannot_book_retry(conn):
+        service = _service(conn)
+        service._effective_attempt_number = AsyncMock(return_value=1)
+        result = await service.handle_call_status("call-1", CallOutcome.FAILED, 42)
+>       assert result.durable is False
+E       AssertionError: assert True is False
+E        +  where True = CallStatusResult(call_id='call-1', found=True, applied=True, durable=True, terminal_status='completed', terminal_outcome='failed', error=None).durable
+
+tests\unit\test_dnc_settlement_truth.py:113: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.repositories.call_event_repository:call_event_repository.py:89 Failed to log call event (state_change): Database pool not initialized. Call init_db_pool() first.
+_________ test_unavailable_suppression_proof_cannot_book_retry[conn1] _________
+
+conn = <tests.unit.test_dnc_settlement_truth.SuppressionConn object at 0x00000179C489A030>
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("conn", [SuppressionConn(suppression=RuntimeError("synthetic storage outage")),
+                                      SuppressionConn(phone="not a number")])
+    async def test_unavailable_suppression_proof_cannot_book_retry(conn):
+        service = _service(conn)
+        service._effective_attempt_number = AsyncMock(return_value=1)
+        result = await service.handle_call_status("call-1", CallOutcome.FAILED, 42)
+>       assert result.durable is False
+E       AssertionError: assert True is False
+E        +  where True = CallStatusResult(call_id='call-1', found=True, applied=True, durable=True, terminal_status='completed', terminal_outcome='failed', error=None).durable
+
+tests\unit\test_dnc_settlement_truth.py:113: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.repositories.call_event_repository:call_event_repository.py:89 Failed to log call event (state_change): Database pool not initialized. Call init_db_pool() first.
+============================== warnings summary ===============================
+tests/unit/test_dnc_settlement_truth.py::test_unavailable_suppression_proof_cannot_book_retry[conn0]
+tests/unit/test_dnc_settlement_truth.py::test_unavailable_suppression_proof_cannot_book_retry[conn0]
+tests/unit/test_dnc_settlement_truth.py::test_unavailable_suppression_proof_cannot_book_retry[conn1]
+tests/unit/test_dnc_settlement_truth.py::test_unavailable_suppression_proof_cannot_book_retry[conn1]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_dnc_settlement_truth.py::test_active_opt_out_preserves_projection_without_rewriting_call_outcome[answered]
+FAILED tests/unit/test_dnc_settlement_truth.py::test_active_opt_out_preserves_projection_without_rewriting_call_outcome[goal_achieved]
+FAILED tests/unit/test_dnc_settlement_truth.py::test_active_opt_out_preserves_projection_without_rewriting_call_outcome[failed]
+FAILED tests/unit/test_dnc_settlement_truth.py::test_opt_out_blocks_pending_outbox_replay_without_recounting
+FAILED tests/unit/test_dnc_settlement_truth.py::test_unavailable_suppression_proof_cannot_book_retry[conn0]
+FAILED tests/unit/test_dnc_settlement_truth.py::test_unavailable_suppression_proof_cannot_book_retry[conn1]
+6 failed, 1 passed, 4 warnings in 13.87s

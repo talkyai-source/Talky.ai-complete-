@@ -1,15 +1,20 @@
 "use client";
 
+import { RealtimeControls } from "@/components/realtime/ai-options-controls";
+import { Select } from "@/components/ui/select";
 import { useEffect, useState, useRef, useCallback, useMemo } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ApplyToCampaignsModal } from "@/components/campaigns/apply-to-campaigns-modal";
 import { VoiceCloneModal } from "@/components/ai-options/voice-clone-modal";
+import { AI_OPTIONS_READ_ONLY_NOTICE, canEditAiOptions } from "@/components/ai-options/controls";
+import { useAuth } from "@/hooks/useAuth";
+import { AssemblyAIControls } from "@/components/ai-options/assemblyai-controls";
+import { assemblyAISettingsError } from "@/lib/assemblyai-settings";
 import {
     aiOptionsApi,
     AIProviderConfig,
     ProviderListResponse,
     VoiceInfo,
-    RealtimeVoiceInfo,
 } from "@/lib/ai-options-api";
 import {
     Cpu,
@@ -26,6 +31,7 @@ import {
     Sparkles,
     SlidersHorizontal,
     AudioWaveform,
+    Eye,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -45,6 +51,7 @@ import {
     useVoicesQuery,
     useConfigQuery,
     aiOptionsKeys,
+    useAiOptionsScope,
 } from "@/lib/queries/ai-options-queries";
 
 interface LatencyMetrics {
@@ -98,33 +105,8 @@ function dedupeVoicesById(input: VoiceInfo[]): VoiceInfo[] {
 }
 
 // ── Realtime (gpt-realtime-2) fallback catalog ────────────────
-// Used only when the backend hasn't shipped `providers.realtime` yet, so the
-// card still renders (and is developable) before that lands. Remove once the
-// backend always returns this section.
-const FALLBACK_REALTIME_MODEL = "gpt-realtime-2";
-const FALLBACK_REALTIME_VOICES: RealtimeVoiceInfo[] = [
-    { id: "marin", name: "Marin", description: "Warm, natural, conversational.", gender: "female" },
-    { id: "cedar", name: "Cedar", description: "Calm, grounded, and clear.", gender: "male" },
-];
-const FALLBACK_TURN_DETECTION = ["low", "medium", "high", "auto"];
-const FALLBACK_NOISE_REDUCTION = ["off", "near_field", "far_field"];
 const DEFAULT_TURN_DETECTION = "high";
 const DEFAULT_NOISE_REDUCTION = "far_field";
-
-function getRealtimeCatalog(providers: ProviderListResponse | null): {
-    model: string;
-    voices: RealtimeVoiceInfo[];
-    turn_detection: string[];
-    noise_reduction: string[];
-} {
-    const realtime = providers?.realtime;
-    return {
-        model: realtime?.model || FALLBACK_REALTIME_MODEL,
-        voices: realtime?.voices?.length ? realtime.voices : FALLBACK_REALTIME_VOICES,
-        turn_detection: realtime?.turn_detection?.length ? realtime.turn_detection : FALLBACK_TURN_DETECTION,
-        noise_reduction: realtime?.noise_reduction?.length ? realtime.noise_reduction : FALLBACK_NOISE_REDUCTION,
-    };
-}
 
 // ── theme-aware card / header ─────────────────────────────────
 function Card({ children, className = "", delay = 0 }: { children: React.ReactNode; className?: string; delay?: number }) {
@@ -158,14 +140,25 @@ function SectionHeader({ icon, title, subtitle, right }: { icon: React.ReactNode
 }
 
 export default function AIOptionsPage() {
+    const scope = useAiOptionsScope();
+    if (!scope) return <DashboardLayout><p role="status" className="p-6">Verifying your account before loading AI settings…</p></DashboardLayout>;
+    return <AIOptionsEditor key={scope} scope={scope} />;
+}
+
+function AIOptionsEditor({ scope }: { scope: string }) {
     // Cached, deduped, stale-while-revalidate queries (global cache → instant
     // on revisit, warmed by the post-login prefetch). Catalogs are read-only;
     // the config is fetched here but EDITED via a local draft (below).
     const queryClient = useQueryClient();
+    const { user: authUser } = useAuth();
+    const canEdit = canEditAiOptions(authUser?.role);
     const providersQuery = useProvidersQuery();
     const voicesQuery = useVoicesQuery();
     const configQuery = useConfigQuery();
     const [cloneOpen, setCloneOpen] = useState(false);
+    // Purely visual toggle for the creativity/max-length dials card — not
+    // persisted anywhere, resets to visible on reload.
+    const [llmDialsHidden, setLlmDialsHidden] = useState(false);
 
     const providers = providersQuery.data ?? null;
     const voices = useMemo(() => dedupeVoicesById(voicesQuery.data?.voices ?? []), [voicesQuery.data]);
@@ -195,6 +188,7 @@ export default function AIOptionsPage() {
     }
     const [error, setError] = useState("");
     const [saveSuccess, setSaveSuccess] = useState(false);
+    const [saving, setSaving] = useState(false);
     const [latencyWarnings, setLatencyWarnings] = useState<string[]>([]);
 
     // Derived from the cached queries (no local mirror to drift out of sync).
@@ -215,81 +209,79 @@ export default function AIOptionsPage() {
     const [accentFilter, setAccentFilter] = useState<"All" | AccentBucket>("All");
     const [applyModal, setApplyModal] = useState<{ provider: string; voiceId: string; voiceLabel?: string } | null>(null);
 
+    const activeRef = useRef(true);
+    const previewRequestRef = useRef(0);
     const voicePreviewAudioRef = useRef<HTMLAudioElement | null>(null);
+    const voicePreviewContextRef = useRef<AudioContext | null>(null);
+    const saveInFlightRef = useRef(false);
 
-    // Seed the editable draft exactly ONCE — after providers + config load and
-    // voices have settled (success or failure), so the picked voice/model are
-    // validated against the real voice list. React Query owns fetching/retry/
-    // caching; this just derives the initial form state.
+    // Seed once from the saved record. A partial or unavailable catalog must
+    // never silently replace a customer's selected voice, model or audio rate.
     const seededRef = useRef(false);
     useEffect(() => {
-        if (seededRef.current) return;
-        if (!providersQuery.data || !configQuery.data) return;
-        if (voicesQuery.isLoading) return; // let voices finish (or error) first
-
-        const providersData = providersQuery.data;
-        const configData = configQuery.data;
-        const uniqueVoices = dedupeVoicesById(voicesQuery.data?.voices ?? []);
-        const providerVoices = uniqueVoices.filter((v) => v.provider === configData.tts_provider);
-        const providerModels = getProviderTtsModels(configData.tts_provider, providersData);
-        const normalizedConfig: AIProviderConfig = {
-            ...configData,
-            tts_model: providerModels.some((m) => m.id === configData.tts_model)
-                ? configData.tts_model
-                : getDefaultTtsModel(configData.tts_provider, providersData),
-            tts_sample_rate: getDefaultTtsSampleRate(configData.tts_provider),
-            tts_voice_id: providerVoices.some((v) => v.id === configData.tts_voice_id)
-                ? configData.tts_voice_id
-                : (providerVoices[0]?.id ?? configData.tts_voice_id),
-        };
-        const providerOptions = new Set([
-            ...providersData.tts.providers,
-            ...uniqueVoices.map((v) => v.provider),
-        ]);
-        const initialProvider = providerOptions.has(normalizedConfig.tts_provider)
-            ? normalizedConfig.tts_provider
-            : (uniqueVoices[0]?.provider ?? normalizedConfig.tts_provider);
-
-        setConfig(normalizedConfig);
-        setTtsProvider(initialProvider);
+        if (seededRef.current || !configQuery.data) return;
+        setConfig(configQuery.data);
+        setTtsProvider(configQuery.data.tts_provider);
         seededRef.current = true;
-    }, [providersQuery.data, configQuery.data, voicesQuery.data, voicesQuery.isLoading]);
+    }, [configQuery.data]);
 
     async function handleSaveConfig() {
-        if (!config) return;
+        if (!canEdit || !config || saveInFlightRef.current) return;
+        // AssemblyAI controls only show while AssemblyAI is the standard engine;
+        // a draft left invalid there must not block saving another engine.
+        const assemblySelected = config.pipeline_mode !== "realtime" && config.stt_engine === "assemblyai";
+        const assemblyError = assemblyAISettingsError(config.assemblyai_settings);
+        if (assemblySelected && assemblyError) {
+            setError(assemblyError);
+            return;
+        }
+        // The backend validates assemblyai_settings for every engine, so send the
+        // last saved settings instead of an unfinished hidden draft.
+        const toSave = assemblyError
+            ? { ...config, assemblyai_settings: configQuery.data?.assemblyai_settings ?? null }
+            : config;
+        const engine = providers?.stt.engines?.find((entry) => entry.id === config.stt_engine);
+        if (config.pipeline_mode !== "realtime" && engine?.available === false) {
+            setError(engine.unavailable_reason || "The selected transcription engine is unavailable.");
+            return;
+        }
+        if (config.pipeline_mode === "realtime" && !providers?.realtime?.available) {
+            setError(providers?.realtime?.unavailable_reason || "Realtime availability could not be verified.");
+            return;
+        }
+        saveInFlightRef.current = true;
+        setSaving(true);
+        setError("");
+        setSaveSuccess(false);
         setLatencyWarnings([]);
         try {
-            const normalizedConfig: AIProviderConfig = {
-                ...config,
-                tts_model: config.tts_model || getDefaultTtsModel(config.tts_provider, providers),
-                tts_sample_rate: getDefaultTtsSampleRate(config.tts_provider),
-            };
-            const { config: saved, latency_warnings } = await aiOptionsApi.saveConfig(normalizedConfig);
+            const { config: saved, latency_warnings } = await aiOptionsApi.saveConfig(toSave);
+            if (!activeRef.current) return;
             // Keep the query cache authoritative so other surfaces + a revisit
             // see the saved config without a refetch.
-            queryClient.setQueryData(aiOptionsKeys.config(), saved);
-            setConfig({
-                ...saved,
-                tts_model: saved.tts_model || getDefaultTtsModel(saved.tts_provider, providers),
-                tts_sample_rate: getDefaultTtsSampleRate(saved.tts_provider),
-            });
+            queryClient.setQueryData(aiOptionsKeys.config(scope), saved);
+            setConfig(saved);
             setTtsProvider(saved.tts_provider);
             setSaveSuccess(true);
-            setApplyModal({
+            if (saved.pipeline_mode !== "realtime") setApplyModal({
                 provider: saved.tts_provider,
                 voiceId: saved.tts_voice_id,
                 voiceLabel: voices.find((v) => v.id === saved.tts_voice_id)?.name,
             });
             setLatencyWarnings(latency_warnings);
-            setTimeout(() => setSaveSuccess(false), 3000);
-            if (latency_warnings.length > 0) setTimeout(() => setLatencyWarnings([]), 8000);
+            setTimeout(() => { if (activeRef.current) setSaveSuccess(false); }, 3000);
+            if (latency_warnings.length > 0) setTimeout(() => { if (activeRef.current) setLatencyWarnings([]); }, 8000);
         } catch (err) {
+            if (!activeRef.current) return;
             setError(err instanceof Error ? err.message : "Failed to save configuration");
+        } finally {
+            saveInFlightRef.current = false;
+            if (activeRef.current) setSaving(false);
         }
     }
 
     async function handleTestLLM() {
-        if (!config || !testMessage.trim()) return;
+        if (!canEdit || !config || !testMessage.trim()) return;
         try {
             setTesting(true);
             setError("");
@@ -299,21 +291,29 @@ export default function AIOptionsPage() {
                 temperature: config.llm_temperature,
                 max_tokens: config.llm_max_tokens,
             });
+            if (!activeRef.current) return;
             setTestResponse(response.response);
             setLatencyMetrics((prev) => ({ ...prev, llm_first_token_ms: response.first_token_ms, llm_total_ms: response.latency_ms }));
         } catch (err) {
+            if (!activeRef.current) return;
             setError(err instanceof Error ? err.message : "LLM test failed");
         } finally {
-            setTesting(false);
+            if (activeRef.current) setTesting(false);
         }
     }
 
     async function handlePreviewVoiceById(voiceId: string, opts?: { provider?: string }) {
+        if (!canEdit) return;
+        const requestId = ++previewRequestRef.current;
         const isRealtime = opts?.provider === "realtime";
         const selectedVoice = voices.find((voice) => voice.id === voiceId);
         try {
             setPreviewingVoiceId(voiceId);
             setError("");
+            if (voicePreviewContextRef.current) {
+                void voicePreviewContextRef.current.close();
+                voicePreviewContextRef.current = null;
+            }
             if (voicePreviewAudioRef.current) {
                 voicePreviewAudioRef.current.pause();
                 voicePreviewAudioRef.current.currentTime = 0;
@@ -322,51 +322,64 @@ export default function AIOptionsPage() {
             if (selectedVoice?.preview_url) {
                 const audio = new Audio(selectedVoice.preview_url);
                 voicePreviewAudioRef.current = audio;
-                audio.onended = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; setPreviewingVoiceId(null); };
-                audio.onerror = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; setPreviewingVoiceId(null); };
+                audio.onended = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; if (activeRef.current && requestId === previewRequestRef.current) setPreviewingVoiceId(null); };
+                audio.onerror = () => { if (voicePreviewAudioRef.current === audio) voicePreviewAudioRef.current = null; if (activeRef.current && requestId === previewRequestRef.current) setPreviewingVoiceId(null); };
                 await audio.play();
                 return;
             }
             const response = await aiOptionsApi.previewVoice({ voice_id: voiceId, text: "Hello, I am your AI voice assistant. How can I help you today?", provider: opts?.provider });
+            if (!activeRef.current || requestId !== previewRequestRef.current) return;
             const audioData = atob(response.audio_base64);
             const audioArray = new Float32Array(audioData.length / 4);
             const dataView = new DataView(new ArrayBuffer(audioData.length));
             for (let i = 0; i < audioData.length; i++) dataView.setUint8(i, audioData.charCodeAt(i));
             for (let i = 0; i < audioArray.length; i++) audioArray[i] = dataView.getFloat32(i * 4, true);
             if (audioArray.length === 0) throw new Error("This voice returned no audio — it may be deprecated or unavailable.");
-            // Realtime previews come from OpenAI's speech endpoint at 24 kHz;
+            // Native Realtime preview and the cascaded samples are decoded at 24 kHz;
             // cascaded providers also emit 24 kHz float32, everything else 16 kHz.
             const sampleRate = isRealtime || selectedVoice?.provider === "cartesia" || selectedVoice?.provider === "google" || selectedVoice?.provider === "deepgram" || selectedVoice?.provider === "elevenlabs" ? 24000 : 16000;
             const audioContext = new AudioContext({ sampleRate });
+            voicePreviewContextRef.current = audioContext;
             const audioBuffer = audioContext.createBuffer(1, audioArray.length, sampleRate);
             audioBuffer.getChannelData(0).set(audioArray);
             const source = audioContext.createBufferSource();
             source.buffer = audioBuffer;
             source.connect(audioContext.destination);
             source.start();
-            source.onended = () => { audioContext.close(); setPreviewingVoiceId(null); };
+            source.onended = () => { if (voicePreviewContextRef.current === audioContext) voicePreviewContextRef.current = null; void audioContext.close(); if (activeRef.current && requestId === previewRequestRef.current) setPreviewingVoiceId(null); };
         } catch (err) {
+            if (!activeRef.current) return;
+            if (requestId !== previewRequestRef.current) return;
             setError(err instanceof Error ? err.message : "Voice preview failed");
             setPreviewingVoiceId(null);
         }
     }
 
     async function handleRunBenchmark() {
-        if (!config) return;
+        if (!canEdit || !config) return;
         try {
             setBenchmarking(true);
             setError("");
             const result = await aiOptionsApi.runBenchmark(config);
+            if (!activeRef.current) return;
             setLatencyMetrics(result);
         } catch (err) {
+            if (!activeRef.current) return;
             setError(err instanceof Error ? err.message : "Benchmark failed");
         } finally {
-            setBenchmarking(false);
+            if (activeRef.current) setBenchmarking(false);
         }
     }
 
     useEffect(() => {
+        activeRef.current = true;
         return () => {
+            activeRef.current = false;
+            previewRequestRef.current += 1;
+            if (voicePreviewContextRef.current) {
+                void voicePreviewContextRef.current.close();
+                voicePreviewContextRef.current = null;
+            }
             if (voicePreviewAudioRef.current) {
                 voicePreviewAudioRef.current.pause();
                 voicePreviewAudioRef.current = null;
@@ -403,7 +416,7 @@ export default function AIOptionsPage() {
         setTtsProvider(providerName);
         setAccentFilter("All");
         setConfig((prev) => {
-            if (!prev) return prev;
+            if (!prev || prev.tts_provider === providerName) return prev;
             const providerVoices = voices.filter((voice) => voice.provider === providerName);
             const nextVoiceId = providerVoices.some((voice) => voice.id === prev.tts_voice_id) ? prev.tts_voice_id : (providerVoices[0]?.id ?? prev.tts_voice_id);
             return { ...prev, tts_provider: providerName, tts_model: getDefaultTtsModel(providerName, providers), tts_voice_id: nextVoiceId, tts_sample_rate: getDefaultTtsSampleRate(providerName) };
@@ -413,10 +426,14 @@ export default function AIOptionsPage() {
     // Phase 2 — realtime (speech-to-speech) pipeline catalog + mode switch.
     // Falls back to a small hardcoded catalog until the backend ships
     // `providers.realtime` (see getRealtimeCatalog above).
-    const realtimeCatalog = useMemo(() => getRealtimeCatalog(providers), [providers]);
+    const realtimeCatalog = providers?.realtime;
     const pipelineMode = config?.pipeline_mode ?? "cascaded";
 
     function setPipelineMode(mode: "cascaded" | "realtime") {
+        if (mode === "realtime" && !providers?.realtime?.available) {
+            setError(providers?.realtime?.unavailable_reason || "Realtime availability could not be verified.");
+            return;
+        }
         setConfig((prev) => {
             if (!prev) return prev;
             if (mode !== "realtime") return { ...prev, pipeline_mode: mode };
@@ -425,9 +442,10 @@ export default function AIOptionsPage() {
             return {
                 ...prev,
                 pipeline_mode: mode,
-                realtime_model: prev.realtime_model || realtimeCatalog.model,
-                realtime_voice: prev.realtime_voice || realtimeCatalog.voices[0]?.id || "marin",
+                realtime_model: prev.realtime_model || realtimeCatalog?.model,
+                realtime_voice: prev.realtime_voice || realtimeCatalog?.voices[0]?.id || "marin",
                 realtime_settings: {
+                    ...prev.realtime_settings,
                     turn_detection: prev.realtime_settings?.turn_detection || DEFAULT_TURN_DETECTION,
                     noise_reduction: prev.realtime_settings?.noise_reduction || DEFAULT_NOISE_REDUCTION,
                 },
@@ -435,18 +453,38 @@ export default function AIOptionsPage() {
         });
     }
 
-    function updateRealtimeSetting(field: "turn_detection" | "noise_reduction", value: string) {
-        setConfig((prev) => {
-            if (!prev) return prev;
-            return { ...prev, realtime_settings: { ...(prev.realtime_settings ?? {}), [field]: value } };
-        });
-    }
-
     const llmModelInfo = providers?.llm.models.find((m) => m.id === config?.llm_model);
+    const llmModelUnavailable = Boolean(
+        config && providers && !providers.llm.models.some((model) => model.id === config.llm_model),
+    );
     const sttEngines = providers?.stt.engines ?? [];
     const sttEngineInfo = sttEngines.find((e) => e.id === config?.stt_engine);
     const ttsModelInfo = ttsModelsForSelectedProvider.find((model) => model.id === config?.tts_model);
     const selectCls = "w-full rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40";
+    // Same sizing on the shared Select's trigger: h-auto lets py-2.5 set the
+    // height like the old native control; pr-9 keeps text clear of the chevron.
+    const sharedSelectCls = `${selectCls} h-auto pr-9`;
+
+    // Compact Save button — rendered in a card header's `right` slot (top-right
+    // of the Test LLM card in cascaded mode, beside the model badge in realtime
+    // mode) so it scrolls with the page instead of hovering over the fixed
+    // bottom-right chat launcher. Sized like the other header actions (see
+    // "Run Benchmark"); label, icon, colour and action are unchanged.
+    // In cascaded mode it renders twice — header (md and up) and inside the
+    // Test LLM card next to Send (below md) — with display-based hiding, so
+    // exactly one instance is in the accessibility tree at any width.
+    const saveConfigButton = (className: string) => (
+        <button
+            type="button"
+            onClick={handleSaveConfig}
+            disabled={saving || !canEdit}
+            aria-busy={saving}
+            className={`${className} items-center gap-2 rounded-lg bg-emerald-500 font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-wait disabled:opacity-70 disabled:hover:bg-emerald-500`}
+        >
+            {saving ? <RefreshCw className="h-4 w-4 animate-spin" aria-hidden /> : <Save className="h-4 w-4" aria-hidden />}
+            <span>{saving ? "Saving…" : "Save Configuration"}</span>
+        </button>
+    );
 
     return (
         <DashboardLayout title="AI Options" description="Configure LLM, STT, and TTS providers">
@@ -472,6 +510,8 @@ export default function AIOptionsPage() {
                         <p className="text-sm font-medium text-white/90">Tune the brain, the voice, and the rhythm of every call.</p>
                     </motion.div>
 
+                    {!canEdit && <p role="status" className="rounded-lg border border-border bg-muted/60 px-4 py-2 text-sm text-foreground">{AI_OPTIONS_READ_ONLY_NOTICE}</p>}
+
                     {/* Pipeline mode — the single switch that decides which card set
                         renders below. Prominent, top-of-page, own card so it reads as
                         a top-level choice rather than a buried setting. */}
@@ -483,7 +523,7 @@ export default function AIOptionsPage() {
                                 </div>
                                 <div>
                                     <h3 className="text-base font-semibold text-foreground sm:text-lg">Pipeline Mode</h3>
-                                    <p className="text-xs text-muted-foreground sm:text-sm">Choose how this tenant's calls are processed</p>
+                                    <p className="text-xs text-muted-foreground sm:text-sm">Choose how this tenant&apos;s calls are processed</p>
                                 </div>
                             </div>
                             <Segmented
@@ -524,85 +564,16 @@ export default function AIOptionsPage() {
 
                     <AnimatePresence mode="wait">
                     {pipelineMode === "realtime" ? (
-                        <motion.div key="realtime" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
-                            {/* Realtime (gpt-realtime-2) — one model listens, thinks, and
-                                speaks. Replaces the LLM / STT / TTS-voice / voice-tuning
-                                cards entirely; only latency + test stay cascaded-only. */}
-                            <Card delay={0.05}>
-                                <SectionHeader
-                                    icon={<AudioWaveform className="h-5 w-5" />}
-                                    title="Realtime 2"
-                                    subtitle="One model listens, thinks, and speaks — lowest latency, most natural"
-                                    right={
-                                        <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                            {realtimeCatalog.model}
-                                        </span>
-                                    }
-                                />
-
-                                <div className="mb-4 rounded-lg border border-border bg-muted/40 p-3 text-xs text-muted-foreground">
-                                    Realtime speaks with its own built-in voice and turn-taking — there is no separate STT/TTS
-                                    step. Campaign compliance and persona still apply, delivered through this model's instructions.
-                                </div>
-
-                                <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Voice</label>
-                                <div className="mb-4 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-                                    {realtimeCatalog.voices.map((voice) => {
-                                        const selected = config.realtime_voice === voice.id;
-                                        const isPlaying = previewingVoiceId === voice.id;
-                                        return (
-                                            <motion.button
-                                                type="button"
-                                                key={voice.id}
-                                                // Speak-on-selection: persist the choice first (so it
-                                                // sticks even if the preview fails), then play a sample.
-                                                onClick={() => { setConfig({ ...config, realtime_voice: voice.id }); void handlePreviewVoiceById(voice.id, { provider: "realtime" }); }}
-                                                whileHover={{ y: -2 }}
-                                                className={`relative rounded-xl border p-2.5 text-left transition-colors ${selected ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40" : "border-border bg-background hover:border-emerald-500/40 hover:bg-muted/50"}`}
-                                            >
-                                                <span className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-emerald-500/15" aria-hidden>
-                                                    {isPlaying ? <Equalizer active color="#10b981" /> : <Play className="h-3.5 w-3.5 text-emerald-500" />}
-                                                </span>
-                                                <div className="pr-8">
-                                                    <p className="truncate text-sm font-medium text-foreground">{voice.name}</p>
-                                                    {voice.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{voice.description}</p>}
-                                                    {voice.gender && (
-                                                        <div className="mt-2 flex flex-wrap gap-1">
-                                                            <span className={`rounded px-1.5 py-0.5 text-[11px] ${voice.gender === "female" ? "bg-pink-500/15 text-pink-500" : "bg-blue-500/15 text-blue-500"}`}>{voice.gender}</span>
-                                                        </div>
-                                                    )}
-                                                </div>
-                                                {selected && <Check className="absolute bottom-2 right-2 h-4 w-4 text-emerald-500" />}
-                                            </motion.button>
-                                        );
-                                    })}
-                                </div>
-                                <p className="mb-5 text-[11px] text-muted-foreground">Selecting a voice plays a sample.</p>
-
-                                <div className="grid gap-4 sm:grid-cols-2">
-                                    <div>
-                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Turn detection</label>
-                                        <select
-                                            value={config.realtime_settings?.turn_detection ?? DEFAULT_TURN_DETECTION}
-                                            onChange={(e) => updateRealtimeSetting("turn_detection", e.target.value)}
-                                            className={selectCls}
-                                        >
-                                            {realtimeCatalog.turn_detection.map((opt) => (<option key={opt} value={opt} className="capitalize">{opt}</option>))}
-                                        </select>
-                                    </div>
-                                    <div>
-                                        <label className="mb-1.5 block text-sm font-medium text-muted-foreground">Noise reduction</label>
-                                        <select
-                                            value={config.realtime_settings?.noise_reduction ?? DEFAULT_NOISE_REDUCTION}
-                                            onChange={(e) => updateRealtimeSetting("noise_reduction", e.target.value)}
-                                            className={selectCls}
-                                        >
-                                            {realtimeCatalog.noise_reduction.map((opt) => (<option key={opt} value={opt} className="capitalize">{opt}</option>))}
-                                        </select>
-                                    </div>
-                                </div>
-                            </Card>
-                        </motion.div>
+                        <div key="realtime" className="space-y-4">
+                            {/* Save lives in the Test LLM card header in cascaded mode;
+                                that card doesn't render here and RealtimeControls owns
+                                its own header, so Save sits in a slim right-aligned row
+                                above it (the button carries ml-auto). */}
+                            <div className="flex">{saveConfigButton("ml-auto flex px-4 py-2")}</div>
+                            <RealtimeControls config={config} catalog={providers?.realtime} onChange={setConfig}
+                                onPreview={(voice) => { void handlePreviewVoiceById(voice, { provider: "realtime" }); }}
+                                previewing={Boolean(previewingVoiceId) || !canEdit} />
+                        </div>
                     ) : (
                         <motion.div key="cascaded" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
                     {/* Configuration grid — balanced 12-col so small cards pair up
@@ -613,19 +584,36 @@ export default function AIOptionsPage() {
                         <SectionHeader icon={<Cpu className="h-5 w-5" />} title="LLM Model" subtitle={providers?.llm.providers?.join(" / ") || "Groq"} />
                         <div className="grid gap-5 lg:grid-cols-[1fr_auto]">
                             <div className="space-y-3">
-                                <label className="block text-sm font-medium text-muted-foreground">Model</label>
-                                <select
+                                <label htmlFor="ai-options-llm-model" className="block text-sm font-medium text-muted-foreground">Model</label>
+                                <Select
+                                    id="ai-options-llm-model"
+                                    ariaLabel="Model"
                                     value={config.llm_model}
-                                    onChange={(e) => {
-                                        const picked = providers?.llm.models.find((m) => m.id === e.target.value);
-                                        setConfig({ ...config, llm_model: e.target.value, llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider });
+                                    onChange={(next) => {
+                                        const picked = providers?.llm.models.find((m) => m.id === next);
+                                        setConfig({ ...config, llm_model: next, llm_provider: (picked?.provider as typeof config.llm_provider) || config.llm_provider });
                                     }}
-                                    className={selectCls}
+                                    ariaInvalid={llmModelUnavailable}
+                                    ariaDescribedBy={llmModelUnavailable ? "ai-options-llm-model-warning" : undefined}
+                                    selectClassName={sharedSelectCls}
                                 >
+                                    {llmModelUnavailable && (
+                                        <option value={config.llm_model} disabled>
+                                            {`[${config.llm_provider}] ${config.llm_model} (currently unavailable)`}
+                                        </option>
+                                    )}
                                     {providers?.llm.models.map((model) => (
                                         <option key={model.id} value={model.id}>{model.provider ? `[${model.provider}] ${model.name}` : model.name}</option>
                                     ))}
-                                </select>
+                                </Select>
+                                {llmModelUnavailable && (
+                                    <div id="ai-options-llm-model-warning" role="status" className="flex items-start gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+                                        <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden />
+                                        <p>
+                                            The saved model <span className="break-all font-semibold">{config.llm_model}</span> is not in the current provider catalog. Its value has been preserved; choose an available model to replace it.
+                                        </p>
+                                    </div>
+                                )}
                                 {llmModelInfo && (
                                     <div className="rounded-lg border border-border bg-muted/40 p-3">
                                         <p className="text-sm text-foreground">{llmModelInfo.description}</p>
@@ -633,9 +621,65 @@ export default function AIOptionsPage() {
                                     </div>
                                 )}
                             </div>
-                            <div className="flex items-center justify-center gap-4 rounded-xl border border-border bg-muted/30 px-4 py-2">
-                                <RadialKnob label="Temp" value={config.llm_temperature} min={0} max={2} step={0.1} format={(v) => v.toFixed(1)} hint="creativity" onChange={(v) => setConfig({ ...config, llm_temperature: v })} />
-                                <RadialKnob label="Tokens" value={config.llm_max_tokens} min={50} max={5000} step={50} hint="max length" onChange={(v) => setConfig({ ...config, llm_max_tokens: v })} />
+                            <div
+                                role="button"
+                                tabIndex={0}
+                                aria-pressed={llmDialsHidden}
+                                aria-label={llmDialsHidden ? "Show creativity and max length dials" : "Hide creativity and max length dials"}
+                                onClick={() => setLlmDialsHidden((hidden) => !hidden)}
+                                onKeyDown={(e) => {
+                                    if (e.key !== "Enter" && e.key !== " ") return;
+                                    e.preventDefault();
+                                    setLlmDialsHidden((hidden) => !hidden);
+                                }}
+                                className="relative grid w-full cursor-pointer grid-cols-2 place-items-center gap-2 rounded-xl border border-border bg-muted/30 px-2 py-2 outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:w-[274px] sm:justify-self-center sm:gap-4 sm:px-4"
+                            >
+                                <div className={llmDialsHidden ? "contents invisible" : "contents"} onClick={(e) => e.stopPropagation()}>
+                                    <RadialKnob
+                                        label="Temp" value={config.llm_temperature}
+                                        min={0} max={2} step={0.1}
+                                        format={(v) => v.toFixed(1)} hint="creativity"
+                                        onChange={(v) => setConfig({ ...config, llm_temperature: v })}
+                                        tip={
+                                            <>
+                                                <strong>Creativity</strong> — how much the agent varies its wording.
+                                                <br />
+                                                <strong>Lower</strong> is more consistent and predictable: it says
+                                                nearly the same thing each time.
+                                                <br />
+                                                <strong>Higher</strong> is more varied, but more likely to
+                                                improvise something wrong.
+                                                <br />
+                                                Validate the selected model with your campaign. Knowledge checks
+                                                and caller confirmation remain required at every setting.
+                                                Nothing is changed for you — the dial stays where you put it.
+                                            </>
+                                        }
+                                    />
+                                    <RadialKnob
+                                        label="Tokens" value={config.llm_max_tokens}
+                                        min={50} max={5000} step={50} hint="max length"
+                                        onChange={(v) => setConfig({ ...config, llm_max_tokens: v })}
+                                        tip={
+                                            <>
+                                                <strong>Tokens</strong> are pieces of text — roughly ¾ of a word
+                                                each — counted across what the agent reads and what it says.
+                                                <br />
+                                                A higher limit allows longer replies, but usually costs more and
+                                                can add latency before the caller hears anything.
+                                                <br />
+                                                On a phone call, replies should normally stay <strong>short</strong>;
+                                                a long monologue is worse than a brief answer even when it is
+                                                correct.
+                                            </>
+                                        }
+                                    />
+                                </div>
+                                {llmDialsHidden && (
+                                    <div className="pointer-events-none absolute inset-0 flex items-center justify-center" aria-hidden>
+                                        <Eye className="h-6 w-6 text-muted-foreground" />
+                                    </div>
+                                )}
                             </div>
                             {(() => {
                                 const advice = temperatureAdvice(config.llm_temperature);
@@ -661,23 +705,37 @@ export default function AIOptionsPage() {
                     <Card delay={0.08} className="xl:col-span-5">
                         <SectionHeader icon={<Mic className="h-5 w-5" />} title="Speech-to-Text" subtitle="The engine that hears the caller" />
                         <div className="space-y-3">
-                            <label className="block text-sm font-medium text-muted-foreground">Engine</label>
-                            <select
+                            <label htmlFor="ai-options-stt-engine" className="block text-sm font-medium text-muted-foreground">Engine</label>
+                            <Select
+                                id="ai-options-stt-engine"
+                                ariaLabel="Engine"
                                 value={config.stt_engine}
-                                onChange={(e) => setConfig({ ...config, stt_engine: e.target.value })}
-                                className={selectCls}
+                                onChange={(next) => setConfig({ ...config, stt_engine: next,
+                                    ...(next === "assemblyai" ? {
+                                        stt_provider: "assemblyai", stt_model: "universal-3-6-pro", stt_language: "en",
+                                        assemblyai_settings: config.assemblyai_settings ?? { mode: "balanced" },
+                                    } : {
+                                        stt_provider: "deepgram", stt_model: next === "deepgram_nova" ? "nova-3" : "flux-general-en",
+                                        // AssemblyAI forces English; leaving it must restore the saved language.
+                                        stt_language: configQuery.data?.stt_language ?? config.stt_language,
+                                    }),
+                                })}
+                                selectClassName={sharedSelectCls}
                             >
-                                {sttEngines.length === 0 && <option value={config.stt_engine}>{config.stt_engine}</option>}
+                                {!sttEngines.some((engine) => engine.id === config.stt_engine) && <option value={config.stt_engine}>{config.stt_engine} (saved selection)</option>}
                                 {sttEngines.map((eng) => (
-                                    <option key={eng.id} value={eng.id}>{eng.name}{eng.is_preview ? " (beta)" : ""}</option>
+                                    <option key={eng.id} value={eng.id} disabled={eng.available === false}>{`${eng.name}${eng.is_preview ? " (beta)" : ""}${eng.available === false ? " (unavailable)" : ""}`}</option>
                                 ))}
-                            </select>
+                            </Select>
                             {sttEngineInfo && (
                                 <div className="rounded-lg border border-border bg-muted/40 p-3">
                                     <p className="text-sm text-foreground">{sttEngineInfo.description}</p>
-                                    <p className="mt-1 text-xs text-muted-foreground">Turn detection: {sttEngineInfo.speed ?? "n/a"} · automatically fails over to the other engine if one is unavailable</p>
+                                    <p className="mt-1 text-xs text-muted-foreground">Turn detection: {sttEngineInfo.speed ?? "n/a"}</p>
+                                    {sttEngineInfo.available === false && <p role="status" className="mt-2 text-xs text-amber-600 dark:text-amber-300">{sttEngineInfo.unavailable_reason || "This transcription engine is currently unavailable."}</p>}
                                 </div>
                             )}
+                            {sttEngines.filter((engine) => engine.available === false && engine.id !== config.stt_engine).map((engine) => <p key={engine.id} className="text-xs text-muted-foreground">{engine.name}: {engine.unavailable_reason || "currently unavailable"}</p>)}
+                            {config.stt_engine === "assemblyai" && <AssemblyAIControls value={config.assemblyai_settings} onChange={(next) => setConfig({ ...config, assemblyai_settings: next })} />}
                         </div>
                     </Card>
 
@@ -692,6 +750,7 @@ export default function AIOptionsPage() {
                                     {ttsProvider === "elevenlabs" && (
                                         <button
                                             onClick={() => setCloneOpen(true)}
+                                            disabled={!canEdit}
                                             className="flex items-center gap-1 rounded-lg border border-emerald-600/40 px-2.5 py-1 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 dark:text-emerald-300 dark:hover:bg-emerald-950/40"
                                             title="Clone a voice with ElevenLabs"
                                         >
@@ -706,10 +765,13 @@ export default function AIOptionsPage() {
 
                         <div className={`mb-4 grid gap-3 ${showAccentFilter ? "sm:grid-cols-2" : ""}`}>
                             <div>
-                                <label className="mb-1.5 block text-sm font-medium text-muted-foreground">TTS Model</label>
-                                <select value={config.tts_model} onChange={(e) => setConfig({ ...config, tts_model: e.target.value })} className={selectCls}>
+                                <label htmlFor="tts-model" className="mb-1.5 block text-sm font-medium text-muted-foreground">TTS Model</label>
+                                <Select id="tts-model" ariaLabel="TTS model" value={config.tts_model} onChange={(next) => setConfig({ ...config, tts_model: next })} selectClassName={sharedSelectCls}>
+                                    {!ttsModelsForSelectedProvider.some((model) => model.id === config.tts_model) && (
+                                        <option value={config.tts_model}>{config.tts_model} (currently unavailable)</option>
+                                    )}
                                     {ttsModelsForSelectedProvider.map((model) => (<option key={model.id} value={model.id}>{model.name}</option>))}
-                                </select>
+                                </Select>
                             </div>
                             {showAccentFilter && (
                                 <div>
@@ -725,6 +787,12 @@ export default function AIOptionsPage() {
                                 <p className="text-sm text-foreground">{ttsModelInfo.description}</p>
                                 <p className="mt-1 text-xs text-muted-foreground">Speed: {ttsModelInfo.speed || "n/a"}</p>
                             </div>
+                        )}
+
+                        {!voicesQuery.isLoading && !voices.some((voice) => voice.id === config.tts_voice_id && voice.provider === config.tts_provider) && (
+                            <p role="status" className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm">
+                                Saved voice {config.tts_voice_id} is currently unavailable in the catalog. Reload the catalog or select a voice explicitly. Your saved selection has been kept.
+                            </p>
                         )}
 
                         {/* Voice grid — compact */}
@@ -749,8 +817,8 @@ export default function AIOptionsPage() {
                                             ...config,
                                             tts_voice_id: voice.id,
                                             tts_provider: voice.provider,
-                                            tts_model: ttsModelsForSelectedProvider.some((m) => m.id === config.tts_model) ? config.tts_model : getDefaultTtsModel(voice.provider, providers),
-                                            tts_sample_rate: getDefaultTtsSampleRate(voice.provider),
+                                            tts_model: voice.provider === config.tts_provider ? config.tts_model : getDefaultTtsModel(voice.provider, providers),
+                                            tts_sample_rate: voice.provider === config.tts_provider ? config.tts_sample_rate : getDefaultTtsSampleRate(voice.provider),
                                         })}
                                         whileHover={{ y: -2 }}
                                         className={`relative rounded-xl border p-2.5 text-left transition-colors ${selected ? "border-emerald-500 bg-emerald-500/10 ring-1 ring-emerald-500/40" : "border-border bg-background hover:border-emerald-500/40 hover:bg-muted/50"}`}
@@ -763,6 +831,7 @@ export default function AIOptionsPage() {
                                             className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full transition-transform hover:scale-110"
                                             style={{ backgroundColor: ac + "22" }}
                                             aria-label="Preview voice"
+                                            aria-disabled={!canEdit}
                                         >
                                             {isPlaying ? <Equalizer active color={ac} /> : <Play className="h-3.5 w-3.5" style={{ color: ac }} />}
                                         </span>
@@ -794,7 +863,7 @@ export default function AIOptionsPage() {
                                         <p className="truncate text-sm font-medium text-foreground">{getDisplayVoiceName(selectedVoice)}</p>
                                         <p className="truncate text-xs text-muted-foreground">{selectedVoice.description}</p>
                                     </div>
-                                    <button onClick={() => handlePreviewVoiceById(selectedVoice.id)} disabled={isPlaying} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60">
+                                    <button onClick={() => handlePreviewVoiceById(selectedVoice.id)} disabled={isPlaying || !canEdit} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-600 disabled:opacity-60">
                                         {isPlaying ? <Equalizer active color="#fff" /> : <Play className="h-4 w-4" />}<span>Preview</span>
                                     </button>
                                 </div>
@@ -806,7 +875,7 @@ export default function AIOptionsPage() {
                     <Card delay={0.15} className="xl:col-span-5">
                         <SectionHeader icon={<Zap className="h-5 w-5" />} title="Latency Metrics" subtitle="Real-time pipeline performance"
                             right={
-                                <button onClick={handleRunBenchmark} disabled={benchmarking} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">
+                                <button onClick={handleRunBenchmark} disabled={benchmarking || !canEdit} className="flex items-center gap-2 rounded-lg bg-emerald-500 px-4 py-2 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">
                                     {benchmarking ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}<span>Run Benchmark</span>
                                 </button>
                             }
@@ -832,6 +901,7 @@ export default function AIOptionsPage() {
                         <SectionHeader icon={<SlidersHorizontal className="h-5 w-5" />} title="Voice tuning" subtitle="Optional · falls back to defaults when unset" />
                         <p className="mb-4 text-xs text-muted-foreground">Conversational rhythm tuning for this tenant. Each field is optional — “Reset to default” clears the override. Changes apply on the next call after Save.</p>
                         {config && (() => {
+                            const fluxActive = config.stt_engine === "deepgram_flux" && ["en", "en-us", "en-gb", "en-au", "en-in", "en-nz"].includes(config.stt_language.toLowerCase());
                             const tuning = config.voice_tuning ?? {};
                             const eot = tuning.stt_eot_threshold;
                             const timeout = tuning.stt_eot_timeout_ms;
@@ -839,29 +909,32 @@ export default function AIOptionsPage() {
                             const eagerExplicit = "stt_eager_eot_threshold" in tuning;
                             const minConf = tuning.turn_0_min_confidence;
                             const minChars = tuning.turn_0_min_alpha_chars;
-                            const resetLink = "text-[11px] text-muted-foreground underline hover:text-foreground";
+                            const resetLink = "inline-block px-1 py-1 -mx-1 -my-1 text-[11px] text-muted-foreground underline hover:text-foreground";
                             const rangeCls = "mt-1 w-full accent-emerald-500";
                             const numCls = "mt-1 w-full rounded border border-border bg-background px-3 py-2 text-sm text-foreground";
                             return (
                                 <div className="grid gap-5 md:grid-cols-2">
+                                    {!fluxActive && <p className="md:col-span-2 text-xs text-muted-foreground">Flux turn-detection controls apply only to Flux English calls. Saved overrides are kept for Flux calls.</p>}
+                                    <fieldset disabled={!fluxActive} aria-label="Flux turn detection" className="contents disabled:opacity-50">
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">End-of-turn confidence <span className="ml-1 text-muted-foreground">default 0.85</span></span><span className="font-mono text-emerald-500">{eot !== undefined ? eot.toFixed(2) : "—"}</span></div>
-                                        <input type="range" min={0.5} max={0.9} step={0.05} value={eot ?? 0.85} onChange={(e) => updateVoiceTuningField("stt_eot_threshold", parseFloat(e.target.value))} className={rangeCls} />
+                                        <input aria-label="Flux end-of-turn confidence" type="range" min={0.5} max={0.9} step={0.05} value={eot ?? 0.85} onChange={(e) => updateVoiceTuningField("stt_eot_threshold", parseFloat(e.target.value))} className={rangeCls} />
                                         {eot !== undefined && <button type="button" onClick={() => resetVoiceTuningField("stt_eot_threshold")} className={resetLink}>Reset to default</button>}
                                     </div>
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">End-of-turn silence timeout (ms) <span className="ml-1 text-muted-foreground">default 500</span></span><span className="font-mono text-emerald-500">{timeout !== undefined ? timeout : "—"}</span></div>
-                                        <input type="number" min={500} max={10000} step={100} value={timeout ?? 500} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v)) updateVoiceTuningField("stt_eot_timeout_ms", v); }} className={numCls} />
+                                        <input aria-label="Flux silence timeout" type="number" min={500} max={10000} step={100} value={timeout ?? 500} onChange={(e) => { const v = parseInt(e.target.value, 10); if (!Number.isNaN(v)) updateVoiceTuningField("stt_eot_timeout_ms", v); }} className={numCls} />
                                         {timeout !== undefined && <button type="button" onClick={() => resetVoiceTuningField("stt_eot_timeout_ms")} className={resetLink}>Reset to default</button>}
                                     </div>
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Eager-mode threshold <span className="ml-1 text-muted-foreground">default 0.7</span></span><span className="font-mono text-emerald-500">{!eagerExplicit ? "—" : eager === null ? "disabled" : (eager as number).toFixed(2)}</span></div>
-                                        <input type="range" min={0.3} max={0.9} step={0.05} value={(eager ?? 0.7) as number} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", parseFloat(e.target.value))} disabled={eager === null} className={`${rangeCls} disabled:opacity-40`} />
+                                        <input aria-label="Flux eager threshold" type="range" min={0.3} max={0.9} step={0.05} value={(eager ?? 0.7) as number} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", parseFloat(e.target.value))} disabled={eager === null} className={`${rangeCls} disabled:opacity-40`} />
                                         <div className="mt-1 flex flex-wrap items-center gap-3">
-                                            <label className="flex items-center gap-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={eager === null} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", e.target.checked ? null : 0.7)} className="accent-emerald-500" />Disable eager mode</label>
+                                            <label className="flex cursor-pointer items-center gap-1 px-1 py-1 -mx-1 -my-1 text-[11px] text-muted-foreground"><input type="checkbox" checked={eager === null} onChange={(e) => updateVoiceTuningField("stt_eager_eot_threshold", e.target.checked ? null : 0.7)} className="accent-emerald-500" />Disable eager mode</label>
                                             {eagerExplicit && <button type="button" onClick={() => resetVoiceTuningField("stt_eager_eot_threshold")} className={resetLink}>Reset to default</button>}
                                         </div>
                                     </div>
+                                    </fieldset>
                                     <div>
                                         <div className="flex items-center justify-between text-xs"><span className="font-medium text-foreground">Turn-0 minimum confidence <span className="ml-1 text-muted-foreground">default 0.4</span></span><span className="font-mono text-emerald-500">{minConf !== undefined ? minConf.toFixed(2) : "—"}</span></div>
                                         <input type="range" min={0} max={1} step={0.05} value={minConf ?? 0.4} onChange={(e) => updateVoiceTuningField("turn_0_min_confidence", parseFloat(e.target.value))} className={rangeCls} />
@@ -879,11 +952,12 @@ export default function AIOptionsPage() {
 
                     {/* Test LLM */}
                     <Card delay={0.25} className="xl:col-span-12">
-                        <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" />
+                        <SectionHeader icon={<MessageSquare className="h-5 w-5" />} title="Test LLM" subtitle="Send a message to the selected model" right={saveConfigButton("ml-auto hidden md:flex px-4 py-2")} />
                         <div className="space-y-4">
                             <div className="flex flex-col gap-3 sm:flex-row">
                                 <input type="text" value={testMessage} onChange={(e) => setTestMessage(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleTestLLM()} placeholder="Type a message to test the LLM…" className="flex-1 rounded-lg border border-border bg-background px-4 py-2.5 text-sm text-foreground placeholder:text-muted-foreground outline-none transition focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/40" />
-                                <button onClick={handleTestLLM} disabled={testing || !testMessage.trim()} className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-6 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{testing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span>Send</span></button>
+                                <button onClick={handleTestLLM} disabled={testing || !canEdit || !testMessage.trim()} className="flex items-center justify-center gap-2 rounded-lg bg-emerald-500 px-6 py-2.5 font-medium text-white transition hover:bg-emerald-600 disabled:opacity-50">{testing ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}<span>Send</span></button>
+                                {saveConfigButton("flex md:hidden w-full sm:w-auto justify-center px-6 py-2.5")}
                             </div>
                             {testResponse && <div className="rounded-lg border border-border bg-muted/40 p-4"><p className="whitespace-pre-wrap text-sm text-foreground">{testResponse}</p></div>}
                         </div>
@@ -893,19 +967,13 @@ export default function AIOptionsPage() {
                     )}
                     </AnimatePresence>
 
-                    {/* Save */}
-                    <motion.div initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.3 }} className="sticky bottom-4 z-10 flex justify-end">
-                        <button onClick={handleSaveConfig} className="flex items-center gap-2 rounded-xl bg-emerald-500 px-8 py-3 font-semibold text-white shadow-lg shadow-emerald-500/30 transition hover:scale-[1.02] hover:bg-emerald-600 active:scale-[0.98]">
-                            <Save className="h-5 w-5" /><span>Save Configuration</span>
-                        </button>
-                    </motion.div>
                 </div>
             )}
             <ApplyToCampaignsModal open={!!applyModal} provider={applyModal?.provider ?? ""} voiceId={applyModal?.voiceId ?? ""} voiceLabel={applyModal?.voiceLabel} onClose={() => setApplyModal(null)} />
             <VoiceCloneModal
                 open={cloneOpen}
                 onClose={() => setCloneOpen(false)}
-                onCloned={() => { void queryClient.invalidateQueries({ queryKey: aiOptionsKeys.voices() }); }}
+                onCloned={() => { void queryClient.invalidateQueries({ queryKey: aiOptionsKeys.voices(scope) }); }}
             />
         </DashboardLayout>
     );

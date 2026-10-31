@@ -9,6 +9,8 @@ so it uses the covering partial index on (tenant_id, e164) WHERE status='verifie
 from __future__ import annotations
 
 import logging
+import json
+import re
 from datetime import datetime
 from typing import Any, Optional
 
@@ -23,6 +25,14 @@ logger = logging.getLogger(__name__)
 
 class TenantPhoneNumberError(Exception):
     """Base exception for DID operations."""
+
+
+class TenantPhoneNumberConflictError(TenantPhoneNumberError):
+    """Registering a number whose existing row is revoked or suspended.
+
+    Platform-side controls: the tenant cannot undo them by re-registering, so
+    the caller must surface a conflict (HTTP 409) instead of a success.
+    """
 
 
 class NumberNotOwnedError(TenantPhoneNumberError):
@@ -51,8 +61,10 @@ class TenantPhoneNumberService:
     ) -> bool:
         """True iff the tenant owns this number AND it is in `verified`
         status. When `require_attestation=True`, also requires a non-NULL
-        `stir_shaken_token` — set this in production so un-attested
-        numbers (test-only) cannot dial real carriers.
+        `stir_shaken_token`. That optional legacy filter checks only field
+        presence; it does not validate STIR/SHAKEN and must not be used as a
+        blanket production dialing requirement. Carrier signatures are
+        specific to a call, including its destination and issuance time.
 
         Safe to call on a cold DB: falls through to False on any error so
         origination gets a clean 403 instead of a 500.
@@ -125,7 +137,9 @@ class TenantPhoneNumberService:
     # ──────────────────────────────────────────────────────────────────
 
     async def list_for_tenant(self, tenant_id: str) -> list[TenantPhoneNumber]:
-        async with self._db_pool.acquire() as conn:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             rows = await conn.fetch(
                 """
                 SELECT * FROM tenant_phone_numbers
@@ -137,7 +151,9 @@ class TenantPhoneNumberService:
         return [_row_to_model(r) for r in rows]
 
     async def get(self, tenant_id: str, did_id: str) -> Optional[TenantPhoneNumber]:
-        async with self._db_pool.acquire() as conn:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM tenant_phone_numbers WHERE tenant_id=$1 AND id=$2",
                 tenant_id,
@@ -153,11 +169,19 @@ class TenantPhoneNumberService:
         provider: str = "manual_admin",
         label: Optional[str] = None,
         metadata: Optional[dict] = None,
+        actor_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
     ) -> TenantPhoneNumber:
         """Insert a new number in `pending_verification` state. Idempotent
         on (tenant_id, e164) — returns the existing row if it already
-        exists (admins often re-submit the same number)."""
-        async with self._db_pool.acquire() as conn:
+        exists (admins often re-submit the same number). A number that was
+        revoked or suspended by the platform is NOT returned as a success and
+        its status is never reset here: raises
+        :class:`TenantPhoneNumberConflictError`."""
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.telephony.inbound_router import redact_did
+
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO tenant_phone_numbers
@@ -166,6 +190,7 @@ class TenantPhoneNumberService:
                 ON CONFLICT (tenant_id, e164) DO UPDATE
                     SET label = COALESCE(EXCLUDED.label, tenant_phone_numbers.label),
                         metadata = tenant_phone_numbers.metadata || EXCLUDED.metadata
+                    WHERE tenant_phone_numbers.status NOT IN ('revoked', 'suspended')
                 RETURNING *
                 """,
                 tenant_id,
@@ -174,9 +199,80 @@ class TenantPhoneNumberService:
                 label,
                 __import__("json").dumps(metadata or {}),
             )
+            if row is None:
+                # Conflict on a revoked/suspended row: the WHERE above left it
+                # untouched. Do not hand it back as if registration succeeded.
+                blocked = await conn.fetchval(
+                    "SELECT status FROM tenant_phone_numbers WHERE tenant_id = $1 AND e164 = $2",
+                    tenant_id,
+                    e164,
+                )
+                raise TenantPhoneNumberConflictError(
+                    f"This number is {blocked or 'blocked'} on the platform and cannot be "
+                    "re-registered by the tenant; contact support to restore it"
+                )
+            if actor_id:
+                await conn.execute(
+                    """
+                    INSERT INTO inbound_audit_events (
+                        tenant_id,event_type,actor_id,actor_role,resource_type,
+                        resource_id,after_state,metadata
+                    ) VALUES (
+                        $1,'tenant_phone_number_registered',$2,$3,
+                        'tenant_phone_number',$4,$5::jsonb,$6::jsonb
+                    )
+                    """,
+                    tenant_id,
+                    actor_id,
+                    actor_role,
+                    row["id"],
+                    json.dumps({"status": row["status"], "provider": row["provider"]}),
+                    json.dumps({"did_ref": redact_did(row["e164"])}),
+                )
         model = _row_to_model(row)
         assert model is not None
         return model
+
+    async def _other_tenant_holding_verified(
+        self, conn, tenant_id: str, e164: str
+    ) -> Optional[str]:
+        """Id of ANOTHER tenant that already holds ``e164`` as ``verified``.
+
+        The comparison is on the normalised number (digits only), so
+        ``+442046132300``, ``442046132300`` and ``+44 20 4613 2300`` are one
+        number. ``tenant_phone_numbers`` is under RLS, so a tenant-scoped
+        connection cannot see other tenants' rows: this genuinely cross-tenant
+        read turns the RLS bypass on for this one statement and excludes the
+        requesting tenant with an explicit predicate. Read-only; no row is
+        changed.
+
+        It runs on the caller's connection, inside the transaction that holds
+        the row lock and the advisory lock: a second pool connection here (no
+        acquire timeout) could wait forever on a saturated pool while the first
+        is held. The bypass is switched off again before the caller's
+        tenant-scoped write; if the read fails, the transaction aborts and the
+        SET LOCAL goes with it.
+        """
+        from app.domain.services.phone_number_normalizer import normalize_e164_digits
+
+        digits = re.sub(r"\D", "", normalize_e164_digits(e164))
+        if not digits:
+            return None
+        await conn.execute("SET LOCAL app.bypass_rls = 'on'")
+        holder = await conn.fetchrow(
+            """
+            SELECT tenant_id
+            FROM tenant_phone_numbers
+            WHERE tenant_id <> $1
+              AND status = 'verified'
+              AND regexp_replace(e164, '[^0-9]', '', 'g') = $2
+            LIMIT 1
+            """,
+            tenant_id,
+            digits,
+        )
+        await conn.execute("SET LOCAL app.bypass_rls = 'off'")
+        return str(holder["tenant_id"]) if holder else None
 
     async def mark_verified(
         self,
@@ -185,10 +281,52 @@ class TenantPhoneNumberService:
         did_id: str,
         method: VerificationMethod,
         verified_by: Optional[str],
+        proof_reference: str,
         stir_shaken_token: Optional[str] = None,
+        proof_notes: Optional[str] = None,
+        actor_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
     ) -> TenantPhoneNumber:
-        """Transition pending → verified. No-op if already verified."""
-        async with self._db_pool.acquire() as conn:
+        """Transition pending -> verified after privileged proof review."""
+        from app.core.db_utils import acquire_with_tenant
+        from app.core.security.rbac import UserRole, normalize_role
+        from app.domain.services.telephony.inbound_router import redact_did
+
+        if normalize_role(actor_role or "") != UserRole.PLATFORM_ADMIN:
+            raise TenantPhoneNumberError(
+                "DID verification requires a platform administrator"
+            )
+        proof_ref = str(proof_reference or "").strip()
+        if not proof_ref:
+            raise TenantPhoneNumberError("A proof reference is required")
+
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
+            before = await conn.fetchrow(
+                "SELECT * FROM tenant_phone_numbers WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+                tenant_id,
+                did_id,
+            )
+            if before is None:
+                raise TenantPhoneNumberError(f"DID {did_id} not found for tenant {tenant_id}")
+            if before["status"] == "revoked":
+                raise TenantPhoneNumberError("A revoked DID cannot be self-restored; register new proof")
+            # A verified number is the proof that this tenant may present it as
+            # its caller ID. Ownership checks are per tenant, so a second
+            # tenant verifying the same number could impersonate the first.
+            # The advisory lock serialises verifications of one number across
+            # tenants, so two admins cannot both pass the check at once.
+            from app.domain.services.phone_number_normalizer import normalize_e164_digits
+
+            lock_digits = re.sub(r"\D", "", normalize_e164_digits(before["e164"]))
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext($1))", f"tpn_verify:{lock_digits}"
+            )
+            holder = await self._other_tenant_holding_verified(conn, tenant_id, before["e164"])
+            if holder:
+                raise TenantPhoneNumberConflictError(
+                    f"This number is already verified for another tenant ({holder}); "
+                    "revoke it there before verifying it for this tenant"
+                )
             row = await conn.fetchrow(
                 """
                 UPDATE tenant_phone_numbers
@@ -206,22 +344,102 @@ class TenantPhoneNumberService:
                 verified_by,
                 stir_shaken_token,
             )
-        if row is None:
-            raise TenantPhoneNumberError(f"DID {did_id} not found for tenant {tenant_id}")
+            if actor_id:
+                await conn.execute(
+                    """
+                    INSERT INTO inbound_audit_events (
+                        tenant_id,event_type,actor_id,actor_role,resource_type,
+                        resource_id,before_state,after_state,metadata
+                    ) VALUES (
+                        $1,'tenant_phone_number_verified',$2,$3,
+                        'tenant_phone_number',$4,$5::jsonb,$6::jsonb,$7::jsonb
+                    )
+                    """,
+                    tenant_id,
+                    actor_id,
+                    actor_role,
+                    row["id"],
+                    json.dumps({"status": before["status"]}),
+                    json.dumps(
+                        {
+                            "status": row["status"],
+                            "verification_method": row["verification_method"],
+                        }
+                    ),
+                    json.dumps(
+                        {
+                            "did_ref": redact_did(row["e164"]),
+                            "proof_reference": proof_ref,
+                            "proof_notes_present": bool(str(proof_notes or "").strip()),
+                            "attestation_set": bool(stir_shaken_token),
+                        }
+                    ),
+                )
         return _row_to_model(row)  # type: ignore[return-value]
 
-    async def revoke(self, *, tenant_id: str, did_id: str) -> None:
+    async def revoke(
+        self,
+        *,
+        tenant_id: str,
+        did_id: str,
+        actor_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ) -> None:
         """Move to `revoked`. Kept for audit — row is not deleted."""
-        async with self._db_pool.acquire() as conn:
-            await conn.execute(
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.telephony.inbound_router import redact_did
+
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
+            before = await conn.fetchrow(
+                "SELECT * FROM tenant_phone_numbers WHERE tenant_id=$1 AND id=$2 FOR UPDATE",
+                tenant_id,
+                did_id,
+            )
+            if not before:
+                raise TenantPhoneNumberError(f"DID {did_id} not found for tenant {tenant_id}")
+            assigned = await conn.fetchval(
                 """
-                UPDATE tenant_phone_numbers
-                SET status = 'revoked'
-                WHERE tenant_id = $1 AND id = $2
+                SELECT EXISTS(
+                    SELECT 1 FROM inbound_did_assignments
+                    WHERE tenant_id=$1 AND phone_number_id=$2 AND status <> 'archived'
+                )
                 """,
                 tenant_id,
                 did_id,
             )
+            if assigned:
+                raise TenantPhoneNumberError(
+                    "Archive the inbound DID assignment before revoking this number"
+                )
+            row = await conn.fetchrow(
+                """
+                UPDATE tenant_phone_numbers
+                SET status = 'revoked', updated_at=NOW()
+                WHERE tenant_id = $1 AND id = $2
+                RETURNING *
+                """,
+                tenant_id,
+                did_id,
+            )
+            if actor_id:
+                await conn.execute(
+                    """
+                    INSERT INTO inbound_audit_events (
+                        tenant_id,event_type,actor_id,actor_role,resource_type,
+                        resource_id,before_state,after_state,metadata
+                    ) VALUES (
+                        $1,'tenant_phone_number_revoked',$2,$3,
+                        'tenant_phone_number',$4,$5::jsonb,$6::jsonb,$7::jsonb
+                    )
+                    """,
+                    tenant_id,
+                    actor_id,
+                    actor_role,
+                    row["id"],
+                    json.dumps({"status": before["status"]}),
+                    json.dumps({"status": row["status"]}),
+                    json.dumps({"did_ref": redact_did(row["e164"])}),
+                )
 
 
 def _row_to_model(row: Any) -> Optional[TenantPhoneNumber]:

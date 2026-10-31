@@ -40,15 +40,14 @@ async def seed_rbac():
         logger.info(f"Seeded {len(perm_map)} permissions.")
         
         # 2. Seed Roles
+        #
+        # Derived from UserRole itself, never from a hand-maintained list: the
+        # previous hardcoded 5-role dict is exactly why campaign_manager, agent
+        # and billing_user could be added to the enum and still never reach the
+        # database. Levels come from UserRole.level so the two cannot drift.
         role_map = {}
-        role_levels = {
-            UserRole.PLATFORM_ADMIN: 100,
-            UserRole.PARTNER_ADMIN: 80,
-            UserRole.TENANT_ADMIN: 60,
-            UserRole.USER: 40,
-            UserRole.READONLY: 20,
-        }
-        
+        role_levels = {role: role.level for role in UserRole}
+
         for role_enum, level in role_levels.items():
             is_system = True
             tenant_scoped = (role_enum != UserRole.PLATFORM_ADMIN)

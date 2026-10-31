@@ -1,0 +1,153 @@
+Offline synthetic Admin receipt validation; no database or provider access
+Overlay versions: PyJWT=2.15.1, urllib3=2.8.0, fastapi=0.139.0, pytest=7.4.4
+FFFFFF.................................................................. [ 96%]
+...                                                                      [100%]
+================================== FAILURES ===================================
+_ test_detail_retains_status_and_sanitized_unconfirmed_original_receipt[unknown] _
+
+status = 'unknown'
+
+    @pytest.mark.parametrize("status", ["unknown", "scheduled", "completed"])
+    async def test_detail_retains_status_and_sanitized_unconfirmed_original_receipt(status):
+        response, db = await detail(status=status, output={
+            "success": True, "confirmation_allowed": False, "status": "accepted",
+            "provider_result": {"provider": "gmail", "connector_id": "original-connector",
+                                "external_account_id": "original-account", "message_id": "original-message",
+                                "access_token": "synthetic-private", "recipient": "private@example.invalid"},
+            "body": "synthetic-private", "credentials": {"token": "synthetic-private"},
+        })
+        assert response.status_code == 200
+        body = response.json()
+>       receipt = body["saved_receipt"]
+E       KeyError: 'saved_receipt'
+
+tests\unit\test_ag06_admin_receipt_projection.py:70: KeyError
+_ test_detail_retains_status_and_sanitized_unconfirmed_original_receipt[scheduled] _
+
+status = 'scheduled'
+
+    @pytest.mark.parametrize("status", ["unknown", "scheduled", "completed"])
+    async def test_detail_retains_status_and_sanitized_unconfirmed_original_receipt(status):
+        response, db = await detail(status=status, output={
+            "success": True, "confirmation_allowed": False, "status": "accepted",
+            "provider_result": {"provider": "gmail", "connector_id": "original-connector",
+                                "external_account_id": "original-account", "message_id": "original-message",
+                                "access_token": "synthetic-private", "recipient": "private@example.invalid"},
+            "body": "synthetic-private", "credentials": {"token": "synthetic-private"},
+        })
+        assert response.status_code == 200
+        body = response.json()
+>       receipt = body["saved_receipt"]
+E       KeyError: 'saved_receipt'
+
+tests\unit\test_ag06_admin_receipt_projection.py:70: KeyError
+_ test_detail_retains_status_and_sanitized_unconfirmed_original_receipt[completed] _
+
+status = 'completed'
+
+    @pytest.mark.parametrize("status", ["unknown", "scheduled", "completed"])
+    async def test_detail_retains_status_and_sanitized_unconfirmed_original_receipt(status):
+        response, db = await detail(status=status, output={
+            "success": True, "confirmation_allowed": False, "status": "accepted",
+            "provider_result": {"provider": "gmail", "connector_id": "original-connector",
+                                "external_account_id": "original-account", "message_id": "original-message",
+                                "access_token": "synthetic-private", "recipient": "private@example.invalid"},
+            "body": "synthetic-private", "credentials": {"token": "synthetic-private"},
+        })
+        assert response.status_code == 200
+        body = response.json()
+>       receipt = body["saved_receipt"]
+E       KeyError: 'saved_receipt'
+
+tests\unit\test_ag06_admin_receipt_projection.py:70: KeyError
+_____ test_completed_status_does_not_invent_confirmation_or_account[None] _____
+
+confirmed = None
+
+    @pytest.mark.parametrize("confirmed", [None, False, True])
+    async def test_completed_status_does_not_invent_confirmation_or_account(confirmed):
+        output = {"success": True}
+        if confirmed is not None:
+            output["confirmation_allowed"] = confirmed
+        response, _db = await detail(status="completed", output=output)
+>       receipt = response.json()["saved_receipt"]
+E       KeyError: 'saved_receipt'
+
+tests\unit\test_ag06_admin_receipt_projection.py:90: KeyError
+____ test_completed_status_does_not_invent_confirmation_or_account[False] _____
+
+confirmed = False
+
+    @pytest.mark.parametrize("confirmed", [None, False, True])
+    async def test_completed_status_does_not_invent_confirmation_or_account(confirmed):
+        output = {"success": True}
+        if confirmed is not None:
+            output["confirmation_allowed"] = confirmed
+        response, _db = await detail(status="completed", output=output)
+>       receipt = response.json()["saved_receipt"]
+E       KeyError: 'saved_receipt'
+
+tests\unit\test_ag06_admin_receipt_projection.py:90: KeyError
+_____ test_completed_status_does_not_invent_confirmation_or_account[True] _____
+
+confirmed = True
+
+    @pytest.mark.parametrize("confirmed", [None, False, True])
+    async def test_completed_status_does_not_invent_confirmation_or_account(confirmed):
+        output = {"success": True}
+        if confirmed is not None:
+            output["confirmation_allowed"] = confirmed
+        response, _db = await detail(status="completed", output=output)
+>       receipt = response.json()["saved_receipt"]
+E       KeyError: 'saved_receipt'
+
+tests\unit\test_ag06_admin_receipt_projection.py:90: KeyError
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\assistant_ws.py:719: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\assistant_ws.py:440: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\assistant_ws.py:441: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat()
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\assistant_voice_ws.py:719: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    messages_history.append({"role": "assistant", "content": _VOICE_GREETING, "timestamp": datetime.utcnow().isoformat()})
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\assistant_voice_ws.py:638: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    messages_history.append({"role": "assistant", "content": spoken_note, "timestamp": datetime.utcnow().isoformat()})
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\assistant_voice_ws.py:341: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-ag06-receipts-20261005\backend\app\api\v1\endpoints\assistant_voice_ws.py:342: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+6 failed, 69 passed, 22 warnings in 16.86s

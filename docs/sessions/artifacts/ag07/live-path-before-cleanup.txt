@@ -1,0 +1,21 @@
+.F....                                                                   [100%]
+================================== FAILURES ===================================
+_____ test_caller_denial_reaches_state_and_blocks_existing_customer_claim _____
+
+pipeline = (<app.domain.services.voice_pipeline_service.VoicePipelineService object at 0x00000280F57D1760>, CallSession(call_id='..._pipeline_conversation.ScriptedLLM object at 0x00000280F57A2930>, ['As our existing customer, your account is ready.'])
+
+    async def test_caller_denial_reaches_state_and_blocks_existing_customer_claim(pipeline):
+        service, session, llm, submitted = pipeline
+        llm.chunks = ["As our existing customer, your account is ready."]
+        await service._run_turn(session, "I am not your customer.")
+        assert "customer_relationship=denied" in llm.requests[0]["system_prompt"]
+>       assert "existing customer" not in " ".join(submitted).lower()
+E       AssertionError: assert 'existing customer' not in 'as our exis...nt is ready.'
+E         'existing customer' is contained here:
+E           as our existing customer, your account is ready.
+E         ?        +++++++++++++++++
+
+tests\integration\test_voice_pipeline_conversation.py:97: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_voice_pipeline_conversation.py::test_caller_denial_reaches_state_and_blocks_existing_customer_claim
+1 failed, 5 passed, 12 warnings in 15.40s

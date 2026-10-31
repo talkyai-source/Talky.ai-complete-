@@ -1,16 +1,34 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useMemo, useState, ReactNode, useCallback } from "react";
+import { normalizeMinutesAllowance, type MinutesState } from "@/lib/minutes-allowance";
+import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError } from "@/lib/http-client";
+import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
+import { notificationsStore } from "@/lib/notifications";
+
+// Contains no token or account data. Cookie-only sessions also need an explicit
+// cross-tab boundary because removing an absent bearer key emits no event.
+export const AUTH_IDENTITY_EVENT_KEY = "talklee.auth.identity.v1";
+const FOREIGN_IDENTITY_EVENT_KEY = "talky.admin.identity.v1";
+function publishIdentityChange(kind: "changed" | "logout", channel: BroadcastChannel | null) {
+    const message = { kind, nonce: crypto.randomUUID() };
+    let delivered = false;
+    try { window.localStorage.setItem(AUTH_IDENTITY_EVENT_KEY, JSON.stringify(message)); delivered = true; } catch { /* BroadcastChannel can still notify cookie-only tabs. */ }
+    try { if (channel) { channel.postMessage(message); delivered = true; } } catch { /* Fail closed below if neither transport works. */ }
+    return delivered;
+}
+function clearUnconfirmedLogout() {
+    try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* Storage may be unavailable. */ }
+}
 interface MeResponse {
     id: string;
     email: string;
     name?: string;
     business_name?: string;
     role: string;
-    minutes_remaining: number;
+    minutes_remaining: number | null;
+    minutes_state?: MinutesState;
     // Admin / suspension fields populated by the backend's /me endpoint
     // when the user has elevated permissions or the tenant/partner is in
     // a non-active state. All optional — older sessions without these
@@ -41,17 +59,19 @@ interface AuthContextType {
     // localStorage directly.
     accessToken: string | null;
     status: AuthStatus;
+    notificationSyncAvailable: boolean;
     login: (email: string, password: string) => Promise<void>;
-    register: (email: string, password: string, businessName: string, name?: string) => Promise<void>;
-    logout: () => Promise<void>;
+    logout: () => Promise<{ serverConfirmed: boolean; identityCurrent: boolean }>;
     setToken: (token: string) => void;
     refreshUser: (opts?: { silent?: boolean }) => Promise<void>;
     applyLoginResult: (res: {
         user_id: string;
+        tenant_id?: string;
         email: string;
         role: string;
         business_name?: string | null;
-        minutes_remaining?: number;
+        minutes_remaining?: number | null;
+        minutes_state?: MinutesState;
         access_token?: string;
     }) => void;
 }
@@ -59,8 +79,23 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-    const [user, setUser] = useState<MeResponse | null>(null);
+    const [user, setUserState] = useState<MeResponse | null>(null);
+    const setUser = useCallback((next: MeResponse | null) => {
+        // Optimistic legacy login payloads can omit tenant identity. Only /me
+        // may complete that scope; a platform administrator can be tenantless.
+        setRequestIdentity(next && (next.tenant_id || next.role === "platform_admin")
+            ? { userId: next.id, tenantId: next.tenant_id } : null);
+        setUserState(next);
+    }, []);
     const [loading, setLoading] = useState(true);
+    const [notificationSyncAvailable, setNotificationSyncAvailable] = useState(false);
+    const identityChannel = useRef<BroadcastChannel | null>(null);
+    const broadcastIdentityChange = useCallback((kind: "changed" | "logout") => {
+        if (!publishIdentityChange(kind, identityChannel.current)) {
+            notificationsStore.setIdentity(null);
+            setNotificationSyncAvailable(false);
+        }
+    }, []);
     // Phase 2: token state owned by AuthContext (single writer). Initialised
     // synchronously on first render from the persisted store so the bootstrap
     // effect below sees the right value AND so the http-client's
@@ -106,15 +141,46 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return null;
     });
 
+    // Latest-value mirror of `accessToken` for effects that must NOT re-run
+    // when the token rotates (see the bootstrap effect below).
+    const accessTokenRef = useRef(accessToken);
+    const identityEpoch = useRef(0);
+    const profileRead = useRef(0);
+    // Local intent must survive in-flight logout and unavailable persistence.
+    // Only an owned successful sign-in may reopen this mounted provider.
+    const logoutIntent = useRef(false);
+    // Explicit logout closes admission as well as invalidating earlier reads:
+    // a timer that starts afterward must not rediscover the still-valid cookie
+    // while the logout request is in flight.
+    const profileReadsAllowed = useRef(true);
+    const invalidateIdentity = useCallback(() => {
+        invalidateRequestIdentity();
+        profileReadsAllowed.current = false;
+        identityEpoch.current += 1;
+        profileRead.current += 1;
+        notificationsStore.setIdentity(null);
+        return identityEpoch.current;
+    }, []);
+
     // Plumb the live token to the shared HTTP client. Every request reads
     // _externalTokenProvider() at request time, so a rotation here is
     // automatically picked up by all consumers without anyone re-reading
     // localStorage. Cleared on unmount so a unit test that tears down
     // AuthProvider doesn't leak state across tests.
     useEffect(() => {
-        setTokenProvider(() => accessToken);
-        return () => setTokenProvider(null);
-    }, [accessToken]);
+        profileReadsAllowed.current = true;
+        setTokenProvider(() => accessTokenRef.current, token => {
+            accessTokenRef.current = token;
+            setBrowserAuthToken(token);
+            setAccessTokenState(token);
+        });
+        return () => {
+            profileReadsAllowed.current = false;
+            identityEpoch.current += 1;
+            profileRead.current += 1;
+            setTokenProvider(null);
+        };
+    }, []);
 
     // Cross-tab logout: when another tab clears the persisted token, sync
     // this tab's state. The "storage" event only fires for OTHER tabs'
@@ -123,102 +189,140 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // tooling (e.g. DevTools clearing storage during a test).
     useEffect(() => {
         if (typeof window === "undefined") return;
-        function onStorage(e: StorageEvent) {
-            if (e.key !== "talklee.auth.token") return;
-            const next = e.newValue && e.newValue.trim() ? e.newValue : null;
-            setAccessTokenState(next);
-            if (!next) setUser(null);
-        }
-        window.addEventListener("storage", onStorage);
-        return () => window.removeEventListener("storage", onStorage);
-    }, []);
-
-    // AH-Phase-E: retry a previously-failed logout on mount. If the user
-    // clicked Sign Out and the backend call failed (offline, 5xx,
-    // timeout), AuthContext.logout queued a `talky.logout.pending`
-    // localStorage flag. Re-fire api.logout silently — the server
-    // invalidates the refresh_tokens row, clearing the cookies, and
-    // narrows the window where a leaked JWT could still be used.
-    // Runs once per mount, before the /auth/me bootstrap.
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        let pending: string | null = null;
-        try { pending = window.localStorage.getItem("talky.logout.pending"); } catch { /* ignore */ }
-        if (!pending) return;
-        let cancelled = false;
-        (async () => {
+        const seen = new Set<string>();
+        function handleIdentityChange(kind: "changed" | "logout") {
+            invalidateRequestIdentity();
+            setUser(null);
+            const epoch = ++identityEpoch.current;
+            const read = ++profileRead.current;
             try {
-                await api.logout();
-                if (cancelled) return;
-                try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* ignore */ }
-                if (process.env.NODE_ENV !== "production") {
-                    console.debug("[auth] retried pending logout, server confirmed");
-                }
-            } catch (err) {
-                if (cancelled) return;
-                if (isApiClientError(err) && (err.status === 401 || err.status === 403)) {
-                    // Server already considers us logged out — success.
-                    try { window.localStorage.removeItem("talky.logout.pending"); } catch { /* ignore */ }
-                } else {
-                    // Still failing; leave the flag for the next mount.
-                    if (process.env.NODE_ENV !== "production") {
-                        console.debug("[auth] pending logout retry still failing — will retry on next mount");
-                    }
-                }
+                if (window.localStorage.getItem("talky.logout.pending")) logoutIntent.current = true;
+            } catch { /* Keep the volatile intent when storage is unavailable. */ }
+            // A notification is not confirmation of an earlier local logout.
+            // Only an explicit successful sign-in clears that durable fence.
+            if (kind === "logout" || logoutIntent.current) {
+                profileReadsAllowed.current = false;
+                notificationsStore.setIdentity(null);
+                accessTokenRef.current = null;
+                setAccessTokenState(null);
+                setUser(null);
+                setLoading(false);
+                clearFreshLoginGrace();
+                return;
             }
-        })();
-        return () => { cancelled = true; };
-    }, []);
+            // An unverified token/session change masks old data immediately.
+            // Keep the saved same-identity history until /me proves the scope.
+            notificationsStore.suspendIdentity();
+            profileReadsAllowed.current = true;
+            // The old user is masked above but the session is NOT known to be
+            // gone: a sibling tab's routine token rotation lands here too. Hold
+            // `loading` until /me answers so DashboardLayout's `!loading && !user`
+            // redirect cannot send a still-valid session to /auth/login.
+            setLoading(true);
+            resetSessionExpiredLatch();
+            const current = () => identityEpoch.current === epoch && profileRead.current === read;
+            void api.getMe().then(me => {
+                if (current()) { setUser(me); setLoading(false); }
+            }).catch(() => {
+                if (current()) { notificationsStore.setIdentity(null); setUser(null); setLoading(false); }
+            });
+        }
+        function receiveMarker(value: unknown, foreign = false) {
+            if (!value || typeof value !== "object") return;
+            const message = value as { kind?: unknown; nonce?: unknown };
+            if ((message.kind !== "changed" && message.kind !== "logout") || typeof message.nonce !== "string" || !message.nonce || message.nonce.length > 200) return;
+            if (seen.has(message.nonce)) return;
+            seen.add(message.nonce);
+            if (seen.size > 100) seen.delete(seen.values().next().value!);
+            if (foreign) {
+                // Foreign cookie changes invalidate this app's old bearer; it
+                // must not accompany the canonical cookie-only identity check.
+                accessTokenRef.current = null;
+                setAccessTokenState(null);
+                setBrowserAuthToken(null);
+            } else if (message.kind === "changed") {
+                accessTokenRef.current = getBrowserAuthToken();
+                setAccessTokenState(accessTokenRef.current);
+            }
+            handleIdentityChange(message.kind);
+        }
+        function onStorage(e: StorageEvent) {
+            if (e.key === "talklee.auth.token") {
+                const next = e.newValue && e.newValue.trim() ? e.newValue : null;
+                if (next === accessTokenRef.current) return;
+                accessTokenRef.current = next;
+                setAccessTokenState(next);
+                handleIdentityChange(next ? "changed" : "logout");
+            } else if (e.key === AUTH_IDENTITY_EVENT_KEY || e.key === FOREIGN_IDENTITY_EVENT_KEY) {
+                try { receiveMarker(JSON.parse(e.newValue ?? "null"), e.key === FOREIGN_IDENTITY_EVENT_KEY); } catch { /* Ignore malformed markers. */ }
+            } else if (e.key === null) handleIdentityChange("logout");
+        }
+        let storageAvailable = false;
+        try {
+            const probe = `${AUTH_IDENTITY_EVENT_KEY}.probe`;
+            window.localStorage.setItem(probe, "1"); window.localStorage.removeItem(probe);
+            storageAvailable = true;
+        } catch { /* Storage can be blocked or full while cookies remain usable. */ }
+        let channel: BroadcastChannel | null = null;
+        let foreignChannel: BroadcastChannel | null = null;
+        try {
+            if (typeof window.BroadcastChannel !== "undefined") {
+                channel = new window.BroadcastChannel(AUTH_IDENTITY_EVENT_KEY);
+                channel.onmessage = event => receiveMarker(event.data);
+            }
+        } catch { /* Notifications remain unscoped if both transports fail. */ }
+        try {
+            if (typeof window.BroadcastChannel !== "undefined") {
+                foreignChannel = new window.BroadcastChannel(FOREIGN_IDENTITY_EVENT_KEY);
+                foreignChannel.onmessage = event => receiveMarker(event.data, true);
+            }
+        } catch { /* The existing foreign storage marker remains the fallback. */ }
+        identityChannel.current = channel;
+        // Capability depends on successfully opening browser transports, which
+        // must happen after mount rather than during render or on the server.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setNotificationSyncAvailable(storageAvailable || !!channel);
+        window.addEventListener("storage", onStorage);
+        return () => {
+            window.removeEventListener("storage", onStorage);
+            identityChannel.current = null;
+            channel?.close();
+            foreignChannel?.close();
+        };
+    }, [setUser]);
 
-    // Bootstrap auth state from the server.
-    //
-    // Two gating strategies depending on the deploy mode:
-    //
-    //   Bearer-fallback ON (default): skip /auth/me when there's no Bearer
-    //   token in localStorage. The Bearer's presence is the proxy signal
-    //   that "we have a session." Without it, calling /auth/me on a cold
-    //   anonymous visit fires a 401 → trips the session-expired latch →
-    //   tears down sibling API calls. The protective behaviour we want
-    //   for visitors who land on /auth/login without a session.
-    //
-    //   Bearer-fallback OFF (Phase F+F2 cookie-only mode): the JWT is
-    //   never written to localStorage anymore. The HttpOnly `talky_at`
-    //   cookie IS the session and JS can't read it. So we MUST call
-    //   /auth/me unconditionally on mount — if the cookie's valid the
-    //   server returns the user; if not we get a 401 and present a
-    //   logged-out shell. The latch-tearing-down concern is mitigated
-    //   by the fresh-login grace window and by the fact that nothing
-    //   in localStorage is at risk of being wiped anymore.
-    //
-    // Hotfix 2026-05-21: the previous gate only checked the Bearer path,
-    // so after the Phase F flip every page reload bounced the user to
-    // /auth/login even with a valid cookie. The branch on
-    // isBearerFallbackEnabled() restores the correct cookie-mode
-    // behaviour.
+    // A failed logout has an unknown server outcome. Do not replay a timestamp
+    // against current cookies: they may now belong to a different session.
+
+    // Verify the session on mount using existing cookies and any saved bearer.
+    // A missing bearer says nothing about the HttpOnly cookie. getMe suppresses
+    // the global expiry redirect; an anonymous response settles this provider.
+    // Token changes stay outside the dependency list so rotation cannot restart
+    // bootstrap. The HTTP client reads the live token ref when needed.
     useEffect(() => {
         let cancelled = false;
-        const legacyToken = accessToken ?? getBrowserAuthToken();
-        const inCookieOnlyMode = !isBearerFallbackEnabled();
-        if (!legacyToken && !inCookieOnlyMode) {
-            // Bearer mode + no Bearer = anonymous cold visit. Don't
-            // call /auth/me, just present the logged-out shell.
-            setLoading(false);
-            return;
-        }
-
-        // Retry once with backoff if /auth/me fails during a fresh-login
-        // race. The login handler seeds `user` via flushSync BEFORE this
-        // effect typically runs again, but if AuthProvider remounts (e.g.
-        // a Suspense boundary swaps), this bootstrap fires fresh and can
-        // race the cookie commit. One 1.5s retry inside the grace window
-        // resolves >99% of those races; outside the window we fail open
-        // and let the user re-login explicitly.
+        const epoch = identityEpoch.current;
+        const read = ++profileRead.current;
+        const current = () => !cancelled && identityEpoch.current === epoch && profileRead.current === read;
+        try {
+            if (window.localStorage.getItem("talky.logout.pending")) {
+                logoutIntent.current = true;
+                profileReadsAllowed.current = false;
+                // Settle the client-only bootstrap after reading its persisted receipt.
+                // eslint-disable-next-line react-hooks/set-state-in-effect
+                setLoading(false);
+                return;
+            }
+        } catch { /* Continue the usual bootstrap when storage is unavailable. */ }
+        // Retain the existing single retry during fresh-login grace. Current
+        // ownership checks reject reads superseded by logout or another login.
         async function loadMe(attempt: number): Promise<void> {
+            if (!current()) return;
             try {
                 const me = await api.getMe();
-                if (!cancelled) setUser(me);
+                if (current()) setUser(me);
             } catch {
-                if (cancelled) return;
+                if (!current()) return;
                 if (attempt === 0 && isWithinFreshLoginGrace()) {
                     if (process.env.NODE_ENV !== "production") {
                         console.debug("[auth] bootstrap /auth/me failed in grace window, retrying in 1500ms");
@@ -236,19 +340,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                     }
                     return;
                 }
-                // Real failure — http-client already cleared the token via
-                // its 401 path; we just sync our user state.
+                // The canonical check failed; leave this provider anonymous.
                 setUser(null);
             } finally {
-                if (!cancelled) setLoading(false);
+                if (current()) setLoading(false);
             }
         }
         void loadMe(0);
         return () => { cancelled = true; };
-    }, []);
+    }, [setUser]);
 
     // The ONE writer that touches the persisted token + the reactive state.
-    // Every other action (login, register, logout, setToken, applyLoginResult)
+    // Every other action (login, logout, setToken, applyLoginResult)
     // delegates to this so localStorage and React state can't drift out of
     // sync. Marked `setAccessToken` (not `setAccessTokenState`) to remind
     // readers that this is the canonical mutation, not the raw setState.
@@ -258,12 +361,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // was removed — it was non-HttpOnly pure attack surface with the
     // shared client + AuthContext fallback path doing its job.
     const setAccessToken = useCallback((token: string | null) => {
+        accessTokenRef.current = token;
         setBrowserAuthToken(token);   // writes localStorage (canonical, single key)
         setAccessTokenState(token);   // updates reactive state → re-renders all subscribers
     }, []);
 
     const login = useCallback(async (email: string, password: string) => {
+        const epoch = invalidateIdentity();
         const res = await api.login(email, password);
+        if (identityEpoch.current !== epoch) return;
+        if (res.mfa_required || !res.access_token) {
+            throw new ApiClientError({ code: "mfa_required", message: "Complete two-factor authentication on the sign-in page.",
+                url: "/auth/login", method: "POST" });
+        }
+        logoutIntent.current = false;
+        clearUnconfirmedLogout();
+        profileReadsAllowed.current = true;
+        profileRead.current += 1;
         setAccessToken(res.access_token);
         // Re-arm the http-client's session-expired latch so the NEXT 401
         // (after this fresh session eventually expires) fires the redirect
@@ -272,107 +386,93 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         resetSessionExpiredLatch();
         setUser({
             id: res.user_id,
+            tenant_id: res.tenant_id,
             email: res.email,
             role: res.role,
             business_name: res.business_name,
-            minutes_remaining: res.minutes_remaining ?? 0,
+            ...normalizeMinutesAllowance(res),
         });
-    }, [setAccessToken]);
-
-    const register = useCallback(async (
-        email: string,
-        password: string,
-        businessName: string,
-        name?: string,
-    ) => {
-        // /auth/register no longer issues a session: the user must verify
-        // their email and then sign in via /auth/login. We resolve without
-        // setting any auth state — callers should redirect to the "check
-        // your email" screen after this resolves.
-        //
-        // The legacy session-on-register branch is preserved in case a
-        // future backend reverts the behaviour, so this callback stays
-        // forward-compatible.
-        const res = await api.register(email, password, businessName, "basic", name);
-        if (res.access_token && res.role) {
-            setAccessToken(res.access_token);
-            resetSessionExpiredLatch();
-            setUser({
-                id: res.user_id,
-                email: res.email,
-                role: res.role,
-                business_name: res.business_name,
-                minutes_remaining: res.minutes_remaining ?? 0,
-            });
-        }
-    }, [setAccessToken]);
+        setLoading(false);
+        broadcastIdentityChange("changed");
+    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange, setUser]);
 
     const logout = useCallback(async () => {
-        // AH-Phase-E: distinguish "logout actually invalidated the
-        // server-side session" from "logout call failed and the row may
-        // still be alive". On failure (network drop, 5xx) we set a
-        // localStorage flag so the NEXT page load (or AuthProvider mount)
-        // retries silently. 401/403 from the backend means the server
-        // already considers us logged out — that's a success state and
-        // the flag is cleared.
+        const expectedIdentity = user ? { userId: user.id, tenantId: user.tenant_id } : undefined;
+        logoutIntent.current = true;
+        // Persist before a cross-app hint can retire this operation's epoch.
+        // A failed write still leaves the mounted provider fenced in memory.
+        try { window.localStorage.setItem("talky.logout.pending", String(Date.now())); } catch { /* Keep volatile intent. */ }
+        const epoch = invalidateIdentity();
+        setUser(null);
+        setLoading(false);
+        clearFreshLoginGrace();
+        broadcastIdentityChange("logout");
+        // Keep an unconfirmed outcome visible; never replay it against a
+        // future session. Only a successful acknowledgment confirms revocation.
         let serverConfirmedLogout = false;
         try {
-            await api.logout();
+            await api.logout(expectedIdentity);
             serverConfirmedLogout = true;
         } catch (err) {
-            if (isApiClientError(err) && (err.status === 401 || err.status === 403)) {
-                // Server already considers this session gone. Treat as success.
-                serverConfirmedLogout = true;
-            } else {
-                serverConfirmedLogout = false;
-                if (process.env.NODE_ENV !== "production") {
-                    console.warn("[auth] logout call failed; queued for retry on next mount", err);
-                }
+            serverConfirmedLogout = false;
+            if (process.env.NODE_ENV !== "production") {
+                console.warn("[auth] local sign-out completed; server revocation is unconfirmed", err);
             }
         } finally {
-            // Always clear local state, regardless of whether the backend
-            // call succeeded. Cross-tab tabs see this via the storage event
-            // listener installed above and drop their own state.
-            //
-            // Phase 7: also scrub the legacy `refresh_token` localStorage
-            // key on logout. Nothing in the app writes it anymore (Phase 7
-            // dropped the login-success + oauth-callback writes), but any
-            // user who logged in before Phase 7 still has a stale value
-            // sitting in their browser. One defensive removeItem on the
-            // next logout clears it across the user base; this whole try
-            // block can be deleted after the 2-week soak.
-            setAccessToken(null);
-            // Phase E: kill the fresh-login grace window. If the user
-            // logged in and out within 15s, a lingering grace would
-            // suppress an otherwise-correct session-expired bounce on the
-            // next API call. Logout is the explicit signal that "any
-            // recent login is no longer in effect."
-            clearFreshLoginGrace();
-            try {
-                localStorage.removeItem("refresh_token");
-                if (serverConfirmedLogout) {
-                    localStorage.removeItem("talky.logout.pending");
-                } else {
-                    // Queue the retry. Bootstrap effect on next mount
-                    // (or a focus-driven retry) will re-fire api.logout
-                    // until the server confirms.
-                    localStorage.setItem("talky.logout.pending", String(Date.now()));
-                }
-            } catch { /* ignore */ }
-            setUser(null);
+            // A later login owns the current local identity. This older logout
+            // completion must not erase its profile or notification scope.
+            if (identityEpoch.current === epoch) {
+                // Always clear local state, regardless of whether the backend
+                // call succeeded. Cross-tab tabs see this via the storage event
+                // listener installed above and drop their own state.
+                //
+                // Phase 7: also scrub the legacy `refresh_token` localStorage
+                // key on logout. Nothing in the app writes it anymore (Phase 7
+                // dropped the login-success + oauth-callback writes), but any
+                // user who logged in before Phase 7 still has a stale value
+                // sitting in their browser. One defensive removeItem on the
+                // next logout clears it across the user base; this whole try
+                // block can be deleted after the 2-week soak.
+                setAccessToken(null);
+                // Phase E: kill the fresh-login grace window. If the user
+                // logged in and out within 15s, a lingering grace would
+                // suppress an otherwise-correct session-expired bounce on the
+                // next API call. Logout is the explicit signal that "any
+                // recent login is no longer in effect."
+                clearFreshLoginGrace();
+                try {
+                    localStorage.removeItem("refresh_token");
+                    if (serverConfirmedLogout) {
+                        localStorage.removeItem("talky.logout.pending");
+                    } else {
+                        // Preserve uncertainty without replaying an unbound logout.
+                        localStorage.setItem("talky.logout.pending", String(Date.now()));
+                    }
+                } catch { /* ignore */ }
+                setUser(null);
+            }
         }
-    }, [setAccessToken]);
+        return { serverConfirmed: serverConfirmedLogout, identityCurrent: identityEpoch.current === epoch };
+    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange, setUser, user]);
 
     const setToken = useCallback((token: string) => {
+        const epoch = invalidateIdentity();
+        profileReadsAllowed.current = true;
+        const read = ++profileRead.current;
+        const current = () => identityEpoch.current === epoch && profileRead.current === read;
         setAccessToken(token);
+        setUser(null);
+        setLoading(true);
+        broadcastIdentityChange("changed");
         resetSessionExpiredLatch();
         // After setting token, try to load real user.
         // Inside the fresh-login grace window, a 401 here is a transient
         // race against cookie commit — keep the existing user state (if
         // any) rather than tearing it down and bouncing to /login.
         api.getMe()
-            .then((me) => setUser(me))
+            .then((me) => { if (current()) setUser(me); })
             .catch(() => {
+                if (!current()) return;
                 if (isWithinFreshLoginGrace()) {
                     if (process.env.NODE_ENV !== "production") {
                         console.debug("[auth] setToken /auth/me failed in grace window — preserving state");
@@ -381,8 +481,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 }
                 setAccessToken(null);
                 setUser(null);
-            });
-    }, [setAccessToken]);
+            }).finally(() => { if (current()) setLoading(false); });
+    }, [setAccessToken, invalidateIdentity, broadcastIdentityChange, setUser]);
 
     // `silent: true` callers (Phase 3 suspension-freshness loop, any future
     // background poll) MUST NOT flip authLoading or tear down auth state
@@ -395,12 +495,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // current session. Real 401s still log the user out — those mean the
     // server has actually invalidated the session.
     const refreshUser = useCallback(async (opts?: { silent?: boolean }) => {
+        if (!profileReadsAllowed.current) return;
+        const epoch = identityEpoch.current;
+        const read = ++profileRead.current;
+        const current = () => identityEpoch.current === epoch && profileRead.current === read;
         const silent = opts?.silent === true;
         if (!silent) setLoading(true);
         try {
             const me = await api.getMe();
-            setUser(me);
+            if (current()) setUser(me);
         } catch (err) {
+            if (!current()) return;
             if (isWithinFreshLoginGrace()) {
                 if (process.env.NODE_ENV !== "production") {
                     console.debug("[auth] refreshUser failed in grace window — preserving state");
@@ -423,11 +528,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return;
             }
             setAccessToken(null);
+            invalidateIdentity();
             setUser(null);
+            setLoading(false);
         } finally {
-            if (!silent) setLoading(false);
+            // A newer silent read can supersede a foreground read that opened
+            // the loading state. The winning read settles that state too.
+            if (current()) setLoading(false);
         }
-    }, [setAccessToken]);
+    }, [setAccessToken, invalidateIdentity, setUser]);
 
     // Synchronous user-state population from a login response. The login
     // POST returns enough fields to render the dashboard shell; we use
@@ -436,12 +545,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // still run on next reload to refresh any drifted fields.
     const applyLoginResult = useCallback((res: {
         user_id: string;
+        tenant_id?: string;
         email: string;
         role: string;
         business_name?: string | null;
-        minutes_remaining?: number;
+        minutes_remaining?: number | null;
+        minutes_state?: MinutesState;
         access_token?: string;
     }) => {
+        invalidateIdentity();
+        logoutIntent.current = false;
+        clearUnconfirmedLogout();
+        profileReadsAllowed.current = true;
         // When a caller passes the access_token, we commit it through the
         // single writer so the new accessToken state stays in sync with
         // localStorage. Existing call sites (login-client.tsx) still call
@@ -455,18 +570,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             // Skip the localStorage write if the value is already there —
             // setAccessToken's writer is idempotent but we want to avoid
             // unnecessary cookie-mirror writes in the legacy fallback case.
+            accessTokenRef.current = tokenToCommit;
             setAccessTokenState(tokenToCommit);
             if (res.access_token) setBrowserAuthToken(tokenToCommit);
         }
         setUser({
             id: res.user_id,
+            tenant_id: res.tenant_id,
             email: res.email,
             role: res.role,
             business_name: res.business_name ?? undefined,
-            minutes_remaining: res.minutes_remaining ?? 0,
+            ...normalizeMinutesAllowance(res),
         });
         setLoading(false);
-    }, []);
+        broadcastIdentityChange("changed");
+    }, [invalidateIdentity, broadcastIdentityChange, setUser]);
 
     // Compute the AuthStatus from the underlying state. Order matters:
     // `loading` wins over presence checks because a freshly-mounted
@@ -484,11 +602,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // back to /auth/login on click.
         if (user) return "authenticated";
         return "anonymous";
-    }, [loading, user, accessToken]);
+        // `accessToken` is deliberately NOT a dependency: since the cookie-only
+        // fix above, the status is derived from `loading` + `user` alone, so
+        // listing the token only made this memo churn on every rotation.
+    }, [loading, user]);
 
     const value = useMemo(
-        () => ({ user, loading, accessToken, status, login, register, logout, setToken, refreshUser, applyLoginResult }),
-        [loading, user, accessToken, status, login, register, logout, setToken, refreshUser, applyLoginResult],
+        () => ({ user, loading, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult }),
+        [loading, user, accessToken, status, notificationSyncAvailable, login, logout, setToken, refreshUser, applyLoginResult],
     );
 
     return (
@@ -509,10 +630,8 @@ const SSR_FALLBACK_AUTH_CONTEXT: AuthContextType = {
     loading: true,
     accessToken: null,
     status: "uninitialized",
+    notificationSyncAvailable: false,
     login: async () => {
-        throw new Error("useAuth used outside AuthProvider on client");
-    },
-    register: async () => {
         throw new Error("useAuth used outside AuthProvider on client");
     },
     logout: async () => {

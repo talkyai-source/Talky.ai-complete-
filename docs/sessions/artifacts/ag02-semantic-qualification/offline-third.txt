@@ -1,0 +1,69 @@
+.............FF...............                                           [100%]
+================================== FAILURES ===================================
+_ test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile _
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '...l_system_addendum at 0x000001E60AD334C0>, Provider=<class 'app.infrastructure.llm.groq.GroqLLMProvider'>, reserve=1024)
+
+    async def test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile(profile, rt):
+        calls = []
+        def handler(request):
+            payload = json.loads(request.content)
+            calls.append(payload)
+            return sse(tool=True) if len(calls) == 1 else sse(text="An approved refund takes five working days.")
+        transport = q.BoundedTransport(httpx.MockTransport(handler), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+        assert result["completed"] and len(calls) == 2, (result, transport.denials,
+            [{key: value for key, value in r.items() if key != "request"} for r in transport.requests])
+        assert all(p["max_completion_tokens"] == 1280 and p["reasoning_effort"] == "low" and
+                   p["include_reasoning"] is False and p["temperature"] == 0.4 for p in calls)
+        assert "tools" in calls[0] and "tools" not in calls[1]
+        assert case()["query"] in calls[0]["messages"][-1]["content"]
+        assert calls[1]["messages"][-1]["role"] == "tool"
+        assert result["lookups"][0]["query"] == "refund processing"
+        assert result["lookups"][0]["evidence"]["passages"][0]["source_id"] == "synthetic"
+>       assert result["model_final_output"] == "An approved refund takes five working days."
+E       AssertionError: assert '' == 'An approved ...working days.'
+E         - An approved refund takes five working days.
+
+tests\unit\test_ag02_semantic_qualification.py:165: AssertionError
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-16' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-17' coro=<<async_generator_athrow without __name__>()>>
+________ test_wrong_final_answer_cannot_be_counted_as_semantic_success ________
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '...l_system_addendum at 0x000001E60AD334C0>, Provider=<class 'app.infrastructure.llm.groq.GroqLLMProvider'>, reserve=1024)
+
+    async def test_wrong_final_answer_cannot_be_counted_as_semantic_success(profile, rt):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return sse(tool=True) if len(calls) == 1 else sse(text="Refunds arrive instantly without approval.")
+        transport = q.BoundedTransport(httpx.MockTransport(handler), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+        assert result["mechanical"]["matched_expected_passage"] is True
+        assert result["semantic_quality_pass"] is None and result["human_answer_fidelity"] == "pending"
+>       assert "instantly" in result["model_final_output"]
+E       AssertionError: assert 'instantly' in ''
+
+tests\unit\test_ag02_semantic_qualification.py:185: AssertionError
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-20' coro=<<async_generator_athrow without __name__>()>>
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-21' coro=<<async_generator_athrow without __name__>()>>
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_wrong_final_answer_cannot_be_counted_as_semantic_success
+2 failed, 28 passed in 2.57s

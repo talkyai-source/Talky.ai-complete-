@@ -1,0 +1,8 @@
+..                                                                       [100%]
+============================== warnings summary ===============================
+tests/unit/test_ag04_realtime_smoke.py::test_smoke_captures_complete_response_candidate[False]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\scripts\realtime_smoke.py:82: DeprecationWarning: 'audioop' is deprecated and slated for removal in Python 3.13
+    import audioop  # deprecated in 3.13 but present in the 3.11 venv
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+2 passed, 1 warning in 1.47s

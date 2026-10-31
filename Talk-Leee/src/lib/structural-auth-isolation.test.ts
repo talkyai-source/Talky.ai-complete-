@@ -32,6 +32,9 @@ const ALLOWLIST = new Set<string>([
     // The single in-app caller; rest of the codebase consumes via
     // useAccessToken() / useAuth() / api.request().
     "lib/auth-context.tsx",
+    // Shared HTTP token bridge: delegates writes to mounted AuthContext,
+    // otherwise uses canonical persistence helpers and their cookie-only policy.
+    "lib/http-client.ts",
     // Bridges the shared HttpClient to the persisted token via a
     // callback `getToken: () => getBrowserAuthToken()`. The callback
     // shape means the token is read at REQUEST time, not snapshotted,

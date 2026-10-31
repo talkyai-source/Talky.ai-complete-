@@ -552,6 +552,7 @@ class TestQueueService:
         ])
         mock_redis.scan = AsyncMock(return_value=(0, ["dialer:tenant:tenant-1:queue"]))
         mock_redis.zrange = AsyncMock(return_value=[scheduled_target, keep_entry])
+        mock_redis.lrem = AsyncMock(return_value=1)
         mock_redis.delete = AsyncMock()
         mock_redis.rpush = AsyncMock()
         mock_redis.zrem = AsyncMock()
@@ -562,8 +563,12 @@ class TestQueueService:
         removed = await service.clear_campaign_jobs("campaign-a")
 
         assert removed == 3
-        mock_redis.delete.assert_any_call(service.PRIORITY_QUEUE)
-        mock_redis.delete.assert_any_call("dialer:tenant:tenant-1:queue")
+        # Current invariant: matching entries are removed with an atomic LREM;
+        # the list is never deleted and rewritten (that dropped concurrent pushes).
+        mock_redis.lrem.assert_any_await(service.PRIORITY_QUEUE, 1, target_entry)
+        mock_redis.lrem.assert_any_await("dialer:tenant:tenant-1:queue", 1, target_entry)
+        mock_redis.delete.assert_not_awaited()
+        mock_redis.rpush.assert_not_awaited()
         mock_redis.zrem.assert_awaited_once_with(service.SCHEDULED_ZSET, scheduled_target)
 
 

@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-06",
+  "execution_base": "7c4baa91333a84d4f1c3c8f9330c01a247ff0c3d",
+  "source_commit_after_unchanged_test_commit": "e81f525f6c476e74e22b6a41901e1d50c5c184dc",
+  "source_hashes_lf": {
+    "backend/app/services/crm_sync_service.py": "443e157411d0d48a9098f8d52a3cdbacb74c31b2c0f87e3f8ed7ec6d77711ff1",
+    "backend/app/services/connector_resolver.py": "054e6f5a0e7824ce55dadc8c29c9665b65d7bb6aad113d6c96abf9704a2143e0",
+    "backend/app/domain/services/voice_pipeline/action_execution.py": "33779d45ca915814fea12b04dc39fb6c48a5a7a359a1340ef1b67704209b023a",
+    "backend/app/api/v1/endpoints/admin/actions.py": "ccdeb3e084a6daf50c90b50786584671fc40463571de5282abb1c25693d84ee2",
+    "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+    "backend/app/services/email_service.py": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+    "backend/app/services/meeting_service.py": "26775c66e5dd9e5e1dafeca6a00af599d513594202111d56f517328b6473774d",
+    "backend/app/api/v1/endpoints/admin/calls.py": "4ee2b9cc6ba31f131ce57b01a8184d44b622f64b48756f7284856bf2b03e4cad",
+    "backend/app/infrastructure/connectors/crm/base.py": "e18c16b5055e77e0d1062da46aae6f0b12e18797e95acac97bb089b3b828c430",
+    "backend/app/infrastructure/connectors/crm/hubspot.py": "da902d16118d0df30e2b83adf88efc50551634c05945d2f2a7e39920a3756b22",
+    "backend/app/infrastructure/connectors/crm/salesforce.py": "38282ec10b2ead2fa82fb857bcd2048d5a7472601991c98bb94f24436c1870d9",
+    "backend/tests/unit/test_crm_sync_service.py": "f47477ad8c05a5ca4f31f035905931afd72c53a7fa2b006c3fbf5513dc2faa08",
+    "backend/tests/unit/test_ag06_crm_evidence.py": "d0b1e35a8cc63d75a604fcf89b620d572a98dc035c7558f0efccaade27b710db",
+    "backend/tests/unit/test_crm_sync_hooks.py": "b1fdccd586cedb23cb2c8291e52181d6fb3eb24ed1345a0e6d7c81c930ef0bec",
+    "backend/tests/unit/test_admin_crm_inspection.py": "310c22aab9b872001b8edcf56801269dad28fde15b826eeb72a8686633ee142a",
+    "backend/tests/unit/test_reviewed_selector_identity_types.py": "c1aea1efe6929be29cd0cfc1fe6cfd3fe6c571cd08d7d0fd28cc20369eb9e7a6",
+    "backend/tests/unit/test_reviewed_account_identity.py": "8b00221c871ad882e1e878e8fe53bc6568e72209ccba952b54974893b966d933",
+    "backend/tests/unit/test_inbox_original_account.py": "5ec8cb2518e619054a754ef9d6bfdfcc337022d8cf41585db57d79e620295a1a",
+    "backend/tests/unit/test_inbox_authorization_health.py": "78b1845dfb4e3032688ab1656c063566df9e39c50a9a5732c07f4b88679392cd",
+    "backend/tests/unit/test_admin_gmail_inspection.py": "ba8b55aa0d031345ef59fce95db9e867bcbeba729459578c238165bcdd14fc18",
+    "backend/tests/unit/test_voice_email_receipt_proof.py": "47c4f5b8de5d3f92e345fc4573718e5735091aa62229141c3e612236633ee967",
+    "backend/tests/unit/test_voice_email_inspection_handoff.py": "7d0ce510df7224e486b05b00c116b961fb84f1cf4a66458ee3266dddfe64e765"
+  },
+  "source_matches_committed_git": true,
+  "result": {
+    "passed": 421,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 1,
+    "modules": 11
+  },
+  "prohibited_network_attempts": 0,
+  "allowed_windows_internal_socketpairs": 748,
+  "independent_parity": {
+    "reviewer": "crm_inspection read-only",
+    "combined_sources": 22,
+    "sources_already_in_execution_base": 21,
+    "handoff_test_committed_unchanged": true,
+    "gmail_owner_sources": 6,
+    "voice_owner_sources": 2,
+    "voice_manifest_sources": 7,
+    "artifact_hashes": 14,
+    "mismatches": 0,
+    "execution_repeated": false
+  },
+  "production_gate_promoted": false,
+  "artifacts": {
+    "command.json": {
+      "sha256_raw": "aead960e003b64093362c1583a60a16ca48e7e511f87b9bb66edf794ab42b743",
+      "sha256_lf": "3f0a6d113b4c3f49a7be9e1fe038a37fa3a1318f8875340bc76dc44eb99f90e7"
+    },
+    "result.json": {
+      "sha256_raw": "aca78091530d063068c665a397864cab187fda47a0a73ee2947583d4040eb674",
+      "sha256_lf": "e5eded7eee7c40533163675857dbbdb3ff7312e5c584b667c82b617d2cb087ec"
+    },
+    "runner.py": {
+      "sha256_raw": "4da1cf28b4f38ca75a858f78ff9238e8e69955cd58d7b59681a27cd3d9f0a2c5",
+      "sha256_lf": "53ee3d5534499d934570d0a47be374a2cf1face8fd1c488614081b6aa30090eb"
+    },
+    "tests.txt": {
+      "sha256_raw": "99daaeac6310a374da5c604d0ae9d16432b24b4c3022bf548931aa209628b378",
+      "sha256_lf": "9b40ac90d52528f323e257ed8790959bb2a6a60924d00071254aa62993d5ff7f"
+    },
+    "verification.md": {
+      "sha256_raw": "04c646678dbd2840fc42ec261206517c6827197ee4562efa9958c93e8cf11aa5",
+      "sha256_lf": "04c646678dbd2840fc42ec261206517c6827197ee4562efa9958c93e8cf11aa5"
+    }
+  }
+}

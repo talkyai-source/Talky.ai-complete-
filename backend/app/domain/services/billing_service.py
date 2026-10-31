@@ -9,16 +9,25 @@ Day 8: Fully integrated billing with:
 - Usage tracking & metering
 - Invoice management
 """
-import os
-import logging
-from typing import Optional, Dict, Any
-from datetime import datetime
-from app.core.postgres_adapter import Client
 
-from app.domain.services.audit_logger import AuditEvent, AuditLogger
-from app.domain.services.notification_service import (
-    get_notification_service,
-    NotificationChannel,
+import asyncio
+import json
+import logging
+import os
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+from app.core.db_utils import acquire_with_tenant
+from app.core.postgres_adapter import Client
+from app.domain.services.audit_logger import AuditLogger
+from app.domain.services.subscription_status import (
+    CANCELLED as SUBSCRIPTION_CANCELLED,
+)
+from app.domain.services.subscription_status import (
+    INACTIVE as SUBSCRIPTION_INACTIVE,
+)
+from app.domain.services.subscription_status import (
+    canonical as canonical_subscription_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,698 +35,554 @@ logger = logging.getLogger(__name__)
 # Try to import stripe, but make it optional for development
 try:
     import stripe
+
     STRIPE_AVAILABLE = True
 except ImportError:
     STRIPE_AVAILABLE = False
-    logger.warning("Stripe SDK not installed. Billing features will use mock mode.")
+    logger.warning("Stripe SDK not installed. Provider billing is unavailable.")
 
 
 class BillingService:
     """
     Service for handling Stripe billing operations.
-    
-    Supports mock mode when:
-    - Stripe SDK is not installed
-    - STRIPE_SECRET_KEY is not configured
-    - STRIPE_MOCK_MODE environment variable is set to 'true'
+
+    Mock mode requires an explicit STRIPE_MOCK_MODE setting. Missing provider
+    configuration and disabled billing never simulate a financial operation.
     """
-    
+
     def __init__(self, db_client: Client, audit_logger: Optional[AuditLogger] = None):
         self.db_client = db_client
         self.audit_logger = audit_logger
+        from app.domain.services.billing_mode import get_billing_mode
+        self.billing_mode = get_billing_mode(sdk_available=STRIPE_AVAILABLE)
+        self._stripe_api_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
         self.mock_mode = self._should_use_mock_mode()
-        
-        if not self.mock_mode and STRIPE_AVAILABLE:
-            stripe.api_key = os.getenv("STRIPE_SECRET_KEY")
-            self.webhook_secret = os.getenv("STRIPE_WEBHOOK_SECRET")
-        
+
+        self.webhook_secret = (os.getenv("STRIPE_WEBHOOK_SECRET") or "").strip()
+        if self.billing_mode in {"live", "test"}:
+            stripe.api_key = (os.getenv("STRIPE_SECRET_KEY") or "").strip()
+
         logger.info(f"BillingService initialized (mock_mode={self.mock_mode})")
-    
+
     def _should_use_mock_mode(self) -> bool:
-        """Determine if we should use mock mode"""
-        if not STRIPE_AVAILABLE:
-            return True
-        if os.getenv("STRIPE_MOCK_MODE", "false").lower() == "true":
-            return True
-        if not os.getenv("STRIPE_SECRET_KEY"):
-            return True
-        return False
-    
+        return self.billing_mode == "mock"
+
+    def _require_billing_enabled(self):
+        if self.billing_mode not in {"live", "test", "mock"}:
+            raise ValueError("Billing is unavailable in the current mode")
+
+    async def _stripe_call(self, resource: str, method: str, *args, **kwargs):
+        """Keep synchronous SDK I/O off the request event loop.
+
+        A timed-out thread may still be accepted by Stripe; checkout attempts
+        retain their identity and uncertainty instead of replaying a new write.
+        """
+        if self.billing_mode not in {"live", "test"}:
+            raise ValueError("Paid billing is not available in the current mode")
+        paths = {"Price": ("prices",), "Customer": ("customers",),
+                 "Subscription": ("subscriptions",), "Invoice": ("invoices",),
+                 "Charge": ("charges",), "PaymentIntent": ("payment_intents",),
+                 "Dispute": ("disputes",), "Event": ("events",),
+                 "InvoiceLineItem": ("invoices", "line_items"),
+                 "InvoicePayment": ("invoice_payments",), "CreditNote": ("credit_notes",),
+                 "Refund": ("refunds",),
+                 "checkout.Session": ("checkout", "sessions"),
+                 "billing_portal.Session": ("billing_portal", "sessions")}
+        options = {}
+        if "idempotency_key" in kwargs:
+            options["idempotency_key"] = kwargs.pop("idempotency_key")
+
+        def call():
+            transport = stripe.RequestsClient(timeout=5)
+            try:
+                client = stripe.StripeClient(self._stripe_api_key, http_client=transport, max_network_retries=0)
+                target = client.v1
+                for part in paths[resource]:
+                    target = getattr(target, part)
+                return getattr(target, method)(*args, params=kwargs, options=options)
+            finally:
+                transport.close()
+
+        return await asyncio.wait_for(asyncio.to_thread(call), 20.0)
+
     # =========================================================================
     # Customer Management
     # =========================================================================
-    
+
     async def create_or_get_customer(
-        self, 
-        tenant_id: str, 
-        email: str,
-        business_name: Optional[str] = None
+        self, tenant_id: str, email: str, business_name: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get existing Stripe customer or create a new one.
-        
+
+        Serialized per tenant. Two first checkouts that overlap (two workers,
+        two replicas, two tabs) must not each create a customer: the tenant
+        would end up bound to one while the other checkout session belongs to
+        the other, and the top-up webhook refuses to credit a session whose
+        customer is not the tenant's. So the read, the Stripe create and the
+        write happen in ONE transaction under a transaction-scoped advisory
+        lock. The lock is deliberately not a row lock: a FOR UPDATE held across
+        the Stripe call would stall every call-row insert for the tenant.
+
         Returns:
             Dict with customer_id and whether it was newly created
         """
-        # Check if tenant already has a Stripe customer
-        tenant = self.db_client.table("tenants").select(
-            "stripe_customer_id"
-        ).eq("id", tenant_id).single().execute()
-        
-        existing_customer_id = tenant.data.get("stripe_customer_id") if tenant.data else None
-        
-        if existing_customer_id:
-            return {
-                "customer_id": existing_customer_id,
-                "created": False
-            }
-        
-        # Create new customer
-        if self.mock_mode:
-            customer_id = f"cus_mock_{tenant_id[:8]}"
-        else:
-            customer = stripe.Customer.create(
-                email=email,
-                name=business_name,
-                metadata={
-                    "tenant_id": tenant_id
-                }
+        self._require_billing_enabled()
+        tenant_id = str(tenant_id)
+        async with acquire_with_tenant(self.db_client.pool, tenant_id) as conn:
+            await conn.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('stripe_customer:' || $1::text))", tenant_id
             )
-            customer_id = customer.id
-        
-        # Update tenant with customer ID
-        self.db_client.table("tenants").update({
-            "stripe_customer_id": customer_id
-        }).eq("id", tenant_id).execute()
-        
+            # Re-read UNDER the lock: the holder before us may have bound one.
+            tenant = await conn.fetchrow(
+                "SELECT stripe_customer_id FROM tenants WHERE id = $1::uuid", tenant_id
+            )
+            if tenant is None:
+                raise ValueError("Billing tenant not found")
+            if tenant["stripe_customer_id"]:
+                # Top-ups need an active paid plan, whose checkout already
+                # replaced any customer Stripe does not have (billing_checkout).
+                return {"customer_id": tenant["stripe_customer_id"], "created": False}
+
+            # Create new customer
+            if self.mock_mode:
+                customer_id = f"cus_mock_{tenant_id[:8]}"
+            else:
+                customer = await self._stripe_call(
+                    "Customer", "create", email=email, name=business_name,
+                    metadata={"tenant_id": tenant_id}, idempotency_key=f"cust-{tenant_id}",
+                )
+                customer_id = customer.id
+
+            # Update tenant with customer ID. The subscription checkout binds a
+            # customer under the tenant row lock, not this advisory lock, so
+            # only an unbound tenant is written; a binding that appeared during
+            # the Stripe call wins and this checkout is retried against it.
+            bound = await conn.execute(
+                "UPDATE tenants SET stripe_customer_id = $1 "
+                "WHERE id = $2::uuid AND COALESCE(stripe_customer_id, '') = ''",
+                customer_id, tenant_id,
+            )
+            if bound != "UPDATE 1":
+                raise RuntimeError("Stripe customer binding changed concurrently; retry the checkout")
+
         logger.info(f"Created Stripe customer {customer_id} for tenant {tenant_id}")
-        
-        return {
-            "customer_id": customer_id,
-            "created": True
-        }
-    
+
+        return {"customer_id": customer_id, "created": True}
+
     # =========================================================================
     # Checkout Session
     # =========================================================================
-    
+
     async def create_checkout_session(
+        self, *, tenant_id: str, email: str, request_id: str,
+        price_option_id: str, business_name: Optional[str] = None,
+        allow_team_only: bool = False,
+    ) -> Dict[str, Any]:
+        from app.domain.services.billing_checkout import CheckoutAttempts
+        return await CheckoutAttempts(self.db_client.pool, self).create(
+            tenant_id=tenant_id, email=email, request_id=request_id,
+            price_option_id=price_option_id, business_name=business_name,
+            allow_team_only=allow_team_only,
+        )
+
+    async def get_checkout_attempt(self, *, tenant_id: str, request_id: str):
+        from app.domain.services.billing_checkout import CheckoutAttempts
+        return await CheckoutAttempts(self.db_client.pool, self).get(
+            tenant_id=tenant_id, request_id=request_id,
+        )
+
+    # =========================================================================
+    # Minute Top-Ups (one-time payments, goals.md §9)
+    # =========================================================================
+
+    async def create_topup_checkout_session(
         self,
+        *,
         tenant_id: str,
         email: str,
-        plan_id: str,
+        order_id: str,
+        minutes: int,
+        price_cents: int,
+        currency: str,
+        product_name: str,
         success_url: str,
         cancel_url: str,
-        business_name: Optional[str] = None
+        business_name: Optional[str] = None,
     ) -> Dict[str, Any]:
+        """One-time checkout for a minute bundle.
+
+        Three things here differ from the subscription flow and each one
+        matters:
+
+        ``mode="payment"``   A top-up is bought once. Opening it in
+                             subscription mode would silently enrol the
+                             customer in a recurring charge.
+
+        ``metadata.purpose`` The webhook receives ONE ``checkout.session.completed``
+                             stream for both flows. Without this marker the
+                             subscription handler would run on a top-up and
+                             overwrite ``plan_id`` and ``stripe_subscription_id``
+                             with the nulls a one-time session carries —
+                             a top-up purchase would break the customer's plan.
+
+        inline ``price_data`` The amount comes from the package row we already
+                             snapshotted onto the order, so no Stripe Price
+                             object has to exist first and the customer is
+                             charged exactly what the order says.
         """
-        Create a Stripe Checkout Session for subscription.
-        
-        Returns:
-            Dict with checkout_url and session_id
-        """
-        # Get or create customer
-        customer_result = await self.create_or_get_customer(
-            tenant_id, email, business_name
-        )
+        self._require_billing_enabled()
+        customer_result = await self.create_or_get_customer(tenant_id, email, business_name)
         customer_id = customer_result["customer_id"]
-        
-        # Get plan's stripe_price_id
-        plan = self.db_client.table("plans").select(
-            "stripe_price_id, name"
-        ).eq("id", plan_id).single().execute()
-        
-        if not plan.data:
-            raise ValueError(f"Plan not found: {plan_id}")
-        
-        stripe_price_id = plan.data.get("stripe_price_id")
+        from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
+        def return_url(url, **values):
+            parts = urlsplit(url)
+            query = dict(parse_qsl(parts.query, keep_blank_values=True))
+            query.update(order_id=str(order_id), **values)
+            return urlunsplit(parts._replace(query=urlencode(query, safe="{}")))
+
+        # Shared by the session and the resulting PaymentIntent. The charge and
+        # refund events carry no checkout session, so the payment intent has to
+        # carry enough to identify the order on its own.
+        meta = {
+            "purpose": "minute_topup",
+            "tenant_id": tenant_id,
+            "order_id": str(order_id),
+            "minutes": str(minutes),
+        }
 
         if self.mock_mode:
-            # In mock mode, stripe_price_id may be NULL — we still return a
-            # fake checkout URL so the frontend flow is fully testable
-            # before real Stripe products are configured.
-            # Return mock checkout session
-            session_id = f"cs_mock_{tenant_id[:8]}_{plan_id}"
+            session_id = f"cs_mock_topup_{str(order_id)[:8]}"
             return {
                 "session_id": session_id,
-                "checkout_url": f"{success_url}?session_id={session_id}&mock=true",
+                "checkout_url": return_url(success_url, session_id=session_id, mock="true"),
                 "mock_mode": True,
-                "message": "Mock checkout session created. Configure STRIPE_SECRET_KEY for real payments."
+                "message": (
+                    "Mock checkout session created. Configure STRIPE_SECRET_KEY "
+                    "for real payments."
+                ),
             }
 
-        if not stripe_price_id:
-            raise ValueError(
-                f"Plan {plan_id} has no stripe_price_id configured. "
-                "Create the product/price in Stripe Dashboard and update "
-                "plans.stripe_price_id for this row."
-            )
-
-        # Create real Stripe Checkout Session
-        session = stripe.checkout.Session.create(
+        # Off the event loop, and keyed to the order: a retried or replayed
+        # request for the same order returns the same session instead of a
+        # second one that could be paid as well.
+        session = await self._stripe_call(
+            "checkout.Session", "create",
             customer=customer_id,
-            mode="subscription",
-            line_items=[{
-                "price": stripe_price_id,
-                "quantity": 1
-            }],
-            success_url=success_url + "?session_id={CHECKOUT_SESSION_ID}",
-            cancel_url=cancel_url,
-            metadata={
-                "tenant_id": tenant_id,
-                "plan_id": plan_id
-            },
-            subscription_data={
-                "metadata": {
-                    "tenant_id": tenant_id,
-                    "plan_id": plan_id
+            mode="payment",
+            # IMMEDIATE methods only. Left unset, Stripe offers every method
+            # enabled on the account — on a GBP account that includes Bacs, and
+            # Klarna/SEPA elsewhere, all of which settle days after checkout.
+            # Nothing in this product handles that gap: the order shows
+            # 'pending' with no reaper and the customer has no pending-payment
+            # UI. Widen this only alongside a reaper and a pending state.
+            payment_method_types=["card"],
+            line_items=[
+                {
+                    "price_data": {
+                        "currency": currency.lower(),
+                        "product_data": {"name": product_name},
+                        "unit_amount": price_cents,
+                    },
+                    "quantity": 1,
                 }
-            }
+            ],
+            success_url=return_url(success_url, session_id="{CHECKOUT_SESSION_ID}"),
+            cancel_url=return_url(cancel_url),
+            client_reference_id=str(order_id),
+            metadata=meta,
+            payment_intent_data={"metadata": meta},
+            idempotency_key=f"topup-{order_id}",
         )
-        
-        logger.info(f"Created checkout session {session.id} for tenant {tenant_id}")
-        
+
+        logger.info(
+            "topup_checkout_created session=%s order=%s tenant=%s minutes=%d",
+            session.id,
+            str(order_id)[:8],
+            str(tenant_id)[:8],
+            minutes,
+        )
         return {
             "session_id": session.id,
             "checkout_url": session.url,
-            "mock_mode": False
+            "mock_mode": False,
         }
-    
+
     # =========================================================================
     # Customer Portal
     # =========================================================================
-    
-    async def create_portal_session(
-        self,
-        tenant_id: str,
-        return_url: str
-    ) -> Dict[str, Any]:
+
+    async def create_portal_session(self, tenant_id: str, return_url: str) -> Dict[str, Any]:
         """
         Create a Stripe Customer Portal session for managing subscription.
         """
         # Get customer ID
-        tenant = self.db_client.table("tenants").select(
-            "stripe_customer_id"
-        ).eq("id", tenant_id).single().execute()
-        
+        tenant = (
+            self.db_client.table("tenants")
+            .select("stripe_customer_id")
+            .eq("id", tenant_id)
+            .single()
+            .execute()
+        )
+
         customer_id = tenant.data.get("stripe_customer_id") if tenant.data else None
-        
+
         if not customer_id:
             raise ValueError("No Stripe customer found for this tenant")
-        
-        if self.mock_mode:
-            return {
-                "portal_url": f"{return_url}?mock_portal=true",
-                "mock_mode": True,
-                "message": "Mock portal session. Configure STRIPE_SECRET_KEY for real portal."
-            }
-        
-        session = stripe.billing_portal.Session.create(
-            customer=customer_id,
-            return_url=return_url
-        )
-        
-        return {
-            "portal_url": session.url,
-            "mock_mode": False
-        }
-    
+
+        if not await self._portal_customer_verified(tenant_id, customer_id):
+            raise ValueError("Billing portal customer ownership could not be verified")
+        # The portal offers card updates, invoices and cancel-at-period-end
+        # only; a price change there would not match the frozen purchase terms.
+        # scripts/stripe_catalog_setup.py creates that configuration.
+        configuration = os.getenv("STRIPE_PORTAL_CONFIGURATION_ID", "").strip()
+        if not configuration:
+            # The account's default portal may allow plan changes; refuse it.
+            raise ValueError("The billing portal is not configured yet. Contact support.")
+        session = await self._stripe_call("billing_portal.Session", "create", customer=customer_id,
+                                          return_url=return_url, configuration=configuration)
+
+        return {"portal_url": session.url, "mock_mode": False}
+
+    async def _portal_customer_verified(self, tenant_id, customer_id):
+        if self.billing_mode not in {"live", "test"} or not customer_id:
+            return False
+        try:
+            customer = await self._stripe_call("Customer", "retrieve", customer_id)
+            return bool(customer.get("id") == customer_id and not customer.get("deleted")
+                        and customer.get("livemode") is (self.billing_mode == "live")
+                        and (customer.get("metadata") or {}).get("tenant_id") == str(tenant_id))
+        except Exception:
+            return False
+
+    async def _purchase_projection(self, tenant_id, subscription):
+        from app.domain.services.billing_checkout import _object, public_option
+        metadata = _object(subscription.get("metadata"))
+        purchase = metadata.get("purchase")
+        if not purchase:
+            async with acquire_with_tenant(self.db_client.pool, tenant_id) as conn:
+                row = await conn.fetchrow(
+                    """SELECT a.snapshot FROM billing_checkout_attempts a JOIN tenants t ON t.id=a.tenant_id
+                       WHERE a.tenant_id=$1::uuid AND a.status='completed'
+                         AND a.snapshot->'option'->>'kind'='free'
+                         AND a.snapshot->'option'->>'plan_id'=t.plan_id
+                         AND t.stripe_subscription_id IS NULL
+                       ORDER BY a.created_at DESC LIMIT 1""", str(tenant_id),
+                )
+            if row:
+                purchase = _object(row["snapshot"])["option"]
+        subscription["purchased_price_option"] = public_option(purchase) if purchase else None
+        customer_id = subscription.get("stripe_customer_id")
+        if not customer_id:
+            tenant = self.db_client.table("tenants").select("stripe_customer_id").eq("id", tenant_id).single().execute()
+            customer_id = (tenant.data or {}).get("stripe_customer_id")
+        subscription["billing_portal_available"] = await self._portal_customer_verified(tenant_id, customer_id)
+        return subscription
+
     # =========================================================================
     # Subscription Management
     # =========================================================================
-    
+
     async def get_subscription(self, tenant_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Get current subscription for a tenant.
-        """
-        subscription = self.db_client.table("subscriptions").select(
-            "*, plans(name, price, minutes, agents)"
-        ).eq("tenant_id", tenant_id).order(
-            "created_at", desc=True
-        ).limit(1).execute()
-        
-        if not subscription.data:
-            # Check tenants table for basic subscription info
-            tenant = self.db_client.table("tenants").select(
-                "subscription_status, stripe_subscription_id, plan_id, plans(name, price, minutes)"
-            ).eq("id", tenant_id).single().execute()
-            
-            if tenant.data and tenant.data.get("subscription_status") != "inactive":
-                return {
-                    "status": tenant.data.get("subscription_status", "inactive"),
-                    "plan": tenant.data.get("plans"),
-                    "stripe_subscription_id": tenant.data.get("stripe_subscription_id")
-                }
+        """Project current tenant access, never an unrelated historical subscription."""
+        tenant = self.db_client.table("tenants").select(
+            "subscription_status,stripe_subscription_id,stripe_customer_id,plan_id,plans(name,price,minutes,agents)"
+        ).eq("id", tenant_id).single().execute()
+        if not tenant.data:
             return None
-        
-        return subscription.data[0]
-    
+        data = tenant.data
+        subscription_id = data.get("stripe_subscription_id")
+        if not subscription_id and data.get("subscription_status") == SUBSCRIPTION_INACTIVE:
+            return None
+        result = {
+            "status": data.get("subscription_status", SUBSCRIPTION_INACTIVE),
+            "plan_id": data.get("plan_id"), "plan": data.get("plans"),
+            "stripe_subscription_id": subscription_id,
+            "stripe_customer_id": data.get("stripe_customer_id"),
+        }
+        if subscription_id:
+            stored = self.db_client.table("subscriptions").select("*,plans(name,price,minutes,agents)").eq(
+                "tenant_id", tenant_id
+            ).eq("stripe_subscription_id", subscription_id).limit(1).execute()
+            if stored.data:
+                result = {**stored.data[0], "status": result["status"]}
+        return await self._purchase_projection(tenant_id, result)
+
     async def cancel_subscription(
-        self, 
-        tenant_id: str, 
-        cancel_at_period_end: bool = True
+        self, tenant_id: str, cancel_at_period_end: bool = True
     ) -> Dict[str, Any]:
         """
         Cancel a subscription (at period end by default).
         """
-        tenant = self.db_client.table("tenants").select(
-            "stripe_subscription_id"
-        ).eq("id", tenant_id).single().execute()
-        
+        self._require_billing_enabled()
+        tenant = (
+            self.db_client.table("tenants")
+            .select("stripe_subscription_id")
+            .eq("id", tenant_id)
+            .single()
+            .execute()
+        )
+
         subscription_id = tenant.data.get("stripe_subscription_id") if tenant.data else None
-        
+
         if not subscription_id:
             raise ValueError("No active subscription found")
-        
+
         if self.mock_mode:
             # Update local state in mock mode
-            self.db_client.table("tenants").update({
-                "subscription_status": "canceled"
-            }).eq("id", tenant_id).execute()
-            
+            self.db_client.table("tenants").update(
+                {"subscription_status": SUBSCRIPTION_CANCELLED}
+            ).eq("id", tenant_id).execute()
+
             return {
-                "status": "canceled",
+                "status": SUBSCRIPTION_CANCELLED,
                 "mock_mode": True,
-                "message": "Subscription canceled (mock mode)"
+                "message": "Subscription canceled (mock mode)",
             }
-        
-        subscription = stripe.Subscription.modify(
-            subscription_id,
-            cancel_at_period_end=cancel_at_period_end
+
+        subscription = await self._stripe_call(
+            "Subscription", "update", subscription_id,
+            cancel_at_period_end=cancel_at_period_end,
         )
-        
-        # Update local state
-        self.db_client.table("tenants").update({
-            "subscription_status": subscription.status
-        }).eq("id", tenant_id).execute()
-        
-        self.db_client.table("subscriptions").update({
-            "status": subscription.status,
-            "cancel_at": datetime.fromtimestamp(subscription.cancel_at) if subscription.cancel_at else None,
-            "canceled_at": datetime.now()
-        }).eq("stripe_subscription_id", subscription_id).execute()
-        
+
+        # Update local state. Stripe spells cancellation "canceled"; the call
+        # guard blocks on the canonical value, so normalise before storing.
+        self.db_client.table("tenants").update(
+            {"subscription_status": canonical_subscription_status(subscription.status)}
+        ).eq("id", tenant_id).execute()
+
+        self.db_client.table("subscriptions").update(
+            {
+                "status": subscription.status,
+                "cancel_at": (
+                    datetime.fromtimestamp(subscription.cancel_at)
+                    if subscription.cancel_at
+                    else None
+                ),
+                # Only an immediate cancellation has a cancelled-at; a scheduled
+                # one (cancel_at_period_end) leaves it null.
+                "canceled_at": (
+                    datetime.fromtimestamp(subscription.canceled_at)
+                    if subscription.canceled_at
+                    else None
+                ),
+            }
+        ).eq("tenant_id", tenant_id).eq("stripe_subscription_id", subscription_id).execute()
+
         return {
             "status": subscription.status,
             "cancel_at_period_end": subscription.cancel_at_period_end,
-            "mock_mode": False
+            "mock_mode": False,
         }
-    
+
     # =========================================================================
     # Webhook Handlers
     # =========================================================================
-    
+
     async def handle_webhook(self, payload: bytes, signature: str) -> Dict[str, Any]:
-        """
-        Verify and handle Stripe webhook events.
-        """
+        """Verify raw Stripe bytes before persisting or applying any event."""
+        from app.domain.services.billing_webhooks import BillingWebhookProcessor, BillingWebhookRetryable
         if self.mock_mode:
             return {"status": "ignored", "reason": "mock_mode"}
-        
+        if self.billing_mode not in {"test", "live"} or not self.webhook_secret:
+            raise BillingWebhookRetryable("webhook_unavailable")
+        if not signature:
+            raise ValueError("Missing Stripe signature")
         try:
-            event = stripe.Webhook.construct_event(
-                payload, signature, self.webhook_secret
-            )
-        except stripe.error.SignatureVerificationError as e:
-            logger.error(f"Webhook signature verification failed: {e}")
-            raise ValueError("Invalid webhook signature")
-        
-        event_type = event["type"]
-        data = event["data"]["object"]
-        event_id = event.get("id")
+            event = stripe.Webhook.construct_event(payload, signature, self.webhook_secret)
+        except (stripe.error.SignatureVerificationError, ValueError) as exc:
+            raise ValueError("Invalid Stripe webhook") from exc
+        event = json.loads(json.dumps(event))
+        return await BillingWebhookProcessor(self.db_client.pool).process(event, self._apply_webhook_event)
 
-        # Idempotency: Stripe redelivers events (up to ~3x). Without dedup,
-        # checkout.completed/invoice.paid would re-apply minute resets and
-        # re-send confirmation emails on each redelivery. Claim the event id;
-        # if it was already processed, ack 200 without re-running the handler.
-        if event_id and not await self._claim_webhook_event(event_id, event_type):
-            logger.info("Duplicate Stripe webhook ignored event_id=%s type=%s", event_id, event_type)
-            return {"status": "duplicate", "event_id": event_id, "event_type": event_type}
+    _TOPUP_SESSION_EVENTS = {
+        "checkout.session.completed", "checkout.session.expired",
+        "checkout.session.async_payment_succeeded", "checkout.session.async_payment_failed",
+    }
+    _TOPUP_CHARGE_EVENTS = {"charge.refunded", "charge.dispute.created"}
 
-        logger.info(f"Processing webhook event: {event_type} (id={event_id})")
+    async def _is_topup_event(self, event_type: str, data: Dict) -> bool:
+        if event_type in self._TOPUP_SESSION_EVENTS:
+            return (data.get("metadata") or {}).get("purpose") == "minute_topup"
+        return event_type in self._TOPUP_CHARGE_EVENTS
 
-        handlers = {
-            "checkout.session.completed": self._handle_checkout_completed,
-            "customer.subscription.created": self._handle_subscription_created,
-            "customer.subscription.updated": self._handle_subscription_updated,
-            "customer.subscription.deleted": self._handle_subscription_deleted,
-            "invoice.paid": self._handle_invoice_paid,
-            "invoice.payment_failed": self._handle_invoice_payment_failed,
-        }
-        
-        handler = handlers.get(event_type)
-        if handler:
-            await handler(data)
-            return {"status": "handled", "event_type": event_type}
-        
-        return {"status": "ignored", "event_type": event_type}
-    
-    async def _claim_webhook_event(self, event_id: str, event_type: str) -> bool:
-        """Atomically claim a Stripe event id for processing.
-
-        Returns True if THIS call claimed it (first time → process), False if it
-        was already processed (duplicate → skip). Fail-OPEN on any error: a
-        missing table or DB hiccup must not drop a real billing event, so we
-        process it (the previous always-process behavior).
-        """
+    async def _apply_webhook_event(self, conn, event: Dict) -> Dict[str, Any]:
+        from app.domain.services.billing_webhooks import BillingWebhookReviewRequired
+        from app.domain.services.billing_state_events import apply_billing_event, BillingStateReviewRequired
+        from app.domain.services.billing_topup_events import apply_topup_event, BillingTopupReviewRequired
+        mode = "live" if event["livemode"] else "test"
+        if mode != self.billing_mode or event.get("account"):
+            raise BillingWebhookReviewRequired("provider_account_or_mode_mismatch")
+        event_type, data = event["type"], event["data"]["object"]
         try:
-            async with self.db_client.pool.acquire() as conn:
-                await conn.execute("SET app.bypass_rls = 'on'")
-                await conn.execute(
-                    "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
-                )
-                status = await conn.execute(
-                    """
-                    INSERT INTO processed_webhook_events (event_id, event_type)
-                    VALUES ($1, $2)
-                    ON CONFLICT (event_id) DO NOTHING
-                    """,
-                    event_id, event_type,
-                )
-            # asyncpg tag: "INSERT 0 1" = inserted (claimed); "INSERT 0 0" = conflict
-            return status.strip().endswith(" 1")
-        except Exception as e:  # noqa: BLE001
-            logger.warning("webhook idempotency claim failed (processing anyway): %s", e)
-            return True
+            if event_type in {"refund.created", "refund.updated", "refund.failed", "charge.refund.updated"}:
+                from app.domain.services.billing_refund_projection import handle_topup_refund_observation
+                result = await handle_topup_refund_observation(conn, self, event_type, data, event["id"])
+                if result["status"] != "ignored":
+                    return result
+            if await self._is_topup_event(event_type, data):
+                result = await apply_topup_event(conn, self, event_type, data, event["id"])
+                if result["status"] != "ignored" or event_type not in {"charge.refunded", "charge.dispute.created"}:
+                    return result
+            return await apply_billing_event(conn, self, event_type, data, source_reference=event["id"])
+        except (BillingStateReviewRequired, BillingTopupReviewRequired) as exc:
+            raise BillingWebhookReviewRequired(exc.code) from exc
 
-    async def _handle_checkout_completed(self, session: Dict):
-        """Handle checkout.session.completed event"""
-        tenant_id = session.get("metadata", {}).get("tenant_id")
-        plan_id = session.get("metadata", {}).get("plan_id")
-        subscription_id = session.get("subscription")
-        customer_id = session.get("customer")
-        
-        if not tenant_id:
-            logger.warning("Checkout completed but no tenant_id in metadata")
-            return
-        
-        # Update tenant
-        self.db_client.table("tenants").update({
-            "stripe_customer_id": customer_id,
-            "stripe_subscription_id": subscription_id,
-            "subscription_status": "active",
-            "plan_id": plan_id
-        }).eq("id", tenant_id).execute()
-        
-        # Get plan details to update minutes
-        if plan_id:
-            plan = self.db_client.table("plans").select("minutes").eq("id", plan_id).single().execute()
-            if plan.data:
-                self.db_client.table("tenants").update({
-                    "minutes_allocated": plan.data.get("minutes", 0),
-                    "minutes_used": 0
-                }).eq("id", tenant_id).execute()
-        
-        logger.info(f"Activated subscription for tenant {tenant_id}")
-
-        # Day 8: Audit log
-        if self.audit_logger:
-            await self.audit_logger.log(
-                event_type=AuditEvent.BILLING_UPDATED,
-                tenant_id=tenant_id,
-                action="subscription_activated",
-                description=f"Subscription activated via Stripe checkout: {plan_id}",
-                metadata={"subscription_id": subscription_id, "plan_id": plan_id},
-                actor_type="system"
-            )
-    
-    async def _handle_subscription_created(self, subscription: Dict):
-        """Handle customer.subscription.created event"""
-        await self._sync_subscription(subscription)
-    
-    async def _handle_subscription_updated(self, subscription: Dict):
-        """Handle customer.subscription.updated event"""
-        await self._sync_subscription(subscription)
-    
-    async def _handle_subscription_deleted(self, subscription: Dict):
-        """Handle customer.subscription.deleted event"""
-        tenant_id = subscription.get("metadata", {}).get("tenant_id")
-        
-        if tenant_id:
-            self.db_client.table("tenants").update({
-                "subscription_status": "canceled",
-                "stripe_subscription_id": None
-            }).eq("id", tenant_id).execute()
-        
-        # Update subscription record
-        self.db_client.table("subscriptions").update({
-            "status": "canceled",
-            "canceled_at": datetime.now()
-        }).eq("stripe_subscription_id", subscription["id"]).execute()
-
-        # Day 8: Audit log
-        if self.audit_logger and tenant_id:
-            await self.audit_logger.log(
-                event_type=AuditEvent.BILLING_UPDATED,
-                tenant_id=tenant_id,
-                action="subscription_deleted",
-                description="Subscription deleted/canceled via Stripe",
-                metadata={"subscription_id": subscription["id"]},
-                actor_type="system"
-            )
-    
-    async def _handle_invoice_paid(self, invoice: Dict):
-        """Handle invoice.paid event"""
-        tenant_id = invoice.get("metadata", {}).get("tenant_id")
-
-        # Store invoice record
-        self.db_client.table("invoices").upsert({
-            "stripe_invoice_id": invoice["id"],
-            "stripe_subscription_id": invoice.get("subscription"),
-            "tenant_id": tenant_id,
-            "amount_due": invoice.get("amount_due", 0),
-            "amount_paid": invoice.get("amount_paid", 0),
-            "currency": invoice.get("currency", "usd"),
-            "status": "paid",
-            "invoice_pdf": invoice.get("invoice_pdf"),
-            "hosted_invoice_url": invoice.get("hosted_invoice_url"),
-            "paid_at": datetime.now()
-        }, on_conflict="stripe_invoice_id").execute()
-
-        # Send payment success notification
-        if tenant_id:
-            # Get user email from tenant
-            tenant_data = self.db_client.table("tenants").select(
-                "business_name"
-            ).eq("id", tenant_id).single().execute()
-
-            user_email = ""
-            if tenant_data.data:
-                # Try to get admin user email
-                users = self.db_client.table("user_profiles").select(
-                    "email"
-                ).eq("tenant_id", tenant_id).eq("role", "owner").limit(1).execute()
-                if users.data:
-                    user_email = users.data[0].get("email", "")
-
-            if user_email:
-                notification_service = get_notification_service()
-                await notification_service.send_email(
-                    to_email=user_email,
-                    subject="Payment Received",
-                    html_body=f"""
-                    <html>
-                        <body style="font-family: Arial, sans-serif; color: #333;">
-                            <h1 style="color: #34C759;">Payment Successful</h1>
-                            <p>Your payment of ${invoice.get('amount_paid', 0)/100:.2f} {invoice.get('currency', 'USD').upper()} has been received.</p>
-                            <p><strong>Invoice ID:</strong> {invoice['id']}</p>
-                            <p><a href="{invoice.get('hosted_invoice_url', 'https://talky.ai/invoices')}" style="color: #007AFF;">View Invoice</a></p>
-                        </body>
-                    </html>
-                    """,
-                )
-
-            # Audit log
-            if self.audit_logger:
-                await self.audit_logger.log(
-                    event_type=AuditEvent.BILLING_UPDATED,
-                    tenant_id=tenant_id,
-                    action="payment_received",
-                    description=f"Payment received: ${invoice.get('amount_paid', 0)/100:.2f}",
-                    metadata={
-                        "invoice_id": invoice["id"],
-                        "amount": invoice.get("amount_paid", 0)
-                    },
-                    actor_type="system"
-                )
-
-    async def _handle_invoice_payment_failed(self, invoice: Dict):
-        """Handle invoice.payment_failed event"""
-        subscription_id = invoice.get("subscription")
-        tenant_id = invoice.get("metadata", {}).get("tenant_id")
-
-        if subscription_id:
-            self.db_client.table("subscriptions").update({
-                "status": "past_due"
-            }).eq("stripe_subscription_id", subscription_id).execute()
-
-            # Update tenant status
-            if tenant_id:
-                self.db_client.table("tenants").update({
-                    "subscription_status": "past_due"
-                }).eq("id", tenant_id).execute()
-
-        # Send payment failure notification
-        if tenant_id:
-            # Get user email
-            users = self.db_client.table("user_profiles").select(
-                "email"
-            ).eq("tenant_id", tenant_id).eq("role", "owner").limit(1).execute()
-
-            if users.data:
-                user_email = users.data[0].get("email", "")
-                if user_email:
-                    notification_service = get_notification_service()
-                    await notification_service.notify_billing_failure(
-                        user_email=user_email,
-                        amount=invoice.get("amount_due", 0) / 100,
-                        error_message=invoice.get("attempt_count", 1) > 1 and "Multiple payment attempts failed" or "Payment declined",
-                        channels=NotificationChannel.BOTH,
-                    )
-
-            # Audit log
-            if self.audit_logger:
-                await self.audit_logger.log_security_event(
-                    event_type="billing_payment_failed",
-                    severity="HIGH",
-                    description=f"Payment failed for tenant {tenant_id}: {invoice['id']}",
-                    metadata={
-                        "invoice_id": invoice["id"],
-                        "amount": invoice.get("amount_due", 0),
-                        "attempt_count": invoice.get("attempt_count", 1)
-                    },
-                )
-    
-    async def _sync_subscription(self, subscription: Dict):
-        """Sync subscription data from Stripe to database"""
-        tenant_id = subscription.get("metadata", {}).get("tenant_id")
-        plan_id = subscription.get("metadata", {}).get("plan_id")
-        
-        subscription_data = {
-            "stripe_subscription_id": subscription["id"],
-            "stripe_customer_id": subscription["customer"],
-            "status": subscription["status"],
-            "current_period_start": datetime.fromtimestamp(subscription["current_period_start"]),
-            "current_period_end": datetime.fromtimestamp(subscription["current_period_end"]),
-        }
-        
-        if tenant_id:
-            subscription_data["tenant_id"] = tenant_id
-        if plan_id:
-            subscription_data["plan_id"] = plan_id
-        
-        # Upsert subscription record
-        self.db_client.table("subscriptions").upsert(
-            subscription_data,
-            on_conflict="stripe_subscription_id"
-        ).execute()
-        
-        # Update tenant
-        if tenant_id:
-            self.db_client.table("tenants").update({
-                "subscription_status": subscription["status"],
-                "stripe_subscription_id": subscription["id"]
-            }).eq("id", tenant_id).execute()
-
-            # Day 8: Audit log
-            if self.audit_logger:
-                await self.audit_logger.log(
-                    event_type=AuditEvent.BILLING_UPDATED,
-                    tenant_id=tenant_id,
-                    action="subscription_synced",
-                    description=f"Subscription state synced: {subscription['status']}",
-                    metadata={
-                        "subscription_id": subscription["id"],
-                        "status": subscription["status"],
-                        "plan_id": plan_id
-                    },
-                    actor_type="system"
-                )
-    
     # =========================================================================
     # Usage Tracking (for metered billing)
     # =========================================================================
-    
+
     async def record_usage(
-        self, 
-        tenant_id: str, 
-        quantity: int,
-        usage_type: str = "minutes"
+        self, tenant_id: str, quantity: int, usage_type: str = "minutes"
     ) -> Dict[str, Any]:
         """
         Record usage for metered billing.
-        
+
         This stores usage locally and optionally reports to Stripe.
         """
         # Store usage record
-        result = self.db_client.table("usage_records").insert({
-            "tenant_id": tenant_id,
-            "quantity": quantity,
-            "usage_type": usage_type,
-            "reported_to_stripe": False
-        }).execute()
-        
-        return {
-            "recorded": True,
-            "usage_id": result.data[0]["id"] if result.data else None
-        }
-    
+        result = (
+            self.db_client.table("usage_records")
+            .insert(
+                {
+                    "tenant_id": tenant_id,
+                    "quantity": quantity,
+                    "usage_type": usage_type,
+                    "reported_to_stripe": False,
+                }
+            )
+            .execute()
+        )
+
+        return {"recorded": True, "usage_id": result.data[0]["id"] if result.data else None}
+
     async def get_usage_summary(
-        self,
-        tenant_id: str,
-        usage_type: str = "minutes"
+        self, tenant_id: str, usage_type: str = "minutes"
     ) -> Dict[str, Any]:
-        """Get usage summary for the current billing period.
+        """Current calendar-month meter, not an invoice-period estimate.
 
-        `GET /billing/usage` used to report zero for every tenant, always.
-        It summed `usage_records`, whose only writer is `record_usage()` —
-        a method with no callers anywhere in the codebase — so the table is
-        empty. It then compared that against `tenants.minutes_used`, a column
-        that is likewise zero for every tenant in production.
-
-        Minutes now come from the same live computation as the quota gate,
-        the dashboard and the auth/profile paths, so a tenant cannot be
-        blocked for exhausting an allowance that this endpoint says they have
-        not touched. Non-minute usage types keep the `usage_records` path;
-        it is unwired rather than wrong, and metered add-ons will populate it.
+        Reuse the quota's settled-call definition and purchased allowance. A
+        failed/missing read is unavailable, never evidence of zero usage.
         """
-        # Get tenant allocation (`minutes_used` deliberately not selected —
-        # it is never written; see `tenant_minutes`).
-        tenant = self.db_client.table("tenants").select(
-            "minutes_allocated"
-        ).eq("id", tenant_id).single().execute()
+        if usage_type != "minutes":
+            raise ValueError("Unsupported usage_type; only minutes are metered")
+        from uuid import UUID
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.minutes_quota import compute_minutes_status
 
-        allocated = (tenant.data.get("minutes_allocated", 0) if tenant.data else 0) or 0
-
-        if usage_type == "minutes":
-            from app.core.db import get_pool
-            from app.services.scripts.tenant_minutes import (
-                compute_tenant_minutes_used,
-            )
-            try:
-                total_usage = await compute_tenant_minutes_used(
-                    get_pool(), tenant_id
-                )
-            except Exception as exc:  # noqa: BLE001
-                # Matches the fail-soft contract of every other minutes
-                # reader: a metering hiccup must not 500 the billing page.
-                logger.warning(
-                    "usage summary: live minutes lookup failed for tenant %s: %s",
-                    str(tenant_id)[:8], exc,
-                )
-                total_usage = 0
-        else:
-            usage = self.db_client.table("usage_records").select(
-                "quantity"
-            ).eq("tenant_id", tenant_id).eq("usage_type", usage_type).execute()
-            total_usage = (
-                sum(record["quantity"] for record in usage.data)
-                if usage.data else 0
-            )
-
+        tenant_uuid = UUID(str(tenant_id))
+        async with acquire_with_tenant(self.db_client.pool, str(tenant_uuid), timeout=5) as conn:
+            exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM tenants WHERE id=$1)", tenant_uuid)
+            if not exists:
+                raise RuntimeError("Usage tenant unavailable")
+            quota = (await compute_minutes_status(conn, tenant_uuid)).require_available()
         return {
             "usage_type": usage_type,
-            "total_used": total_usage,
-            "allocated": allocated,
-            "remaining": max(0, allocated - total_usage),
-            "overage": max(0, total_usage - allocated)
+            "total_used": quota.used_minutes,
+            "allocated": quota.allocated,
+            "remaining": quota.remaining_minutes,
+            "overage": 0 if quota.unlimited else max(0, quota.used_minutes - quota.allocated),
+            "unlimited": quota.unlimited,
+            "metering_period": "calendar_month",
         }

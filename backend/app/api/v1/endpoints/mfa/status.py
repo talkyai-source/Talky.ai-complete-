@@ -8,10 +8,12 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.credential_issuance import lock_authenticated_credential_change
 from app.core.security.password import verify_password
 from app.core.security.recovery import count_remaining_codes, invalidate_all_codes
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
@@ -30,7 +32,7 @@ async def get_mfa_status(
     db_client: Client = Depends(get_db_client),
 ) -> MFAStatusResponse:
     """Return the MFA status for the current authenticated user."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         row = await conn.fetchrow(
             "SELECT enabled, verified_at FROM user_mfa WHERE user_id = $1",
             current_user.id,
@@ -49,6 +51,7 @@ async def get_mfa_status(
 
 @router.post("/disable")
 async def disable_mfa(
+    request: Request,
     body: MFADisableRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -68,7 +71,7 @@ async def disable_mfa(
       - Deletes all recovery codes
       - Updates user_profiles.mfa_enabled = FALSE
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         # Load current password hash for reauthentication check
         pw_row = await conn.fetchrow(
             "SELECT password_hash FROM user_profiles WHERE id = $1",
@@ -86,6 +89,10 @@ async def disable_mfa(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Current password is incorrect.",
             )
+
+        locked = await lock_authenticated_credential_change(conn, request, current_user)
+        if locked["password_hash"] != pw_row["password_hash"]:
+            raise HTTPException(401, "Credentials changed. Please sign in again.")
 
         # Check MFA is actually enabled
         mfa_row = await conn.fetchrow(

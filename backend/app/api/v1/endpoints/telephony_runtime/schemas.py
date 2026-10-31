@@ -43,6 +43,10 @@ class RuntimeRollbackResponse(BaseModel):
     status: str
     apply_result: Dict[str, Any]
     verify_result: Dict[str, Any]
+    # The adapter ignores the target artifact: it reloads whatever the live
+    # DB tables hold. Say so, and say when no command actually ran.
+    applied_from: str = "current_database_state"
+    simulated: bool = False
 
 
 class RuntimeVersionResponse(BaseModel):

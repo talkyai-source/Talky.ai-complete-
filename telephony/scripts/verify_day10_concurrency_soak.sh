@@ -50,9 +50,9 @@ SAMPLE_INTERVAL_SECONDS="${DAY10_SAMPLE_INTERVAL_SECONDS:-5}"
 MIN_DISPATCH_INTERVAL_SECONDS="${DAY10_MIN_DISPATCH_INTERVAL_SECONDS:-0.02}"
 HOLD_SECONDS="${DAY10_HOLD_SECONDS:-3.0}"
 
-PROFILE_BASELINE_PERCENT="${DAY10_PROFILE_BASELINE_PERCENT:-50}"
-PROFILE_BARGEIN_PERCENT="${DAY10_PROFILE_BARGEIN_PERCENT:-30}"
-PROFILE_TRANSFER_PERCENT="${DAY10_PROFILE_TRANSFER_PERCENT:-20}"
+PROFILE_BASELINE_PERCENT="${DAY10_PROFILE_BASELINE_PERCENT:-100}"
+PROFILE_BARGEIN_PERCENT="${DAY10_PROFILE_BARGEIN_PERCENT:-0}"
+PROFILE_TRANSFER_PERCENT="${DAY10_PROFILE_TRANSFER_PERCENT:-0}"
 
 SETUP_SUCCESS_MIN="${DAY10_SETUP_SUCCESS_MIN:-0.99}"
 SRD_P95_MAX_MS="${DAY10_SRD_P95_MAX_MS:-2000}"
@@ -63,6 +63,9 @@ BARGEIN_REACTION_P95_MAX_MS="${DAY10_BARGEIN_REACTION_P95_MAX_MS:-250}"
 REQUIRE_TRANSFER="${DAY10_REQUIRE_TRANSFER:-0}"
 REQUIRE_BARGEIN_REACTION="${DAY10_REQUIRE_BARGEIN_REACTION:-0}"
 REQUIRE_TENANT_FAIRNESS="${DAY10_REQUIRE_TENANT_FAIRNESS:-0}"
+REQUIRE_EXTERNAL_LIVE_MEDIA_EVIDENCE="${DAY10_REQUIRE_EXTERNAL_LIVE_MEDIA_EVIDENCE:-0}"
+EXTERNAL_LIVE_MEDIA_EVIDENCE_JSON="${DAY10_EXTERNAL_LIVE_MEDIA_EVIDENCE_JSON:-}"
+CANDIDATE_SHA="${DAY10_CANDIDATE_SHA:-}"
 
 TENANT_ID="${DAY10_TENANT_ID:-day10-default}"
 TENANT_IDS="${DAY10_TENANT_IDS:-$TENANT_ID}"
@@ -89,6 +92,7 @@ SOAK_SUMMARY_JSON="$EVIDENCE_DIR/day10_soak_summary.json"
 SOAK_TIMESERIES_CSV="$EVIDENCE_DIR/day10_soak_timeseries.csv"
 TRANSFER_REPORT_JSON="$EVIDENCE_DIR/day10_transfer_load_report.json"
 BARGEIN_REPORT_JSON="$EVIDENCE_DIR/day10_bargein_load_report.json"
+EXTERNAL_LIVE_MEDIA_EVIDENCE_COPY="$EVIDENCE_DIR/day10_external_live_media_evidence.json"
 TENANT_FAIRNESS_JSON="$EVIDENCE_DIR/day10_tenant_fairness_report.json"
 CALL_RESULTS_JSON="$EVIDENCE_DIR/day10_call_results.json"
 RECOVERY_SMOKE_JSON="$EVIDENCE_DIR/day10_recovery_smoke_results.json"
@@ -116,6 +120,7 @@ RTP_MIN_PORT_SPAN="${DAY10_RTP_MIN_PORT_SPAN:-1000}"
 
 GW_PID=""
 ARI_PID=""
+BLIND_TRANSFER_ENABLED=0
 
 read_kv_cfg() {
   local cfg_file="$1"
@@ -137,7 +142,12 @@ read_kv_cfg() {
 start_controller() {
   local max_completed_calls="$1"
   local append_mode="${2:-0}"
+  local blind_transfer_enabled="${3:-$BLIND_TRANSFER_ENABLED}"
   local start_lines=0
+  if ! [[ "$blind_transfer_enabled" =~ ^[01]$ ]]; then
+    echo "[ERROR] Controller blind-transfer flag must be 0 or 1."
+    return 1
+  fi
   if [[ "$append_mode" == "1" && -f "$ARI_TRACE" ]]; then
     start_lines="$(wc -l < "$ARI_TRACE")"
   fi
@@ -156,7 +166,7 @@ start_controller() {
       --max-completed-calls "$max_completed_calls" \
       --idle-timeout-seconds "$CONTROLLER_IDLE_TIMEOUT_SECONDS" \
       --gateway-echo-enabled 0 \
-      --blind-transfer-enabled 1 \
+      --blind-transfer-enabled "$blind_transfer_enabled" \
       --blind-transfer-endpoint "$TRANSFER_ENDPOINT" \
       --blind-transfer-use-continue 1 \
       --blind-transfer-delay-seconds "$TRANSFER_DELAY_SECONDS" \
@@ -177,7 +187,7 @@ start_controller() {
       --max-completed-calls "$max_completed_calls" \
       --idle-timeout-seconds "$CONTROLLER_IDLE_TIMEOUT_SECONDS" \
       --gateway-echo-enabled 0 \
-      --blind-transfer-enabled 1 \
+      --blind-transfer-enabled "$blind_transfer_enabled" \
       --blind-transfer-endpoint "$TRANSFER_ENDPOINT" \
       --blind-transfer-use-continue 1 \
       --blind-transfer-delay-seconds "$TRANSFER_DELAY_SECONDS" \
@@ -240,6 +250,46 @@ cleanup() {
 trap cleanup EXIT
 
 
+for profile_value in \
+  "$PROFILE_BASELINE_PERCENT" \
+  "$PROFILE_BARGEIN_PERCENT" \
+  "$PROFILE_TRANSFER_PERCENT"; do
+  if ! [[ "$profile_value" =~ ^[0-9]+$ ]]; then
+    echo "[ERROR] Day 10 profile percentages must be non-negative integers."
+    exit 1
+  fi
+done
+
+for gate_value in \
+  "$REQUIRE_TRANSFER" \
+  "$REQUIRE_BARGEIN_REACTION" \
+  "$REQUIRE_TENANT_FAIRNESS" \
+  "$REQUIRE_EXTERNAL_LIVE_MEDIA_EVIDENCE"; do
+  if ! [[ "$gate_value" =~ ^[01]$ ]]; then
+    echo "[ERROR] Day 10 require flags must be 0 or 1."
+    exit 1
+  fi
+done
+
+if (( PROFILE_BASELINE_PERCENT + PROFILE_BARGEIN_PERCENT + PROFILE_TRANSFER_PERCENT <= 0 )); then
+  echo "[ERROR] Day 10 profile percentages must have a positive sum."
+  exit 1
+fi
+if (( PROFILE_BARGEIN_PERCENT != 0 || REQUIRE_BARGEIN_REACTION != 0 )); then
+  echo "[ERROR] The Day 10 SIP-only probe cannot generate RTP or execute/measure barge-in."
+  echo "        Set DAY10_PROFILE_BARGEIN_PERCENT=0 and DAY10_REQUIRE_BARGEIN_REACTION=0."
+  echo "        Supply the separately reviewed live-media evidence gate instead."
+  exit 1
+fi
+if (( REQUIRE_TRANSFER == 1 && PROFILE_TRANSFER_PERCENT == 0 )); then
+  echo "[ERROR] DAY10_REQUIRE_TRANSFER=1 requires DAY10_PROFILE_TRANSFER_PERCENT > 0."
+  exit 1
+fi
+if (( PROFILE_TRANSFER_PERCENT > 0 )); then
+  BLIND_TRANSFER_ENABLED=1
+fi
+
+
 echo "[1/20] Verifying Python runtime for Day 10 probe..."
 if [[ ! -x "$PYTHON_BIN" ]]; then
   echo "[ERROR] Python interpreter not found: $PYTHON_BIN"
@@ -254,6 +304,59 @@ if missing:
     raise SystemExit(f"Missing required modules: {', '.join(missing)}")
 print("python dependency check: ok")
 PY
+
+if [[ "$REQUIRE_EXTERNAL_LIVE_MEDIA_EVIDENCE" == "1" ]]; then
+  if [[ -z "$EXTERNAL_LIVE_MEDIA_EVIDENCE_JSON" || -z "$CANDIDATE_SHA" ]]; then
+    echo "[ERROR] The production live-media gate requires both"
+    echo "        DAY10_EXTERNAL_LIVE_MEDIA_EVIDENCE_JSON and DAY10_CANDIDATE_SHA."
+    exit 1
+  fi
+
+  DAY10_LIVE_MEDIA_SOURCE="$EXTERNAL_LIVE_MEDIA_EVIDENCE_JSON" \
+  DAY10_LIVE_MEDIA_COPY="$EXTERNAL_LIVE_MEDIA_EVIDENCE_COPY" \
+  DAY10_EXPECTED_CANDIDATE_SHA="$CANDIDATE_SHA" \
+  "$PYTHON_BIN" - <<'PY'
+import hashlib
+import json
+import os
+import re
+from pathlib import Path
+
+source = Path(os.environ["DAY10_LIVE_MEDIA_SOURCE"])
+destination = Path(os.environ["DAY10_LIVE_MEDIA_COPY"])
+expected_sha = os.environ["DAY10_EXPECTED_CANDIDATE_SHA"].strip().lower()
+
+if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", expected_sha):
+    raise SystemExit("DAY10_CANDIDATE_SHA must be a full 40- or 64-character hexadecimal digest")
+if not source.is_file():
+    raise SystemExit(f"external live-media evidence file does not exist: {source}")
+
+raw = source.read_bytes()
+try:
+    payload = json.loads(raw)
+except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"external live-media evidence is not valid UTF-8 JSON: {exc}") from exc
+
+required_true = ("two_way_audio_pass", "barge_in_pass")
+if payload.get("schema_version") != 1:
+    raise SystemExit("external live-media evidence schema_version must be 1")
+if payload.get("status") != "passed" or payload.get("environment") != "staging":
+    raise SystemExit("external live-media evidence must be a passed staging result")
+if str(payload.get("candidate_sha") or "").strip().lower() != expected_sha:
+    raise SystemExit("external live-media evidence candidate_sha does not match DAY10_CANDIDATE_SHA")
+if any(payload.get(key) is not True for key in required_true):
+    raise SystemExit("external live-media evidence must pass two-way audio and barge-in")
+
+for key in ("live_carrier_call_ids", "evidence_references", "approved_by"):
+    values = payload.get(key)
+    if not isinstance(values, list) or not values or any(not isinstance(v, str) or not v.strip() for v in values):
+        raise SystemExit(f"external live-media evidence {key} must be a non-empty string list")
+
+payload["gate_source_sha256"] = hashlib.sha256(raw).hexdigest()
+destination.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+print("external live-media evidence gate: ok")
+PY
+fi
 
 echo "    Checking RTP media pool span for Day 10..."
 rtpe_min="$(read_kv_cfg "$RTPENGINE_CFG" "port-min")"
@@ -327,6 +430,7 @@ PY
 echo "[5/20] Capturing ARI baseline state..."
 "$PYTHON_BIN" - <<PY
 import json
+import os
 import requests
 from pathlib import Path
 
@@ -350,6 +454,9 @@ ctest --test-dir "$GATEWAY_BUILD_DIR" --output-on-failure >/dev/null
 
 
 echo "[7/20] Starting C++ voice gateway runtime..."
+# shellcheck source=gateway_test_env.sh
+source "$SCRIPT_DIR/gateway_test_env.sh"
+provision_voice_gateway_test_env
 "$GATEWAY_BUILD_DIR/voice_gateway" --host "$GATEWAY_HOST" --port "$GATEWAY_HTTP_PORT" >"$GATEWAY_LOG" 2>&1 &
 GW_PID=$!
 echo "$GW_PID" >"$GATEWAY_PID_FILE"
@@ -363,7 +470,7 @@ curl -fsS "$GATEWAY_BASE_URL/health" >/dev/null
 
 
 echo "[8/20] Starting ARI controller for Day 10 load window..."
-start_controller 0 0
+start_controller 0 0 "$BLIND_TRANSFER_ENABLED"
 
 
 echo "[9/20] Running Day 10 concurrency + soak probe..."
@@ -418,7 +525,7 @@ DAY10_GATEWAY_PID_FILE="$GATEWAY_PID_FILE" \
 
 
 echo "[12/20] Re-starting ARI controller for post-recovery smoke..."
-start_controller 20 1
+start_controller 20 1 0
 
 "$PYTHON_BIN" "$SCRIPT_DIR/day10_concurrency_soak_probe.py" \
   --host 127.0.0.1 \
@@ -465,6 +572,7 @@ import json
 from pathlib import Path
 
 trace_path = Path("$ARI_TRACE")
+transfer_report_path = Path("$TRANSFER_REPORT_JSON")
 events = []
 for line in trace_path.read_text(encoding="utf-8", errors="ignore").splitlines():
     line = line.strip()
@@ -482,10 +590,41 @@ counts = {
     "call_rejected_concurrency": 0,
     "transfer_rejected_concurrency": 0,
 }
+transfer_event_names = []
+nonzero_transfer_counters = []
 for event in events:
     et = str(event.get("event") or "")
     if et in counts:
         counts[et] += 1
+    if et.startswith("transfer_"):
+        transfer_event_names.append(et)
+    for field in (
+        "transfer_attempts",
+        "transfer_successes",
+        "transfer_failures",
+        "transfer_rejected",
+        "tenant_transfer_inflight",
+    ):
+        try:
+            value = int(event.get(field, 0) or 0)
+        except (TypeError, ValueError):
+            raise SystemExit(f"invalid {field} value in ARI trace: {event.get(field)!r}")
+        if value != 0:
+            nonzero_transfer_counters.append({"event": et, "field": field, "value": value})
+
+transfer_report = json.loads(transfer_report_path.read_text(encoding="utf-8"))
+reported_attempts = int(transfer_report.get("attempted", 0) or 0)
+reported_successes = int(transfer_report.get("success", 0) or 0)
+
+if int("$BLIND_TRANSFER_ENABLED") == 0:
+    if transfer_event_names or nonzero_transfer_counters or reported_attempts or reported_successes:
+        raise SystemExit(
+            "transfer activity detected while blind transfer is disabled: "
+            f"events={transfer_event_names}, counters={nonzero_transfer_counters}, "
+            f"reported_attempts={reported_attempts}, reported_successes={reported_successes}"
+        )
+    if transfer_report.get("mode") != "forbidden" or transfer_report.get("status") != "forbidden_no_activity":
+        raise SystemExit(f"transfer-disabled report is not fail-closed: {transfer_report}")
 
 if int("$REQUIRE_TRANSFER") == 1:
     transfer_total = counts["transfer_redirect_dispatched"] + counts["transfer_continue_dispatched"]
@@ -518,7 +657,10 @@ post = {
 }
 Path("$ARI_POST_JSON").write_text(json.dumps(post, indent=2), encoding="utf-8")
 
-sessions = requests.get("${GATEWAY_BASE_URL}/v1/sessions", timeout=5).json().get("sessions", [])
+gateway_headers = {"Authorization": f"Bearer {os.environ['VOICE_GATEWAY_AUTH_TOKEN']}"}
+sessions = requests.get(
+    "${GATEWAY_BASE_URL}/v1/sessions", headers=gateway_headers, timeout=5
+).json().get("sessions", [])
 active_sessions = [s for s in sessions if str(s.get("state") or "") not in {"stopped", "failed"}]
 
 baseline_external = set(baseline.get("external_channel_ids", []))
@@ -578,6 +720,27 @@ transfer = json.loads(Path("$TRANSFER_REPORT_JSON").read_text(encoding="utf-8"))
 bargein = json.loads(Path("$BARGEIN_REPORT_JSON").read_text(encoding="utf-8"))
 fairness = json.loads(Path("$TENANT_FAIRNESS_JSON").read_text(encoding="utf-8"))
 leak = json.loads(Path("$LEAK_AUDIT_REPORT_JSON").read_text(encoding="utf-8"))
+external_live_media_required = bool(int("$REQUIRE_EXTERNAL_LIVE_MEDIA_EVIDENCE"))
+if external_live_media_required:
+    external_live_media = json.loads(
+        Path("$EXTERNAL_LIVE_MEDIA_EVIDENCE_COPY").read_text(encoding="utf-8")
+    )
+    external_live_media_pass = (
+        external_live_media.get("status") == "passed"
+        and external_live_media.get("environment") == "staging"
+        and str(external_live_media.get("candidate_sha") or "").lower() == "$CANDIDATE_SHA".lower()
+        and external_live_media.get("two_way_audio_pass") is True
+        and external_live_media.get("barge_in_pass") is True
+        and bool(external_live_media.get("live_carrier_call_ids"))
+        and bool(external_live_media.get("evidence_references"))
+        and bool(external_live_media.get("approved_by"))
+    )
+else:
+    external_live_media = {
+        "status": "not_supplied",
+        "note": "Live-media and barge-in are outside this SIP-only harness.",
+    }
+    external_live_media_pass = False
 
 recovery_files = [
     "$RECOVERY_OPENSIPS_JSON",
@@ -592,18 +755,30 @@ checks = {
     "ramp_pass": bool(capacity.get("ramp_gate_passed", False)),
     "soak_pass": bool(soak.get("pass", False)),
     "transfer_pass": bool(transfer.get("pass", False)),
-    "bargein_pass": bool(bargein.get("pass", False)),
+    "bargein_not_measured_contract_pass": (
+        bargein.get("status") == "not_measured"
+        and bargein.get("pass") is None
+        and int(bargein.get("attempted", 0) or 0) == 0
+        and bargein.get("external_live_media_evidence_required") is True
+    ),
     "tenant_fairness_pass": bool(fairness.get("pass", False)),
     "recovery_pass": recovery_pass,
     "leak_pass": bool(leak.get("pass", False)),
 }
+if external_live_media_required:
+    checks["external_live_media_pass"] = external_live_media_pass
 
 failed = [name for name, ok in checks.items() if not ok]
 go = len(failed) == 0
 
 payload = {
     "generated_at_utc": datetime.now(UTC).isoformat(),
-    "decision": "go" if go else "no-go",
+    "decision": "sip-harness-go" if go else "sip-harness-no-go",
+    "decision_scope": "sip_signaling_concurrency_soak",
+    "production_release_verdict": "not_determined_by_this_harness",
+    "external_live_media_required": external_live_media_required,
+    "external_live_media_gate_satisfied": external_live_media_pass,
+    "external_live_media_evidence": external_live_media,
     "checks": checks,
     "failed_checks": failed,
     "safe_concurrency_threshold": capacity.get("safe_concurrency_threshold"),
@@ -616,7 +791,8 @@ lines = [
     "# Day 10 Go/No-Go Checklist",
     "",
     f"Generated (UTC): {payload['generated_at_utc']}",
-    f"Decision: {payload['decision'].upper()}",
+    f"Scoped decision: {payload['decision'].upper()}",
+    "Production release verdict: NOT DETERMINED BY THIS HARNESS",
     "",
     "## Gate Checks",
 ]
@@ -631,7 +807,7 @@ if failed:
 Path("$GO_NO_GO_CHECKLIST_MD").write_text("\n".join(lines) + "\n", encoding="utf-8")
 print("go/no-go decision computed")
 if not go:
-    raise SystemExit("Day10 Go/No-Go decision is NO-GO")
+    raise SystemExit("Day10 SIP harness decision is NO-GO")
 PY
 
 
@@ -660,7 +836,13 @@ Verifier: `telephony/scripts/verify_day10_concurrency_soak.sh`
 1. Safe concurrency threshold: {capacity.get('safe_concurrency_threshold')}
 2. Recommended production concurrency: {capacity.get('recommended_concurrency')}
 3. Soak pass: {soak.get('pass')}
-4. Final decision: {decision.get('decision')}
+4. Scoped SIP-harness decision: {decision.get('decision')}
+5. Production release verdict: {decision.get('production_release_verdict')}
+6. External live-media gate required by this run: {decision.get('external_live_media_required')}
+7. External live-media gate satisfied: {decision.get('external_live_media_gate_satisfied')}
+
+This verifier's load generator exchanges SIP signaling only. It does not send
+or receive RTP and cannot produce two-way-audio or barge-in evidence.
 
 ## Core Evidence Files
 
@@ -701,6 +883,12 @@ for path in \
   fi
 done
 
+if [[ "$REQUIRE_EXTERNAL_LIVE_MEDIA_EVIDENCE" == "1" && ! -f "$EXTERNAL_LIVE_MEDIA_EVIDENCE_COPY" ]]; then
+  echo "[ERROR] Missing pinned external live-media evidence: $EXTERNAL_LIVE_MEDIA_EVIDENCE_COPY"
+  exit 1
+fi
+
 
 echo "[20/20] Day 10 verifier complete."
-echo "Day 10 verification PASSED."
+echo "Day 10 SIP signaling/concurrency verification PASSED."
+echo "This scoped result does not by itself prove live media, barge-in, or production release readiness."

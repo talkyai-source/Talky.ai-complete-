@@ -7,7 +7,12 @@ let a user select something that then fails at request time.
 from __future__ import annotations
 import os
 from typing import Any
-from app.domain.models.ai_config import CEREBRAS_MODELS, GROQ_MODELS
+from app.domain.models.ai_config import (
+    CEREBRAS_MODELS,
+    CEREBRAS_MODELS_HIDDEN,
+    GROQ_MODELS,
+    GROQ_MODELS_HIDDEN,
+)
 
 # Was llama-3.3-70b-versatile until 2026-08-17. That id 404s on this Groq
 # account ("does not exist or you do not have access to it"), which made it the
@@ -15,19 +20,40 @@ from app.domain.models.ai_config import CEREBRAS_MODELS, GROQ_MODELS
 # whenever a tenant's stored choice failed validation — so the failure path led
 # straight to a dead model.
 #
-# GPT-OSS 120B rather than Qwen here, deliberately: the June objection to
-# GPT-OSS was about CONVERSATIONAL VOICE behaviour (stacking questions,
-# spelling things out), none of which applies to a text assistant, and it is
-# the fastest id this account serves with prompt caching on top.
-DEFAULT_ASSISTANT_MODEL = "openai/gpt-oss-120b"
+# GPT-OSS rather than Qwen here, deliberately: the June objection to GPT-OSS
+# was about CONVERSATIONAL VOICE behaviour (stacking questions, spelling things
+# out), none of which applies to a text assistant, and it is the fastest family
+# this account serves with prompt caching on top.
+#
+# Moved 120B -> 20B on 2026-08-24, when the Groq voice menu narrowed to the 20B.
+# The default MUST be something `available_models()` actually offers: otherwise
+# the dropdown never shows the value in use, and `normalize_model` "corrects"
+# unrecognised choices to an id that is itself not selectable. Asserted by
+# test_available_models_includes_default so the two cannot drift apart again.
+DEFAULT_ASSISTANT_MODEL = "openai/gpt-oss-20b"
 
 # Validation accepts Cerebras ids unconditionally, even when the key is unset.
 # Otherwise a tenant who had selected a Cerebras model would silently fall back
 # to the default the moment the key was rotated out — a confusing, invisible
 # downgrade. get_assistant_client raises a clear error instead.
-ALLOWED_ASSISTANT_MODEL_IDS = {m.id for m in GROQ_MODELS} | {
-    m.id for m in CEREBRAS_MODELS
-}
+#
+# THE ASSISTANT IS NOT THE VOICE AGENT (2026-08-24). The voice AI-Options menu
+# was narrowed to one model per provider for the MVP, and that narrowing must
+# not reach in here: this is a TEXT assistant, none of the voice reasons for
+# excluding a model (latency tails, email read-back, spelling things out on a
+# phone) apply to it, and DEFAULT_ASSISTANT_MODEL is one of the ids the voice
+# menu stopped offering. Validating against the voice menu alone would have
+# made the assistant's own default fail its own allow-list — `normalize_model`
+# would then "correct" every stored choice to a value it also rejects.
+#
+# So the allow-list is offered + hidden: everything the accounts can actually
+# serve.
+ALLOWED_ASSISTANT_MODEL_IDS = (
+    {m.id for m in GROQ_MODELS}
+    | {m.id for m in CEREBRAS_MODELS}
+    | set(GROQ_MODELS_HIDDEN)
+    | set(CEREBRAS_MODELS_HIDDEN)
+)
 
 
 def available_models() -> list[dict]:

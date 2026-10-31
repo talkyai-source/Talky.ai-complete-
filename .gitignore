@@ -20,6 +20,9 @@ Admin/frontend/.env
 *.crt
 *.p12
 *.pfx
+/secrets/
+# Atomically installed production binaries are runtime state, not source.
+/runtime/
 
 # ── Python ───────────────────────────────────────────────────
 __pycache__/
@@ -63,6 +66,7 @@ backend/audio_files/*.wav
 backend/audio_files/*.mp3
 backend/audio_files/*.ogg
 freeswitch-recordings/
+feedback_audio/
 *.wav
 *.mp3
 *.ogg
@@ -118,3 +122,15 @@ call_logs.md
 call_logs2.md
 raw_logs*.md
 *_raw_logs.md
+
+# local scratch (inbound test venv/pgdata, renders)
+tmp/
+
+# scratch / tooling output (added 2026-08-30)
+output/
+outputs/
+testsprite_tests/
+
+# Local agent worktrees are machine state, never repository submodules.
+.claude/worktrees/
+.codex-worktrees/

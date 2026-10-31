@@ -1,0 +1,320 @@
+............FFFF...........................................              [100%]
+================================== FAILURES ===================================
+______ test_post_tenant_admin_can_grant_role_at_or_below_own_tier[user] _______
+
+target_role = 'user'
+
+    @pytest.mark.parametrize("target_role", ["user", "readonly"])
+    async def test_post_tenant_admin_can_grant_role_at_or_below_own_tier(target_role):
+        """tenant_admin (60) granting user (40) / readonly (20) -> allowed."""
+        caller = _tenant_admin_user()
+        request = AddTenantUserRequest(
+            user_id="target-user",
+            tenant_id=caller.tenant_id,
+            role_name=target_role,
+        )
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            {"id": "target-user"},  # user exists
+            {"id": caller.tenant_id},  # tenant exists
+            {"id": "role-id-1"},  # role lookup
+            {  # insert result
+                "id": "tu-1",
+                "user_id": "target-user",
+                "tenant_id": caller.tenant_id,
+                "role_id": "role-id-1",
+                "is_primary": False,
+                "status": "active",
+                "invited_at": None,
+                "joined_at": None,
+            },
+            {  # role details
+                "id": "role-id-1",
+                "name": target_role,
+                "description": None,
+                "level": 40 if target_role == "user" else 20,
+                "is_system_role": True,
+                "tenant_scoped": True,
+            },
+        ]
+        db_client = _fake_db_client(conn)
+
+>       result = await add_user_to_tenant(request=request, current_user=caller, db_client=db_client)
+
+tests\unit\test_rbac_tenant_users_escalation.py:110:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\api\v1\endpoints\rbac\tenant_users.py:156: in add_user_to_tenant
+    user_role = await _current_target_admin(conn, current_user, request.tenant_id)
+app\api\v1\endpoints\rbac\tenant_users.py:49: in _current_target_admin
+    role = await get_user_role_in_tenant(conn, current_user.id, str(tenant_id))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+conn = <AsyncMock id='2110929024448'>, user_id = 'caller-1'
+tenant_id = '00000000-0000-0000-0000-000000000001'
+
+    async def get_user_role_in_tenant(
+        conn,
+        user_id: str,
+        tenant_id: str,
+    ) -> Optional[UserRole]:
+        """
+        Get the user's role in a specific tenant.
+
+        Returns None if user is not a member of the tenant.
+        """
+        row = await conn.fetchrow(
+            """
+            SELECT r.name
+            FROM tenant_users tu
+            JOIN roles r ON r.id = tu.role_id
+            WHERE tu.user_id = $1
+              AND tu.tenant_id = $2
+              AND tu.status = 'active'
+            """,
+            user_id,
+            tenant_id,
+        )
+
+        if row:
+>           return normalize_role(row["name"])
+E           KeyError: 'name'
+
+app\core\security\rbac.py:768: KeyError
+____ test_post_tenant_admin_can_grant_role_at_or_below_own_tier[readonly] _____
+
+target_role = 'readonly'
+
+    @pytest.mark.parametrize("target_role", ["user", "readonly"])
+    async def test_post_tenant_admin_can_grant_role_at_or_below_own_tier(target_role):
+        """tenant_admin (60) granting user (40) / readonly (20) -> allowed."""
+        caller = _tenant_admin_user()
+        request = AddTenantUserRequest(
+            user_id="target-user",
+            tenant_id=caller.tenant_id,
+            role_name=target_role,
+        )
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            {"id": "target-user"},  # user exists
+            {"id": caller.tenant_id},  # tenant exists
+            {"id": "role-id-1"},  # role lookup
+            {  # insert result
+                "id": "tu-1",
+                "user_id": "target-user",
+                "tenant_id": caller.tenant_id,
+                "role_id": "role-id-1",
+                "is_primary": False,
+                "status": "active",
+                "invited_at": None,
+                "joined_at": None,
+            },
+            {  # role details
+                "id": "role-id-1",
+                "name": target_role,
+                "description": None,
+                "level": 40 if target_role == "user" else 20,
+                "is_system_role": True,
+                "tenant_scoped": True,
+            },
+        ]
+        db_client = _fake_db_client(conn)
+
+>       result = await add_user_to_tenant(request=request, current_user=caller, db_client=db_client)
+
+tests\unit\test_rbac_tenant_users_escalation.py:110:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\api\v1\endpoints\rbac\tenant_users.py:156: in add_user_to_tenant
+    user_role = await _current_target_admin(conn, current_user, request.tenant_id)
+app\api\v1\endpoints\rbac\tenant_users.py:49: in _current_target_admin
+    role = await get_user_role_in_tenant(conn, current_user.id, str(tenant_id))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+conn = <AsyncMock id='2110928899536'>, user_id = 'caller-1'
+tenant_id = '00000000-0000-0000-0000-000000000001'
+
+    async def get_user_role_in_tenant(
+        conn,
+        user_id: str,
+        tenant_id: str,
+    ) -> Optional[UserRole]:
+        """
+        Get the user's role in a specific tenant.
+
+        Returns None if user is not a member of the tenant.
+        """
+        row = await conn.fetchrow(
+            """
+            SELECT r.name
+            FROM tenant_users tu
+            JOIN roles r ON r.id = tu.role_id
+            WHERE tu.user_id = $1
+              AND tu.tenant_id = $2
+              AND tu.status = 'active'
+            """,
+            user_id,
+            tenant_id,
+        )
+
+        if row:
+>           return normalize_role(row["name"])
+E           KeyError: 'name'
+
+app\core\security\rbac.py:768: KeyError
+__________ test_patch_tenant_admin_cannot_grant_role_above_own_tier ___________
+
+    async def test_patch_tenant_admin_cannot_grant_role_above_own_tier():
+        """PATCH: tenant_admin (60) escalating an existing member to platform_admin (100) -> 403."""
+        caller = _tenant_admin_user()
+        request = UpdateTenantUserRequest(role_name="platform_admin")
+        conn = AsyncMock()
+        conn.fetchrow.return_value = {
+            "id": "tu-1",
+            "user_id": "target-user",
+            "tenant_id": caller.tenant_id,
+            "role_id": "old-role-id",
+            "is_primary": False,
+            "status": "active",
+        }
+        db_client = _fake_db_client(conn)
+        audit_logger = AsyncMock()
+
+        with pytest.raises(HTTPException) as exc_info:
+>           await update_tenant_user(
+                tenant_user_id="tu-1",
+                request=request,
+                current_user=caller,
+                db_client=db_client,
+                audit_logger=audit_logger,
+            )
+
+tests\unit\test_rbac_tenant_users_escalation.py:132:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\api\v1\endpoints\rbac\tenant_users.py:296: in update_tenant_user
+    user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
+app\api\v1\endpoints\rbac\tenant_users.py:49: in _current_target_admin
+    role = await get_user_role_in_tenant(conn, current_user.id, str(tenant_id))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+conn = <AsyncMock id='2110929086288'>, user_id = 'caller-1'
+tenant_id = '00000000-0000-0000-0000-000000000001'
+
+    async def get_user_role_in_tenant(
+        conn,
+        user_id: str,
+        tenant_id: str,
+    ) -> Optional[UserRole]:
+        """
+        Get the user's role in a specific tenant.
+
+        Returns None if user is not a member of the tenant.
+        """
+        row = await conn.fetchrow(
+            """
+            SELECT r.name
+            FROM tenant_users tu
+            JOIN roles r ON r.id = tu.role_id
+            WHERE tu.user_id = $1
+              AND tu.tenant_id = $2
+              AND tu.status = 'active'
+            """,
+            user_id,
+            tenant_id,
+        )
+
+        if row:
+>           return normalize_role(row["name"])
+E           KeyError: 'name'
+
+app\core\security\rbac.py:768: KeyError
+_____________ test_patch_tenant_admin_can_grant_role_at_own_tier ______________
+
+    async def test_patch_tenant_admin_can_grant_role_at_own_tier():
+        """PATCH: tenant_admin (60) assigning tenant_admin (60, same tier) -> allowed."""
+        caller = _tenant_admin_user()
+        request = UpdateTenantUserRequest(role_name="tenant_admin")
+        conn = AsyncMock()
+        conn.fetchrow.side_effect = [
+            {  # current record
+                "id": "tu-1",
+                "user_id": "target-user",
+                "tenant_id": caller.tenant_id,
+                "role_id": "old-role-id",
+                "is_primary": False,
+                "status": "active",
+            },
+            {"id": "role-id-tenant-admin"},  # role lookup
+            {  # update result
+                "id": "tu-1",
+                "user_id": "target-user",
+                "tenant_id": caller.tenant_id,
+                "role_id": "role-id-tenant-admin",
+                "is_primary": False,
+                "status": "active",
+                "invited_at": None,
+                "joined_at": None,
+            },
+            {  # role details
+                "id": "role-id-tenant-admin",
+                "name": "tenant_admin",
+                "description": None,
+                "level": 60,
+                "is_system_role": True,
+                "tenant_scoped": True,
+            },
+        ]
+        db_client = _fake_db_client(conn)
+        audit_logger = AsyncMock()
+
+>       result = await update_tenant_user(
+            tenant_user_id="tu-1",
+            request=request,
+            current_user=caller,
+            db_client=db_client,
+            audit_logger=audit_logger,
+        )
+
+tests\unit\test_rbac_tenant_users_escalation.py:181:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\api\v1\endpoints\rbac\tenant_users.py:296: in update_tenant_user
+    user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
+app\api\v1\endpoints\rbac\tenant_users.py:49: in _current_target_admin
+    role = await get_user_role_in_tenant(conn, current_user.id, str(tenant_id))
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+conn = <AsyncMock id='2110929084032'>, user_id = 'caller-1'
+tenant_id = '00000000-0000-0000-0000-000000000001'
+
+    async def get_user_role_in_tenant(
+        conn,
+        user_id: str,
+        tenant_id: str,
+    ) -> Optional[UserRole]:
+        """
+        Get the user's role in a specific tenant.
+
+        Returns None if user is not a member of the tenant.
+        """
+        row = await conn.fetchrow(
+            """
+            SELECT r.name
+            FROM tenant_users tu
+            JOIN roles r ON r.id = tu.role_id
+            WHERE tu.user_id = $1
+              AND tu.tenant_id = $2
+              AND tu.status = 'active'
+            """,
+            user_id,
+            tenant_id,
+        )
+
+        if row:
+>           return normalize_role(row["name"])
+E           KeyError: 'name'
+
+app\core\security\rbac.py:768: KeyError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_rbac_tenant_users_escalation.py::test_post_tenant_admin_can_grant_role_at_or_below_own_tier[user]
+FAILED tests/unit/test_rbac_tenant_users_escalation.py::test_post_tenant_admin_can_grant_role_at_or_below_own_tier[readonly]
+FAILED tests/unit/test_rbac_tenant_users_escalation.py::test_patch_tenant_admin_cannot_grant_role_above_own_tier
+FAILED tests/unit/test_rbac_tenant_users_escalation.py::test_patch_tenant_admin_can_grant_role_at_own_tier
+4 failed, 55 passed in 9.83s

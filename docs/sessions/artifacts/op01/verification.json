@@ -1,0 +1,129 @@
+{
+  "package": "OP01 policy-independent metering repair",
+  "base_revision": "d8ecd6d0d183e304e21453857619f36330f836bd",
+  "branch": "codex/production-ready-op01-20261005",
+  "date": "2026-10-05",
+  "scope": "Synthetic local tests, actual migrated disposable PostgreSQL and restricted fixture role. No deployment, live call, provider request or paid-policy change.",
+  "contract": {
+    "minutes_state": [
+      "known",
+      "unlimited",
+      "unavailable"
+    ],
+    "auth_and_dashboard_minutes_remaining": "integer when known, null otherwise",
+    "subscription": "same canonical minutes_state; successful legacy numerical fields retained, unknown read raises503",
+    "verified_unlimited": "tenant allocation0 and explicit bound plan minutes0; missing or invalid metadata cannot prove unlimited",
+    "scope_admission": "matching canonical tenant GUC or explicit boolean platform bypass; no unscoped/foreign-context full balance"
+  },
+  "commands": {
+    "backend_unit": "python -m pytest tests/unit/test_op01_metering_unavailable.py tests/unit/test_minutes_quota.py tests/unit/test_call_guard_minutes_quota.py tests/unit/test_billing_read_truth.py tests/unit/test_minutes_quota_is_live.py tests/unit/test_billing_minutes_agree_with_gate.py tests/unit/test_call_metrics_persist.py tests/unit/test_dashboard_summary.py tests/unit/test_dialer_worker_guard_ordering.py tests/unit/test_call_guard_dnc_fail_closed.py tests/unit/test_dialer_origination_durability.py tests/unit/test_billing_checkout_contract.py tests/unit/test_call_issues_direction.py tests/unit/test_campaign_service_direction_race.py tests/unit/test_campaign_stream_events_rls.py -q --tb=short",
+    "frontend": "node --test --import tsx --import ./src/test-utils/setup.ts src/lib/minutes-allowance.test.tsx src/lib/dashboard-api.minutes-status.test.ts src/lib/dashboard-api.campaign-start.test.ts src/lib/notifications-isolation.test.tsx src/components/billing/billing-overview.test.tsx src/components/billing/billing-plan-selector.test.tsx src/lib/billing-purchase.test.ts",
+    "typecheck": "npm run typecheck",
+    "openapi": "npm run docs:openapi:check",
+    "frontend_lint": "eslint <all changed .ts/.tsx files> src/lib/minutes-allowance.ts src/lib/minutes-allowance.test.tsx",
+    "backend_lint": "python -m ruff check --select F --ignore F401,F841 <all changed/new Python files>",
+    "postgres": "TEST_DATABASE_URL=<explicit local disposable DB> python -m pytest tests/integration/test_op01_metering.py tests/integration/test_billing_read_truth.py::test_daily_and_monthly_reads_include_only_settled_owned_seconds tests/integration/test_billing_read_truth.py::test_meter_read_privilege_failure_is_unavailable_not_a_zero_balance tests/integration/test_billing_read_truth.py::test_missing_tenant_does_not_appear_as_unlimited -q --tb=short"
+  },
+  "results": {
+    "backend_unit": {
+      "passed": 193,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 70,
+      "note": "Existing utcnow deprecation warnings; final source including scope predicate."
+    },
+    "frontend": {
+      "passed": 82,
+      "failed": 0
+    },
+    "postgres": {
+      "passed": 15,
+      "failed": 0,
+      "public_revision": "0059_auth_identity_contract",
+      "new_op01_cases": 11,
+      "existing_cp04_api_cases": 4
+    },
+    "typecheck": "passed",
+    "frontend_lint": "passed",
+    "backend_lint": "passed",
+    "frontend_openapi": "passed; generator does not enumerate auth/dashboard schemas, public Pydantic schema covered by behavior suite",
+    "production_build": "not run in isolated slice; root integration required"
+  },
+  "reproduction": {
+    "metering-red.txt": "Initial baseline7fail/1pass. Guard fixture initially used non-UUID tenant, so that single red case proves failure fallback, not selective SQL failure; final real-guard/bridge and PostgreSQL tests use correct scope. Initial worker fixture also lacked unrelated timezone stub; corrected positive recovery fixture is in final suite.",
+    "postgres-red.txt": "6pass/2fail: actual A\u2192B entitlement/usage scope mismatch reproduced; NULL allocation failure is fixture invalidity (schema correctly rejects NULL), corrected to assert constraint rather than weaken it."
+  },
+  "review": "Independent llm_audit read-only review of canonical meter, CallGuard, worker and tenant adapter found no material defect before the final PG-proven scope predicate; root reviewed and authorized that predicate.",
+  "callsite_context": {
+    "worker": "DialerWorker._acquire_db -> acquire_with_tenant(pool,None), explicit backend bypass",
+    "final_bridge": "CallGuard._check_minutes_quota -> acquire_with_tenant(pool,tenant)",
+    "billing_subscription_topup": "acquire_with_tenant(pool,authenticated tenant)",
+    "campaigns": "tenant_minutes_status tenant adapter",
+    "auth_profile_dashboard": "compute_tenant_minutes_status tenant adapter"
+  },
+  "integration_notes": [
+    "Base predates CP08: reconcile principal/session issuance changes when merging; retain canonical principal and atomic credential semantics. Meter DTO/projection changes should stay after canonical identity resolution.",
+    "Same-job meter deferral uses existing queue bounded delay (default120s,min5s), preserves original attempt and committed intent; transport-unknown origination remains held by existing protocol.",
+    "Legacy zero allocation with missing plan is unavailable, not silently migrated to unlimited. Older frontend API responses without state render unavailable.",
+    "Existing CP04 billing usage/subscription/topup unknown reads remain503; no fake zeros returned.",
+    "CI integration module list must include tests/integration/test_op01_metering.py."
+  ],
+  "limits": [
+    "Paid allowance reset/cycle, rounding policy confirmation, strict active-call cap versus admission-only and simultaneous last-minute overrun remain product/finance decisions. Existing calendar-month SQL, floor-settled usage and estimated admission rules are preserved.",
+    "No new reservation/settlement engine; inbound reservation protocol unchanged.",
+    "These tests do not prove paid-offer entitlement policy, acoustic quality, production database/deployment readiness or race-free enforcement of an undecided hard cap.",
+    "No package installation; isolated node_modules junction uses existing main-worktree installation, with separate outputs.",
+    "The unchanged SQL uses date_trunc('month',NOW()) in the database session timezone. This slice does not establish a new UTC/subscription-anniversary reset policy."
+  ],
+  "changed_source_and_test_files": [
+    "Talk-Leee/src/app/auth/callback/page.tsx",
+    "Talk-Leee/src/app/auth/login/login-client.tsx",
+    "Talk-Leee/src/app/auth/register/register-client.tsx",
+    "Talk-Leee/src/app/dashboard/page.tsx",
+    "Talk-Leee/src/app/settings/page.tsx",
+    "Talk-Leee/src/components/billing/billing-overview.test.tsx",
+    "Talk-Leee/src/components/billing/billing-overview.tsx",
+    "Talk-Leee/src/lib/api.ts",
+    "Talk-Leee/src/lib/auth-context.tsx",
+    "Talk-Leee/src/lib/billing-purchase.ts",
+    "Talk-Leee/src/lib/dashboard-api.ts",
+    "Talk-Leee/src/lib/minutes-allowance.test.tsx",
+    "Talk-Leee/src/lib/minutes-allowance.ts",
+    "Talk-Leee/src/lib/notifications-isolation.test.tsx",
+    "Talk-Leee/src/lib/server-auth.ts",
+    "Talk-Leee/src/lib/webauthn-utils.ts",
+    "Talk-Leee/src/server/auth-core.ts",
+    "backend/app/api/v1/dependencies.py",
+    "backend/app/api/v1/endpoints/auth/login.py",
+    "backend/app/api/v1/endpoints/auth/profile.py",
+    "backend/app/api/v1/endpoints/auth/schemas.py",
+    "backend/app/api/v1/endpoints/auth/signup.py",
+    "backend/app/api/v1/endpoints/billing.py",
+    "backend/app/api/v1/endpoints/billing_topups.py",
+    "backend/app/api/v1/endpoints/calls.py",
+    "backend/app/api/v1/endpoints/campaigns.py",
+    "backend/app/api/v1/endpoints/dashboard.py",
+    "backend/app/api/v1/endpoints/mfa/schemas.py",
+    "backend/app/api/v1/endpoints/mfa/verify.py",
+    "backend/app/api/v1/endpoints/passkeys.py",
+    "backend/app/api/v1/endpoints/telephony_bridge.py",
+    "backend/app/domain/services/billing_service.py",
+    "backend/app/domain/services/call_guard.py",
+    "backend/app/domain/services/dialer/block_reasons.py",
+    "backend/app/domain/services/minutes_quota.py",
+    "backend/app/services/scripts/tenant_minutes.py",
+    "backend/app/workers/dialer_worker.py",
+    "backend/tests/integration/test_billing_read_truth.py",
+    "backend/tests/integration/test_op01_metering.py",
+    "backend/tests/unit/test_billing_read_truth.py",
+    "backend/tests/unit/test_call_guard_minutes_quota.py",
+    "backend/tests/unit/test_call_issues_direction.py",
+    "backend/tests/unit/test_call_metrics_persist.py",
+    "backend/tests/unit/test_campaign_service_direction_race.py",
+    "backend/tests/unit/test_campaign_stream_events_rls.py",
+    "backend/tests/unit/test_dashboard_summary.py",
+    "backend/tests/unit/test_minutes_quota.py",
+    "backend/tests/unit/test_minutes_quota_is_live.py",
+    "backend/tests/unit/test_op01_metering_unavailable.py"
+  ]
+}

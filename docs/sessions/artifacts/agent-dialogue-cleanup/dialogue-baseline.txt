@@ -1,0 +1,15 @@
+
+=================================== ERRORS ====================================
+____________ ERROR collecting tests/unit/test_dialogue_cleanup.py _____________
+ImportError while importing test module 'C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dialogue-cleanup-20261007\backend\tests\unit\test_dialogue_cleanup.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+backend\tests\unit\test_dialogue_cleanup.py:7: in <module>
+    from test_voice_pipeline_service import _make_service_for_disposition, _make_session
+E   ModuleNotFoundError: No module named 'test_voice_pipeline_service'
+=========================== short test summary info ===========================
+ERROR backend\tests\unit\test_dialogue_cleanup.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+1 error in 1.09s

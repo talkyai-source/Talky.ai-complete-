@@ -1,0 +1,13 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+______ test_early_caller_correction_reaches_model_after_twenty_exchanges ______
+tests\unit\test_agent_context_window.py:16: in test_early_caller_correction_reaches_model_after_twenty_exchanges
+    assert rounds[0][0] == history
+E   AssertionError: assert [Message(role...335927)), ...] == [Message(role...335927)), ...]
+E     At index 0 diff: Message(role=<MessageRole.ASSISTANT: 'assistant'>, content='Here is detail 10.', timestamp=datetime.datetime(2026, 10, 7, 4, 19, 1, 335927)) != Message(role=<MessageRole.USER: 'user'>, content='I am not an existing customer. This is a new business.', timestamp=datetime.datetime(2026, 10, 7, 4, 19, 1, 335927))
+E     Right contains 21 more items, first extra item: Message(role=<MessageRole.USER: 'user'>, content='Please explain option 19.', timestamp=datetime.datetime(2026, 10, 7, 4, 19, 1, 335927))
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit/test_agent_context_window.py::test_early_caller_correction_reaches_model_after_twenty_exchanges
+1 failed, 2 warnings in 8.02s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 3, 'prohibited': 0}

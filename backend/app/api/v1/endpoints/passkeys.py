@@ -49,7 +49,8 @@ Two-step login flow with fallback:
 # natively, so the future import isn't needed for syntax anyway.
 
 import logging
-from typing import Any, Optional
+from contextlib import asynccontextmanager
+from typing import Literal, Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -57,30 +58,28 @@ from slowapi import Limiter
 from slowapi.util import get_remote_address
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
+from app.core.security.principal import load_current_principal, PrincipalUnavailable, assert_expected_identity
 from app.core.security.passkeys import (
     generate_authentication_options,
     generate_registration_options,
     get_allowed_origins,
     get_credential_by_id,
     get_user_credentials,
-    get_user_id_by_credential_id,
     store_credential,
     update_credential_display_name,
     update_credential_sign_count,
     delete_credential,
     verify_authentication,
     verify_registration,
-    AuthenticationResult,
-    VerifiedCredential,
 )
 from app.api.v1.endpoints.auth._shared import issue_cookie_auth
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
-    hash_session_token,
 )
 
 logger = logging.getLogger(__name__)
@@ -112,11 +111,11 @@ def _set_session_cookie(response: Response, raw_token: str) -> None:
 
 
 def _get_client_ip(request: Request) -> str:
-    """Extract the real client IP from the request."""
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    """Extract the real client IP from the request (never the caller-supplied
+    leftmost X-Forwarded-For entry; live-risk auth-2)."""
+    from app.core.api_security_middleware import resolve_client_ip
+
+    return resolve_client_ip(request)
 
 
 def _get_user_agent(request: Request) -> Optional[str]:
@@ -205,8 +204,10 @@ class LoginCompleteResponse(BaseModel):
     user_id: str
     email: str
     role: str
+    tenant_id: Optional[str] = None
     business_name: Optional[str]
-    minutes_remaining: int
+    minutes_remaining: Optional[int] = None
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
     message: str
 
 
@@ -266,7 +267,9 @@ async def register_begin(
     ip = _get_client_ip(request)
     ua = _get_user_agent(request)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        from app.core.security.credential_issuance import lock_authenticated_credential_change
+        current = await lock_authenticated_credential_change(conn, request, current_user)
         options = await generate_registration_options(
             conn=conn,
             user_id=current_user.id,
@@ -275,7 +278,7 @@ async def register_begin(
             authenticator_type=body.authenticator_type,
             ip_address=ip,
             user_agent=ua,
-            user_role=current_user.role,
+            user_role=current["role"],
         )
 
     # Parse the JSON string to a dict for the response
@@ -309,7 +312,9 @@ async def register_complete(
     ip = _get_client_ip(request)
     expected_origin = _validate_passkey_origin(request)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        from app.core.security.credential_issuance import lock_authenticated_credential_change
+        current = await lock_authenticated_credential_change(conn, request, current_user)
         # Verify the registration response
         try:
             verified = await verify_registration(
@@ -318,6 +323,7 @@ async def register_complete(
                 credential_response=body.credential_response,
                 expected_origin=expected_origin,
                 ip_address=ip,
+                expected_user_id=current_user.id,
             )
         except ValueError as e:
             logger.warning(
@@ -337,7 +343,7 @@ async def register_complete(
         # rogue self-attesting software "authenticator" as their
         # second factor.
         from app.core.security.passkeys import check_admin_aaguid_allowed
-        allowed, reason = check_admin_aaguid_allowed(current_user.role, verified.aaguid)
+        allowed, reason = check_admin_aaguid_allowed(current["role"], verified.aaguid)
         if not allowed:
             logger.warning(
                 "passkey_admin_aaguid_rejected user=%s role=%s aaguid=%s reason=%s",
@@ -380,6 +386,25 @@ async def register_complete(
 # ===========================================================================
 
 
+class _PasskeyRejected(HTTPException):
+    """Known passkey rejection whose failure accounting must commit."""
+
+
+@asynccontextmanager
+async def _passkey_login_transaction(pool):
+    # The clone-detection delete, the consumed challenge and the failed-attempt
+    # row must commit even though the public result is a 401 (same pattern as
+    # auth/login.py). Unexpected/internal failures still roll back.
+    rejection = None
+    async with acquire_with_tenant(pool, None) as conn:
+        try:
+            yield conn
+        except _PasskeyRejected as exc:
+            rejection = exc
+    if rejection is not None:
+        raise rejection
+
+
 @router.post("/login/begin", response_model=LoginBeginResponse)
 @limiter.limit("10/minute")
 async def login_begin(
@@ -404,7 +429,8 @@ async def login_begin(
     credential_ids: Optional[list[str]] = None
     user_id: Optional[str] = None
 
-    async with db_client.pool.acquire() as conn:
+    # Both email and discoverable login begin before a tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         if body.email:
             # Look up user by email
             user_row = await conn.fetchrow(
@@ -488,7 +514,8 @@ async def login_complete(
             detail="Missing credential ID in response.",
         )
 
-    async with db_client.pool.acquire() as conn:
+    # The credential must be resolved before its owning tenant is known.
+    async with _passkey_login_transaction(db_client.pool) as conn:
         # Look up the credential
         credential = await get_credential_by_id(conn, raw_credential_id)
 
@@ -506,37 +533,22 @@ async def login_complete(
         # Load user details. minutes_used intentionally omitted — see
         # auth.py / dependencies.py for the rationale; we compute live
         # from the calls table via compute_tenant_minutes_remaining.
-        user_row = await conn.fetchrow(
-            """
-            SELECT up.id, up.email, up.name, up.role, up.tenant_id,
-                   up.is_active, up.mfa_enabled,
-                   t.business_name, t.minutes_allocated
-            FROM   user_profiles up
-            LEFT   JOIN tenants t ON t.id = up.tenant_id
-            WHERE  up.id = $1
-            """,
-            credential["user_id"],
-        )
-
-        if not user_row:
+        try:
+            from app.core.security.credential_issuance import (
+                lock_user_credential_issuance, require_current_passkey_ceremony,
+            )
+            await lock_user_credential_issuance(conn, user_id)
+            credential = await get_credential_by_id(conn, raw_credential_id, for_update=True)
+            if not credential or str(credential["user_id"]) != user_id:
+                raise PrincipalUnavailable("credentials_changed")
+            user_row = await load_current_principal(conn, user_id)
+            assert_expected_identity(request, user_row)
+            await require_current_passkey_ceremony(conn, user_id, body.ceremony_id)
+        except PrincipalUnavailable as exc:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
-            )
-
-        if not user_row["is_active"]:
-            await record_login_attempt(
-                conn,
-                email=user_row["email"],
-                user_id=user_id,
-                ip_address=ip,
-                success=False,
-                failure_reason="account_inactive",
-            )
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Invalid credentials.",
-            )
+            ) from exc
 
         # Check account lockout
         locked_until = await check_account_locked(conn, user_row["email"].lower())
@@ -549,7 +561,7 @@ async def login_complete(
                 success=False,
                 failure_reason="account_locked",
             )
-            raise HTTPException(
+            raise _PasskeyRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
             )
@@ -565,6 +577,7 @@ async def login_complete(
                 current_sign_count=credential["sign_count"],
                 expected_origin=expected_origin,
                 ip_address=ip,
+                expected_user_id=user_id,
             )
         except ValueError as e:
             await record_login_attempt(
@@ -578,15 +591,17 @@ async def login_complete(
             logger.warning(
                 "Passkey verification failed: user=%s error=%s", user_id, e
             )
-            raise HTTPException(
+            raise _PasskeyRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",
             ) from e
 
         # Update sign count
-        await update_credential_sign_count(
-            conn, credential["credential_id"], auth_result.new_sign_count
-        )
+        if not await update_credential_sign_count(
+            conn, credential["credential_id"], auth_result.new_sign_count,
+            expected_sign_count=credential["sign_count"],
+        ):
+            raise HTTPException(status_code=401, detail="Invalid credentials.")
 
         # Record successful login
         await record_login_attempt(
@@ -623,50 +638,23 @@ async def login_complete(
             session_id=session_id,
         )
 
+        # Factor consumption, session and refresh receipt commit together.
+        await issue_cookie_auth(response, conn, user_id=user_id,
+            email=user_row["email"], role=user_row["role"], tenant_id=tenant_id,
+            session_id=session_id, ip=ip, user_agent=ua)
+
     # Set session cookie
     _set_session_cookie(response, raw_session_token)
-
-    # Issue the httpOnly access + refresh cookie pair, same as the password and
-    # MFA login paths. Passkey login previously set ONLY the legacy talky_sid
-    # cookie and returned the JWT in the response body, which produced a
-    # half-authenticated session with two distinct failures:
-    #
-    #   1. No talky_at -> every cookie-authenticated surface breaks. Both
-    #      assistant_ws.py and campaign_test_ws.py read ONLY talky_at (or a
-    #      first-frame bearer); neither falls back to talky_sid. A browser
-    #      cannot set an Authorization header on a WS upgrade, so passkey
-    #      users silently lost the Test agent and assistant sockets — the
-    #      identical failure MFA users hit ("no auth frame within 5s").
-    #
-    #   2. No talky_rt -> POST /auth/refresh (auth/refresh.py) unconditionally
-    #      401s, so the session cannot renew silently and dies when the body
-    #      JWT expires, forcing a hard re-login.
-    #
-    # A fresh connection is acquired because the one above is scoped to the
-    # transaction that created the session and is already released.
-    async with db_client.pool.acquire() as cookie_conn:
-        await issue_cookie_auth(
-            response,
-            cookie_conn,
-            user_id=user_id,
-            email=user_row["email"],
-            role=user_row["role"],
-            tenant_id=tenant_id,
-            session_id=session_id,
-            ip=ip,
-            user_agent=ua,
-        )
 
     # Use the already-injected db_client instead of trying to import a
     # non-existent resolve_db_client helper (the original
     #   from app.api.v1.dependencies import resolve_db_client
     # was a typo for get_db_client AND unnecessary anyway since db_client
     # is already a Depends parameter on this endpoint).
-    from app.services.scripts.tenant_minutes import compute_tenant_minutes_remaining
-    minutes_remaining = await compute_tenant_minutes_remaining(
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(
         db_client.pool,
-        tenant_id=str(user_row["tenant_id"]) if user_row["tenant_id"] else None,
-        minutes_allocated=user_row["minutes_allocated"],
+        str(user_row["tenant_id"]) if user_row["tenant_id"] else None,
     )
 
     logger.info(
@@ -679,8 +667,9 @@ async def login_complete(
         user_id=user_id,
         email=user_row["email"],
         role=user_row["role"],
+        tenant_id=tenant_id,
         business_name=user_row["business_name"],
-        minutes_remaining=minutes_remaining,
+        **meter.allowance(),
         message="Login successful.",
     )
 
@@ -704,7 +693,7 @@ async def list_passkeys(
       - Backup status (backed_up indicates synced passkey)
       - Last used timestamp
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         credentials = await get_user_credentials(conn, current_user.id)
 
     passkeys = [
@@ -740,7 +729,7 @@ async def update_passkey(
     Users can rename their passkeys to easily identify them
     (e.g., "Work MacBook", "iPhone 15", "YubiKey Nano").
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         success = await update_credential_display_name(
             conn, passkey_id, current_user.id, body.display_name
         )
@@ -766,6 +755,7 @@ async def update_passkey(
 @router.delete("/{passkey_id}")
 async def delete_passkey(
     passkey_id: str,
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> dict[str, str]:
@@ -776,7 +766,9 @@ async def delete_passkey(
     passkey_count. This does NOT revoke the credential from the authenticator
     itself (that's not possible via WebAuthn).
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        from app.core.security.credential_issuance import lock_authenticated_credential_change
+        await lock_authenticated_credential_change(conn, request, current_user)
         # Check if this is their last passkey
         count_result = await conn.fetchrow(
             "SELECT COUNT(*) as cnt FROM user_passkeys WHERE user_id = $1",

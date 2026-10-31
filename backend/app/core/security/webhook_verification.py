@@ -12,11 +12,14 @@ References:
 import hashlib
 import hmac
 import logging
+import os
 import secrets
 import time
 from typing import Optional, Tuple
 
 from fastapi import HTTPException, Request, status
+
+from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -24,15 +27,78 @@ logger = logging.getLogger(__name__)
 SIGNATURE_VERSION = "v1"
 MAX_TIMESTAMP_AGE_SECONDS = 300  # 5 minutes - replay protection
 
+# At-rest format of webhook_configs.secret_key: "enc:v1:<Fernet token>". A stored
+# value without the prefix is a legacy plaintext secret (still accepted on read).
+WEBHOOK_SECRET_ENC_PREFIX = "enc:v1:"
+_ENCRYPTION_KEY_ENV = "CONNECTOR_ENCRYPTION_KEY"
+
 
 class WebhookVerificationError(Exception):
     """Raised when webhook signature verification fails."""
     pass
 
 
+class WebhookSecretEncryptionUnavailable(Exception):
+    """The encryption key is missing or unusable, so a secret cannot be stored."""
+
+
 def generate_webhook_secret() -> str:
     """Generate a secure random webhook secret."""
     return secrets.token_urlsafe(32)
+
+
+def encrypt_webhook_secret(secret: str) -> str:
+    """Encrypt a webhook HMAC secret for storage: ``enc:v1:<Fernet token>``.
+
+    Uses the project's connector encryption service (Fernet keyed by
+    CONNECTOR_ENCRYPTION_KEY; rotated-out keys in CONNECTOR_ENCRYPTION_KEYS_OLD).
+    Fails closed with WebhookSecretEncryptionUnavailable rather than storing
+    plaintext - or encrypting under the service's per-process development key,
+    which no other worker (or the next restart) could read back.
+    """
+    if not (os.getenv(_ENCRYPTION_KEY_ENV) or "").strip():
+        raise WebhookSecretEncryptionUnavailable(f"{_ENCRYPTION_KEY_ENV} is not set")
+    try:
+        from app.infrastructure.connectors.encryption import get_encryption_service
+
+        token = get_encryption_service().encrypt(secret)
+    except Exception as exc:  # RuntimeError (production, no key) / TokenEncryptionError (bad key)
+        raise WebhookSecretEncryptionUnavailable(type(exc).__name__) from exc
+    return WEBHOOK_SECRET_ENC_PREFIX + token
+
+
+def decrypt_stored_webhook_secret(
+    stored: str, *, tenant_id: str, webhook_name: str
+) -> Optional[str]:
+    """Turn a ``webhook_configs.secret_key`` value into the raw HMAC secret.
+
+    ``enc:v1:`` values are decrypted. A value that cannot be decrypted (key
+    missing/rotated away, corrupt) is "not configured": None, with an ERROR log
+    that carries no secret material. Anything else is a legacy plaintext secret:
+    still accepted, with one WARNING per read.
+    """
+    if stored.startswith(WEBHOOK_SECRET_ENC_PREFIX):
+        try:
+            from app.infrastructure.connectors.encryption import get_encryption_service
+
+            secret = get_encryption_service().decrypt(stored[len(WEBHOOK_SECRET_ENC_PREFIX):])
+            if not secret:
+                raise ValueError("empty secret")
+        except Exception as exc:
+            logger.error(
+                "Webhook secret cannot be decrypted (tenant=%s webhook=%s, %s): "
+                "treating the webhook as not configured",
+                tenant_id, webhook_name, type(exc).__name__,
+            )
+            return None
+        return secret
+    logger.warning(
+        "Webhook secret for tenant=%s webhook=%s is stored as legacy plaintext; "
+        "it still verifies, and re-running webhook configure rotates it and "
+        "stores the new secret encrypted",
+        tenant_id, webhook_name,
+    )
+    return stored
 
 
 def compute_signature(payload: bytes, secret: str) -> str:
@@ -257,7 +323,8 @@ class WebhookSecretManager:
             db_pool: Optional database pool for lookup
 
         Returns:
-            Webhook secret or None if not found
+            Webhook secret (decrypted when stored as ``enc:v1:``; a legacy
+            plaintext row is returned as-is) or None if not found/undecryptable
         """
         cache_key = f"{tenant_id}:{webhook_name}"
         cached = self._cache.get(cache_key)
@@ -271,7 +338,7 @@ class WebhookSecretManager:
             return None
 
         try:
-            async with db_pool.acquire() as conn:
+            async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT secret_key FROM webhook_configs
@@ -281,8 +348,11 @@ class WebhookSecretManager:
                 )
 
                 if row:
-                    secret = row["secret_key"]
-                    self._cache[cache_key] = (secret, time.time() + self._cache_ttl)
+                    secret = decrypt_stored_webhook_secret(
+                        row["secret_key"], tenant_id=tenant_id, webhook_name=webhook_name
+                    )
+                    if secret:
+                        self._cache[cache_key] = (secret, time.time() + self._cache_ttl)
                     return secret
         except Exception as e:
             logger.error(f"Failed to lookup webhook secret: {e}")

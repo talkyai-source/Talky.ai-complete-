@@ -1,0 +1,56 @@
+FFFFFF                                                                   [100%]
+================================== FAILURES ===================================
+________ test_second_required_change_waits_and_observes_reload_failure ________
+tests\unit\test_pjsip_reload_receipts.py:66: in test_second_required_change_waits_and_observes_reload_failure
+    assert not returned_before_acknowledgement
+E   assert not True
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.telephony.pjsip_config_generator:pjsip_config_generator.py:452 pjsip_reload_failed rc=1 err=synthetic reload rejected
+________ test_commands_do_not_overlap_and_each_receipt_is_independent _________
+tests\unit\test_pjsip_reload_receipts.py:101: in test_commands_do_not_overlap_and_each_receipt_is_independent
+    assert commands_before_first_finished == [0]
+E   assert [0, 1] == [0]
+E     Left contains one more item: 1
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.telephony.pjsip_config_generator:pjsip_config_generator.py:452 pjsip_reload_failed rc=1 err=first failed
+____________ test_pending_intent_is_not_an_accepted_reload_receipt ____________
+tests\unit\test_pjsip_reload_receipts.py:106: in test_pending_intent_is_not_an_accepted_reload_receipt
+    assert not pjsip.PJSIPReloadResult("coalesced", "Another request is pending").accepted
+E   AssertionError: assert not True
+E    +  where True = PJSIPReloadResult(status='coalesced', detail='Another request is pending').accepted
+E    +    where PJSIPReloadResult(status='coalesced', detail='Another request is pending') = <class 'app.infrastructure.telephony.pjsip_config_generator.PJSIPReloadResult'>('coalesced', 'Another request is pending')
+E    +      where <class 'app.infrastructure.telephony.pjsip_config_generator.PJSIPReloadResult'> = pjsip.PJSIPReloadResult
+___________ test_cancelling_waiting_caller_never_spawns_or_accepts ____________
+tests\unit\test_pjsip_reload_receipts.py:135: in test_cancelling_waiting_caller_never_spawns_or_accepts
+    assert isinstance(results[1], asyncio.CancelledError)
+E   AssertionError: assert False
+E    +  where False = isinstance(PJSIPReloadResult(status='coalesced', detail='A pending PJSIP reload will include this atomic file change.'), <class 'asyncio.exceptions.CancelledError'>)
+E    +    where <class 'asyncio.exceptions.CancelledError'> = asyncio.CancelledError
+_ test_cancelled_command_is_reaped_before_next_reload_even_if_cancelled_again _
+tests\unit\test_pjsip_reload_receipts.py:183: in test_cancelled_command_is_reaped_before_next_reload_even_if_cancelled_again
+    assert count_before_reap == 1
+E   assert 2 == 1
+___ test_timed_out_command_has_no_success_receipt_and_owned_child_is_reaped ___
+tests\unit\test_pjsip_reload_receipts.py:207: in communicate
+    await finish.wait()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\locks.py:212: in wait
+    await fut
+E   asyncio.exceptions.CancelledError
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_pjsip_reload_receipts.py:219: in test_timed_out_command_has_no_success_receipt_and_owned_child_is_reaped
+    result = await asyncio.wait_for(pjsip.request_pjsip_reload(execute=True), 0.2)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py:519: in wait_for
+    async with timeouts.timeout(timeout):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\timeouts.py:115: in __aexit__
+    raise TimeoutError from exc_val
+E   TimeoutError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_second_required_change_waits_and_observes_reload_failure
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_commands_do_not_overlap_and_each_receipt_is_independent
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_pending_intent_is_not_an_accepted_reload_receipt
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_cancelling_waiting_caller_never_spawns_or_accepts
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_cancelled_command_is_reaped_before_next_reload_even_if_cancelled_again
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_timed_out_command_has_no_success_receipt_and_owned_child_is_reaped
+6 failed in 0.99s

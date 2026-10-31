@@ -1,0 +1,45 @@
+........................................................................ [ 20%]
+........................................................................ [ 41%]
+........................................................................ [ 61%]
+........................................................................ [ 82%]
+.............................................................            [100%]
+============================== warnings summary ===============================
+tests/unit/test_ag05_native_contact_revision.py: 36 warnings
+tests/unit/test_ag05_contact_projection.py: 8 warnings
+tests/unit/test_realtime_relationship_ownership.py: 3 warnings
+tests/unit/test_ag03_relationship_acceptance.py: 2 warnings
+tests/unit/test_ag04_native_qualification.py: 157 warnings
+tests/unit/test_live_call_lead_capture.py: 2 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_realtime_independent.py::test_setup_exception_releases_connected_provider_and_gateway
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\realtime\runtime.py:187: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/unit/test_realtime_independent.py::test_setup_exception_releases_connected_provider_and_gateway
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\realtime\runtime.py:188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at=datetime.utcnow(),
+
+tests/unit/test_live_call_lead_capture.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_writes_the_lead_detail_through_the_pipeline
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_that_established_nothing_writes_nothing
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\turn_ender.py:594: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_writes_the_lead_detail_through_the_pipeline
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_writes_the_lead_detail_through_the_pipeline
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_writes_the_lead_detail_through_the_pipeline
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_writes_the_lead_detail_through_the_pipeline
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_that_established_nothing_writes_nothing
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_that_established_nothing_writes_nothing
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_that_established_nothing_writes_nothing
+tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_that_established_nothing_writes_nothing
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+349 passed, 230 warnings in 14.04s

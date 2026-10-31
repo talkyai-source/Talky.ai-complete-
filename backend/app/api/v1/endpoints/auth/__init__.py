@@ -11,7 +11,7 @@ Official references used (verified March 2026):
 Endpoints:
   POST /auth/signup/start      — generate signup verification code
   POST /auth/signup/complete   — verify code and create account
-  POST /auth/register          — direct (single-step) account creation
+  POST /auth/register          — retired; use the verified signup flow (HTTP 410)
   POST /auth/login             — verify credentials, returns JWT + session cookie
   GET  /auth/me                — return current user info
   PATCH /auth/me               — update profile fields

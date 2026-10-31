@@ -30,9 +30,11 @@ from typing import Any, Dict, Optional
 
 from fastapi import WebSocket
 
+from app.realtime.session_config import RealtimeSessionConfig
 from app.domain.models.session import CallSession, CallState
 from app.domain.models.conversation_state import ConversationState, ConversationContext
 from app.domain.models.agent_config import AgentConfig
+from app.domain.models.ai_config import GroqModel
 from app.domain.models.voice_contract import generate_talklee_call_id
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 from app.domain.repositories.call_event_repository import CallEventRepository
@@ -98,17 +100,34 @@ class Direction(str, enum.Enum):
 
     @classmethod
     def from_first_speaker(cls, first_speaker: Optional[str]) -> "Direction":
-        """Map the legacy per-call ``first_speaker`` flag onto a Direction.
+        """DEPRECATED — do not call from campaign, dialer or browser-test paths.
 
         Pre-T3.10 the codebase carried ``first_speaker = "user"`` to mean
-        "treat this as inbound framing". The two concepts are actually
-        orthogonal (who speaks first vs. who initiated the call), but
-        until per-campaign direction lands in the UI, deriving direction
-        from first_speaker preserves the existing intent without needing
-        a schema change.
+        "treat this as inbound framing", and this mapping was a bridge "until
+        per-campaign direction lands in the UI". It never did, and every
+        later consumer of ``direction`` read INBOUND as *carrier inbound*:
+        realtime instructions told the agent the caller had rung in, AMD and
+        voicemail detection switched off, and the 2026-08-30 recording gate
+        discarded the recording. Who speaks first is
+        :func:`opening_mode_from_first_speaker`; who originated the call is a
+        fact the caller already knows and must pass explicitly.
         """
         value = (first_speaker or "").strip().lower()
         return cls.INBOUND if value == "user" else cls.OUTBOUND
+
+
+OPENING_MODE_AGENT_FIRST = "agent_first"
+OPENING_MODE_CALLEE_FIRST = "callee_first"
+
+def opening_mode_from_first_speaker(first_speaker: Optional[str]) -> str:
+    """Map the per-call ``first_speaker`` knob onto an opening mode.
+
+    ``"user"`` → the agent waits for the other party to speak (callee-first).
+    Anything else, including None, → the agent opens. This is a turn-taking
+    choice and says nothing about who originated the call.
+    """
+    value = (first_speaker or "").strip().lower()
+    return OPENING_MODE_CALLEE_FIRST if value == "user" else OPENING_MODE_AGENT_FIRST
 
 
 # ---------------------------------------------------------------------------
@@ -164,7 +183,7 @@ def _default_flux_capture_keyterms() -> list:
 
 
 @dataclass
-class VoiceSessionConfig:
+class VoiceSessionConfig(RealtimeSessionConfig):
     """All parameters needed to spin up a voice session."""
 
     # Provider selection
@@ -174,6 +193,11 @@ class VoiceSessionConfig:
 
     # STT settings
     stt_model: str = "flux-general-en"
+    # Saved in AI Options (AIProviderConfig.stt_language). Flux is English-only
+    # ("flux-general-en"), so a non-English language forces the Nova-3 primary
+    # and is passed to Deepgram on every stream (2026-09-06 audit, F09 — the
+    # setting was accepted, stored and then never sent anywhere).
+    stt_language: str = "en"
     stt_sample_rate: int = 16000
     stt_encoding: str = "linear16"
     stt_eot_threshold: float = 0.7
@@ -184,6 +208,8 @@ class VoiceSessionConfig:
     # providers.yaml flux keyterms (see _default_flux_keyterms). Applies to
     # BOTH telephony and ask-AI since both build STT via _create_stt_provider.
     stt_keyterms: list[str] = field(default_factory=list)
+    # Dedicated settings; Flux timing overrides never change AssemblyAI modes.
+    assemblyai_settings: Optional[dict] = None
 
     # Turn-0 floor — see voice_pipeline_service._should_reject_turn_0.
     # Per-tenant overrides come through the voice_tuning resolver at
@@ -194,7 +220,7 @@ class VoiceSessionConfig:
     turn_0_min_alpha_chars: int = 2
 
     # LLM settings
-    llm_model: str = "llama-3.3-70b-versatile"
+    llm_model: str = GroqModel.GPT_OSS_20B.value
     llm_temperature: float = 0.6
     llm_max_tokens: int = 150
     # Provider-specific knob, Gemini-only today. None = let the model decide
@@ -232,11 +258,38 @@ class VoiceSessionConfig:
     telephony_provider: str = "sip"  # "sip" | "vonage" | "twilio" | "browser"
     agent_config: Optional[AgentConfig] = None
     system_prompt: str = ""
+    # Validated tenant-authored guidance only, without cascaded voice tags or
+    # an outbound persona body. Shared with the realtime instruction builder.
+    campaign_guidance: str = ""
+    # Prepared before provider connection. Runtime section reads never refresh
+    # this call's published/admission source snapshot.
+    _knowledge_catalog: object = field(default=None, repr=False)
+    knowledge_mode: Optional[str] = None
+    # ── Prompt identity (goals.md §6) ────────────────────────────────────
+    # Which instructions this call actually ran on. `prompt_version` is the
+    # name a human rolls back to; `prompt_hash` is derived from the composed
+    # text and cannot go stale when someone edits a persona and forgets to
+    # bump the version. Both travel with the session so the per-call log and
+    # the calls row can carry them — a QA batch has to be able to prove all
+    # 30 calls used one prompt, and that it differed from the batch before.
+    #
+    # The hash covers the STABLE prompt only: it is taken before the callee's
+    # name is prepended, because per-lead context changes every call and would
+    # make the hash unique per call — varying for the wrong reason.
+    prompt_template: str = ""
+    prompt_version: str = ""
+    prompt_hash: str = ""
     # Call direction — set by the bridge when the per-call first_speaker
     # is known, used by build_telephony_session_config to pick the right
     # base prompt (inbound vs outbound) up front. Defaults to OUTBOUND so
     # every legacy call path keeps its current behaviour.
     direction: Direction = Direction.OUTBOUND
+    # Who talks first — "agent_first" or "callee_first" — independent of
+    # direction: an outbound dialer call can be callee-first (a courtesy pause
+    # for "hello?") and a true inbound call can be agent-first. Drives the
+    # callee-first prompt directive and realtime greet_on_start. None means the
+    # caller did not say, and the direction-derived legacy default applies.
+    opening_mode: Optional[str] = None
     # Persona key — "lead_gen" / "customer_support" / "receptionist", or
     # None for legacy/non-telephony sessions. Set by
     # build_telephony_session_config when the campaign has a
@@ -251,6 +304,13 @@ class VoiceSessionConfig:
     # in `tenant_ai_credentials` first, falling back to env vars when no
     # row exists. None = legacy behaviour (env vars only).
     tenant_id: Optional[str] = None
+    # Explicit region used only to interpret a caller-stated national phone
+    # number. None is fail-closed: the agent asks for a country code rather than
+    # silently assuming US.
+    contact_phone_region: Optional[str] = None
+    # Campaign pronunciations applied to what the voice says
+    # (voice_pipeline/spoken_pronunciations.py).
+    tts_pronunciations: tuple = ()
     # Only enable this when the session is backed by a real row in `calls`.
     # Browser demos generate ephemeral call_ids that do not satisfy the FK.
     event_logging_enabled: bool = False
@@ -258,14 +318,9 @@ class VoiceSessionConfig:
     # ── Pipeline mode (Realtime add-on) ──────────────────────────────────
     # "cascaded" (default) = the classic STT→LLM→TTS pipeline, unchanged.
     # "realtime" = a single OpenAI gpt-realtime-2 speech-to-speech session
-    # (see app/infrastructure/realtime/openai_realtime.py). Mirrors the fields
+    # (see app/realtime/openai.py). Mirrors the fields
     # on AIProviderConfig; the telephony session-config builder threads them
     # through. Default "cascaded" keeps every existing call byte-for-byte.
-    pipeline_mode: str = "cascaded"
-    realtime_model: str = "gpt-realtime-2"
-    realtime_voice: str = "marin"
-    realtime_settings: Optional[Dict[str, Any]] = None
-
     # ── Callee identity ("who you're calling") ───────────────────────────
     # Set by build_telephony_session_config from the lead threaded through
     # make_call. The cascaded path bakes this into system_prompt directly;
@@ -353,6 +408,41 @@ class VoiceOrchestrator:
         self._ask_ai_providers: Optional[tuple] = None  # (stt, llm, None, gateway)
         logger.info("VoiceOrchestrator initialised")
 
+    async def _create_session_providers(self, config: VoiceSessionConfig):
+        """Create (stt, llm, tts, media_gateway) concurrently.
+
+        If any of them fails, clean up the ones that DID initialise (LLM/HTTP
+        client, Deepgram TTS heartbeat socket, aiohttp sessions, gateway)
+        before re-raising the first failure with its original type, so e.g.
+        VoiceEligibilityError still maps to 403. Only objects created here are
+        cleaned; the shared ask_ai singletons never pass through this path.
+        """
+        results = await asyncio.gather(
+            self._create_stt_provider(config),
+            self._create_llm_provider(config),
+            self._create_tts_provider(config),
+            self._create_media_gateway(config),
+            return_exceptions=True,
+        )
+        failures = [r for r in results if isinstance(r, BaseException)]
+        if not failures:
+            return tuple(results)
+        for result in results:
+            if isinstance(result, BaseException) or result is None:
+                continue
+            cleanup = getattr(result, "cleanup", None)
+            if cleanup is None:
+                continue
+            try:
+                await cleanup()
+            except Exception:
+                logger.debug("Provider cleanup after failed session init failed", exc_info=True)
+        # Cancellation must win over an ordinary init error.
+        for failure in failures:
+            if isinstance(failure, asyncio.CancelledError):
+                raise failure
+        raise failures[0]
+
     async def prewarm_ask_ai_providers(self) -> None:
         """
         Pre-initialise Ask AI provider singletons at server startup.
@@ -369,12 +459,7 @@ class VoiceOrchestrator:
 
         config = build_ask_ai_session_config()
         try:
-            stt, llm, tts, gateway = await asyncio.gather(
-                self._create_stt_provider(config),
-                self._create_llm_provider(config),
-                self._create_tts_provider(config),
-                self._create_media_gateway(config),
-            )
+            stt, llm, tts, gateway = await self._create_session_providers(config)
             try:
                 cleanup = getattr(tts, "cleanup", None)
                 if cleanup:
@@ -392,6 +477,80 @@ class VoiceOrchestrator:
     # 1. Create session
     # ------------------------------------------------------------------
 
+    async def _persist_prompt_identity(
+        self, call_row_id: Any, config: VoiceSessionConfig, tenant_id: Any = None
+    ) -> None:
+        """Write the prompt identity onto the durable ``calls`` row
+        (goals.md §6, task #90).
+
+        WHICH KEY, AND WHY NOT talklee_call_id (2026-08-28)
+        ---------------------------------------------------
+        This used to run at session-creation time and match on
+        ``talklee_call_id``. It could never match a row. ``create_voice_session``
+        MINTS a fresh ``generate_talklee_call_id()`` for the session; the dialer
+        minted its own, unrelated one when it inserted the ``calls`` row
+        (``dialer_worker._create_call_record``), and nothing carries the
+        dialer's id onto ``VoiceSessionConfig``. Two independent random ids →
+        ``UPDATE 0`` on every single call, which is exactly why
+        ``calls.prompt_version`` was NULL everywhere.
+
+        The join the telephony bridge really does establish is
+        ``voice_session._dialer_call_id`` = ``calls.id`` — set by
+        ``call_transcript_persister.bind_telephony_call`` for outbound and from
+        the pinned admission snapshot for true inbound. That is the key used
+        here, and it is the same key the transcript, outcome and duration
+        writes use at hangup.
+
+        Best-effort by design. A failed bookkeeping write must never fail a
+        call — losing a conversation because an UPDATE hit a busy row would be
+        the wrong trade every time. The identity is still in the
+        ``call_prompt_identity`` log line, so a failure costs queryability, not
+        the fact.
+        """
+        pool = getattr(self._db_client, "pool", None)
+        if pool is None or not call_row_id:
+            return
+        # An empty identity is not an identity: ask-AI and the browser
+        # assistant build their config elsewhere and have no campaign prompt.
+        # Writing '' over the row would turn "no evidence" into a value.
+        if not getattr(config, "prompt_hash", ""):
+            return
+        try:
+            from app.core.db_utils import acquire_with_tenant
+
+            # Tenant context so this keeps working once the app role stops
+            # bypassing row security (task #80). None routes through the
+            # documented bypass path for sessions with no tenant.
+            tenant = tenant_id or getattr(config, "tenant_id", None)
+            async with acquire_with_tenant(pool, str(tenant) if tenant else None) as conn:
+                updated = await conn.execute(
+                    """UPDATE calls
+                          SET prompt_template = $2,
+                              prompt_version  = $3,
+                              prompt_hash     = $4
+                        WHERE id = $1::uuid""",
+                    str(call_row_id),
+                    config.prompt_template,
+                    config.prompt_version,
+                    config.prompt_hash,
+                )
+            # "UPDATE 0" means the join key was wrong — which is invisible
+            # otherwise, and would leave every review unattributable. Now that
+            # the key is a bound calls.id, this signal actually varies: it is
+            # silent on the pre-warm/orphan sessions that never bound a row
+            # (they return above) and loud only when a bound id misses.
+            if isinstance(updated, str) and updated.endswith(" 0"):
+                logger.warning(
+                    "prompt_identity_persist_matched_no_row call=%s — no calls "
+                    "row with that id",
+                    str(call_row_id)[:12],
+                )
+        except Exception:  # noqa: BLE001 — see docstring
+            logger.warning(
+                "prompt_identity_persist_failed call=%s",
+                str(call_row_id)[:12], exc_info=True,
+            )
+
     async def create_voice_session(self, config: VoiceSessionConfig) -> VoiceSession:
         """
         Initialise providers, create a CallSession, and set up event logging.
@@ -406,32 +565,13 @@ class VoiceOrchestrator:
             f"talklee={talklee_call_id} type={config.session_type}"
         )
 
-        # ── PIPELINE-MODE BRANCH POINT (Realtime add-on) ────────────────────
-        # A single OpenAI gpt-realtime-2 speech-to-speech session replaces the
-        # cascaded STT→LLM→TTS middle. Default "cascaded" means every existing
-        # tenant skips this entirely and the code below is byte-for-byte
-        # unchanged. Fail-soft: if the realtime session can't connect, we log
-        # and FALL BACK to the cascaded pipeline so the call still goes out.
-        if getattr(config, "pipeline_mode", "cascaded") == "realtime":
-            rt_session = await self._create_realtime_voice_session(
-                config, call_id, talklee_call_id
-            )
-            if rt_session is not None:
-                self._active_sessions[call_id] = rt_session
-                logger.info("Realtime voice session created: %s", call_id[:8])
-                return rt_session
-            logger.warning(
-                "realtime session setup failed call_id=%s — falling back to "
-                "cascaded pipeline", call_id[:8],
-            )
-            # Force cascaded mode so the gateway + pipeline built below use the
-            # CASCADED sample rate (STT rate), not realtime's 8kHz. Without this
-            # the fallback ran the cascaded pipeline on an 8kHz gateway →
-            # half-rate/garbled "ghost" audio (the exact symptom the user hit).
-            try:
-                config.pipeline_mode = "cascaded"
-            except Exception:  # noqa: BLE001 — config may be immutable; best-effort
-                pass
+        # The selected Realtime engine must never silently become cascaded.
+        if config.pipeline_mode == "realtime":
+            rt_session = await self._create_realtime_voice_session(config, call_id, talklee_call_id)
+            if rt_session is None:
+                raise RuntimeError("Realtime could not start. Check OpenAI configuration and connection; no alternative engine was used.")
+            self._active_sessions[call_id] = rt_session
+            return rt_session
 
         # --- Providers: reuse singletons for ask_ai, init fresh for all others ---
         # TTS is always created fresh per-session (see __init__ comment for why).
@@ -444,12 +584,7 @@ class VoiceOrchestrator:
                 llm_provider,
                 tts_provider,
                 media_gateway,
-            ) = await asyncio.gather(
-                self._create_stt_provider(config),
-                self._create_llm_provider(config),
-                self._create_tts_provider(config),
-                self._create_media_gateway(config),
-            )
+            ) = await self._create_session_providers(config)
             # Cache STT, LLM, and gateway on first successful init for ask_ai.
             # TTS slot is left None — it is never shared.
             if config.session_type == "ask_ai" and self._ask_ai_providers is None:
@@ -485,12 +620,47 @@ class VoiceOrchestrator:
             llm_model=config.llm_model,
             llm_temperature=config.llm_temperature,
             llm_max_tokens=config.llm_max_tokens,
+            stt_language=config.stt_language or "en",
             voice_id=config.voice_id,
+            contact_phone_region=config.contact_phone_region,
+            tts_pronunciations=list(config.tts_pronunciations),
             started_at=datetime.utcnow(),
             last_activity_at=datetime.utcnow(),
         )
         call_session.talklee_call_id = talklee_call_id
         call_session.barge_in_event = asyncio.Event()
+        from app.services.scripts.knowledge.session_inject import copy_prepared_knowledge
+        copy_prepared_knowledge(config, call_session)
+
+        # WHICH INSTRUCTIONS DID THIS CALL RUN ON? (goals.md §6)
+        # The identity is computed in build_telephony_session_config, which
+        # runs before a call exists — so `telephony_prompt_identity` can only
+        # name the campaign, and a QA batch would have to correlate by
+        # timestamp. This is the first point where the call id and the config
+        # are both in scope, so log them together and make the join trivial.
+        #
+        # Guarded on prompt_hash because non-telephony sessions (ask-AI, the
+        # browser assistant) build their config elsewhere and legitimately have
+        # no campaign prompt; an empty line there would be noise, not evidence.
+        if getattr(config, "prompt_hash", ""):
+            logger.info(
+                "call_prompt_identity call=%s campaign=%s template=%s "
+                "version=%s hash=%s",
+                str(call_id)[:12], config.campaign_id, config.prompt_template,
+                config.prompt_version, config.prompt_hash,
+            )
+            # AND PERSIST IT (task #90). Logs rotate, and neither the QA release
+            # gate ("every call has a prompt version") nor a conversation review
+            # can JOIN on a log line. The row is the only durable home.
+            #
+            # NOT HERE, THOUGH (2026-08-28). There is no calls row this session
+            # can be matched to yet: neither this session's call_id nor its
+            # freshly-minted talklee_call_id exists in `calls`, and the dialer's
+            # row is keyed by ids this code has never seen. The durable
+            # calls.id only arrives later, as `_dialer_call_id`, from
+            # bind_telephony_call (outbound) or the admission snapshot
+            # (inbound) — so the write happens in end_session, alongside the
+            # transcript/outcome/duration writes that use the same key.
 
         # --- Event logging ---
         event_repo = None
@@ -567,101 +737,6 @@ class VoiceOrchestrator:
             raise
 
     # ------------------------------------------------------------------
-    # 1b. Mid-call realtime → cascaded fallback (Fix 14)
-    # ------------------------------------------------------------------
-
-    async def start_cascaded_fallback(
-        self, session: VoiceSession
-    ) -> Optional[asyncio.Task]:
-        """Rebuild the CASCADED pipeline on a live realtime session whose
-        speech-to-speech socket dropped mid-call, and start it.
-
-        Reuses the session's EXISTING media gateway (it is wired to the live
-        RTP/gateway session — a fresh gateway from the factory would not be),
-        creates fresh STT/LLM/TTS providers from the session's own config, and
-        returns the started pipeline task. Returns None on any failure so the
-        caller can fall through to normal teardown (the call ends — never worse
-        than today's dead-air-until-watchdog).
-
-        Sample-rate note: the realtime gateway runs at a single 8 kHz internal
-        rate (see _create_media_gateway). We align the cascaded pipeline's
-        stt/tts rates to the gateway's ACTUAL internal rate so the
-        gateway→STT ingest and TTS→gateway egress resample chains stay
-        self-consistent — a 16 kHz assumption on an 8 kHz gateway is exactly
-        the half-speed 'ghost audio' the connect-time fallback guards against.
-        """
-        config = getattr(session, "config", None)
-        gateway = getattr(session, "media_gateway", None)
-        call_session = getattr(session, "call_session", None)
-        if config is None or gateway is None or call_session is None:
-            logger.error(
-                "cascaded fallback missing config/gateway/call_session "
-                "call_id=%s — cannot rebuild", getattr(session, "call_id", "?"),
-            )
-            return None
-        try:
-            # Force cascaded mode so any provider/rate logic keyed off
-            # pipeline_mode builds the cascaded shape.
-            try:
-                config.pipeline_mode = "cascaded"
-            except Exception:  # noqa: BLE001 — config may be frozen; best-effort
-                pass
-
-            gw_rate = int(
-                getattr(gateway, "_sample_rate", None) or config.stt_sample_rate
-            )
-
-            stt_provider, llm_provider, tts_provider = await asyncio.gather(
-                self._create_stt_provider(config),
-                self._create_llm_provider(config),
-                self._create_tts_provider(config),
-            )
-
-            pipeline = VoicePipelineService(
-                stt_provider=stt_provider,
-                llm_provider=llm_provider,
-                tts_provider=tts_provider,
-                media_gateway=gateway,
-                stt_sample_rate=gw_rate,
-                tts_sample_rate=gw_rate,
-            )
-
-            # The realtime bridge told the gateway its output was already
-            # real-time-paced (batch=1). Clear that hint so cascaded TTS gets
-            # its normal opportunistic batching. Best-effort.
-            try:
-                set_rt = getattr(gateway, "set_realtime_output", None)
-                if set_rt:
-                    set_rt(session.call_id, False)
-            except Exception:  # noqa: BLE001
-                pass
-
-            # Swap the cascaded providers + pipeline onto the live session so
-            # end_session tears them down normally on hangup.
-            session.stt_provider = stt_provider
-            session.llm_provider = llm_provider
-            session.tts_provider = tts_provider
-            session.pipeline = pipeline
-
-            # The gateway session was already registered at answer time; the
-            # telephony start_pipeline path takes websocket=None and reuses it.
-            task = asyncio.create_task(
-                pipeline.start_pipeline(call_session, None)
-            )
-            logger.warning(
-                "cascaded fallback pipeline started call_id=%s rate=%d",
-                session.call_id[:8], gw_rate,
-            )
-            return task
-        except Exception as exc:  # noqa: BLE001 — never raise into the callback
-            logger.error(
-                "cascaded fallback build failed call_id=%s: %s",
-                getattr(session, "call_id", "?"), exc,
-            )
-            return None
-
-    # ------------------------------------------------------------------
-    # 2. Start pipeline
     # ------------------------------------------------------------------
 
     async def start_pipeline(
@@ -678,7 +753,7 @@ class VoiceOrchestrator:
         invoking this method — ``TelephonyMediaGateway`` does not need a
         WebSocket and is initialised directly by the telephony bridge.
         """
-        if not session.pipeline:
+        if not session.pipeline and not session.realtime_bridge:
             raise RuntimeError("Pipeline not initialised")
 
         if websocket is not None:
@@ -691,7 +766,10 @@ class VoiceOrchestrator:
 
         async def _pipeline_with_error_handling():
             try:
-                await session.pipeline.start_pipeline(session.call_session, websocket=websocket)
+                if session.realtime_bridge is not None:
+                    await session.realtime_bridge.run()
+                else:
+                    await session.pipeline.start_pipeline(session.call_session, websocket=websocket)
             except Exception as e:
                 logger.error(f"Pipeline error for {session.call_id[:8]}: {e}")
                 raise
@@ -750,6 +828,7 @@ class VoiceOrchestrator:
         was_interrupted = False
         sent_audio = False
         waited_for_browser_playback = False
+        context_playback_allowed = True
 
         try:
             mute_during_tts = (
@@ -802,6 +881,9 @@ class VoiceOrchestrator:
                         )
                         break
 
+                    if not audio_chunk.data:
+                        continue
+
                     # Route greeting audio through the media gateway so browser
                     # sessions use the same format conversion and buffering path as
                     # normal replies.
@@ -845,7 +927,18 @@ class VoiceOrchestrator:
             ):
                 await websocket.send_json({"type": "tts_audio_complete"})
                 waited_for_browser_playback = True
-                await session.media_gateway.wait_for_playback_complete(session.call_id)
+                playback_result = await session.media_gateway.wait_for_playback_complete(session.call_id)
+                context_playback_allowed = playback_result is not False
+
+            if (
+                sent_audio and not was_interrupted and context_playback_allowed
+                and not interrupt_event.is_set()
+            ):
+                from app.domain.services.stt_context import update_stt_agent_context
+
+                await update_stt_agent_context(
+                    session.stt_provider, session.call_id, cleaned_greeting,
+                )
 
         except Exception as e:
             logger.error(f"Greeting TTS error: {e}")
@@ -902,6 +995,10 @@ class VoiceOrchestrator:
                 await session.pipeline_task
             except asyncio.CancelledError:
                 pass
+            except Exception:
+                # A pipeline may fail in its own finally while being cancelled.
+                # Gateway/provider cleanup and active-session removal still apply.
+                logger.warning("voice_pipeline_cancel_failed call=%s", call_id[:8], exc_info=True)
 
         # Realtime teardown (idempotent): cancelling pipeline_task already runs
         # bridge.run()'s finally→stop(), which closes the speech-to-speech
@@ -947,6 +1044,20 @@ class VoiceOrchestrator:
                 )
             except Exception as evt_err:
                 logger.debug(f"Failed to log session end: {evt_err}")
+
+        # WHICH INSTRUCTIONS DID THIS CALL RUN ON? (goals.md §6, task #90)
+        # Written here rather than at session creation because this is the
+        # first point where the durable `calls.id` is on the session: the
+        # bridge binds it after answer (bind_telephony_call for outbound, the
+        # pinned admission snapshot for inbound). Sessions that never bound a
+        # row — pre-warm, ringing, orphans — carry no id and are skipped.
+        # No-ops for sessions with no campaign prompt. Never raises.
+        if session.config is not None:
+            await self._persist_prompt_identity(
+                getattr(session, "_dialer_call_id", None),
+                session.config,
+                getattr(session, "_dialer_tenant_id", None),
+            )
 
         # Determine whether this session uses singleton (shared) providers.
         # Singleton providers must NOT be cleaned up — they are reused across
@@ -1028,14 +1139,22 @@ class VoiceOrchestrator:
             get_credential_resolver,
         )
 
-        api_key = await get_credential_resolver().resolve(
-            "deepgram", tenant_id=config.tenant_id,
-        )
+        engine = (config.stt_provider_type or "deepgram_flux").lower()
+        is_assemblyai = engine == "assemblyai"
+        failover_on = _failover_enabled("STT_FAILOVER_ENABLED")
+        resolver = get_credential_resolver()
+        api_key = None
+        observation_context = None
+        if not is_assemblyai or failover_on:
+            credential = await resolver.resolve_with_metadata("deepgram", tenant_id=config.tenant_id)
+            api_key = credential.secret if credential is not None else None
+            observation_context = credential.observation_context if credential is not None else None
 
         def _build_flux(model: str):
             from app.infrastructure.stt.deepgram_flux import DeepgramFluxSTTProvider
             init = {
                 "api_key": api_key,
+                "observation_context": observation_context,
                 "model": model,
                 "sample_rate": config.stt_sample_rate,
                 "encoding": config.stt_encoding,
@@ -1058,6 +1177,7 @@ class VoiceOrchestrator:
             from app.infrastructure.stt.deepgram_nova import DeepgramNovaSTTProvider
             init = {
                 "api_key": api_key,
+                "observation_context": observation_context,
                 "model": model,
                 "sample_rate": config.stt_sample_rate,
                 "encoding": config.stt_encoding,
@@ -1065,15 +1185,54 @@ class VoiceOrchestrator:
             return DeepgramNovaSTTProvider(), init
 
         # PRIMARY = the engine the tenant picked in AI Options (default Flux).
-        engine = (config.stt_provider_type or "deepgram_flux").lower()
         is_nova_primary = engine in ("deepgram_nova", "deepgram-nova", "nova", "nova-3")
-        if is_nova_primary:
+        # Flux only ships an English model; a non-English tenant language can
+        # only be honoured by Nova-3. Switch here as well as in the session
+        # builder so non-telephony callers get the same rule.
+        _lang = (getattr(config, "stt_language", None) or "en").strip().lower()
+        if is_assemblyai and _lang not in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz"):
+            raise ValueError("AssemblyAI 3.6 Pro is configured for English only")
+        if not is_assemblyai and not is_nova_primary and _lang not in ("en", "en-us", "en-gb", "en-au", "en-in", "en-nz"):
+            logger.info(
+                "stt_language_forces_nova language=%s (Flux is English-only)", _lang,
+            )
+            is_nova_primary = True
+        if is_assemblyai:
+            from app.infrastructure.stt.assemblyai import AssemblyAISTTProvider
+
+            primary = AssemblyAISTTProvider()
+            credential = await resolver.resolve_with_metadata("assemblyai", tenant_id=config.tenant_id)
+            primary_init = {
+                "api_key": credential.secret if credential is not None else None,
+                "observation_context": credential.observation_context if credential is not None else None,
+                "model": "universal-3-6-pro",
+                "sample_rate": config.stt_sample_rate,
+                "encoding": config.stt_encoding,
+                "assemblyai_settings": config.assemblyai_settings or {},
+                # The call's brand/agent/product names (telephony_session_config
+                # ._build_call_keyterms), the same list Flux already receives.
+                "keyterms": list(config.stt_keyterms or []),
+            }
+            # AssemblyAI-only accounts do not need a Deepgram subscription.
+            failover_on = failover_on and bool(api_key)
+            # Privacy settings fail closed: the Deepgram secondary has no PII
+            # redaction and no region pinning, so falling back would send
+            # unredacted audio outside the chosen region.
+            _aai_settings = config.assemblyai_settings or {}
+            if failover_on and (
+                bool(_aai_settings.get("redact_pii"))
+                or (_aai_settings.get("region") or "global") != "global"
+            ):
+                failover_on = False
+                logger.info(
+                    "assemblyai_failover_disabled_by_privacy_settings tenant=%s",
+                    config.tenant_id,
+                )
+        elif is_nova_primary:
             primary, primary_init = _build_nova(config.stt_model or "nova-3")
         else:
             primary, primary_init = _build_flux(config.stt_model or "flux-general-en")
         await primary.initialize(primary_init)
-
-        failover_on = _failover_enabled("STT_FAILOVER_ENABLED")
 
         # Controlled fault injection (2026-08-18). Off unless an operator names
         # THIS campaign in VOICE_STT_FAULT_SILENT_CAMPAIGN with a live expiry,
@@ -1125,16 +1284,18 @@ class VoiceOrchestrator:
         )
         logger.info(
             "stt_resilient_wrapper_active primary=%s-%s secondary=%s",
-            "nova" if is_nova_primary else "flux", primary_init["model"], sec_label,
+            engine, primary_init["model"], sec_label,
         )
         return wrapper
 
     # Map provider type → env var holding its API key. Keep this small and
     # explicit; if it grows past ~5 entries, move it to a config object.
     _LLM_API_KEY_ENV = {
+        "openai": "OPENAI_API_KEY",
         "groq": "GROQ_API_KEY",
         "gemini": "GEMINI_API_KEY",
         "cerebras": "CEREBRAS_API_KEY",
+        "deepseek": "DEEPSEEK_API_KEY",
     }
 
     # Default secondary model per provider for LLM_FAILOVER_ENABLED. Same-vendor
@@ -1143,6 +1304,16 @@ class VoiceOrchestrator:
     # fastest Groq model — a clean low-latency fallback. Operators can point the
     # secondary at another vendor (LLM_SECONDARY_PROVIDER=gemini) for true vendor
     # isolation, or override the model with LLM_SECONDARY_MODEL.
+    # The two production models are each other's fallback. When the configured
+    # secondary (env) turns out to be the same provider+model as the tenant's
+    # primary — which is exactly what happens when a tenant picks Groq 20B while
+    # LLM_SECONDARY_* names Groq 20B — the counterpart is used instead of
+    # silently running with no failover at all (2026-09-06 audit, F06).
+    _LLM_PAIR_FALLBACK = {
+        ("groq", "openai/gpt-oss-20b"): ("cerebras", "gpt-oss-120b"),
+        ("cerebras", "gpt-oss-120b"): ("groq", "openai/gpt-oss-20b"),
+    }
+
     _LLM_DEFAULT_SECONDARY_MODEL = {
         # Was llama-3.1-8b-instant until 2026-08-17, by which point that model
         # 404'd on this account — so the default same-vendor fallback was a
@@ -1151,7 +1322,37 @@ class VoiceOrchestrator:
         # deployment without that env var had a silently dead safety net.
         # gpt-oss-20b is the fastest id this account can actually serve.
         "groq": "openai/gpt-oss-20b",
+        "cerebras": "gpt-oss-120b",
     }
+
+    @classmethod
+    def _pick_secondary_llm(
+        cls,
+        *,
+        primary_provider: str,
+        primary_model: Optional[str],
+        env_provider: Optional[str],
+        env_model: Optional[str],
+    ) -> Optional[tuple[str, str]]:
+        """Resolve the (provider, model) to fail over to, or None.
+
+        Env wins when it names something different from the primary. When it
+        names the primary itself (or is unset for a provider without a default
+        model), fall back to the production pair's counterpart so selecting
+        either target model keeps the other as its safety net.
+        """
+        primary_provider = (primary_provider or "").strip()
+        primary_model = (primary_model or "").strip()
+        sec_provider = (env_provider or primary_provider).strip()
+        sec_model = (env_model or cls._LLM_DEFAULT_SECONDARY_MODEL.get(sec_provider) or "").strip()
+        if sec_provider and sec_model and not (
+            sec_provider == primary_provider and sec_model == primary_model
+        ):
+            return sec_provider, sec_model
+        counterpart = cls._LLM_PAIR_FALLBACK.get((primary_provider, primary_model))
+        if counterpart and counterpart != (primary_provider, primary_model):
+            return counterpart
+        return None
 
     # Map TTS primary provider name → secondary provider config tuple
     # (provider_name, env_var). Used by T1.3 failover wiring. Keep small
@@ -1177,13 +1378,17 @@ class VoiceOrchestrator:
         tenant deploys keep working.
         """
         from app.infrastructure.llm.factory import LLMFactory
+        from app.domain.models.ai_config import validate_traditional_llm_selection
         from app.domain.services.credential_resolver import (
             get_credential_resolver,
         )
 
-        provider_type = config.llm_provider_type or "groq"
+        provider_type = config.llm_provider_type
+        # Invalid saved profiles must not turn into first-token failures that
+        # silently invoke an unrelated secondary model.
+        validate_traditional_llm_selection(provider_type, config.llm_model)
         api_key_env = self._LLM_API_KEY_ENV.get(provider_type)
-        api_key = await get_credential_resolver().resolve(
+        credential = await get_credential_resolver().resolve_with_metadata(
             provider_type,
             tenant_id=config.tenant_id,
             env_var=api_key_env,
@@ -1191,7 +1396,8 @@ class VoiceOrchestrator:
 
         provider = LLMFactory.create(provider_type, config={})
         init_config: dict = {
-            "api_key": api_key,
+            "api_key": credential.secret if credential is not None else None,
+            "observation_context": credential.observation_context if credential is not None else None,
             "model": config.llm_model,
             "temperature": config.llm_temperature,
             "max_tokens": config.llm_max_tokens,
@@ -1217,12 +1423,47 @@ class VoiceOrchestrator:
             LLMFailoverPolicy,
             ResilientLLMProvider,
         )
-        deadline_ms = float(os.getenv("LLM_FIRST_TOKEN_DEADLINE_MS", "2500"))
+        # 2500 -> 1500 on 2026-09-23, from 194 production turns over 14 days
+        # (primary Cerebras gpt-oss-120b, secondary Groq gpt-oss-20b):
+        #
+        #   primary first token   <=1.0s 180 | 1.0-1.5s 4 | 1.5-2.0s 0
+        #                         2.0-2.5s 2 | >2.5s (failed over) 8
+        #   secondary first token when it served: 0.8-1.2s
+        #
+        # Every failover turn paid the full deadline in silence before the
+        # secondary even started - the 3.3-3.8s turns that were most of the
+        # slow tail. At 1.5s those eight turns get ~1s faster, the two
+        # 2.0-2.5s turns come out about even, and none gets slower because
+        # nothing landed between 1.5s and 2.0s. Going lower would start
+        # failing over the four 1.0-1.5s turns and make them slower. Re-check
+        # the distribution if the primary model or provider changes.
+        deadline_ms = float(os.getenv("LLM_FIRST_TOKEN_DEADLINE_MS", "1500"))
+
+        # Controlled fault injection, off unless a campaign is named AND the
+        # window is open. Applied to the PRIMARY here, inside the wrapper, so
+        # the failover path under test is the real one — no special-casing
+        # anywhere in resilient_llm. See llm_fault_injection for the four
+        # safety properties; it declines when there is no secondary, which
+        # cannot happen on this line because we returned above if so.
+        from app.domain.services.llm_fault_injection import maybe_break_primary
+
+        primary_for_wrapper = maybe_break_primary(
+            provider,
+            getattr(config, "campaign_id", None),
+            getattr(config, "call_id", None) or getattr(config, "campaign_id", None),
+            failover_enabled=True,
+        )
+
         wrapper = ResilientLLMProvider(
-            primary=provider,
+            primary=primary_for_wrapper,
             secondary=secondary,
             policy=LLMFailoverPolicy(
                 first_token_deadline_seconds=max(0.3, deadline_ms / 1000.0),
+                # Start the secondary alongside a primary that is still silent
+                # at 0.8 s (stability audit 2026-10-02). 0 disables.
+                hedge_after_seconds=(
+                    float(os.getenv("LLM_HEDGE_AFTER_MS", "800")) / 1000.0 or None
+                ),
             ),
         )
         logger.info(
@@ -1241,25 +1482,24 @@ class VoiceOrchestrator:
         Secondary selection: ``LLM_SECONDARY_PROVIDER`` (default = primary's
         provider) + ``LLM_SECONDARY_MODEL`` (default per ``_LLM_DEFAULT_SECONDARY_MODEL``).
         """
-        sec_provider = (
-            os.getenv("LLM_SECONDARY_PROVIDER") or primary_provider_type
-        ).strip()
-        sec_model = (
-            os.getenv("LLM_SECONDARY_MODEL")
-            or self._LLM_DEFAULT_SECONDARY_MODEL.get(sec_provider)
+        picked = self._pick_secondary_llm(
+            primary_provider=primary_provider_type,
+            primary_model=config.llm_model,
+            env_provider=os.getenv("LLM_SECONDARY_PROVIDER"),
+            env_model=os.getenv("LLM_SECONDARY_MODEL"),
         )
-        if not sec_model:
+        if picked is None:
             logger.warning(
-                "llm_secondary_no_model provider=%s — set LLM_SECONDARY_MODEL "
-                "to enable failover", sec_provider,
+                "llm_secondary_unavailable primary=%s/%s — env secondary is the "
+                "primary itself and no counterpart is known; failover disabled",
+                primary_provider_type, config.llm_model,
             )
             return None
-        if sec_provider == primary_provider_type and sec_model == config.llm_model:
-            logger.info(
-                "llm_secondary_same_as_primary model=%s — skipping (no benefit)",
-                sec_model,
-            )
-            return None
+        sec_provider, sec_model = picked
+        logger.info(
+            "llm_secondary_selected primary=%s/%s secondary=%s/%s",
+            primary_provider_type, config.llm_model, sec_provider, sec_model,
+        )
 
         try:
             from app.infrastructure.llm.factory import LLMFactory
@@ -1267,14 +1507,15 @@ class VoiceOrchestrator:
                 get_credential_resolver,
             )
 
-            api_key = await get_credential_resolver().resolve(
+            credential = await get_credential_resolver().resolve_with_metadata(
                 sec_provider,
                 tenant_id=config.tenant_id,
                 env_var=self._LLM_API_KEY_ENV.get(sec_provider),
             )
             secondary = LLMFactory.create(sec_provider, config={})
             sec_init: dict = {
-                "api_key": api_key,
+                "api_key": credential.secret if credential is not None else None,
+                "observation_context": credential.observation_context if credential is not None else None,
                 "model": sec_model,
                 "temperature": config.llm_temperature,
                 "max_tokens": config.llm_max_tokens,
@@ -1306,11 +1547,12 @@ class VoiceOrchestrator:
         if config.tts_provider_type == "cartesia":
             from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 
-            api_key = await resolver.resolve("cartesia", tenant_id=config.tenant_id)
+            credential = await resolver.resolve_with_metadata("cartesia", tenant_id=config.tenant_id)
             provider = CartesiaTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": config.voice_id,
                     "model_id": config.tts_model or "sonic-3",
                     "sample_rate": config.tts_sample_rate,
@@ -1319,11 +1561,12 @@ class VoiceOrchestrator:
         elif config.tts_provider_type == "deepgram":
             from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 
-            api_key = await resolver.resolve("deepgram", tenant_id=config.tenant_id)
+            credential = await resolver.resolve_with_metadata("deepgram", tenant_id=config.tenant_id)
             provider = DeepgramTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": config.voice_id,
                     "sample_rate": config.tts_sample_rate,
                 }
@@ -1331,11 +1574,28 @@ class VoiceOrchestrator:
         elif config.tts_provider_type == "elevenlabs":
             from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
 
-            api_key = await resolver.resolve("elevenlabs", tenant_id=config.tenant_id)
+            from app.domain.services.voice_eligibility import (
+                VoiceEligibilityError,
+                require_elevenlabs_voice_eligible,
+            )
+            try:
+                await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, config.voice_id)
+            except VoiceEligibilityError as exc:
+                # The catalog helper never raises: during an ElevenLabs outage it
+                # returns [] and eligibility reports a permission-style 403.
+                # Report the outage as the temporary 503 it is.
+                from app.infrastructure.tts.elevenlabs_catalog import elevenlabs_catalog_unavailable
+                if exc.code == "voice_not_available" and elevenlabs_catalog_unavailable():
+                    raise VoiceEligibilityError(
+                        "catalog_unavailable", "Voice eligibility is temporarily unavailable", 503
+                    ) from exc
+                raise
+            credential = await resolver.resolve_with_metadata("elevenlabs", tenant_id=config.tenant_id)
             provider = ElevenLabsTTSProvider()
             await provider.initialize(
                 {
-                    "api_key": api_key,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
                     "voice_id": config.voice_id,
                     "model_id": config.tts_model or "eleven_flash_v2_5",
                     "sample_rate": config.tts_sample_rate,
@@ -1399,8 +1659,18 @@ class VoiceOrchestrator:
         if not secondary_provider_name or secondary_provider_name == primary_name:
             return None
 
+        secondary_voice = _parse_voice_map(
+            os.getenv("TTS_SECONDARY_VOICE_MAP", "")
+        ).get(config.voice_id)
+        if not secondary_voice:
+            logger.warning(
+                "tts_secondary_unavailable reason=missing_voice_mapping primary=%s secondary=%s",
+                primary_name, secondary_provider_name,
+            )
+            return None
+
         resolver = get_credential_resolver()
-        api_key = await resolver.resolve(
+        credential = await resolver.resolve_with_metadata(
             secondary_provider_name, tenant_id=config.tenant_id,
         )
 
@@ -1409,8 +1679,9 @@ class VoiceOrchestrator:
                 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
                 provider = CartesiaTTSProvider()
                 await provider.initialize({
-                    "api_key": api_key,
-                    "voice_id": config.voice_id,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
+                    "voice_id": secondary_voice,
                     "model_id": "sonic-3",
                     "sample_rate": config.tts_sample_rate,
                 })
@@ -1418,10 +1689,13 @@ class VoiceOrchestrator:
                 from app.infrastructure.tts.elevenlabs_tts import (
                     ElevenLabsTTSProvider,
                 )
+                from app.domain.services.voice_eligibility import require_elevenlabs_voice_eligible
+                await require_elevenlabs_voice_eligible(getattr(self._db_client, "pool", None), config.tenant_id, secondary_voice)
                 provider = ElevenLabsTTSProvider()
                 await provider.initialize({
-                    "api_key": api_key,
-                    "voice_id": config.voice_id,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
+                    "voice_id": secondary_voice,
                     "model_id": "eleven_flash_v2_5",
                     "sample_rate": config.tts_sample_rate,
                 })
@@ -1429,8 +1703,9 @@ class VoiceOrchestrator:
                 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
                 provider = DeepgramTTSProvider()
                 await provider.initialize({
-                    "api_key": api_key,
-                    "voice_id": config.voice_id,
+                    "api_key": credential.secret if credential is not None else None,
+                    "observation_context": credential.observation_context if credential is not None else None,
+                    "voice_id": secondary_voice,
                     "sample_rate": config.tts_sample_rate,
                 })
             else:
@@ -1450,270 +1725,19 @@ class VoiceOrchestrator:
     # Realtime (speech-to-speech) session assembly
     # ------------------------------------------------------------------
 
-    async def _create_realtime_voice_session(
-        self,
-        config: VoiceSessionConfig,
-        call_id: str,
-        talklee_call_id: str,
-    ):
-        """Build a VoiceSession backed by an OpenAI gpt-realtime-2 bridge.
-
-        Returns the assembled VoiceSession on success, or None on any failure
-        (the caller then falls back to the cascaded pipeline). NEVER raises —
-        a realtime setup error must not take down call origination.
-
-        Kept deliberately separate from the cascaded provider machinery:
-        - resolves OPENAI_API_KEY via CredentialResolver ("openai"),
-        - builds instructions with build_realtime_instructions (NOT
-          compose_prompt / compliance_floor / prompt_builder),
-        - creates + connects OpenAIRealtimeSession,
-        - wires a RealtimeBridge to the SAME media-gateway transport TTS uses.
-        """
-        try:
-            from app.domain.services.credential_resolver import (
-                get_credential_resolver,
-            )
-            from app.infrastructure.realtime.openai_realtime import (
-                OpenAIRealtimeSession,
-                knowledge_lookup_tool,
-            )
-            from app.domain.services.voice_pipeline.realtime_bridge import (
-                RealtimeBridge,
-            )
-            from app.services.scripts.realtime_instructions import (
-                RealtimePersona,
-                build_realtime_instructions,
-            )
-
-            # Provider selection — STRICTLY opt-in, per-tenant/campaign. Rides
-            # the EXISTING realtime_settings JSONB dict (no new DB column):
-            # realtime_settings["provider"] = "openai" (default, unchanged) |
-            # "xai". Every existing tenant/campaign that has never set this
-            # key gets byte-for-byte the same OpenAI path as before.
-            rt_settings = config.realtime_settings or {}
-            provider = str(rt_settings.get("provider") or "openai").strip().lower()
-
-            if provider == "xai":
-                api_key = await get_credential_resolver().resolve(
-                    "xai", tenant_id=config.tenant_id,
-                )
-                if not api_key:
-                    logger.error(
-                        "realtime session call_id=%s: no XAI_API_KEY resolved "
-                        "(tenant=%s) — cannot start xai realtime", call_id[:8],
-                        config.tenant_id,
-                    )
-                    return None
-            else:
-                api_key = await get_credential_resolver().resolve(
-                    "openai", tenant_id=config.tenant_id,
-                )
-                if not api_key:
-                    logger.error(
-                        "realtime session call_id=%s: no OPENAI_API_KEY resolved "
-                        "(tenant=%s) — cannot start realtime", call_id[:8],
-                        config.tenant_id,
-                    )
-                    return None
-
-            # Persona/company/goal → clean realtime instructions. Pull from the
-            # campaign agent_config when present; fall back to sane defaults.
-            persona = self._build_realtime_persona(config)
-            instructions = build_realtime_instructions(persona)
-
-            # Media gateway at 8 kHz internal so the μ-law wire needs NO
-            # resampling — only the codec conversion in the bridge.
-            gateway = await self._create_media_gateway(config)
-            internal_rate = getattr(gateway, "_sample_rate", config.gateway_sample_rate)
-
-            if provider == "xai":
-                from app.infrastructure.realtime.xai_realtime import (
-                    XAIRealtimeSession,
-                    XAI_DEFAULT_MODEL,
-                )
-                # config.realtime_model defaults to the OpenAI model name
-                # ("gpt-realtime-2") for every tenant that hasn't touched
-                # this field, so that value is NOT a meaningful xAI override.
-                # Precedence: explicit realtime_settings["model"] > a
-                # realtime_model the operator actually customised > the xAI
-                # default.
-                xai_model = (
-                    rt_settings.get("model")
-                    or (config.realtime_model
-                        if config.realtime_model and config.realtime_model != "gpt-realtime-2"
-                        else XAI_DEFAULT_MODEL)
-                )
-                rt = XAIRealtimeSession(
-                    api_key=api_key,
-                    model=xai_model,
-                    agent_id=rt_settings.get("agent_id"),
-                    instructions=instructions,
-                    tools=[knowledge_lookup_tool()],
-                    settings=config.realtime_settings,
-                    call_id=call_id,
-                )
-            else:
-                rt = OpenAIRealtimeSession(
-                    api_key=api_key,
-                    model=config.realtime_model or "gpt-realtime-2",
-                    voice=config.realtime_voice or "marin",
-                    instructions=instructions,
-                    tools=[knowledge_lookup_tool()],
-                    settings=config.realtime_settings,
-                    call_id=call_id,
-                )
-            connected = await rt.connect()
-            if not connected:
-                logger.warning(
-                    "realtime session call_id=%s: connect() failed", call_id[:8],
-                )
-                try:
-                    await rt.close()
-                except Exception:
-                    pass
-                return None
-
-            # Knowledge context (reuse the cascaded retrieval). Best-effort — a
-            # missing pool just means the knowledge tool returns "no info".
-            knowledge_pool = None
-            try:
-                from app.core.container import get_container
-                c = get_container()
-                if c.is_initialized:
-                    # Use the SAME accessor the cascaded per-turn retrieval uses
-                    # (turn_streamer._knowledge_block_for_turn:
-                    #   getattr(container.db_client, "pool", None)). Both resolve
-                    # to the one asyncpg pool, but aligning the accessor keeps the
-                    # two knowledge paths provably identical and avoids the
-                    # db_pool @property raising if the pool is torn down mid-setup.
-                    knowledge_pool = getattr(c.db_client, "pool", None)
-            except Exception:
-                knowledge_pool = None
-
-            call_session = CallSession(
-                call_id=call_id,
-                campaign_id=config.campaign_id,
-                lead_id=config.lead_id,
-                provider_call_id=f"{config.session_type}-realtime",
-                state=CallState.ACTIVE,
-                conversation_state=ConversationState.GREETING,
-                conversation_context=ConversationContext(),
-                agent_config=config.agent_config,
-                persona_type=config.persona_type,
-                # CallSession REQUIRES these (they're cascaded fields). Omitting
-                # them raised "2 validation errors for CallSession" → the realtime
-                # setup crashed and fell back to cascaded (at the wrong 8kHz rate),
-                # which is what produced the "ghost" audio. Realtime doesn't USE the
-                # cascaded system_prompt, but the model needs the field populated;
-                # voice_id carries the realtime voice for telemetry/consistency.
-                system_prompt=config.system_prompt,
-                voice_id=(getattr(config, "realtime_voice", None) or config.voice_id),
-                started_at=datetime.utcnow(),
-                last_activity_at=datetime.utcnow(),
-            )
-            call_session.talklee_call_id = talklee_call_id
-            call_session.barge_in_event = asyncio.Event()
-
-            # Transcript accumulation for the realtime path. The speech-to-speech
-            # model emits no transcript on its own, so the bridge feeds the
-            # model's final agent + caller transcripts into a TranscriptService
-            # (class-level buffer keyed by call_id) — the SAME buffer the shared
-            # hangup persister reads. We stash it on the voice_session so
-            # lifecycle._on_call_ended finds it (pipeline is None on realtime).
-            from app.domain.services.transcript_service import TranscriptService
-            realtime_transcript_service = TranscriptService()
-
-            # Wire barge-in into the media gateway's pacing loop, mirroring
-            # the cascaded path (voice_pipeline_service.start_pipeline).
-            # Without this, TelephonyMediaGateway.send_audio's pacing loop
-            # never sees the event fire (it stays None), so it can't
-            # early-exit and the agent keeps talking ~200-400ms over the
-            # caller after a barge-in on realtime calls.
-            set_barge_in = getattr(gateway, "set_barge_in_event", None)
-            if set_barge_in:
-                set_barge_in(call_id, call_session.barge_in_event)
-
-            bridge = RealtimeBridge(
-                call_id=call_id,
-                realtime_session=rt,
-                media_gateway=gateway,
-                internal_sample_rate=internal_rate,
-                knowledge_pool=knowledge_pool,
-                tenant_id=config.tenant_id,
-                campaign_id=config.campaign_id,
-                session_active=lambda: self._active_sessions.get(call_id) is not None,
-                barge_in_event=call_session.barge_in_event,
-                # Caller-speaks-first (INBOUND) calls must NOT have the agent
-                # greet at t=0 — that talks over the caller who just picked
-                # up expecting to speak first. OUTBOUND (platform-dialed)
-                # calls keep the existing greet-on-connect behaviour.
-                greet_on_start=(config.direction == Direction.OUTBOUND),
-                transcript_service=realtime_transcript_service,
-                talklee_call_id=talklee_call_id,
-            )
-
-            voice_session = VoiceSession(
-                call_id=call_id,
-                talklee_call_id=talklee_call_id,
-                call_session=call_session,
-                media_gateway=gateway,
-                realtime_session=rt,
-                realtime_bridge=bridge,
-                config=config,
-            )
-            # Surface the transcript buffer for the hangup persister
-            # (lifecycle._on_call_ended falls back to this when pipeline is None).
-            voice_session.transcript_service = realtime_transcript_service
-            return voice_session
-        except Exception as exc:  # noqa: BLE001 — fail soft to cascaded
-            logger.error(
-                "realtime session setup raised call_id=%s: %s — falling back",
-                call_id[:8], exc,
-            )
-            return None
+    async def _create_realtime_voice_session(self, config, call_id, talklee_call_id):
+        from app.realtime.runtime import create_realtime_voice_session
+        return await create_realtime_voice_session(self, config, call_id, talklee_call_id)
 
     @staticmethod
-    def _build_realtime_persona(config: VoiceSessionConfig):
-        """Map campaign/agent config onto a RealtimePersona. Tolerant of
-        missing fields — realtime should work even on a bare campaign."""
-        from app.services.scripts.realtime_instructions import RealtimePersona
+    def _resolve_realtime_greet_on_start(config):
+        from app.realtime.runtime import resolve_realtime_greet_on_start
+        return resolve_realtime_greet_on_start(config)
 
-        ac = config.agent_config
-        agent_name = getattr(ac, "agent_name", None) or getattr(ac, "name", None) or "Alex"
-        company = getattr(ac, "company_name", None) or getattr(ac, "company", None) or "the company"
-        goal = (
-            getattr(ac, "goal", None)
-            or getattr(ac, "objective", None)
-            or "have a helpful, natural conversation with the caller"
-        )
-        role = getattr(ac, "role", None) or "a friendly voice assistant"
-
-        # "Who you're calling" for the realtime pipeline. The cascaded path
-        # gets this via system_prompt; realtime builds instructions from the
-        # persona, so surface it as extra_notes. Fail-soft: no name → no note.
-        extra_notes = None
-        first = (getattr(config, "callee_first_name", None) or "").strip()
-        last = (getattr(config, "callee_last_name", None) or "").strip()
-        callee_company = (getattr(config, "callee_company", None) or "").strip()
-        full = " ".join(p for p in (first, last) if p).strip()
-        if full:
-            greet = first or full
-            comp_clause = f" from {callee_company}" if callee_company else ""
-            extra_notes = (
-                f"You are calling {full}{comp_clause}. You haven't spoken to "
-                "them yet, so treat the name as who you expect to reach, not a "
-                "confirmed fact. Greet them by first name and check you've "
-                f'reached the right person (e.g. "Hi, is this {greet}?") before '
-                "getting into it. Don't recite their details back robotically."
-            )
-
-        return RealtimePersona(
-            agent_name=str(agent_name),
-            company_name=str(company),
-            role=str(role),
-            goal=str(goal),
-            extra_notes=extra_notes,
-        )
+    @staticmethod
+    def _build_realtime_persona(config):
+        from app.realtime.runtime import build_realtime_persona
+        return build_realtime_persona(config)
 
     async def _create_media_gateway(self, config: VoiceSessionConfig):
         """Initialise and return a media gateway via the factory."""

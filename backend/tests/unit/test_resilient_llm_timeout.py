@@ -137,12 +137,30 @@ async def test_no_secondary_passes_through_to_primary():
 
 
 @pytest.mark.asyncio
-async def test_clean_zero_token_completion_does_not_failover():
-    primary = _TimeoutStub("groq", tokens=[])          # responds fine, says nothing
+async def test_empty_primary_completion_fails_over_before_anything_is_spoken():
+    # A reasoning model that burned its budget thinking ends the stream with
+    # zero visible tokens. Nothing was spoken, so the secondary takes the turn.
+    primary = _TimeoutStub("groq", tokens=[])
     secondary = _TimeoutStub("backup", tokens=["x"])
     r = ResilientLLMProvider(primary, secondary, policy=_fast_policy())
+    assert await _drain(r) == ["x"]
+    assert secondary.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_completion_from_both_ends_cleanly_without_raising():
+    primary = _TimeoutStub("groq", tokens=[])
+    secondary = _TimeoutStub("backup", tokens=[])
+    r = ResilientLLMProvider(primary, secondary, policy=_fast_policy())
+    assert await _drain(r) == []          # turn streamer speaks its recovery line
+    assert secondary.calls == 1
+
+
+@pytest.mark.asyncio
+async def test_empty_completion_without_a_secondary_ends_cleanly():
+    primary = _TimeoutStub("groq", tokens=[])
+    r = ResilientLLMProvider(primary, None, policy=_fast_policy())
     assert await _drain(r) == []
-    assert secondary.calls == 0
 
 
 @pytest.mark.asyncio

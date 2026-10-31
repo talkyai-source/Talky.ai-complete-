@@ -1,0 +1,166 @@
+"""Which prompt text did this call actually use?
+
+WHY THIS EXISTS (goals.md §6, 2026-08-22)
+-----------------------------------------
+`telephony_prompt_composed` recorded persona, agent, company, campaign and
+prompt_chars — everything except the one thing a QA batch needs. Two calls could
+run completely different instructions and be indistinguishable in the logs, so
+none of these release-gate lines were checkable:
+
+    "Every call has a call ID, recording/transcript, prompt version and score."
+    "No old prompt used in any test call."
+    "Freeze one prompt version for every test batch."
+
+A prompt run for 30 controlled calls has to be provably the same prompt for all
+30, and provably different from the one before it.
+
+TWO IDENTIFIERS, BECAUSE THEY ANSWER DIFFERENT QUESTIONS
+--------------------------------------------------------
+``prompt_version`` is a name a human chose: "lead_gen@2". It is what you say in
+a standup and what you roll back to. It is also, on its own, a promise nobody
+can keep — someone edits a persona and forgets to bump it, and every call after
+that is mislabelled with no signal at all.
+
+``prompt_hash`` is derived from the composed text. It cannot lie and it cannot
+go stale, but it means nothing to a person.
+
+So both are logged, and the registry below pins them **together**. The
+accompanying test recomputes each version's hash from the live prompt modules
+and fails when they diverge — which is what makes "versions are immutable once
+used; changes create a new version" an enforced rule rather than a hope.
+
+WHAT IS HASHED, AND WHAT DELIBERATELY IS NOT
+--------------------------------------------
+The hash covers the *stable* composed system prompt — persona body, guardrails,
+compliance floor, campaign slots, tenant instructions. It is taken in
+``telephony_session_config`` at the moment ``_compose()`` returns, which is
+before ``build_call_target_block`` prepends the callee's name and company.
+
+That boundary is the entire point. Per-lead context changes on every single
+call, so folding it in would give every call a unique hash and answer "was this
+the same prompt?" with "no" forever — a metric that varies for the wrong reason
+is as useless as one that never varies at all.
+"""
+
+from __future__ import annotations
+
+import hashlib
+from typing import Final, Mapping, NamedTuple
+
+# Truncated to 16 hex chars (64 bits). Long enough that an accidental collision
+# between prompt revisions is not a thing that happens, short enough to read in
+# a log line and paste into a spreadsheet next to a call id.
+_HASH_CHARS: Final[int] = 16
+
+
+class PromptIdentity(NamedTuple):
+    """What identifies the instructions a call ran on."""
+
+    #: Stable template name, e.g. "generic_lead_generation".
+    template: str
+    #: Human-chosen version, e.g. "lead_gen@1".
+    version: str
+    #: First 16 hex chars of sha256 over the composed stable prompt.
+    hash: str
+
+
+def hash_prompt(prompt: str | None) -> str:
+    """Content hash of a composed system prompt.
+
+    Whitespace is *not* normalised. Trailing-space churn is a real edit to the
+    bytes we send the model, and pretending otherwise would let a change slip
+    past the version check this module exists to enforce.
+    """
+    return hashlib.sha256((prompt or "").encode("utf-8")).hexdigest()[:_HASH_CHARS]
+
+
+# ── the registry ────────────────────────────────────────────────────────────
+#
+# goals.md §6 names the master template `generic_lead_generation`; the other two
+# personas get the same treatment so a campaign on any of them is attributable.
+#
+# TO CHANGE A PROMPT: edit the persona, run
+# tests/unit/test_prompt_versions.py, take the hash it reports, and add a NEW
+# entry here with the next version. Do not edit an existing entry — a version
+# that has already appeared in a call log has to keep meaning what it meant.
+
+_TEMPLATES: Final[Mapping[str, str]] = {
+    "lead_gen": "generic_lead_generation",
+    "customer_support": "generic_customer_support",
+    "receptionist": "generic_receptionist",
+}
+
+#: Current version per persona. Bump on any change to the composed text.
+_VERSIONS: Final[Mapping[str, str]] = {
+    # @7 / @6 (2026-09-30): contact capture the way production voice agents
+    # do it. The shared CORE DETAILS block now asks for the email provider
+    # first (Gmail/Outlook/Hotmail/Yahoo/work), asks about only the unclear
+    # part of the name ("one word, or with a dot?") with example-word letter
+    # checks, and confirms the number the call is on with one yes/no instead
+    # of taking digits by voice.
+    # @6 / @5 (2026-09-08): a declined or hesitant contact detail is a no.
+    # Prod call c63cdaff: the caller said "I know if I should give you my
+    # email", the agent re-asked, the caller said they were not comfortable.
+    # Two shared blocks scripted "what's the best email for it?" as the reply
+    # to ANY unknown fact, and nothing named hesitation as refusal. Hard rule
+    # 7 now caps every contact-detail ask at once per call and treats
+    # hesitation as no; rule 6 and the composer's knowledge fallback no longer
+    # default to asking for an email.
+    # @5 / @4 (2026-09-02): connected voice actions replaced END_CALL's
+    # sentinel-only wording with the deterministic tool-result contract. The
+    # shared call-control block changes every composed persona.
+    # @4 / @3 (2026-09-02): the prompt stopped arguing with itself. Voicemail
+    # has one instruction (end the call), wrong PERSON is a pivot everywhere
+    # and only wrong NUMBER/BUSINESS ends, silence belongs to the silence
+    # monitor alone (the "Take your time / Still there?" prose is gone), the
+    # dated engineering changelog inside STAGE 1 is gone, and the
+    # knowledge-driven lead_gen body reuses the shared opening for its
+    # opening mode instead of a private agent-first copy. customer_support
+    # and receptionist move only because the shared guardrails text changed.
+    # @8 / @7: concise shared voice contract, evidence-bound actions and
+    # contact capture, caller corrections before campaign relationship claims.
+    # @9 / @8: product benefits and eligibility require supplied facts.
+    # @10 / @9: unverified caller product use is a question, not a fact.
+    # @11 / @10: caller-paced repair, new prospects, small talk and topic refusals.
+    # @12: the sales closing example requires an explicit caller goodbye.
+    # @13 / @11: explicit-secret privacy and only available secure routes.
+    # @14 / @12: model-led conversation guide and contact recording tools.
+    # @15 / @13: source-bound name/company recording through the existing tool.
+    # @16 / @14 (2026-10-08): voice standards, now in policies/*.md: answer
+    # first, stop after a question, grouped read-back with a two-try limit,
+    # figures exactly as sourced (docs/standards/voice-agent-standards.md).
+    # @17 / @15 (2026-10-09): read an email back exactly as said (no added
+    # dot), and numbers with their country code (test calls 43020665, f5dcac8e).
+    # @18 / @16 (2026-10-14): numbers are read back exactly as the caller gave
+    # them; no country code is added (owner decision, test call 3413d73c).
+    "lead_gen": "lead_gen@18",
+    "customer_support": "customer_support@16",
+    "receptionist": "receptionist@16",
+}
+
+#: Fallback for a persona that is not in the registry yet. Deliberately visible
+#: rather than blank: an unregistered persona in a call log is a thing someone
+#: should notice, not a field that quietly reads empty.
+UNREGISTERED: Final[str] = "unregistered"
+
+
+def template_name(persona_type: str) -> str:
+    return _TEMPLATES.get(persona_type, f"unregistered_{persona_type or 'unknown'}")
+
+
+def version_for(persona_type: str) -> str:
+    return _VERSIONS.get(persona_type, UNREGISTERED)
+
+
+def identify(persona_type: str, composed_prompt: str | None) -> PromptIdentity:
+    """Full identity for a composed prompt. Never raises."""
+    return PromptIdentity(
+        template=template_name(persona_type),
+        version=version_for(persona_type),
+        hash=hash_prompt(composed_prompt),
+    )
+
+
+def known_personas() -> tuple[str, ...]:
+    """Personas the registry covers, for tests and admin tooling."""
+    return tuple(_VERSIONS)

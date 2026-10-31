@@ -8,8 +8,23 @@ Day 30: Added log_call() and create_note() abstract methods
 from abc import abstractmethod
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+import re
 
 from app.infrastructure.connectors.base import BaseConnector, ConnectorCapability
+
+
+def call_reference(body: str) -> Optional[str]:
+    match = re.search(r"^Talky\.ai call id: ([0-9a-fA-F-]{36})$", body or "", re.MULTILINE)
+    return match.group(1) if match else None
+
+
+class AmbiguousCRMCallReference(ValueError):
+    """More than one provider activity matches the exact call reference."""
+
+
+def valid_crm_activity_id(value: Any) -> bool:
+    """Bound the opaque activity IDs returned by the supported CRM searches."""
+    return isinstance(value, str) and re.fullmatch(r"[A-Za-z0-9_-]{1,256}", value) is not None
 
 
 class CRMProvider(BaseConnector):
@@ -97,3 +112,21 @@ class CRMProvider(BaseConnector):
         """
         ...
 
+    async def update_call_log(
+        self,
+        call_log_id: str,
+        *,
+        call_body: Optional[str] = None,
+        outcome: Optional[str] = None,
+    ) -> bool:
+        """Amend a previously logged call (e.g. attach the AI summary that is
+        generated a few seconds after the call settled).
+
+        Optional: providers without an update path return ``False`` and the
+        sync service leaves the original log untouched.
+        """
+        return False
+
+    async def find_call_by_reference(self, reference: str) -> Optional[str]:
+        """Read-only reconciliation after a create's result was lost."""
+        raise NotImplementedError("This CRM cannot reconcile call creation")

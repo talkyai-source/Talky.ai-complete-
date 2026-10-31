@@ -1,0 +1,33 @@
+app\domain\services\llm_guardrails.py:9:8: F401 [*] `asyncio` imported but unused
+   |
+ 7 | """
+ 8 | import re
+ 9 | import asyncio
+   |        ^^^^^^^ F401
+10 | import logging
+11 | from collections.abc import Mapping
+   |
+   = help: Remove unused import: `asyncio`
+
+app\domain\services\llm_guardrails.py:12:42: F401 [*] `typing.List` imported but unused
+   |
+10 | import logging
+11 | from collections.abc import Mapping
+12 | from typing import Any, Tuple, Optional, List, Union
+   |                                          ^^^^ F401
+13 | from pydantic import BaseModel, Field
+   |
+   = help: Remove unused import: `typing.List`
+
+app\domain\services\llm_guardrails.py:15:69: F401 [*] `app.domain.models.conversation_state.CallOutcomeType` imported but unused
+   |
+13 | from pydantic import BaseModel, Field
+14 |
+15 | from app.domain.models.conversation_state import ConversationState, CallOutcomeType
+   |                                                                     ^^^^^^^^^^^^^^^ F401
+16 | from app.domain.models.agent_config import ConversationRule
+   |
+   = help: Remove unused import: `app.domain.models.conversation_state.CallOutcomeType`
+
+Found 3 errors.
+[*] 3 fixable with the `--fix` option.

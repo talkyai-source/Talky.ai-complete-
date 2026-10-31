@@ -1,0 +1,13 @@
+✔ table preserves unknown and offers its actual filter (33.402ms)
+✔ table preserves scheduled and offers its actual filter (5.1646ms)
+✔ drawer shows sanitized unconfirmed receipt without raw result or current-account substitution (7.4391ms)
+✔ late A detail cannot replace selected B receipt (4.0445ms)
+✔ a cancellation confirmation belongs only to its selected action (7.0255ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 309.8404

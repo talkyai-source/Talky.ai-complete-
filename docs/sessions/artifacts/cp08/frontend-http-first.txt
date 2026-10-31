@@ -1,0 +1,26 @@
+✔ JSON request cannot retry as the account that logged in while it was pending (61.9782ms)
+✔ binary request cannot retry as the account that logged in while it was pending (2.7418ms)
+✔ an old failed response cannot clear the newer token or fire its session-expired handler (2.3354ms)
+✔ an old successful response is discarded after the local identity changes (2.0572ms)
+✔ late API logout completion cannot erase a later sign-in (4.1616ms)
+✔ 401 fires the registered session-expired handler and clears the token (70.6038ms)
+✔ multiple parallel 401s fire the handler only ONCE (idempotent) (8.9702ms)
+✔ resetSessionExpiredLatch re-arms the handler after a successful login (7.6936ms)
+✔ non-401 errors do NOT fire the session-expired handler (3.6444ms)
+✔ a thrown handler does not derail the request rejection (2.5221ms)
+✔ http client injects Authorization header when token present (65.5166ms)
+✔ http client refreshes on 401 then retries the original request (6.4025ms)
+✔ http client surfaces 401 when refresh also fails (4.7162ms)
+✔ http client maps 429 response to rate_limited with retryAfterMs (4.5171ms)
+✔ requestRaw refreshes on 401 then retries and returns the raw binary Response (9.3104ms)
+✔ requestRaw surfaces the backend error detail on a non-OK response (3.0586ms)
+✔ http client preserves structured FastAPI detail codes (4.9925ms)
+✔ requestRaw preserves canonical error codes for binary endpoints (3.0267ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6020.592

@@ -1,0 +1,143 @@
+........................................................................ [ 22%]
+........................................................................ [ 44%]
+........................................................................ [ 66%]
+........................................................................ [ 88%]
+.......................................                                  [100%]
+============================== warnings summary ===============================
+::test_actual_compiled_graph_text_turn_keeps_message_order
+::test_actual_compiled_graph_tool_loop_preserves_scope_and_tool_message
+::test_actual_compiled_graph_tool_loop_preserves_scope_and_tool_message
+::test_actual_graph_stream_model_error_ends_without_tool_effect
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\infrastructure\assistant\agent.py:131: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "content": SYSTEM_PROMPT.format(current_time=datetime.utcnow().isoformat())
+
+tests/unit/assistant/test_calendar_and_drive_errors.py::TestReadCalendarEvents::test_lists_upcoming_events
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\tests\unit\assistant\test_calendar_and_drive_errors.py:80: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/assistant/test_calendar_and_drive_errors.py::TestReadCalendarEvents::test_lists_upcoming_events
+tests/unit/assistant/test_calendar_and_drive_errors.py::TestReadCalendarEvents::test_provider_permission_failure_is_honest
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\infrastructure\assistant\tools\calendar_read.py:129: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    start = datetime.utcnow()
+
+tests/unit/assistant/test_campaign_create.py::test_confirmed_create_binds_jsonb_columns_as_json_text
+tests/unit/assistant/test_campaign_create.py::test_overwrite_mode_updates_existing_campaign_instead_of_inserting
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\infrastructure\assistant\tools\campaign_create.py:545: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "completed_at": datetime.utcnow().isoformat(),
+
+tests/unit/assistant/test_execution_repairs.py::test_workflow_persistence_failure_stops_before_actions
+tests/unit/test_assistant_agent_service.py::TestAssistantAgentService::test_create_plan_valid
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:148: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow()
+
+tests/unit/assistant/test_execution_repairs.py::test_workflow_rechecks_permission_before_each_step
+tests/unit/assistant/test_execution_repairs.py::test_unknown_external_result_stops_remaining_plan_steps
+tests/unit/assistant/test_execution_repairs.py::test_actual_step_catches_transport_exception_as_unknown_and_stops_failure_branch
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    plan.started_at = datetime.utcnow()
+
+tests/unit/assistant/test_execution_repairs.py::test_workflow_rechecks_permission_before_each_step
+tests/unit/assistant/test_execution_repairs.py::test_unknown_external_result_stops_remaining_plan_steps
+tests/unit/assistant/test_execution_repairs.py::test_actual_step_catches_transport_exception_as_unknown_and_stops_failure_branch
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:197: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    step_start = datetime.utcnow()
+
+tests/unit/assistant/test_execution_repairs.py::test_workflow_rechecks_permission_before_each_step
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:267: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    executed_at=datetime.utcnow(),
+
+tests/unit/assistant/test_execution_repairs.py::test_workflow_rechecks_permission_before_each_step
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:268: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    duration_ms=int((datetime.utcnow() - step_start).total_seconds() * 1000)
+
+tests/unit/assistant/test_execution_repairs.py::test_workflow_rechecks_permission_before_each_step
+tests/unit/assistant/test_execution_repairs.py::test_unknown_external_result_stops_remaining_plan_steps
+tests/unit/assistant/test_execution_repairs.py::test_actual_step_catches_transport_exception_as_unknown_and_stops_failure_branch
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:286: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    plan.completed_at = datetime.utcnow()
+
+tests/unit/assistant/test_execution_repairs.py::test_unknown_external_result_stops_remaining_plan_steps
+tests/unit/assistant/test_execution_repairs.py::test_actual_step_catches_transport_exception_as_unknown_and_stops_failure_branch
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:237: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    duration_ms = int((datetime.utcnow() - step_start).total_seconds() * 1000)
+
+tests/unit/assistant/test_execution_repairs.py::test_unknown_external_result_stops_remaining_plan_steps
+tests/unit/assistant/test_execution_repairs.py::test_actual_step_catches_transport_exception_as_unknown_and_stops_failure_branch
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\services\assistant_agent_service.py:245: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    executed_at=datetime.utcnow(),
+
+tests/unit/assistant/test_streaming.py::TestStreaming::test_text_turn_streams_tokens_then_final
+tests/unit/assistant/test_streaming.py::TestStreaming::test_tool_turn_then_text_turn
+tests/unit/assistant/test_streaming.py::TestStreaming::test_fatal_error_yields_error_event
+tests/unit/assistant/test_streaming.py::TestStreaming::test_explicit_email_read_is_dispatched_before_model_text
+tests/unit/assistant/test_streaming.py::TestStreaming::test_explicit_email_read_returns_classified_tool_error_verbatim
+tests/unit/assistant/test_streaming.py::TestStreaming::test_explicit_email_read_hides_unclassified_dispatch_error
+tests/unit/assistant/test_streaming.py::TestStreaming::test_explicit_email_read_preserves_classified_reconnect_instruction
+tests/unit/test_assistant_knowledge_authorization.py::test_streaming_dispatch_threads_authenticated_actor
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\infrastructure\assistant\streaming.py:340: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    system_prompt = SYSTEM_PROMPT.format(current_time=datetime.utcnow().isoformat())
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_assistant_ws.py::test_assistant_chat_does_not_send_error_when_conversation_update_fails
+tests/unit/test_assistant_ws.py::test_assistant_chat_parses_stringified_history_for_existing_conversation
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_ws.py:480: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat()
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_assistant_ws.py::test_assistant_chat_does_not_send_error_when_conversation_update_fails
+tests/unit/test_assistant_ws.py::test_assistant_chat_parses_stringified_history_for_existing_conversation
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_ws.py:587: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_ws.py:440: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_creates_conversation_from_single_insert_response
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_ws.py:441: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat()
+
+tests/unit/test_assistant_ws.py::test_assistant_chat_does_not_send_error_when_conversation_update_fails
+tests/unit/test_assistant_ws.py::test_assistant_chat_parses_stringified_history_for_existing_conversation
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_ws.py:428: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat()
+
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[running]
+tests/unit/test_ag06_dashboard_actions.py::test_actual_websocket_lost_response_recovers_without_redispatch[unknown]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_ws.py:719: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_voice_ws.py:719: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    messages_history.append({"role": "assistant", "content": _VOICE_GREETING, "timestamp": datetime.utcnow().isoformat()})
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_voice_ws.py:638: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    messages_history.append({"role": "assistant", "content": spoken_note, "timestamp": datetime.utcnow().isoformat()})
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_voice_ws.py:341: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[completed]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[unknown]
+tests/unit/test_ag06_dashboard_actions.py::test_voice_websocket_recovers_original_receipt_without_speaking_false_success[running]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-release-20261008\backend\app\api\v1\endpoints\assistant_voice_ws.py:342: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "last_message_at": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+327 passed, 65 warnings in 6.78s
+blocked_network_attempts=0

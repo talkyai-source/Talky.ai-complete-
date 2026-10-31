@@ -1,7 +1,7 @@
 """Tenant AI-config endpoints.
 
 Endpoints:
-  GET /config   - read current config; auto-correct stale voice IDs
+  GET /config   - read current config without replacing saved selections
   POST /config  - validate and persist new config; return latency advisories
 """
 from __future__ import annotations
@@ -13,15 +13,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.rbac import Permission, require_permission
 from app.domain.models.ai_config import (
     AIProviderConfig,
     CARTESIA_MODELS,
     DEEPGRAM_TTS_MODELS,
-    CEREBRAS_MODELS,
-    GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
-    GROQ_MODELS,
 )
 from app.infrastructure.tts.elevenlabs_catalog import (
     get_elevenlabs_tts_models_for_current_key,
@@ -64,80 +63,43 @@ async def get_config(
             detail="User is not associated with a tenant",
         )
 
-    async with db_client.pool.acquire() as conn:
+    # tenant_ai_configs is under FORCE RLS (Alembic 0038) and the app role has
+    # no BYPASSRLS: a bare acquire sees zero rows and its bootstrap INSERT is
+    # refused by WITH CHECK (prod 500 on 2026-09-02). Set the tenant GUC.
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
         config = await _fetch_tenant_config(conn, tenant_id)
         if config is None:
             config = AIProviderConfig()
             await _upsert_tenant_config(conn, tenant_id, config)
-        elif config.tts_provider == "deepgram":
-            deepgram_voices = await _get_deepgram_voices_for_current_key()
-            valid_voice_ids = {voice.id for voice in deepgram_voices}
-            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
-                old_voice_id = config.tts_voice_id
-                config.tts_voice_id = deepgram_voices[0].id
-                config.tts_model = "aura-2"
-                if config.tts_sample_rate not in {8000, 16000, 24000, 32000, 48000}:
-                    config.tts_sample_rate = 24000
-                await _upsert_tenant_config(conn, tenant_id, config)
-                logger.info(
-                    "Auto-corrected invalid Deepgram voice id '%s' to '%s' for tenant %s",
-                    old_voice_id,
-                    config.tts_voice_id,
-                    tenant_id,
-                )
-        elif config.tts_provider == "cartesia":
-            cartesia_voices = await _get_live_cartesia_voices()
-            valid_voice_ids = {voice.id for voice in cartesia_voices}
-            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
-                old_voice_id = config.tts_voice_id
-                config.tts_voice_id = cartesia_voices[0].id
-                config.tts_model = "sonic-3"
-                if config.tts_sample_rate not in {8000, 16000, 24000, 32000, 44100}:
-                    config.tts_sample_rate = 24000
-                await _upsert_tenant_config(conn, tenant_id, config)
-                logger.info(
-                    "Auto-corrected stale Cartesia voice id '%s' to '%s' for tenant %s",
-                    old_voice_id,
-                    config.tts_voice_id,
-                    tenant_id,
-                )
-        elif config.tts_provider == "elevenlabs":
-            elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
-            valid_voice_ids = {voice.id for voice in elevenlabs_voices}
-            if valid_voice_ids and config.tts_voice_id not in valid_voice_ids:
-                elevenlabs_models = await get_elevenlabs_tts_models_for_current_key()
-                old_voice_id = config.tts_voice_id
-                config.tts_voice_id = elevenlabs_voices[0].id
-                config.tts_model = elevenlabs_models[0].id if elevenlabs_models else "eleven_flash_v2_5"
-                if config.tts_sample_rate not in {8000, 16000, 22050, 24000, 44100}:
-                    config.tts_sample_rate = 24000
-                await _upsert_tenant_config(conn, tenant_id, config)
-                logger.info(
-                    "Auto-corrected invalid ElevenLabs voice id '%s' to '%s' for tenant %s",
-                    old_voice_id,
-                    config.tts_voice_id,
-                    tenant_id,
-                )
+        elif config.pipeline_mode == "realtime":
+            from app.realtime.config import normalize_realtime_settings
+            config.realtime_settings = normalize_realtime_settings(config.realtime_settings)
+            return config
 
     # NOTE: this GET handler MUST NOT mutate any process-global state. It used
     # to call set_global_config(config), which meant merely VIEWING the
     # AI-Options page overwrote the model/provider/pipeline that every OTHER
     # tenant's live call read off the shared singleton (cross-tenant model
     # bleed). Per-call config is now sourced per-tenant from tenant_ai_configs
-    # via tenant_ai_config_resolver, so viewing config is a pure read.
+    # via tenant_ai_config_resolver. Existing selections stay intact even if
+    # a provider catalog is temporarily incomplete; explicit saves validate them.
     return config
 
 
-@router.post("/config", response_model=AIProviderConfigWithWarnings)
+@router.post(
+    "/config",
+    response_model=AIProviderConfigWithWarnings,
+    dependencies=[Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def save_config(
     config: AIProviderConfig,
     current_user=Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
     """
-    Save AI provider configuration GLOBALLY.
+    Save AI provider configuration for the authenticated tenant.
 
-    This configuration is used for ALL voice interactions:
+    This configuration supplies this tenant's defaults for voice interactions:
     - Dummy calls
     - Real phone calls
     - SIP calls
@@ -158,50 +120,75 @@ async def save_config(
             detail="User is not associated with a tenant",
         )
 
+    from app.domain.services.voice_tuning import get_voice_tuning_resolver
+    try:
+        config.voice_tuning = get_voice_tuning_resolver().validate_user_partial_for_tenant(config.voice_tuning or {}, tenant_id) or None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
+    if config.pipeline_mode not in {"cascaded", "realtime"}:
+        raise HTTPException(400, "Invalid voice pipeline")
+    if config.pipeline_mode == "realtime":
+        from app.realtime.config import validate_realtime
+        from app.domain.services.credential_resolver import get_credential_resolver
+        try:
+            config.realtime_settings = validate_realtime(config.realtime_model, config.realtime_voice, config.realtime_settings)
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        provider = str((config.realtime_settings or {}).get("provider") or "openai").lower()
+        if not await get_credential_resolver().resolve(provider, tenant_id=tenant_id):
+            raise HTTPException(400, f"{provider} is not configured for Realtime")
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            await _upsert_tenant_config(conn, tenant_id, config)
+        return AIProviderConfigWithWarnings(config=config, latency_warnings=[])
+
     if config.tts_provider not in {"cartesia", "google", "deepgram", "elevenlabs"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid TTS provider. Supported providers: cartesia, google, deepgram, elevenlabs.",
         )
 
-    # Validate LLM provider + model. Sourced from a single union so adding a
-    # new provider only requires extending GEMINI_MODELS / GROQ_MODELS — never
-    # editing this validator.
-    _llm_models_by_provider: dict[str, list[str]] = {
-        "groq": [m.id for m in GROQ_MODELS],
-        "gemini": [m.id for m in GEMINI_MODELS],
-        "cerebras": [m.id for m in CEREBRAS_MODELS],
-    }
+    # Save and runtime use the same offered + legacy provider/model contract.
+    from app.domain.models.ai_config import validate_traditional_llm_selection
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+    try:
+        resolve_stt_selection(config)
+        validate_traditional_llm_selection(config.llm_provider, config.llm_model)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
-    if config.llm_provider not in _llm_models_by_provider:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Invalid LLM provider '{config.llm_provider}'. "
-                f"Supported: {sorted(_llm_models_by_provider.keys())}"
-            ),
-        )
-
-    # Cross-field check: model must belong to the selected provider, otherwise
-    # the orchestrator will pass a Groq model name to Gemini (or vice-versa)
-    # and fail at first stream call.
-    valid_llm_models = _llm_models_by_provider[config.llm_provider]
-    if config.llm_model not in valid_llm_models:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                f"Invalid LLM model '{config.llm_model}' for provider "
-                f"'{config.llm_provider}'. Must be one of: {valid_llm_models}"
-            ),
-        )
+    if config.stt_engine == "assemblyai":
+        from app.domain.services.credential_resolver import get_credential_resolver
+        key = await get_credential_resolver().resolve("assemblyai", tenant_id=str(tenant_id))
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="AssemblyAI API key not configured. Add a tenant AssemblyAI credential or set ASSEMBLYAI_API_KEY on the backend.",
+            )
 
     # Refuse to save a Gemini config if the API key isn't present — caught
     # here gives a clear 503 instead of a confusing pipeline error mid-call.
+    if config.llm_provider == "openai":
+        from app.domain.services.credential_resolver import get_credential_resolver
+        key = await get_credential_resolver().resolve("openai", tenant_id=str(current_user.tenant_id))
+        if not key:
+            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
     if config.llm_provider == "gemini" and not os.getenv("GEMINI_API_KEY"):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Gemini API key not configured. Set GEMINI_API_KEY in .env.",
         )
+    # Every other offered LLM must resolve a key too (tenant BYOK, the platform
+    # key or a *_KEYS pool). Otherwise the save succeeds and every later call
+    # on this tenant fails at session creation.
+    if config.llm_provider in {"groq", "cerebras", "deepseek"}:
+        from app.domain.services.credential_resolver import get_credential_resolver
+        key = await get_credential_resolver().resolve(config.llm_provider, tenant_id=str(tenant_id))
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"{config.llm_provider.capitalize()} API key not configured. Add a tenant credential or set the key on the backend.",
+            )
 
     if config.tts_provider == "cartesia":
         if not os.getenv("CARTESIA_API_KEY"):
@@ -220,8 +207,15 @@ async def save_config(
         deepgram_voices = await _get_deepgram_voices_for_current_key()
         valid_voice_ids = {voice.id for voice in deepgram_voices}
     else:
+        from app.domain.services.voice_eligibility import (
+            VoiceEligibilityError, require_elevenlabs_voice_eligible,
+        )
         valid_tts_models = [m.id for m in await get_elevenlabs_tts_models_for_current_key()]
         elevenlabs_voices = await get_elevenlabs_voices_for_current_key()
+        try:
+            await require_elevenlabs_voice_eligible(db_client.pool, tenant_id, config.tts_voice_id, voices=elevenlabs_voices)
+        except VoiceEligibilityError as exc:
+            raise HTTPException(exc.status_code, str(exc)) from exc
         valid_voice_ids = {voice.id for voice in elevenlabs_voices}
 
     if config.tts_model not in valid_tts_models:
@@ -232,8 +226,13 @@ async def save_config(
     if config.tts_voice_id not in valid_voice_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid TTS voice for current provider or not available for this Deepgram key",
+            detail="The selected voice is not available for this TTS provider. Reload the catalog or select another voice.",
         )
+
+    if config.tts_provider == "cartesia":
+        from app.infrastructure.tts.cartesia import CARTESIA_SAMPLE_RATES
+        if config.tts_sample_rate not in CARTESIA_SAMPLE_RATES:
+            raise HTTPException(400, f"Cartesia sample_rate must be one of {sorted(CARTESIA_SAMPLE_RATES)}")
 
     if (
         config.tts_provider == "google"
@@ -242,7 +241,7 @@ async def save_config(
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Chirp3-HD requires sample rate 24000",
+            detail="Google TTS settings use sample rate 24000; phone calls adapt audio to their transport",
         )
 
     if (
@@ -264,7 +263,7 @@ async def save_config(
             detail="ElevenLabs sample_rate must be one of 8000, 16000, 22050, 24000, 44100",
         )
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
         await _upsert_tenant_config(conn, tenant_id, config)
 
     # Compute soft latency warnings — advisory only, never blocks saving.
@@ -284,7 +283,6 @@ async def save_config(
     }
     SLOW_MODELS: set[str] = set()
     PREVIEW_MODELS = {
-        "qwen/qwen3.6-27b",
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
         # Superseded by the GA "gemini-3.1-flash-lite"; still selectable so
@@ -305,13 +303,13 @@ async def save_config(
     if config.llm_model in SLOW_MODELS:
         latency_warnings.append(
             f"'{config.llm_model}' is a large reasoning model. "
-            "Expected TTFT: 300–600ms vs ~90ms for llama-3.1-8b-instant. "
+            "Expected TTFT: 300–600ms vs ~100ms for openai/gpt-oss-20b. "
             "Recommended for quality use cases, not real-time voice."
         )
-    elif config.llm_model not in FAST_MODELS:
+    elif config.llm_model not in FAST_MODELS and config.llm_provider != "openai":
         latency_warnings.append(
             f"'{config.llm_model}' has moderate latency (~150–250ms TTFT). "
-            "For lowest latency, use llama-3.1-8b-instant (560 t/s on Groq)."
+            "For lowest latency, use openai/gpt-oss-20b on Groq or gpt-oss-120b on Cerebras."
         )
 
     if config.llm_model in PREVIEW_MODELS:

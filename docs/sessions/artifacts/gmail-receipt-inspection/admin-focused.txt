@@ -1,0 +1,35 @@
+✔ table preserves unknown and offers its actual filter (149.0864ms)
+✔ table preserves scheduled and offers its actual filter (19.76ms)
+✔ drawer shows sanitized unconfirmed receipt without raw result or current-account substitution (31.8636ms)
+✔ late A detail cannot replace selected B receipt (20.0867ms)
+✔ receipt missing retains the actual proof boundary (18.257ms)
+✔ receipt mismatched retains the actual proof boundary (12.5196ms)
+✔ receipt explicit-proof retains the actual proof boundary (14.9363ms)
+✔ late A cancellation refresh cannot replace B or refresh the old action (24.2956ms)
+✔ a foreign detail response cannot populate the current selection (6.9068ms)
+✔ cancel rejection remains an error, without a success refresh (9.8763ms)
+✔ a cancellation confirmation belongs only to its selected action (26.6162ms)
+✔ Gmail observation requires an explicit click and retains saved unknown state (13.3641ms)
+✔ Gmail absence_is_inconclusive never offers retry or completion (8.7116ms)
+✔ Gmail saved_proof_unavailable never offers retry or completion (8.3091ms)
+✔ Gmail original_authorization_unavailable never offers retry or completion (6.8833ms)
+✔ Gmail provider_read_unavailable never offers retry or completion (6.288ms)
+✔ Gmail double click sends one read and never echoes raw API errors (13.6529ms)
+✔ late Gmail A observation cannot replace B or clear B pending state (16.2946ms)
+✔ Gmail action observation is rejected (9.1286ms)
+✔ Gmail message observation is rejected (7.4916ms)
+✔ Gmail outcome observation is rejected (12.3005ms)
+✔ Gmail reason observation is rejected (6.4925ms)
+✔ Gmail inherited observation is rejected (5.3453ms)
+✔ Gmail contradictory observation is rejected (4.8869ms)
+✔ Gmail throw observation is rejected (8.463ms)
+✔ missing availability or mismatched saved receipt offers no Gmail inspection (5.6541ms)
+✔ Gmail API inspection makes one GET with only saved action ID (91.8769ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1516.7686

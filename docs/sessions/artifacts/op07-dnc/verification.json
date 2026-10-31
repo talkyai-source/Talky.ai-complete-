@@ -1,0 +1,121 @@
+{
+  "recorded_at": "2026-10-05T04:11:29.379552+00:00",
+  "base_commit": "c9be4fdde08e8a2d69481bd5c61aa58ca2390ce4",
+  "source_commit": "cc5af3fc8a0d3bda805f4f0fac44884fb5d55859",
+  "required_schema_dependency": {
+    "revision": "0061_dnc_runtime_contract",
+    "source_commit_prefix": "444cbf73",
+    "evidence_commit_prefix": "09bd68f4",
+    "report": "docs/sessions/2026-10-05-dnc-schema-verification.md",
+    "note": "Separate reviewed worktree; included in public DB for these tests, must be integrated/deployed with this service contract"
+  },
+  "scope": "OP07 existing native DNC durability and shared purge acknowledgement; synthetic ports/disposable DB only",
+  "runtime_frozen": true,
+  "app_files": [
+    "backend/app/domain/services/dialer/opt_out.py",
+    "backend/app/domain/services/dnc_service.py",
+    "backend/app/domain/services/telephony/lifecycle.py",
+    "backend/app/realtime/bridge.py"
+  ],
+  "test_files": [
+    "backend/tests/unit/test_opt_out_purge.py",
+    "backend/tests/unit/test_op07_native_dnc_durability.py",
+    "backend/tests/integration/test_op07_native_dnc.py"
+  ],
+  "sha256": {
+    "backend/app/domain/services/dialer/opt_out.py": "0b6c77d760db95ef0966fc2a9795ba6f6fc3f3b145c0677964ee18c06ae708e1",
+    "backend/app/domain/services/dnc_service.py": "c263268b601f6873369fbad0ac34059bc9a7085d3127ca7eb707100087979404",
+    "backend/app/domain/services/telephony/lifecycle.py": "0c8ea8fb80f96d1430227c8e1244155c6d062aa09620ee8575f721e9ffd43cea",
+    "backend/app/realtime/bridge.py": "e06f050fe8580814ca319e9c7ac18e405a42e0fa2d62025095f14986c733142f",
+    "backend/tests/unit/test_opt_out_purge.py": "2fea405bded48f50677408e5eaddd7f404399b62b01465162371fb89e820ea2a",
+    "backend/tests/unit/test_op07_native_dnc_durability.py": "1d1175d8d0295507ccbeda15c13b38aa2fc25e212478e7a9940055a02a52f1a9",
+    "backend/tests/integration/test_op07_native_dnc.py": "510cd4eed9d99897f86b0f01053db19dbdfca752881bf269c33440e2bb1fef43"
+  },
+  "initial": {
+    "actual_probe": "initial-probe.json",
+    "runtime_tests": {
+      "failed": 9,
+      "passed": 8,
+      "log": "native-shared-initial.txt"
+    },
+    "postgres": {
+      "failed": 7,
+      "passed": 0,
+      "log": "postgres-schema-initial.txt",
+      "confirmed_product_blocker": "public0060 bootstrap dnc_entries does not match DNCService columns/source/uniqueness",
+      "separate_fixture_issue": "Restricted fixture role lacked campaign trigger read/update grants; corrected without masking schema"
+    }
+  },
+  "runtime_validation": {
+    "modules": [
+      "tests/unit/test_op07_native_dnc_durability.py",
+      "tests/unit/test_opt_out_purge.py",
+      "tests/unit/test_dnc_service.py",
+      "tests/unit/test_phone_normalizer_equivalence.py",
+      "tests/unit/test_call_guard_dnc_fail_closed.py",
+      "tests/unit/test_lead_do_not_call_suppression.py",
+      "tests/unit/test_caller_authorized_end_call.py",
+      "tests/unit/test_realtime_end_call_ownership.py",
+      "tests/unit/test_realtime_lifecycle_repairs.py",
+      "tests/unit/test_realtime_relationship_ownership.py",
+      "tests/unit/voice_pipeline/test_identity_disposition.py",
+      "tests/unit/test_voice_pipeline_service.py"
+    ],
+    "command": "python -m pytest tests/unit/test_op07_native_dnc_durability.py tests/unit/test_opt_out_purge.py tests/unit/test_dnc_service.py tests/unit/test_phone_normalizer_equivalence.py tests/unit/test_call_guard_dnc_fail_closed.py tests/unit/test_lead_do_not_call_suppression.py tests/unit/test_caller_authorized_end_call.py tests/unit/test_realtime_end_call_ownership.py tests/unit/test_realtime_lifecycle_repairs.py tests/unit/test_realtime_relationship_ownership.py tests/unit/voice_pipeline/test_identity_disposition.py tests/unit/test_voice_pipeline_service.py -q --tb=short",
+    "working_directory": "backend",
+    "passed": 654,
+    "skipped": 0,
+    "failed": 0,
+    "warnings": 486,
+    "log": "runtime-final.txt",
+    "warning_limits": "Existing datetime deprecations and capture_mode AsyncMock warning; not a warnings-clean claim"
+  },
+  "postgres_validation": {
+    "status": "passed",
+    "passed": 10,
+    "failed": 0,
+    "skipped": 0,
+    "module": "tests/integration/test_op07_native_dnc.py",
+    "command": "TEST_DATABASE_URL=<explicit disposable loopback *_test DB> python -m pytest tests/integration/test_op07_native_dnc.py -q --tb=short",
+    "migration_head": "0061_dnc_runtime_contract",
+    "log": "postgres-final.txt",
+    "isolation": "Unique synthetic tenant/campaign/lead/job identities, NOSUPERUSER NOBYPASSRLS pool; only own mutable fixtures removed",
+    "limits": "Provider/transport ports synthetic; real DNCService/asyncpg/SQL commit/RLS and durable reader exercised, not deployed calls"
+  },
+  "lint": {
+    "command": "python -m ruff check --select F --extend-ignore F401,F841 backend/app/domain/services/dialer/opt_out.py backend/app/domain/services/dnc_service.py backend/app/domain/services/telephony/lifecycle.py backend/app/realtime/bridge.py backend/tests/unit/test_opt_out_purge.py backend/tests/unit/test_op07_native_dnc_durability.py backend/tests/integration/test_op07_native_dnc.py",
+    "status": "passed",
+    "log": "ruff-final.txt",
+    "git_diff_check": "passed"
+  },
+  "independent_review": {
+    "reviewer_role": "Realtime/backend peer",
+    "method": "Read-only diff review, no independent suite run",
+    "result": "No material runtime delta defect; schema blocker separately confirmed",
+    "reviewed": "Detached/coalesced task, shielded close, bounded stop drain, current caller recheck, tenant SQL, commit-before-ack, live owner retention"
+  },
+  "contracts": [
+    "Provider-final direct DNC starts bounded persistence independently of caller close authority",
+    "Continued question, barge-in and stale turn metadata cannot undo opt-out; they do not authorize early close",
+    "DNC acknowledgement and complete ancillary cleanup are separate process-local markers",
+    "Only pending/queued/retry_scheduled jobs cancel; processing/calling retain ownership for provider-proven settlement",
+    "Lead acknowledgement requires a tenant-owned returned row; missing/failed cleanup remains retryable",
+    "Existing traditional helper signature/boolean meaning preserved; compatibility db_client accepted but not used for blocking cleanup",
+    "0061 canonical schema alignment must accompany service normalized phone writes; migrations are separately owned/reviewed"
+  ],
+  "unresolved_speech_boundary": {
+    "status": "confirmed_not_repaired_in_this_commit",
+    "probe": "speech-boundary-probe.py",
+    "observed": "speech-boundary-observed.json",
+    "result": "DNC acknowledgement false; generated removal promise submitted as640 synthetic audio bytes and call ended once",
+    "interpretation": "Runtime accepts this synthetic candidate without receipt gating; no claim about live model frequency, hearing or semantic approval"
+  },
+  "limitations": [
+    "Pre-hangup waiting does not gate native provider-generated success language before speech; farewell honesty is NOT verified",
+    "No human hearing, handset, live provider, deployed DB or legal approval proof",
+    "Bounded process-local task/markers provide no durable automatic recovery after process death or exhausted teardown failure",
+    "DNC write uncertainty cannot be reported as acknowledged success",
+    "Recording expiry/export/delete and legal/operational policy acceptance remain separate unfinished OP07 work",
+    "No CP05/CP06/CP09 scope or profile approval changes"
+  ]
+}

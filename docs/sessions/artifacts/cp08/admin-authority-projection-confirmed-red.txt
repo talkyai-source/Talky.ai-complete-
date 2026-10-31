@@ -1,0 +1,56 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+___ test_admin_directory_reflects_rbac_role_edit_and_effective_role_filter ____
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001EF69AB0E60>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000001EF699A59B0>), http=<httpx.AsyncClient object at 0x000001EF69AF7470>)
+
+    async def test_admin_directory_reflects_rbac_role_edit_and_effective_role_filter(identity_db):
+        db = identity_db
+        await db.admin.execute(
+            "UPDATE user_profiles SET role='platform_admin' WHERE id=$1", db.users[0]
+        )
+        membership_id = await db.admin.fetchval(
+            "SELECT id FROM tenant_users WHERE user_id=$1 AND tenant_id=$2",
+            db.users[1], db.tenants[1],
+        )
+        edited = await db.http.patch(
+            f"/rbac/tenant-users/{membership_id}", headers=auth(), json={"role_name": "readonly"}
+        )
+        assert edited.status_code == 200, edited.text
+        # The ordinary membership editor deliberately does not rewrite this legacy profile assignment.
+        assert await db.admin.fetchval(
+            "SELECT role FROM user_profiles WHERE id=$1", db.users[1]
+        ) == "tenant_admin"
+        detailed = await db.http.get(f"/admin/users/{db.users[1]}", headers=auth())
+        assert detailed.status_code == 200, detailed.text
+>       assert detailed.json()["role"] == detailed.json()["effective_role"] == "readonly"
+E       KeyError: 'effective_role'
+
+tests\integration\test_cp08_current_identity.py:929: KeyError
+_ test_admin_directory_distinguishes_historical_assignment_from_current_access _
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000001EF69D84320>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000001EF69E32C40>), http=<httpx.AsyncClient object at 0x000001EF69E526C0>)
+
+    async def test_admin_directory_distinguishes_historical_assignment_from_current_access(identity_db):
+        db = identity_db
+        await db.admin.execute(
+            "UPDATE user_profiles SET role='platform_admin' WHERE id=$1", db.users[0]
+        )
+        await db.admin.execute("DELETE FROM tenant_users WHERE user_id=ANY($1::uuid[])", db.users)
+        legacy = await db.http.get(f"/admin/users/{db.users[1]}", headers=auth())
+        assert legacy.status_code == 200, legacy.text
+        assert legacy.json()["role"] == "tenant_admin"  # Historical assignment only.
+>       assert legacy.json()["effective_role"] is None
+E       KeyError: 'effective_role'
+
+tests\integration\test_cp08_current_identity.py:951: KeyError
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_current_identity.py::test_admin_directory_reflects_rbac_role_edit_and_effective_role_filter
+FAILED tests/integration/test_cp08_current_identity.py::test_admin_directory_distinguishes_historical_assignment_from_current_access
+2 failed, 52 deselected, 1 warning in 6.41s

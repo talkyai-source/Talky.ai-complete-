@@ -1,0 +1,70 @@
+CP03 top-up transaction verification - 2026-10-04
+
+Source: uncommitted CP03 changes in tmp/production-ready-20261004 on base
+10e45b73ad316afd67df379854156b90b840a227. This is not a deployed revision.
+
+Owned source:
+backend/app/domain/services/topup_service.py
+backend/app/domain/services/billing_topup_events.py
+
+Owned tests:
+backend/tests/unit/test_topup_service.py
+backend/tests/unit/test_billing_topup_events.py
+backend/tests/unit/test_billing_topup_webhook_routing.py
+backend/tests/integration/test_billing_topup_events.py
+
+Execution:
+Original backend/.venv/Scripts/python.exe, Python 3.12.12, working directory
+tmp/production-ready-20261004/backend. TEST_DATABASE_URL explicitly points to
+the disposable localhost PostgreSQL instance at port 55434, database cp02_test.
+No production database, real Stripe requests, customer calls, or emails used.
+Database setup uses migration 0054 and a NOSUPERUSER NOBYPASSRLS role. Provider
+reads return synthetic StripeObject values. Ledger/order/tenant fixture data
+are unique synthetic identities; immutable ledger rows are retained rather
+than disabling append-only protection for cleanup.
+
+Command:
+python -m pytest tests/unit/test_topup_service.py
+  tests/unit/test_billing_topup_webhook_routing.py
+  tests/unit/test_billing_topup_events.py
+  tests/integration/test_billing_topup_events.py -q --tb=short
+(The four module paths were supplied to a single invocation.)
+
+Observed results:
+- Earlier clean run: 90 passed in 13.21s, comprising 72 unit and 18 actual-PG
+  cases. This preceded the final stale-order review and legacy email fence.
+- Latest source: 73 unit cases passed. The combined invocation reported
+  92 passed and 3 fixture setup/teardown errors in 19.20s. These errors were
+  PostgreSQL catalog conflicts (tuple concurrently updated in GRANT/DROP
+  OWNED) caused by another concurrent agent test process. One rollback also
+  caused missing-role cleanup. No billing assertion failed. This run does
+  NOT certify the final 20 PG cases; root will run them in an isolated combined
+  integration batch. Do not count setup/teardown failures as passing evidence.
+- Final owned-source Ruff E9,F63,F7,F82 gate passed; git diff --check passed.
+
+Meaningful coverage:
+- Current Session, PaymentIntent, Charge and Dispute validation, including
+  tenant/customer, test/live mode, amount, currency and order/session binding.
+- Nullable signed PaymentIntent discovery followed by aggregate lock and
+  current-object reread; binding drift cannot move money.
+- Same-event and distinct-event deduplication and aggregate contention before
+  financial provider reads. One positive ledger entry survives later reversal.
+- Real rollback after financial SQL and after notification insertion; the
+  same event can retry and commit one credit and one durable delivery intent.
+- Full refund/dispute, late success, pre-credit reversal, partial refund, and
+  invalid provider evidence. Partial allocation is not guessed.
+- Finite allowance cannot become the zero/unlimited sentinel during reversal;
+  an existing unlimited sentinel remains unchanged.
+- Exact session binding prevents another tenant's duplicate legacy payment ID
+  from selecting its order. Single-identifier service compatibility retained.
+- Stale nonpaid order with valid positive ledger requires explicit review.
+- Known new notification intent is deduplicated; old credited payment with no
+  delivery receipt is fenced as unknown, never assumed safe to resend.
+- Missing recipient remains a durable recipient_missing state.
+
+Limits:
+These are service/transaction tests with synthetic provider reads. They do not
+prove Stripe sandbox acceptance, current live provider configuration, signed
+HTTP authenticity, external transport acceptance, or inbox delivery. Separate
+team-owned signed HTTP and delivery tests cover those local boundaries only.
+No production migration, deployment, reversal, payment, or external send ran.

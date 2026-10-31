@@ -1,6 +1,11 @@
 # Day 29: Voice Intent Detection & Assistant Actions
 
-> **Date**: January 13, 2026  
+> **Retired on 2026-09-02:** The `PostCallAnalyzer` described below was not
+> connected to the active call-end lifecycle; its promised `_save_call_data()`
+> hook no longer exists. The unwired analyzer and its private models/tests were
+> removed. This page is a historical implementation record, not live behavior.
+
+> **Date**: January 13, 2026
 > **Focus**: Post-call transcript analysis to detect actionable intents and trigger assistant workflows  
 > **Status**: Implementation Complete ✅
 

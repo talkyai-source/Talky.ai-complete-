@@ -22,7 +22,7 @@ import pytest
 
 from app.domain.models.calling_rules import CallingRules
 from app.domain.models.dialer_job import DialerJob
-from app.workers.dialer_worker import DialerWorker
+from app.workers.dialer_worker import DialerCallIntent, DialerWorker
 
 
 def _job() -> DialerJob:
@@ -44,6 +44,8 @@ def _base_worker() -> DialerWorker:
     worker._redis = None  # tenant-pacing / release_tenant_dial_slot fail-open on None
 
     worker._get_campaign_status = AsyncMock(return_value="running")
+    worker._stale_payload_reason = AsyncMock(return_value=None)
+    worker._load_existing_call_intent = AsyncMock(return_value=None)
     worker._tenant_minutes_exhausted = AsyncMock(return_value=False)
     worker._get_tenant_rules = AsyncMock(return_value=CallingRules.default())
     worker._get_campaign_calling_config = AsyncMock(return_value={})
@@ -66,7 +68,9 @@ def _base_worker() -> DialerWorker:
     # defeat the assertion that ONLY a guard block/throttle/queue releases
     # it).
     worker._make_call = AsyncMock(return_value="provider-call-1")
-    worker._create_call_record = AsyncMock(return_value=("call-1", "tk-1", "leg-1"))
+    intent = DialerCallIntent("call-1", "tk-1", "leg-1", "initiated", None, True)
+    worker._create_call_intent = AsyncMock(return_value=intent)
+    worker._bind_call_intent = AsyncMock()
     worker._update_lead_status = AsyncMock()
     worker._mark_campaign_dialed = AsyncMock()
     worker._emit_progress_event_throttled = AsyncMock()
@@ -83,7 +87,8 @@ async def test_guard_not_evaluated_when_batch_gate_defers():
     await worker.process_job(_job())
 
     worker._evaluate_call_guard.assert_not_awaited()
-    worker.queue_service.schedule_retry.assert_awaited_once()
+    worker.queue_service._redefer_inflight.assert_awaited_once()
+    worker.queue_service.schedule_retry.assert_not_awaited()
     worker._update_job_status.assert_awaited_once()
     _, kwargs = worker._update_job_status.call_args
     assert kwargs.get("reason") == "batch_capacity"
@@ -98,7 +103,8 @@ async def test_guard_not_evaluated_when_call_gap_defers():
     await worker.process_job(_job())
 
     worker._evaluate_call_guard.assert_not_awaited()
-    worker.queue_service.schedule_retry.assert_awaited_once()
+    worker.queue_service._redefer_inflight.assert_awaited_once()
+    worker.queue_service.schedule_retry.assert_not_awaited()
     _, kwargs = worker._update_job_status.call_args
     assert kwargs.get("reason") == "call_gap"
 
@@ -119,9 +125,11 @@ async def test_guard_not_evaluated_when_tenant_gap_defers(monkeypatch):
     await worker.process_job(job)
 
     worker._evaluate_call_guard.assert_not_awaited()
-    worker.queue_service.schedule_retry.assert_awaited_once_with(
-        job, delay_seconds=42,
+    worker.queue_service._redefer_inflight.assert_awaited_once_with(
+        job.job_id, "tenant_gap", delay_seconds=42,
+        scheduled_at=worker._update_job_status.await_args.kwargs["scheduled_at"],
     )
+    worker.queue_service.schedule_retry.assert_not_awaited()
     _, kwargs = worker._update_job_status.call_args
     assert kwargs.get("reason") == "tenant_gap"
 

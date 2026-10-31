@@ -1,0 +1,274 @@
+{
+  "source_commit": "2010a1bf10b1305280ba6047099e0af44f3b7147",
+  "base_commit": "e81f525f6c476e74e22b6a41901e1d50c5c184dc",
+  "python_executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "explicit_environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  },
+  "environment_scope": "Explicit assignments for backend pytest/Ruff; inherited environment not serialized. Node dependencies reused through ignored junction to integration Admin node_modules; no install or lock/manifest changes.",
+  "commands": [
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/backend",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_admin_calendar_inspection.py",
+        "-k",
+        "exact_provider_reference",
+        "-q",
+        "--no-cov",
+        "--tb=short"
+      ],
+      "artifact": "baseline-initial-harness.txt",
+      "result": "2 failed (incorrect test constructor), 2 teardown errors (Windows loop self-pipe blocked), 83 deselected, 1 warning. Harness defect, not product evidence.",
+      "exit_code": null
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/backend",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_admin_calendar_inspection.py",
+        "-k",
+        "exact_provider_reference",
+        "-q",
+        "--no-cov",
+        "--tb=short"
+      ],
+      "artifact": "baseline.txt",
+      "result": "2 failed due to missing concrete get_event_reference methods, 83 deselected, 1 warning. Original application source; repaired test setup.",
+      "exit_code": null
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/backend",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_admin_calendar_inspection.py",
+        "tests/unit/test_admin_gmail_inspection.py",
+        "-q",
+        "--no-cov",
+        "--tb=short"
+      ],
+      "artifact": "backend-focused.txt",
+      "result": "151 passed, 1 warning, 6.12s; predates two plural-ID controls and calendar bulk-ID guard.",
+      "exit_code": null
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/backend",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_admin_calendar_inspection.py",
+        "tests/unit/test_admin_gmail_inspection.py",
+        "tests/unit/test_ag06_admin_actions.py",
+        "tests/unit/test_calendar_delivery_contract.py",
+        "tests/unit/test_meeting_service.py",
+        "tests/unit/test_reviewed_account_identity.py",
+        "tests/unit/test_voice_email_inspection_handoff.py",
+        "-q",
+        "--no-cov",
+        "--tb=short"
+      ],
+      "artifact": "backend-final.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 296,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 1,
+        "modules": 7,
+        "new_calendar_controls": 87,
+        "seconds": 7.07
+      }
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/Admin/frontend",
+      "executable": "node",
+      "argv": [
+        "--test",
+        "tests/action-receipts.test.mjs"
+      ],
+      "artifact": "admin-focused.txt",
+      "result": "48 passed; predates timestamp and nonempty-reference controls.",
+      "exit_code": null
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/Admin/frontend",
+      "executable": "npm",
+      "argv": [
+        "test"
+      ],
+      "artifact": "admin-before-reference-guard.txt",
+      "exit_code": 0,
+      "result": "95 passed; predates four nonempty-reference controls."
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/Admin/frontend",
+      "executable": "npm",
+      "argv": [
+        "test"
+      ],
+      "artifact": "admin-final.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 99,
+        "failed": 0,
+        "skipped": 0,
+        "receipt_module_total": 58,
+        "new_controls_included": 31
+      }
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/Admin/frontend",
+      "executable": "npx",
+      "argv": [
+        "tsc",
+        "-b",
+        "--pretty",
+        "false"
+      ],
+      "artifact": "admin-typecheck.txt",
+      "exit_code": 0,
+      "note": "Final source check; same command also passed earlier before final UI guards, final log retained."
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/Admin/frontend",
+      "executable": "npx",
+      "argv": [
+        "eslint",
+        "src/components/ActionReceiptPanel.tsx",
+        "src/lib/api.ts",
+        "tests/action-receipts.test.mjs"
+      ],
+      "artifact": "admin-lint.txt",
+      "exit_code": 0,
+      "note": "Final source check; earlier same-command success overwritten by final log."
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/Admin/frontend",
+      "executable": "npx",
+      "argv": [
+        "vite",
+        "build"
+      ],
+      "artifact": "admin-build.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/backend",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "app/api/v1/endpoints/admin/actions.py",
+        "app/infrastructure/connectors/calendar/google_calendar.py",
+        "app/infrastructure/connectors/calendar/outlook_calendar.py",
+        "tests/unit/test_admin_calendar_inspection.py",
+        "--select",
+        "F"
+      ],
+      "artifact": "backend-lint.txt",
+      "exit_code": 1,
+      "result": "Two pre-existing unused typing.Any imports, retained unchanged."
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "--stdin-filename",
+        "google_calendar.py",
+        "-"
+      ],
+      "stdin_command": [
+        "git",
+        "show",
+        "e81f525f:backend/app/infrastructure/connectors/calendar/google_calendar.py"
+      ],
+      "artifact": "baseline-google-lint.txt",
+      "exit_code": 1,
+      "result": "Same unused typing.Any import at original source."
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "--stdin-filename",
+        "outlook_calendar.py",
+        "-"
+      ],
+      "stdin_command": [
+        "git",
+        "show",
+        "e81f525f:backend/app/infrastructure/connectors/calendar/outlook_calendar.py"
+      ],
+      "artifact": "baseline-outlook-lint.txt",
+      "exit_code": 1,
+      "result": "Same unused typing.Any import at original source."
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006/backend",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "app/api/v1/endpoints/admin/actions.py",
+        "app/infrastructure/connectors/calendar/google_calendar.py",
+        "app/infrastructure/connectors/calendar/outlook_calendar.py",
+        "tests/unit/test_admin_calendar_inspection.py",
+        "--select",
+        "F",
+        "--extend-ignore",
+        "F401,F841"
+      ],
+      "artifact": "backend-ci-lint.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006",
+      "executable": "git",
+      "argv": [
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "exit_code": 0,
+      "note": "Seven exact source/test paths staged before source commit."
+    },
+    {
+      "cwd": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/calendar-receipt-inspection-20261006",
+      "executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+      "argv": [
+        "docs/sessions/artifacts/calendar-receipt-inspection/record_evidence.py",
+        "--freeze"
+      ],
+      "exit_code": 0,
+      "note": "Seven source/test and five unchanged dependency LF hashes frozen before source commit."
+    }
+  ],
+  "provenance_notes": [
+    "All commands shown were executed. Null exit_code means the first PowerShell wrapper ended with Get-Content and did not separately capture the child process code; the retained pytest/Node result establishes pass/fail and counts.",
+    "An earlier setup attempt resolved paths relative to backend incorrectly, so output redirection failed before pytest launched. No execution result was produced. Corrected invocation then produced baseline-initial-harness.txt.",
+    "Counts overlap; focused and final runs are not additive.",
+    "Final backend application/test bytes did not change after backend-final.txt; later UI-only validation guards were verified by final Admin test/typecheck/lint/build.",
+    "No provider accounts, actual PostgreSQL, browser, deploy or push was used."
+  ]
+}

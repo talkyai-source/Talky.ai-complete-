@@ -1,0 +1,49 @@
+FFFFF                                                                    [100%]
+================================== FAILURES ===================================
+_ test_hold_and_resume_keep_one_actual_database_job[outside_time_window_14:00_17:00] _
+tests\integration\test_op05_pre_attempt_holds.py:111: in test_hold_and_resume_keep_one_actual_database_job
+    await assert_one_owner(db, "retry_scheduled")
+tests\integration\test_op05_pre_attempt_holds.py:94: in assert_one_owner
+    with pytest.raises(asyncpg.UniqueViolationError):
+E   Failed: DID NOT RAISE <class 'asyncpg.exceptions.UniqueViolationError'>
+_ test_hold_and_resume_keep_one_actual_database_job[daily_lead_cap_reached_3/3] _
+tests\integration\test_op05_pre_attempt_holds.py:111: in test_hold_and_resume_keep_one_actual_database_job
+    await assert_one_owner(db, "retry_scheduled")
+tests\integration\test_op05_pre_attempt_holds.py:94: in assert_one_owner
+    with pytest.raises(asyncpg.UniqueViolationError):
+E   Failed: DID NOT RAISE <class 'asyncpg.exceptions.UniqueViolationError'>
+_ test_hold_and_resume_keep_one_actual_database_job[max_concurrent_calls_reached_10/10] _
+tests\integration\test_op05_pre_attempt_holds.py:111: in test_hold_and_resume_keep_one_actual_database_job
+    await assert_one_owner(db, "retry_scheduled")
+tests\integration\test_op05_pre_attempt_holds.py:94: in assert_one_owner
+    with pytest.raises(asyncpg.UniqueViolationError):
+E   Failed: DID NOT RAISE <class 'asyncpg.exceptions.UniqueViolationError'>
+_________ test_schedule_outage_never_terminalizes_actual_owner[False] _________
+tests\integration\test_op05_pre_attempt_holds.py:143: in test_schedule_outage_never_terminalizes_actual_owner
+    await assert_one_owner(db, "processing")
+tests\integration\test_op05_pre_attempt_holds.py:94: in assert_one_owner
+    with pytest.raises(asyncpg.UniqueViolationError):
+E   Failed: DID NOT RAISE <class 'asyncpg.exceptions.UniqueViolationError'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.queue_service:queue_service.py:706 redefer_inflight failed job=006260f8-4e52-4121-adb9-cbf5cb16f464 err=synthetic schedule handoff failure
+_________ test_schedule_outage_never_terminalizes_actual_owner[True] __________
+tests\integration\test_op05_pre_attempt_holds.py:143: in test_schedule_outage_never_terminalizes_actual_owner
+    await assert_one_owner(db, "processing")
+tests\integration\test_op05_pre_attempt_holds.py:94: in assert_one_owner
+    with pytest.raises(asyncpg.UniqueViolationError):
+E   Failed: DID NOT RAISE <class 'asyncpg.exceptions.UniqueViolationError'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.queue_service:queue_service.py:706 redefer_inflight failed job=01150a5b-2c6f-4513-9dac-48faf88664b3 err=synthetic schedule handoff failure
+============================== warnings summary ===============================
+tests/integration/test_op05_pre_attempt_holds.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_hold_and_resume_keep_one_actual_database_job[outside_time_window_14:00_17:00]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_hold_and_resume_keep_one_actual_database_job[daily_lead_cap_reached_3/3]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_hold_and_resume_keep_one_actual_database_job[max_concurrent_calls_reached_10/10]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_schedule_outage_never_terminalizes_actual_owner[False]
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_schedule_outage_never_terminalizes_actual_owner[True]
+5 failed, 10 warnings in 3.60s

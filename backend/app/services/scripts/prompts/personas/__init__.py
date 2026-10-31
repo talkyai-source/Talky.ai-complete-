@@ -30,6 +30,7 @@ from app.services.scripts.prompts.personas.lead_gen import (
     LEAD_GEN_BODY,
     LEAD_GEN_OPENINGS,
     LEAD_GEN_PERSONA,
+    format_lead_gen_campaign_controls,
     format_qualification_questions,
 )
 from app.services.scripts.prompts.personas.lead_gen import (
@@ -94,5 +95,6 @@ __all__ = [
     "format_common_issues",
     "format_escalate_triggers",
     "format_new_patient_info_needed",
+    "format_lead_gen_campaign_controls",
     "format_qualification_questions",
 ]

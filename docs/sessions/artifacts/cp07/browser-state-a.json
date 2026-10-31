@@ -1,0 +1,22 @@
+{
+  "syntheticIdentity": "A",
+  "scopeKey": "[\"00000000-0000-4000-8000-00000000000a\",\"00000000-0000-4000-8000-00000000001a\"]",
+  "generation": 1,
+  "hydrated": true,
+  "persistence": "local",
+  "titles": [
+    "Qualified synthetic lead A",
+    "Synthetic account A alert"
+  ],
+  "toastTitles": [
+    "Qualified synthetic lead A"
+  ],
+  "externalDestination": {
+    "enabled": false,
+    "url": ""
+  },
+  "thirdPartyConsent": false,
+  "networkAttempts": 0,
+  "eventReads": 2,
+  "lateResult": "captured A"
+}

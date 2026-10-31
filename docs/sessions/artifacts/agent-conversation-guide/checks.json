@@ -1,0 +1,74 @@
+{
+  "base": "0270d44981a4218e16619d7a65b4ffb7dc79a8ef",
+  "source_commit": "0c385e86b5da360c5095aeb35e765dde1945a0e0",
+  "python": {
+    "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "version": "3.12.12",
+    "provenance": "Existing repository backend/.venv; no new dependencies or exact requirements reproducibility claim."
+  },
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH": "<worktree>/backend",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1"
+  },
+  "commands": {
+    "baseline": "python -B -m pytest tests/unit/test_agent_conversation_guide.py -q -o addopts=",
+    "affected": "python -B -m pytest tests/unit/test_agent_conversation_guide.py tests/unit/test_prompt_versions.py tests/unit/test_prompt_composer.py tests/unit/test_core_prompt_contract.py tests/unit/test_prompt_builder.py tests/unit/test_prompt_build.py tests/unit/test_prompt_composer_direction.py tests/unit/test_prompt_composer_knowledge_driven.py tests/unit/test_true_inbound_prompt_separation.py tests/unit/test_realtime_independent.py tests/unit/test_realtime_inbound_opening.py tests/unit/test_prompt_identity_persist.py tests/unit/test_llm_guardrails.py -q -o addopts=",
+    "followup": "python -B -m pytest backend/tests/unit/test_prompt_composer.py backend/tests/unit/test_prompt_versions.py -q -o addopts=",
+    "lint": "python -B -m ruff check --select F <22 changed source/test paths>",
+    "diff": "git -c core.safecrlf=false diff --check"
+  },
+  "results": {
+    "baseline": "12 failed, 1 passed; first13 new controls on original source",
+    "draft_first": "4 failed,23 passed; expected version bump and actual pending status assertion",
+    "affected_first": "68 failed,166 passed; superseded scripted contract assertions",
+    "affected_contract_update": "234 passed,33warnings3.33s",
+    "final": "234 passed,33warnings4.01s",
+    "compatibility_followup": "39 passed1.74s after comment cleanup and equivalent empty addendum simplification; overlaps final, not additive",
+    "ruff_final": "pass",
+    "diff_check": "pass"
+  },
+  "qualification_binding": "Final234 run predates guardrails comment cleanup and equivalent model_prompt_addendum return-empty simplification; followup39 and scoped lint cover final22-file source. Composed prompt hashes unchanged by that followup.",
+  "source_sha256": {
+    "backend/app/domain/services/llm_guardrails.py": "88b7f8dfc77f6290c810d0dd42989ad30dd1534f7a81e93a4603e67bf32461f4",
+    "backend/app/realtime/prompts.py": "2bb4eea8a29ccb8a3ff66fa520fc85723bb1eb964134d8cb89204af77e67b143",
+    "backend/app/services/scripts/prompt_builder.py": "db654b740df5267f37ca825354fa904c7e31ae710815a5cf9bd54c7607fcb68e",
+    "backend/app/services/scripts/prompts/composer.py": "d1ddc7e15a578f75fa525f85db1418a30d06fc7bdc4634849269603c74716234",
+    "backend/app/services/scripts/prompts/direction.py": "45723944e24351f52b4fddeb3c9ea3090ac085f9ac7196cffc52a8ce4a6f9c86",
+    "backend/app/services/scripts/prompts/guardrails.py": "cb1d0cc30ae6716f8e9ecf89cf9a93be3c760378dcd9fbfed6b3806241de85b2",
+    "backend/app/services/scripts/prompts/inbound.py": "d33bde9c1bd1ab91147220d2eb1c07ba005621a2724c8aa356b2fcfe1e2b14cb",
+    "backend/app/services/scripts/prompts/live_state.py": "b323c035902f5a27e87ed5caffd1563bc5a3531f944e19dee5d889e79094660e",
+    "backend/app/services/scripts/prompts/personas/customer_support.py": "088f0d704c87c8eb45120bb7c608992f3dcef76dc29aaab8cb6b6365f6382ca7",
+    "backend/app/services/scripts/prompts/personas/lead_gen.py": "7c2cec1ba8d71f8f123f82e0dbcd243ddb1495cb191b42fd36fde4bcaa582bab",
+    "backend/app/services/scripts/prompts/personas/receptionist.py": "a1bfbf2180b3473b05f4d7157fbc1c6fecf970912d205bb50c238613ce4c2a79",
+    "backend/app/services/scripts/prompts/versions.py": "3b00ac088e7f621872edeac299959a9d4b8fa255e946986be01ef0ff31f443a4",
+    "backend/tests/unit/test_agent_conversation_guide.py": "e344f2f9ddc8e756cdc95e677c895e50f65742ca776fbc3e774e3a472379f519",
+    "backend/tests/unit/test_core_prompt_contract.py": "c571a7973397e82c3ac424b70ff40821c6c09ddba8ee7fe293d71c8e61bf3d27",
+    "backend/tests/unit/test_llm_guardrails.py": "10635f0b5b4e52c45e7abcedfbfcd248b36806b728f44039a3e1451accb6d3ee",
+    "backend/tests/unit/test_prompt_build.py": "e69138caf2fbf82fb705e8b6370da7c5f570815223d09759f98f4a816c3d2cf2",
+    "backend/tests/unit/test_prompt_builder.py": "efe58498b1682b3f8b811ec3232c9f90eec8af8aee12c9a0388565bb5bf15d0b",
+    "backend/tests/unit/test_prompt_composer.py": "99d72f5c5674054d22054b7c75032ea441746ebf6b636b5d34fbb671ac141090",
+    "backend/tests/unit/test_prompt_composer_direction.py": "778ad6444028be639c93aa163084f7ea47b6d278b31228208a01837960449bd5",
+    "backend/tests/unit/test_prompt_versions.py": "829ec42608af8aa4fa42ef6f78f934e5f091b2b59bb922cc9d550e83642f3ffd",
+    "backend/tests/unit/test_realtime_inbound_opening.py": "25f24e1e40f7501160e54680a39252dc71ba6318fe676d37d73e1d0250e4b386",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "725272def36c7aeb243733623d461c9ccba9aaf47446a4d48517f6294bdd3c69"
+  },
+  "artifact_sha256": {
+    "affected-contract-update.txt": "305053d458777496114a176bfecf06da5c9b1345bca4f9655cdb0a9834e98006",
+    "affected-first.txt": "9cd7076611ce064a1dbb14e2a69e0893cb101d272ab785ef23cc9f674136dd74",
+    "baseline.txt": "2ea61d5d340bf6b5629e1475d5939f56a29d59a9874554d1271949dbcfbf9dd4",
+    "compatibility-final.txt": "a114c6e13916336993e94b0eea34f33d2afd3764e71465fc69017b6a8d335a4a",
+    "draft-first.txt": "f7e4f455a83ac526463c16cd5db1391028b9debc53bc201b50e1d2194b1cc4ea",
+    "final.txt": "397c0fd37416dc9132c24475e62f688cabe084b99a0547d9a0aae9d4631dd426",
+    "prompt-size-after.json": "210162f2edbf0a6dba711b914e6167ec17c4d9a961da51d3b08336db94fc762a",
+    "prompt-size-before.json": "0b812984ae910abb27e72f278f3af40b684ace42d3bd74d309050637758aa7f1",
+    "ruff-final.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "ruff.txt": "caba2b678edf764a58cdfd311a0ca47be730f294c0a4c64bebe1f69d993880c1"
+  },
+  "limits": [
+    "Pure prompt/cleaner tests and synthetic runtime boundaries; no model/provider/DB/audio/browser acceptance.",
+    "No semantic hallucination guarantee or production-ready closure.",
+    "Removed script-enforcing expectations are intentional user architecture revision; standalone legacy validator method tests do not establish current live enforcement."
+  ]
+}

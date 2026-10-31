@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "scope": "AG06 Gmail saved acknowledgement recovery only",
+  "source_commits": {
+    "backend": "9eeeb428c9fe1cfe6f82bef57541d416b3f59012",
+    "frontend": "1a58d7c5c346c7b75b00b43727736a9fcc5fbe0b"
+  },
+  "source_hash_manifest": "source-hashes.json",
+  "source_inputs": 31,
+  "artifact_lf_sha256": {
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/backend-commands.json": "95b83258406d374a9cd6c9477a13a5559cdd7243877f8387744197a767d00749",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/backend-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/backend-source-hashes.json": "e1a5578e50ead8e53b36e2cf8ec3e499e9514d2d4a6532c1c8fcb91a68d189be",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-final-result.json": "366f66ea50e5dd59cbc5d4d09479da98de7ddb9bb9f8c3e892a118649ee83777",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-final.txt": "2ff24b3666914f58e4ad67859473f920ec77fa89efc9ceda1963f3ce437b6661",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-first-probe.py": "5ca1cabf2dec2e533abb5be4d2acac34dd3c080a39b57f12568732feb7c8bfcc",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-first-result.json": "dba4f450b75e37c098ae63f7b9472cc2f1de2d921146faf46e494cf4b28dd1f9",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-first.txt": "e4fdb17c6b0a2b31a5c801d9500b2d6271189e18b113b4390fd1bfe60d642d97",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/pg_probe.py": "c515e5d1459e11872dd06b0165d010ea9c880ec7d1c824acc21e5c07ad66846b",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/source-hashes.json": "f28bccd00020ff217c76ccd153f552cc3287752f892b6be58ce6c4204df97c22",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/ui-build.txt": "f4c736771946f97ee80d0e828c7713e922bb032632961df2785ab5f6c6727ef6",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/ui-checks.json": "33bcf936dcedb71d3ffe2496ed33471c6472d044f19832bd2b18569636ce92f1",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/ui-focused.txt": "9416497ed15c10fdeaf4c2596606fd969818a988519099d29325cdcb34c2e3da",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/ui-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/ui-tests.txt": "addb1fbdfa1278faedf33fb486d9aebf9dd5505d229a2527b93fabd9a2458c23",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/ui-typescript.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/unit-final-result.json": "9f0b3d42de9011a18730262f89bac0672976035559f0d73412e7748df13ac5f9",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/unit-final.txt": "fe85f7b131fac050e72e9fcefa41556a227ef9c50907d05eb2b57b2accbee5bf",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/unit-focus.txt": "c88afd3af869a89605770d2082ed089c019da71e543d3485800bbd2faaa3be36",
+    "docs/sessions/artifacts/ag06-saved-ack-recovery/unit_probe.py": "ccc823277f7bc8944745222540ecba33c386ff5a34d1b92ca7ac162de5b7ba44",
+    "docs/sessions/2026-10-06-ag06-saved-acknowledgement-recovery.md": "b090adcce58b6e0d1442e109c7d4f6c0087d991998c5d55d29ef8962670b3690"
+  },
+  "verification": {
+    "backend_focused": 48,
+    "backend_affected_12_modules": 441,
+    "private_postgres_parametrized_controls": 8,
+    "admin_focused": 118,
+    "admin_new_controls": 60,
+    "admin_all": 159,
+    "overlap": "48 is included in441;118 is included in159. Root integration runs are separate.",
+    "scoped_lint": "passed",
+    "final_admin_typescript_and_build": "passed"
+  },
+  "reviews": {
+    "root": "final backend and frontend source cleared before their commits",
+    "independent": "account_finalize final source and backend evidence parity cleared; no reviewer tests/DB execution"
+  },
+  "limits": [
+    "Private PostgreSQL used hand-built relevant-shape tables plus actual namespace-rewritten0062, not full migrated product acceptance.",
+    "First PG run has socket-only Proactor guard limitation; final run additionally measures22 exact database transport admissions and0 prohibited attempts.",
+    "108public table hashes/schema/head0061 unchanged; role and private schemas removed.",
+    "No live provider/customer DB/public migration/deployment/browser acceptance.",
+    "UI uses synthetic API promises/minimal hook scheduler; pending cache is memory-only per token generation, not cross-tab or restart persistence.",
+    "BroaderAG06 and feature freeze remain open;CP05/CP06/CP09 unchanged."
+  ]
+}

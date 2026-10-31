@@ -1,0 +1,25 @@
+
+> frontend@0.1.0 build
+> next build --webpack
+
+▲ Next.js 16.3.8 (webpack)
+✓ Running next.config.ts took 10.4s
+Warning: Custom Cache-Control headers detected for the following routes:
+  - /_next/static/:path*
+
+Setting a custom Cache-Control header can break Next.js development behavior.
+- Experiments (use with caution):
+  · clientTraceMetadata
+  · optimizePackageImports
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 2.6min
+  Running TypeScript ...
+src/components/auth/logout-controls.test.tsx(21,3): error TS1360: Type '{ id: string; tenant_id: string; email: string; role: string; minutes_remaining: number; name: undefined; business_name: undefined; partner_id: undefined; partner_status: undefined; tenant_status: undefined; suspended_scope: undefined; suspension_reason: undefined; suspended_at: undefined; }' does not satisfy the expected type '{ name: string | undefined; business_name: string | undefined; partner_id: string | undefined; tenant_id: string | undefined; partner_status: string | undefined; tenant_status: string | undefined; ... 7 more ...; role: string; }'.
+  Property 'minutes_state' is missing in type '{ id: string; tenant_id: string; email: string; role: string; minutes_remaining: number; name: undefined; business_name: undefined; partner_id: undefined; partner_status: undefined; tenant_status: undefined; suspended_scope: undefined; suspension_reason: undefined; suspended_at: undefined; }' but required in type '{ name: string | undefined; business_name: string | undefined; partner_id: string | undefined; tenant_id: string | undefined; partner_status: string | undefined; tenant_status: string | undefined; ... 7 more ...; role: string; }'.
+src/components/auth/logout-controls.test.tsx(37,27): error TS2322: Type 'Promise<{ id: string; tenant_id: string; email: string; role: string; minutes_remaining: number; name: undefined; business_name: undefined; partner_id: undefined; partner_status: undefined; tenant_status: undefined; suspended_scope: undefined; suspension_reason: undefined; suspended_at: undefined; }>' is not assignable to type 'Promise<{ name: string | undefined; business_name: string | undefined; partner_id: string | undefined; tenant_id: string | undefined; partner_status: string | undefined; tenant_status: string | undefined; ... 7 more ...; role: string; }>'.
+  Property 'minutes_state' is missing in type '{ id: string; tenant_id: string; email: string; role: string; minutes_remaining: number; name: undefined; business_name: undefined; partner_id: undefined; partner_status: undefined; tenant_status: undefined; suspended_scope: undefined; suspension_reason: undefined; suspended_at: undefined; }' but required in type '{ name: string | undefined; business_name: string | undefined; partner_id: string | undefined; tenant_id: string | undefined; partner_status: string | undefined; tenant_status: string | undefined; ... 7 more ...; role: string; }'.
+src/lib/webauthn-client-contract.test.tsx(42,5): error TS2322: Type '(id: string) => Promise<{ access_token: string; token_type: string; user_id: string; tenant_id: string; email: string; role: string; minutes_remaining: number; message: string; mfa_required: false; mfa_challenge_token: undefined; business_name: undefined; }>' is not assignable to type '(ceremonyId: string, credentialResponse: Record<string, unknown>) => Promise<{ message: string; mfa_required: boolean; mfa_challenge_token: string | undefined; minutes_state: MinutesState; ... 7 more ...; user_id: string; }>'.
+  Type 'Promise<{ access_token: string; token_type: string; user_id: string; tenant_id: string; email: string; role: string; minutes_remaining: number; message: string; mfa_required: false; mfa_challenge_token: undefined; business_name: undefined; }>' is not assignable to type 'Promise<{ message: string; mfa_required: boolean; mfa_challenge_token: string | undefined; minutes_state: MinutesState; minutes_remaining: number | null; email: string; role: string; ... 4 more ...; user_id: string; }>'.
+    Property 'minutes_state' is missing in type '{ access_token: string; token_type: string; user_id: string; tenant_id: string; email: string; role: string; minutes_remaining: number; message: string; mfa_required: false; mfa_challenge_token: undefined; business_name: undefined; }' but required in type '{ message: string; mfa_required: boolean; mfa_challenge_token: string | undefined; minutes_state: MinutesState; minutes_remaining: number | null; email: string; ... 5 more ...; user_id: string; }'.
+Failed to type check.

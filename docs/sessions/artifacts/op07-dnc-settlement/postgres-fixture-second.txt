@@ -1,0 +1,68 @@
+..................FF                                                     [100%]
+================================== FAILURES ===================================
+__ test_old_unacknowledged_outbox_keeps_newer_live_attempt_owned[processing] __
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x000002268902F020>, pool=<asyncpg.pool.Pool obj...42e-a24e-4994-bbf2-f13b74a8b79d'), service=<app.domain.services.call_service.CallService object at 0x0000022689150230>)
+live_status = 'processing'
+
+    @pytest.mark.parametrize("live_status", ["processing", "calling"])
+    async def test_old_unacknowledged_outbox_keeps_newer_live_attempt_owned(settlement, live_status):
+        f, db = settlement, settlement.db
+        assert (await settle(f)).retry_args is not None
+        newer_call = uuid4()
+        await db.admin.execute("UPDATE dialer_jobs SET status=$2,attempt_number=2 WHERE id=$1", db.jobs[0], live_status)
+>       await db.admin.execute("""INSERT INTO calls(id,tenant_id,lead_id,dialer_job_id,phone_number,status)
+                                 VALUES($1,$2,$3,$4,$5,'in_progress')""",
+                              newer_call, db.tenants[0], db.leads[0], db.jobs[0], PHONE)
+
+tests\integration\test_dnc_settlement_truth.py:283:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.ForeignKeyViolationError: outbound artifact campaign is missing or not visible
+
+asyncpg\protocol\protocol.pyx:207: ForeignKeyViolationError
+___ test_old_unacknowledged_outbox_keeps_newer_live_attempt_owned[calling] ____
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x000002268902D220>, pool=<asyncpg.pool.Pool obj...2c0-452c-4462-b562-102d822c6fff'), service=<app.domain.services.call_service.CallService object at 0x0000022689128B60>)
+live_status = 'calling'
+
+    @pytest.mark.parametrize("live_status", ["processing", "calling"])
+    async def test_old_unacknowledged_outbox_keeps_newer_live_attempt_owned(settlement, live_status):
+        f, db = settlement, settlement.db
+        assert (await settle(f)).retry_args is not None
+        newer_call = uuid4()
+        await db.admin.execute("UPDATE dialer_jobs SET status=$2,attempt_number=2 WHERE id=$1", db.jobs[0], live_status)
+>       await db.admin.execute("""INSERT INTO calls(id,tenant_id,lead_id,dialer_job_id,phone_number,status)
+                                 VALUES($1,$2,$3,$4,$5,'in_progress')""",
+                              newer_call, db.tenants[0], db.leads[0], db.jobs[0], PHONE)
+
+tests\integration\test_dnc_settlement_truth.py:283:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:353: in execute
+    _, status, _ = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.ForeignKeyViolationError: outbound artifact campaign is missing or not visible
+
+asyncpg\protocol\protocol.pyx:207: ForeignKeyViolationError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_dnc_settlement_truth.py::test_old_unacknowledged_outbox_keeps_newer_live_attempt_owned[processing]
+FAILED tests/integration/test_dnc_settlement_truth.py::test_old_unacknowledged_outbox_keeps_newer_live_attempt_owned[calling]
+2 failed, 18 passed in 30.62s

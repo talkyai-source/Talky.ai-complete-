@@ -1,0 +1,33 @@
+✔ read-only knowledge hides every mutation control (586.6059ms)
+✔ a superseded knowledge request cannot replace the current campaign tree (127.9621ms)
+✔ switching campaigns immediately removes already-loaded knowledge while the next request is pending (156.8496ms)
+✔ question result preserves matched and never displays generated raw-hit phrasing (263.0979ms)
+✔ question result preserves weak_match and never displays generated raw-hit phrasing (233.0695ms)
+✔ question result preserves no_match and never displays generated raw-hit phrasing (183.0219ms)
+✔ absent enrichment and provenance still show original source with explicit unavailable revision (201.3982ms)
+✔ editing the query clears evidence and ignores an older pending result (315.863ms)
+✔ campaign switch and old request errors cannot replace current diagnostics (182.918ms)
+✔ a source mutation clears reviewed evidence and blocks testing until it finishes (325.8683ms)
+✔ request errors stay errors rather than becoming no-match evidence (225.9606ms)
+✔ actual API preserves shared source evidence and scoped request (94.231ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[]} (2.3124ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"constructor","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (1.8447ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"no_match","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (1.3818ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[]}} (0.9316ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"Different source","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (1.0436ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":true}]}} (1.9707ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":"1"}]}} (1.2658ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":null}]}} (1.7617ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":2}]}} (2.2008ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":-1}]}} (1.3693ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":true,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (0.8406ms)
+✔ actual API rejects cross-query and legacy response without evidence (9.7547ms)
+✔ unknown coverage/provenance stays nullable weak evidence (1.4973ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13461.9865

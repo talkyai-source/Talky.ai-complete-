@@ -1,0 +1,114 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "database": "disposable loopback cp08_bootstrap_test",
+  "steps": [
+    {
+      "command": [
+        "C:/Program Files/PostgreSQL/16/bin/psql.exe",
+        "-h",
+        "127.0.0.1",
+        "-p",
+        "55434",
+        "-U",
+        "talky",
+        "-d",
+        "cp08_bootstrap_test",
+        "-v",
+        "ON_ERROR_STOP=1",
+        "-f",
+        "database/complete_schema.sql"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "alembic",
+        "stamp",
+        "0008_tenant_voice_tuning"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "alembic",
+        "upgrade",
+        "head"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "alembic",
+        "downgrade",
+        "0058_crm_contact_effect"
+      ],
+      "exit_code": 0
+    },
+    {
+      "command": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "alembic",
+        "upgrade",
+        "head"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "verification": {
+    "migration_head": "0059_auth_identity_contract",
+    "columns": [
+      {
+        "table_name": "mfa_challenges",
+        "column_name": "attempts",
+        "column_default": "0",
+        "is_nullable": "NO"
+      },
+      {
+        "table_name": "user_profiles",
+        "column_name": "email_verified_at",
+        "column_default": null,
+        "is_nullable": "YES"
+      },
+      {
+        "table_name": "user_profiles",
+        "column_name": "is_verified",
+        "column_default": "false",
+        "is_nullable": "NO"
+      },
+      {
+        "table_name": "user_profiles",
+        "column_name": "verification_token",
+        "column_default": null,
+        "is_nullable": "YES"
+      },
+      {
+        "table_name": "user_profiles",
+        "column_name": "verification_token_expires_at",
+        "column_default": null,
+        "is_nullable": "YES"
+      }
+    ],
+    "constraints": [
+      {
+        "conname": "chk_email_verification_consistency",
+        "convalidated": true
+      },
+      {
+        "conname": "mfa_challenges_attempts_bounds",
+        "convalidated": true
+      }
+    ],
+    "result": "passed"
+  },
+  "source_sha256_lf": {
+    "backend/database/complete_schema.sql": "14598518e889157b30de23584457a50997551491cddb465aab4b849a5d925d17",
+    "backend/Alembic/versions/0059_auth_identity_contract.py": "c51610e4014c5c2daa79cf016297e37af87157d5b313e61aaa23eac83ef4a4df"
+  }
+}

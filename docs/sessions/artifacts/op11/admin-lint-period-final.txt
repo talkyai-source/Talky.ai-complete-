@@ -1,0 +1,2 @@
+Verification record: final changed-file ESLint command in validation-manifest.json.
+Exit code: 0. No stdout/stderr was emitted; the completed tool invocation reported success.

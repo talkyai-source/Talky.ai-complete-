@@ -1,0 +1,96 @@
+{
+  "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "resolver": {
+    "cwd": "release worktree",
+    "argv": [
+      "-m",
+      "pip",
+      "install",
+      "--dry-run",
+      "--ignore-installed",
+      "--report",
+      "docs/sessions/artifacts/release-langgraph-security/resolver.json",
+      "-r",
+      "backend/requirements.txt"
+    ],
+    "exit_code": 0
+  },
+  "audit": {
+    "cwd": "release worktree",
+    "argv": [
+      "-m",
+      "pip_audit",
+      "-r",
+      "docs/sessions/artifacts/release-langgraph-security/resolved-requirements.txt",
+      "--no-deps",
+      "--disable-pip",
+      "--format",
+      "json",
+      "--output",
+      "docs/sessions/artifacts/release-langgraph-security/audit.json"
+    ],
+    "exit_code": 0,
+    "package_count": 156,
+    "vulnerabilities": 0
+  },
+  "install": {
+    "cwd": "release worktree",
+    "argv": [
+      "-m",
+      "pip",
+      "install",
+      "--target",
+      "backend/tmp/langgraph-security-exact-packages",
+      "--constraint",
+      "docs/sessions/artifacts/release-langgraph-security/resolved-requirements.txt",
+      "langgraph==1.2.4",
+      "langgraph-sdk==0.4.4",
+      "langgraph-prebuilt==1.1.0",
+      "langchain-core==1.4.0",
+      "langchain-groq==1.1.2",
+      "langsmith==0.8.18"
+    ],
+    "exit_code": 0,
+    "package_count": 37
+  },
+  "regression": {
+    "cwd": "backend",
+    "argv": [
+      "tmp/release-backend-check.py",
+      "-q",
+      "--tb=short",
+      "-c",
+      "pytest.ini",
+      "../docs/sessions/artifacts/release-langgraph-security/test_graph_compatibility.py",
+      "tests/unit/assistant",
+      "tests/unit/test_assistant_agent.py",
+      "tests/unit/test_assistant_agent_service.py",
+      "tests/unit/test_assistant_ws.py",
+      "tests/unit/test_assistant_model_config.py",
+      "tests/unit/test_assistant_knowledge_authorization.py",
+      "tests/unit/test_ag06_dashboard_actions.py",
+      "tests/unit/test_reviewed_account_identity.py"
+    ],
+    "wrapper_copy": "offline_pytest.py",
+    "exit_code": 0,
+    "passed": 327,
+    "skipped": 0,
+    "warnings": 65,
+    "seconds": 6.78,
+    "blocked_network_attempts": 0
+  },
+  "environment": {
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "GROQ_API_KEY": "ci-dummy",
+    "OPENAI_API_KEY": "ci-dummy",
+    "CEREBRAS_API_KEY": "ci-dummy",
+    "LANGCHAIN_TRACING_V2": "false",
+    "LANGSMITH_TRACING": "false",
+    "PYTHONPATH_order": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-release-20261008/backend/tmp/langgraph-security-exact-packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ]
+  }
+}

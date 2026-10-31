@@ -1,0 +1,1 @@
+{"passed":true,"checks":[{"viewport":"desktop","width":1280,"height":1000,"horizontal_page_overflow":false},{"viewport":"mobile","width":390,"height":844,"horizontal_page_overflow":false}],"artifact_directory":"output/playwright/cp04"}

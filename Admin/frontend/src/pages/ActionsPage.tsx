@@ -39,7 +39,7 @@ export function ActionsPage() {
                             <div>
                                 <h1 className="page-title">Assistant Actions</h1>
                                 <p className="page-description">
-                                    Full audit trail of all actions triggered by the AI assistant
+                                    Saved action records and receipts from the AI assistant
                                 </p>
                             </div>
                         </div>
@@ -60,7 +60,7 @@ export function ActionsPage() {
                         </div>
                         <div className="info-item">
                             <AlertCircle size={16} />
-                            <span>Only safe actions (Email, SMS, Reminder) can be retried</span>
+                            <span>Automatic retry is unavailable. Keep uncertain actions held and review the original account and receipt.</span>
                         </div>
                     </div>
 

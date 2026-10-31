@@ -1,0 +1,96 @@
+{
+  "source_commit": "3da14e88734c4c9771b68c97e3f01eeb006ec09d",
+  "base_commit": "e7b8a84c9d8e74b12a10a6bab88a98fef40e8050",
+  "date": "2026-10-05",
+  "platform": "Windows",
+  "python": "3.12.12",
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "cwd": "backend",
+  "unit": {
+    "argv": [
+      "-m",
+      "pytest",
+      "tests/unit/test_dnc_settlement_truth.py",
+      "tests/unit/test_dnc_bulk_acknowledgement.py",
+      "tests/unit/test_dnc_service.py",
+      "tests/unit/test_call_service_pooled_teardown.py",
+      "tests/unit/test_call_service_counters.py",
+      "tests/unit/test_call_guard_dnc_fail_closed.py",
+      "tests/unit/test_crm_sync_hooks.py",
+      "tests/unit/test_disposition_retry_bounds.py",
+      "tests/unit/test_outbound_answered_duration.py",
+      "tests/unit/test_telephony_orphan_recovery_confirmation.py",
+      "tests/unit/test_unavailable_disposition.py",
+      "tests/unit/test_webhooks_call_idor.py",
+      "tests/unit/test_op07_native_dnc_durability.py",
+      "tests/unit/test_call_status_terminal_monotonic.py",
+      "tests/unit/test_call_terminal_settlement_migration.py",
+      "-q"
+    ],
+    "passed": 227,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 124,
+    "seconds": 6.68,
+    "artifact": "regression-final.txt"
+  },
+  "postgres": {
+    "environment": {
+      "TEST_DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp04_acceptance_test"
+    },
+    "argv": [
+      "-m",
+      "pytest",
+      "tests/integration/test_dnc_settlement_truth.py",
+      "tests/integration/test_op07_native_dnc.py",
+      "-q"
+    ],
+    "passed": 35,
+    "failed": 0,
+    "skipped": 0,
+    "seconds": 35.02,
+    "artifact": "postgres-final.txt",
+    "schema": "Parent-supplied retained fully migrated disposable database through 0061; no bootstrap/migration performed by this slice",
+    "role": "Random NOSUPERUSER NOBYPASSRLS role; RLS context explicit per service contract",
+    "cleanup": "Fixture rows/role cleaned; DB left running and slot released to parent"
+  },
+  "review": {
+    "reviewer": "llm_audit",
+    "kind": "independent read-only final delta review",
+    "result": "no further material defect found",
+    "independent_test_count": 0
+  },
+  "ruff": {
+    "argv": [
+      "-m",
+      "ruff",
+      "check",
+      "app/domain/services/call_service.py",
+      "app/domain/services/dnc_service.py",
+      "tests/unit/test_dnc_settlement_truth.py",
+      "tests/unit/test_dnc_bulk_acknowledgement.py",
+      "tests/unit/test_call_service_pooled_teardown.py",
+      "tests/unit/test_dnc_service.py",
+      "tests/unit/test_disposition_retry_bounds.py",
+      "tests/integration/test_dnc_settlement_truth.py",
+      "--select",
+      "F",
+      "--extend-ignore",
+      "F401,F841"
+    ],
+    "result": "passed",
+    "artifact": "ruff-ci.txt"
+  },
+  "limits": [
+    "No live provider, telephone, production database, deployment or browser proof",
+    "No distributed PostgreSQL/Redis atomic admission claim",
+    "Existing CallGuard remains final phone suppression boundary",
+    "No manual-unblock policy or do_not_call flag change",
+    "No historical projection backfill"
+  ],
+  "source_commits": [
+    "3ae053b081fdced8614e1712add0d6dae4b8af03",
+    "3da14e88734c4c9771b68c97e3f01eeb006ec09d"
+  ],
+  "compatibility": "Persisted inbound/test non-dialable labels without dialer job/outbox may settle without DNC lookup. Existing separate finalizers were not shown broken. Invalid normal outbound or retry-owning records remain fail-closed."
+}

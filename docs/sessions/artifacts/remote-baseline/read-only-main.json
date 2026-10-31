@@ -1,0 +1,16 @@
+{
+  "checked_at_utc": "2026-10-05T06:04:17.707620+00:00",
+  "candidate": "a07d9163f7da732897579bb66529fab5328cc02f",
+  "branch": "codex/production-ready-20261004",
+  "tracked_status_before": "",
+  "prior_origin_main": "0a64828c23a17a8ab84c566d9739487606f26b64",
+  "fetch_exit_code": 0,
+  "fetched_main": "0a64828c23a17a8ab84c566d9739487606f26b64",
+  "merge_base": "0a64828c23a17a8ab84c566d9739487606f26b64",
+  "candidate_only_main_only_commits": "111\t0",
+  "main_changes_since_merge_base": [],
+  "candidate_unchanged": true,
+  "branch_unchanged": true,
+  "tracked_status_after": "",
+  "scope": "Read remote main into local refs/FETCH_HEAD only. No push, merge, checkout, application edit, deployment or production access."
+}

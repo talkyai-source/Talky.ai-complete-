@@ -1,14 +1,22 @@
 # Day 10 Concurrency + Soak Evidence
 
+> **INVALIDATED — not production release evidence.** This March 2026 run used a
+> SIP-only generator that sent and received no RTP, yet counted unavailable
+> barge-in timing as a pass. It also predates the transfer-disabled fail-closed
+> controller/trace contract and has no candidate-bound external live-media
+> manifest. The production verdict is **NO-GO** until the corrected verifier and
+> external live-media gate are completed against the frozen candidate.
+
 Date: 2026-03-04  
 Verifier: `telephony/scripts/verify_day10_concurrency_soak.sh`
 
 ## Summary
 
 1. Safe concurrency threshold: 3
-2. Recommended production concurrency: 2
+2. Historical SIP-only headroom value (not a production recommendation): 2
 3. Soak pass: True
-4. Final decision: go
+4. Historical decision: invalidated
+5. Production release verdict: no-go
 
 ## Core Evidence Files
 

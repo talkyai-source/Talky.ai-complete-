@@ -1,0 +1,73 @@
+{
+  "candidate_revision": "fa145cf4869800dbca30755d8cf598f670aec30b",
+  "scope": "Small actual model spot check with identical production prompt composer and TurnStreamer, synthetic text callers, no-source/no-tool fixture, TTS/media mocked. This does not exercise configured campaign knowledge retrieval or prove end-user hearability.",
+  "fixture": {
+    "company": "Northwind Systems",
+    "persona": "lead_gen",
+    "knowledge_driven_composer": true,
+    "campaign_slots": {},
+    "additional_instructions": "The target list contains existing terminal customers. Discuss an upgrade.",
+    "initial_assistant": "Hi, I'm Ava from Northwind Systems. I'm calling about our payment terminals.",
+    "verified_product_benefits": [],
+    "runtime_knowledge_mode": null,
+    "external_action_tools": [],
+    "configured_campaign_retrieval_pipeline_exercised": false
+  },
+  "manual_semantic_review": {
+    "groq_openai_gpt_oss_20b": {
+      "ordinary_turns": 6,
+      "customer_relationship_reassertions_after_denial": 0,
+      "turns_with_unverified_benefit_claims_actually_submitted": 5,
+      "examples": [
+        "lower transaction fees",
+        "contactless payments",
+        "detailed reporting"
+      ],
+      "raw_artifact": "2026-10-01-groq-final-fa145cf4.json"
+    },
+    "openai_gpt_6_luna": {
+      "ordinary_turns": 2,
+      "customer_relationship_reassertions_after_denial": 0,
+      "turns_with_unverified_benefit_claims_actually_submitted": 0,
+      "second_reply": "I can\u2019t confirm what Northwind Systems could offer without knowing your business needs. Are you interested in hearing about payment terminal upgrades?",
+      "raw_artifact": "2026-10-01-openai-semantic-fa145cf4.json"
+    },
+    "gemini_3_8_flash": {
+      "ordinary_turns": 2,
+      "customer_relationship_reassertions_after_denial": 0,
+      "turns_with_unverified_benefit_claims_actually_submitted": 1,
+      "examples": [
+        "processing solutions",
+        "contactless payments"
+      ],
+      "raw_artifact": "2026-10-01-gemini-semantic-fa145cf4.json"
+    }
+  },
+  "incomplete_response_probe": {
+    "provider": "groq/openai/gpt-oss-20b",
+    "injected_wire_max_completion_tokens": 8,
+    "actual_terminal_reason": "length",
+    "actual_sdk_requests": 1,
+    "raw_provider_text": "",
+    "mocked_tts_submissions": [
+      "I'm sorry, could you repeat that?"
+    ],
+    "returned_history_matches_submissions": true,
+    "hangup_requested": false,
+    "result": "pass for actual zero-visible-content token exhaustion; deterministic tests separately cover exhaustion after partial speech"
+  },
+  "additional_runtime_defect_found": {
+    "root_cause": "Comma clauses counted as full sentences for the live playback cap, while history independently recounted punctuation in the raw answer.",
+    "history_mismatches": {
+      "groq": 3,
+      "openai": 1,
+      "gemini": 0
+    },
+    "symptoms": [
+      "Unsubmitted sentence or clause retained in history",
+      "Speech can stop at a comma mid-sentence"
+    ],
+    "repair_status_at_capture": "Confirmed, assigned to LLM agent for canonical submitted history and grammatical sentence cap correction; not fixed in fa145cf4."
+  },
+  "interpretation": "Luna adhered better to the no-source benefit rule in this narrow sample. These unequal, tiny sample sizes do not establish comparative production reliability. Qualitative benefit misses are outside the bounded deterministic figure/link/action/relationship guards; prompt wiring was present. No saved model or default configuration was changed."
+}

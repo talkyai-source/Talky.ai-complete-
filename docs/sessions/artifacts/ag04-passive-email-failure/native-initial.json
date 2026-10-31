@@ -1,0 +1,359 @@
+{
+  "source_base": "be44bf7267ee2aa96ca851c8f0acdbc9e5733502",
+  "blocked_network_attempts": [],
+  "scope": "Initial actual native parser/bridge probe with synthetic failed executor receipt",
+  "rows": [
+    {
+      "scenario_id": "probe.failed_action",
+      "profile": {
+        "provider": "openai",
+        "model": "gpt-realtime-2",
+        "voice": "ash",
+        "settings": {
+          "reasoning_effort": "low"
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": false
+      },
+      "raw_output": [
+        {
+          "response_id": "response-2",
+          "text": "The email was sent to you.",
+          "status": "completed"
+        },
+        {
+          "response_id": "response-3",
+          "text": "The email could not be sent.",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [],
+      "history": [
+        {
+          "role": "user",
+          "content": "Please email the details.",
+          "timestamp": "2026-10-05T06:35:47.42477",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "request",
+            "caller_turn_order": 1
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [],
+      "observed": {
+        "submissions": 0,
+        "clears": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_message_ids": {
+          "send_email": null
+        },
+        "repair_requests": 1,
+        "normal_continuations": 1,
+        "failure": true,
+        "connection_lost": false,
+        "tool_statuses": [
+          "failed"
+        ],
+        "last_tool_success": false,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [
+          "send_email"
+        ],
+        "accepted": 0,
+        "executor_attempts": [
+          {
+            "action": "send_email",
+            "arguments": {},
+            "receipt": {
+              "version": 1,
+              "action": "send_email",
+              "success": false,
+              "status": "failed",
+              "confirmation_allowed": false,
+              "provider": "synthetic-email",
+              "request_id": "synthetic-failed-request-1",
+              "message_id": null,
+              "message": "Synthetic provider rejected the send request."
+            },
+            "origin": "synthetic connected executor; no provider send"
+          }
+        ],
+        "recorded_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        },
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [
+          {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        ],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 640,
+        "submitted_bytes": 0,
+        "submissions": [],
+        "receipts": [],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 0,
+        "truncate_events": []
+      }
+    },
+    {
+      "scenario_id": "probe.failed_action",
+      "profile": {
+        "provider": "xai",
+        "model": "grok-voice-think-fast-1.0",
+        "voice": "eve",
+        "settings": {
+          "reasoning_effort": "high",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.85
+          }
+        },
+        "mode": "offline_replay",
+        "hidden_opt_in": true
+      },
+      "raw_output": [
+        {
+          "response_id": "response-2",
+          "text": "The email was sent to you.",
+          "status": "completed"
+        },
+        {
+          "response_id": "response-3",
+          "text": "The email could not be sent.",
+          "status": "completed"
+        }
+      ],
+      "submitted_speech": [],
+      "history": [
+        {
+          "role": "user",
+          "content": "Please email the details.",
+          "timestamp": "2026-10-05T06:35:47.491184",
+          "confidence": null,
+          "talklee_call_id": null,
+          "turn_index": 0,
+          "event_type": "utterance",
+          "is_final": true,
+          "audio_window_start": null,
+          "audio_window_end": null,
+          "include_in_plaintext": true,
+          "metadata": {
+            "provider_item_id": "request",
+            "caller_turn_order": 1
+          }
+        }
+      ],
+      "contacts": {
+        "email": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        },
+        "phone": {
+          "value": null,
+          "confirmed": false,
+          "capture_status": null,
+          "confirmation_evidence": null,
+          "value_source": null,
+          "confirmation_source": null,
+          "status_source": null,
+          "readback": null
+        }
+      },
+      "contact_checkpoints": [],
+      "observed": {
+        "submissions": 0,
+        "clears": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "dnc_acknowledged": false,
+        "llm_controls": [],
+        "relationship": "unknown",
+        "identity_introduced": null,
+        "opening_interrupted": false,
+        "opening_state_on_wire": false,
+        "email_confirmed": false,
+        "email": null,
+        "email_capture_status": null,
+        "email_value_source": null,
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "phone": null,
+        "phone_confirmed": false,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_message_ids": {
+          "send_email": null
+        },
+        "repair_requests": 1,
+        "normal_continuations": 1,
+        "failure": true,
+        "connection_lost": false,
+        "tool_statuses": [
+          "failed"
+        ],
+        "last_tool_success": false,
+        "delivered_text": ""
+      },
+      "effects": {
+        "attempts": [
+          "send_email"
+        ],
+        "accepted": 0,
+        "executor_attempts": [
+          {
+            "action": "send_email",
+            "arguments": {},
+            "receipt": {
+              "version": 1,
+              "action": "send_email",
+              "success": false,
+              "status": "failed",
+              "confirmation_allowed": false,
+              "provider": "synthetic-email",
+              "request_id": "synthetic-failed-request-1",
+              "message_id": null,
+              "message": "Synthetic provider rejected the send request."
+            },
+            "origin": "synthetic connected executor; no provider send"
+          }
+        ],
+        "recorded_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        },
+        "external_execution": "not_run; any declared action receipt is a synthetic executor result",
+        "tool_results": [
+          {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        ],
+        "dnc_persistence_receipts": [],
+        "dnc_database_writes": 0
+      },
+      "end": {
+        "requested": false,
+        "shutdown_count": 0,
+        "dnc_flag": false,
+        "dnc_effect_count": null
+      },
+      "media": {
+        "generated_codec": "pcmu/8000",
+        "submitted_codec": "pcm_s16le/8000",
+        "generated_bytes": 640,
+        "submitted_bytes": 0,
+        "submissions": [],
+        "receipts": [],
+        "receipt_origin": "synthetic gateway fixture",
+        "clear_count": 0,
+        "truncate_events": []
+      }
+    }
+  ]
+}

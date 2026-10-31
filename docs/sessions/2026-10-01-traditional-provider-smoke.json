@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-01",
+  "scope": "Actual candidate provider adapters, synthetic read-only tool fixture, production provider credentials; no calls, customers, connector writes or database mutations.",
+  "command": "backend/.venv/Scripts/python.exe tmp/agent-core-repair-20261001/tmp/provider_smoke.py --production-keys",
+  "credential_handling": "SSH retrieval restricted to provider key names; captured in process memory, never printed or written to an artifact.",
+  "request": {
+    "temperature": 0.2,
+    "max_tokens": 160,
+    "strict_tool_result_before_content": true,
+    "fixture_tool": "lookup_test_value",
+    "fixture_arguments": {"key": "alpha"},
+    "fixture_result": {"success": true, "value": "blue"}
+  },
+  "results": [
+    {"provider": "openai", "model": "gpt-6-luna", "status": "ok", "tool_executions": 1, "valid_arguments": true, "fixture_value_in_answer": true, "total_ms": 5329},
+    {"provider": "groq", "model": "openai/gpt-oss-20b", "status": "ok", "tool_executions": 1, "valid_arguments": true, "fixture_value_in_answer": true, "total_ms": 1859},
+    {"provider": "cerebras", "model": "gpt-oss-120b", "status": "ok", "tool_executions": 1, "valid_arguments": true, "fixture_value_in_answer": true, "total_ms": 3047},
+    {"provider": "gemini", "model": "gemini-3.8-flash", "status": "ok", "tool_executions": 1, "valid_arguments": true, "fixture_value_in_answer": true, "total_ms": 7234}
+  ],
+  "interpretation": "All four actual providers accepted the adapter's request and completed a tool-result continuation. Times are whole buffered two-round turns from the local workstation, not single-model first-token latency or a production call SLO. One fixture is a transport and tool-contract smoke test, not proof of conversation quality.",
+  "luna_parameters": "The live Luna request accepted temperature=0.2 with reasoning_effort=none and max_completion_tokens. Keep the functional temperature setting; do not preserve the older upstream comment that nondefault temperature always fails."
+}

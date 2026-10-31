@@ -1,0 +1,102 @@
+tests/unit/test_email_confirmation.py::test_freshly_parsed_email_is_unconfirmed
+tests/unit/test_email_confirmation.py::test_affirm_after_capture_confirms_email
+tests/unit/test_email_confirmation.py::test_reject_after_capture_reopens_email
+tests/unit/test_email_confirmation.py::test_corrected_email_recaptures_as_unconfirmed_even_if_previously_confirmed
+tests/unit/test_email_confirmation.py::test_unclear_reply_keeps_email_pending
+tests/unit/test_email_confirmation.py::test_incidental_negation_does_not_wipe_email
+tests/unit/test_email_confirmation.py::test_incidental_right_does_not_confirm_email
+tests/unit/test_email_confirmation.py::test_confirmation_ignored_without_readback
+tests/unit/test_email_confirmation.py::test_gate_detects_dotted_and_digit_local_parts
+tests/unit/test_email_confirmation.py::test_gate_skips_interposed_silence_check
+tests/unit/test_email_confirmation.py::test_gate_false_when_last_real_turn_is_unrelated
+tests/unit/test_email_confirmation.py::test_domain_only_mention_without_local_or_confirm_is_not_readback
+tests/unit/test_email_confirmation.py::test_domain_plus_local_signal_is_a_readback
+tests/unit/test_email_confirmation.py::test_domain_only_with_confirm_question_still_does_not_count
+tests/unit/test_email_confirmation.py::test_multiword_email_from_agent_readback_seeds_and_confirms
+tests/unit/test_email_confirmation.py::test_agent_readback_seed_ignored_when_not_a_confirmation_turn
+tests/unit/test_email_confirmation.py::test_readback_attempts_increment_and_trigger_fallback
+tests/unit/test_email_confirmation.py::test_new_email_resets_readback_attempts
+tests/unit/test_email_confirmation.py::test_affirmative_no_discourse_marker_does_not_wipe_and_confirms
+tests/unit/test_email_confirmation.py::test_bare_no_still_rejects
+tests/unit/test_email_confirmation.py::test_formal_that_is_right_and_wrong
+tests/unit/test_email_confirmation.py::test_confirmation_verdict_override_affirm
+tests/unit/test_email_confirmation.py::test_confirmation_verdict_override_reject
+tests/unit/test_email_confirmation.py::test_confirmation_verdict_override_unclear_stays_pending
+tests/unit/test_email_confirmation.py::test_partial_correction_does_not_commit
+tests/unit/test_email_confirmation.py::test_rehearing_same_confirmed_email_keeps_it_confirmed
+tests/unit/test_email_confirmation.py::test_prompt_unconfirmed_email_demands_readback_not_confirmed
+tests/unit/test_email_confirmation.py::test_prompt_confirmed_email_is_a_captured_fact
+tests/unit/test_email_confirmation.py::test_unconfirmed_email_prompt_injects_exact_spoken_readback
+tests/unit/test_email_confirmation.py::test_confirmed_email_prompt_injects_exact_spoken_readback
+tests/unit/test_phone_confirmation.py::test_freshly_captured_phone_is_unconfirmed
+tests/unit/test_phone_confirmation.py::test_affirm_after_readback_confirms_phone
+tests/unit/test_phone_confirmation.py::test_reject_after_readback_reopens_phone
+tests/unit/test_phone_confirmation.py::test_unclear_reply_keeps_phone_pending_and_counts
+tests/unit/test_phone_confirmation.py::test_confirmation_ignored_without_readback
+tests/unit/test_phone_confirmation.py::test_corrected_phone_recaptures_as_unconfirmed
+tests/unit/test_phone_confirmation.py::test_new_phone_resets_readback_attempts
+tests/unit/test_phone_confirmation.py::test_phone_verdict_override_affirm_and_reject
+tests/unit/test_phone_confirmation.py::test_email_and_phone_gates_are_independent
+tests/unit/test_phone_confirmation.py::test_agent_read_back_phone_matches_any_formatting
+tests/unit/test_phone_confirmation.py::test_agent_read_back_phone_skips_silence_check
+tests/unit/test_phone_confirmation.py::test_full_phone_mention_with_unrelated_question_is_not_confirmation_gate
+tests/unit/test_phone_confirmation.py::test_prompt_unconfirmed_phone_demands_readback
+tests/unit/test_phone_confirmation.py::test_prompt_confirmed_phone_is_a_captured_fact
+tests/unit/test_phone_confirmation.py::test_prompt_phone_readback_attempts_trigger_fallback
+tests/unit/test_contact_capture_best_practice.py::test_a_yes_to_this_number_confirms_the_line_number[Is this number the best one to reach you on?]
+tests/unit/test_contact_capture_best_practice.py::test_a_yes_to_this_number_confirms_the_line_number[Can we reach you on the number you're calling from?]
+tests/unit/test_contact_capture_best_practice.py::test_a_yes_to_this_number_confirms_the_line_number[Should Azian call you back on this number?]
+tests/unit/test_contact_capture_best_practice.py::test_asking_for_a_new_number_does_not_offer_the_line_number
+tests/unit/test_contact_capture_best_practice.py::test_a_no_leaves_nothing_confirmed
+tests/unit/test_contact_capture_best_practice.py::test_a_confirmed_phone_is_never_replaced_by_the_line_number
+tests/unit/test_contact_capture_best_practice.py::test_the_agent_is_told_the_number_as_a_detail_not_an_action
+tests/unit/test_contact_capture_best_practice.py::test_the_line_number_is_only_used_when_it_is_a_real_number
+tests/unit/test_contact_capture_best_practice.py::test_the_shared_rules_accept_complete_contacts_and_clarify_only_unclear_parts
+tests/unit/test_contact_capture_best_practice.py::test_provider_first_then_name_then_yes_is_captured
+tests/unit/test_contact_capture_best_practice.py::test_two_failed_asks_then_the_agent_moves_on
+tests/unit/test_contact_capture_best_practice.py::test_a_complete_number_still_reopens_after_giving_up
+tests/unit/test_contact_capture_best_practice.py::test_an_unconfirmed_email_leaves_a_follow_up_note_and_an_outcome_line
+tests/unit/test_contact_capture_best_practice.py::test_a_confirmed_email_writes_no_note
+tests/unit/test_contact_capture_best_practice.py::test_a_browser_test_call_writes_no_note
+tests/unit/test_contact_capture_best_practice.py::test_the_outcome_runs_at_hangup
+tests/unit/test_email_llm_first_capture.py::test_the_read_back_address_is_read_correctly[Let me confirm that \u2014 allstate dot estimation at gmail dot com. Is that correct?-allstate.estimation@gmail.com]
+tests/unit/test_email_llm_first_capture.py::test_the_read_back_address_is_read_correctly[Allstate dot state dot estimation at gmail dot com. Is that correct?-allstate.state.estimation@gmail.com]
+tests/unit/test_email_llm_first_capture.py::test_the_read_back_address_is_read_correctly[Allstate estimation at gmail dot com \u2014 so allstateestimation at gmail dot com. Is that correct?-allstateestimation@gmail.com]
+tests/unit/test_email_llm_first_capture.py::test_the_read_back_address_is_read_correctly[So that's a-l-l-s-t-a-t-e-estimation, all one word, at gmail dot com. Is that right?-allstateestimation@gmail.com]
+tests/unit/test_email_llm_first_capture.py::test_the_read_back_address_is_read_correctly[So that's allstateestimation at gmail dot com, no dots \u2014 is that right?-allstateestimation@gmail.com]
+tests/unit/test_email_llm_first_capture.py::test_the_read_back_address_is_read_correctly[Thanks, bob at gmail dot com, correct?-bob@gmail.com]
+tests/unit/test_email_llm_first_capture.py::test_sentences_that_are_not_a_read_back_give_nothing[Should I reach you at your gmail dot com address?]
+tests/unit/test_email_llm_first_capture.py::test_sentences_that_are_not_a_read_back_give_nothing[You work at microsoft and it's bob at gmail dot com, right?]
+tests/unit/test_email_llm_first_capture.py::test_sentences_that_are_not_a_read_back_give_nothing[I'll send it to all state estimation at gmail dot com.]
+tests/unit/test_email_llm_first_capture.py::test_each_new_read_back_replaces_an_unconfirmed_one
+tests/unit/test_email_llm_first_capture.py::test_a_confirmed_email_is_never_replaced_by_a_later_read_back
+tests/unit/test_email_llm_first_capture.py::test_a_caller_correction_wins_and_the_wrong_read_back_is_never_confirmed
+tests/unit/test_email_llm_first_capture.py::test_the_live_call_now_ends_with_the_email_confirmed
+tests/unit/test_email_llm_first_capture.py::test_nothing_is_confirmed_before_the_callers_yes
+tests/unit/test_email_llm_first_capture.py::test_the_short_path_one_question_then_yes
+tests/unit/test_email_llm_first_capture.py::test_an_ambiguous_address_gets_a_plain_either_or_question
+tests/unit/test_call_1436672a_regressions.py::test_an_email_read_back_is_not_rewritten_as_our_website
+tests/unit/test_call_1436672a_regressions.py::test_a_made_up_web_address_is_still_replaced
+tests/unit/test_call_1436672a_regressions.py::test_a_number_said_as_words_is_captured_with_its_country
+tests/unit/test_call_1436672a_regressions.py::test_a_read_back_that_drops_a_digit_is_never_spoken
+tests/unit/test_call_1436672a_regressions.py::test_a_timed_call_back_promise_is_caught
+tests/unit/test_call_1436672a_regressions.py::test_a_second_email_is_asked_one_word_or_dot_then_stored_beside_the_first
+tests/unit/test_call_1436672a_regressions.py::test_a_later_address_without_asking_for_another_does_not_replace_the_first
+tests/unit/test_call_1436672a_regressions.py::test_a_fresh_two_word_address_after_a_failed_one_gets_the_question_too
+tests/unit/test_call_1436672a_regressions.py::test_a_second_phone_number_is_stored_as_phone_2
+tests/unit/test_call_1436672a_regressions.py::test_both_checks_sit_in_the_gate_every_spoken_sentence_passes
+
+=================================== ERRORS ====================================
+________ ERROR collecting tests/unit/test_phantom_goodbye_recovery.py _________
+ImportError while importing test module 'C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-guide-prompts-20261007\backend\tests\unit\test_phantom_goodbye_recovery.py'.
+Hint: make sure your test modules/packages have valid Python names.
+Traceback:
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\importlib\__init__.py:90: in import_module
+    return _bootstrap._gcd_import(name[level:], package, level)
+tests\unit\test_phantom_goodbye_recovery.py:21: in <module>
+    from app.domain.services.voice_pipeline.turn_runner import (
+E   ImportError: cannot import name '_agent_read_back_email' from 'app.domain.services.voice_pipeline.turn_runner' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-guide-prompts-20261007\backend\app\domain\services\voice_pipeline\turn_runner.py)
+=========================== short test summary info ===========================
+ERROR tests/unit/test_phantom_goodbye_recovery.py
+!!!!!!!!!!!!!!!!!!! Interrupted: 1 error during collection !!!!!!!!!!!!!!!!!!!!
+87 tests collected, 1 error in 1.38s

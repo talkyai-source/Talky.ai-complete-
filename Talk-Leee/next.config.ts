@@ -8,6 +8,14 @@ const configDir = path.dirname(configFilePath);
 
 const nextConfig: NextConfig = {
     outputFileTracingRoot: configDir,
+    // Canonical URLs carry a trailing slash (/ai-voice-dialer/).
+    // `skipTrailingSlashRedirect` disables Next's built-in non-slash -> slash
+    // 308 so it cannot fire on /api/*: external callers that do not follow
+    // redirects (the Stripe webhook posts to /api/v1/billing/webhooks/stripe)
+    // would see a 308 as a failed delivery. The redirect is re-implemented for
+    // page routes only, in src/middleware.ts (trailingSlashRedirectPath).
+    trailingSlash: true,
+    skipTrailingSlashRedirect: true,
     compress: true,
     poweredByHeader: false,
     images: {
@@ -17,7 +25,41 @@ const nextConfig: NextConfig = {
     experimental: {
         optimizePackageImports: ["lucide-react", "framer-motion"],
     },
+    // The /inbound* routes were a parallel, fixture-backed inbound frontend.
+    // They issued no request: their create and update calls reported success
+    // while persisting nothing. Removed 2026-09-01 in favour of
+    // /inbound-campaigns, which is wired to the real backend.
+    //
+    // Redirected rather than deleted outright so existing bookmarks and
+    // links do not 404. `trailingSlash: true` is set above, so each source
+    // is listed in both forms: `skipTrailingSlashRedirect` disables Next's
+    // built-in normalisation, and the replacement in src/proxy.ts runs
+    // AFTER redirects, so a bare `/inbound` would otherwise miss a
+    // slash-only rule.
+    //
+    // `/inbound/:id/edit` lands on the list, not on an edit page: its ids
+    // were fixture strings such as `cfg-1001`, while the backend coerces
+    // config_id to a UUID (inbound_campaign_service.py:91) and answers a
+    // non-UUID with 400 invalid_identifier. A per-id redirect would send
+    // every old link to a guaranteed error.
+    async redirects() {
+        const target = (destination: string) => [
+            { source: "/inbound", destination, permanent: false },
+            { source: "/inbound/", destination, permanent: false },
+        ];
+        return [
+            { source: "/inbound/new", destination: "/inbound-campaigns/new", permanent: false },
+            { source: "/inbound/new/", destination: "/inbound-campaigns/new", permanent: false },
+            { source: "/inbound/calls", destination: "/calls?direction=inbound", permanent: false },
+            { source: "/inbound/calls/", destination: "/calls?direction=inbound", permanent: false },
+            { source: "/inbound/:id/edit", destination: "/inbound-campaigns", permanent: false },
+            { source: "/inbound/:id/edit/", destination: "/inbound-campaigns", permanent: false },
+            // Listed last: `/inbound` must not shadow the deeper paths above.
+            ...target("/inbound-campaigns"),
+        ];
+    },
     async headers() {
+        const isDev = process.env.NODE_ENV === "development";
         return [
             {
                 source: "/images/:path*",
@@ -35,6 +77,18 @@ const nextConfig: NextConfig = {
                 source: "/:path*.svg",
                 headers: [{ key: "Cache-Control", value: "public, max-age=604800, stale-while-revalidate=2592000" }],
             },
+            // Documentation screenshots (public/docs/*.webp, rendered by
+            // docs-markdown.tsx). Next's static default is max-age=0, which
+            // re-validates every image on every visit. The filenames carry no
+            // content hash, so this is deliberately NOT immutable: fresh for a
+            // day, then served stale for a week while revalidating in the
+            // background (the same values as /images above), so a replaced
+            // screenshot reaches a returning reader within a day. Matches only
+            // .webp under /docs/, never the /docs/* HTML pages.
+            {
+                source: "/docs/:path*.webp",
+                headers: [{ key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" }],
+            },
             {
                 source: "/openapi.json",
                 headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
@@ -43,10 +97,13 @@ const nextConfig: NextConfig = {
                 source: "/site.webmanifest",
                 headers: [{ key: "Cache-Control", value: "public, max-age=3600, stale-while-revalidate=86400" }],
             },
-            {
+            // Content-hashed in production, but NOT in dev: the dev server reuses
+            // stable chunk names, so an immutable year-long cache makes edits
+            // invisible until the browser cache is cleared. Production only.
+            ...(isDev ? [] : [{
                 source: "/_next/static/:path*",
                 headers: [{ key: "Cache-Control", value: "public, max-age=31536000, immutable" }],
-            },
+            }]),
         ];
     },
     webpack: (config, { dev }) => {
@@ -73,7 +130,10 @@ const nextConfig: NextConfig = {
         }
         return config;
     },
-    allowedDevOrigins: ["http://127.0.0.1:3100", "http://localhost:3100"],
+    // Next 16 expects hostnames here, not full URL origins. Supplying a scheme
+    // makes the dev server reject its own HMR request from 127.0.0.1, which in
+    // turn leaves Client Components unhydrated during local browser testing.
+    allowedDevOrigins: ["127.0.0.1", "localhost"],
 };
 
 const authToken = process.env.SENTRY_AUTH_TOKEN;

@@ -129,6 +129,31 @@ These are real, code-verified gaps. They matter directly to your goal of restric
 
 ---
 
+## 7a. Support permissions (added 2026-10-30)
+
+The Support system (help bot, tickets, staff console) uses three permissions.
+Grants live in `ROLE_DEFAULT_PERMISSIONS` (`backend/app/core/security/rbac.py`)
+and are seeded into `role_permissions` by migration `0082_support_system`.
+
+| Permission | Meaning | Granted to |
+|---|---|---|
+| `support:report` | Use the help bot, open tickets, read and reply to **own** tickets, upload attachments | `tenant_admin`, `campaign_manager`, `user`, `agent`, `billing_user`, `partner_admin`, `platform_admin` — **not** `readonly` |
+| `support:read_team` | Read **every** ticket of the own tenant (read-only for colleagues' tickets) | `tenant_admin`, `partner_admin`, `platform_admin` |
+| `support:manage` | Staff console under `/api/v1/admin/support` (all tenants, internal notes, articles, metrics) | `platform_admin` only, and the route also re-checks current platform-admin authority in the database |
+
+Notes:
+- `GET /api/v1/support/config` needs only a signed-in user; it reports
+  `permissions.report` / `permissions.read_team` so the app can hide what the
+  user cannot do.
+- Another tenant's ticket, conversation or attachment is **403**, never an
+  empty result. A colleague's ticket is 403 without `support:read_team`, and
+  never writable by anyone but its requester.
+- Granting `support:report` to the working roles also lets them use the
+  in-app assistant's existing `report_issue` tool, which is gated on the same
+  permission.
+- With `SUPPORT_ENABLED=false` (the default) every support route except
+  `/support/config` answers 404 regardless of permissions.
+
 ## 8. Reference — the 32 permissions
 
 Format `resource:action`. Held implicitly via role (`ROLE_DEFAULT_PERMISSIONS`, `rbac.py:179-292`).

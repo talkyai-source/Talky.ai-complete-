@@ -1,0 +1,50 @@
+Failed to update email action status: RuntimeError
+email receipt persistence failed action=d3854edb-e08a-4004-a249-98bdfc57cd89
+Failed to update email action status: RuntimeError
+email receipt persistence failed action=386ed3d2-afa8-443f-a31b-74d2f6c87868
+Failed to update email action status: DivisionByZeroError
+Failed to update email action status: DivisionByZeroError
+Failed to update email action status: DivisionByZeroError
+email receipt persistence failed action=f9d40d4e-2533-4aa6-b6b7-01c00acd69aa
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\reviewed-account-identity-20261006\docs\sessions\artifacts\email-bind-actual-pg\probe.py", line 397, in <module>
+    asyncio.run(guarded())
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py", line 195, in run
+    return runner.run(main)
+           ^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py", line 118, in run
+    return self._loop.run_until_complete(task)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 691, in run_until_complete
+    return future.result()
+           ^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\reviewed-account-identity-20261006\docs\sessions\artifacts\email-bind-actual-pg\probe.py", line 394, in guarded
+    await asyncio.wait_for(run(args.output), 90)
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\tasks.py", line 520, in wait_for
+    return await fut
+           ^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\reviewed-account-identity-20261006\docs\sessions\artifacts\email-bind-actual-pg\probe.py", line 360, in run
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\__init__.py", line 238, in dumps
+    **kw).encode(obj)
+          ^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 202, in encode
+    chunks = list(chunks)
+             ^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 432, in _iterencode
+    yield from _iterencode_dict(o, _current_indent_level)
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 326, in _iterencode_list
+    yield from chunks
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 439, in _iterencode
+    o = _default(o)
+        ^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\encoder.py", line 180, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type bytes is not JSON serializable

@@ -1,0 +1,4 @@
+WARNING:venv:Actual environment location may have moved due to redirects, links or junctions.
+  Requested location: "C:\Users\ALAZIZ~1\AppData\Local\Temp\tmp5p10ucjc\Scripts\python.exe"
+  Actual location:    "C:\Users\AL AZIZ TECH\AppData\Local\Temp\tmp5p10ucjc\Scripts\python.exe"
+No known vulnerabilities found

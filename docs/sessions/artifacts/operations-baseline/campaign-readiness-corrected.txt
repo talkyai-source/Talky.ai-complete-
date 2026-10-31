@@ -1,0 +1,14 @@
+✔ start is disabled until the server proves readiness, including cloud routes (335.2827ms)
+✔ a failed refresh disables previously ready start and offers a successful retry (123.0129ms)
+✔ bulk resume waits for every selected route and shows the server reason (41.3162ms)
+✔ a closed or nonlaunch surface performs no readiness request (6.7322ms)
+✔ table selection and details block resume while the route is unavailable (534.1199ms)
+✔ command-bar keyboard execution cannot bypass unavailable resume routes (119.0263ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 6
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5598.9228

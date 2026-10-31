@@ -1,0 +1,15 @@
+[Unit]
+Description=Talky carrier-hairpin inbound synthetic call
+After=network-online.target asterisk.service talky-api.service talky-voice-gateway.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/etc/talky/inbound-synthetic.env
+ExecStart=/bin/bash /opt/talky/backend/deploy/inbound-synthetic-call.sh
+TimeoutStartSec=90
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-inbound-synthetic

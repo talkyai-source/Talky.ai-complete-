@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
+from app.domain.services.credential_resolver import CredentialResolver
 from app.api.v1.dependencies import get_db_client, require_admin_tenant, CurrentUser
 
 # TENANT-SCOPED router. `tenant_ai_credentials.tenant_id` is NOT NULL — these
@@ -86,6 +87,9 @@ async def create_api_key(
         result = db_client.table("tenant_ai_credentials").insert(payload).execute()
         if result.error or not result.data:
             raise HTTPException(status_code=500, detail="Failed to create API key")
+        # The write is committed: drop this process's cached resolution so a
+        # new key is picked up now (other processes catch up via the TTL).
+        CredentialResolver.invalidate_cache(tenant_id=str(current_user.tenant_id))
         row = result.data[0]
         return ApiKeyResponse(
             id=str(row.get("id")),
@@ -117,6 +121,8 @@ async def revoke_api_key(
         }).eq("id", key_id).eq("tenant_id", current_user.tenant_id).execute()
         if result.error or not result.data:
             raise HTTPException(status_code=404, detail="API key not found")
+        # Committed: stop serving the revoked key's plaintext from the cache.
+        CredentialResolver.invalidate_cache(tenant_id=str(current_user.tenant_id))
         return {"success": True}
     except HTTPException:
         raise

@@ -1,0 +1,55 @@
+{
+  "recorded_on": "2026-10-05",
+  "scope": "CP07 authenticated event response attribution, local synthetic tests only",
+  "production_changes": false,
+  "external_requests": false,
+  "contract": "GET /api/v1/events adds tenant_id and user_id from CurrentUser. Browser compares both against its captured notificationScopeKey before mapping or caching items. Missing or mismatched ownership fails closed.",
+  "before_fix": [
+    {
+      "working_directory": "backend",
+      "command": "python -m pytest tests/unit/test_stream_events_response_owner.py -q",
+      "passed": 1,
+      "failed": 3,
+      "observed_failure": "test_response_owner_is_authenticated_recipient: KeyError: 'tenant_id' for tenant-a/user-a, tenant-b/user-a, tenant-a/user-b. Missing authenticated tenant control passed."
+    },
+    {
+      "working_directory": "Talk-Leee",
+      "command": "node --test --import tsx --import ./src/test-utils/setup.ts --test-name-pattern 'account marker' src/components/notifications/qualified-lead-alerts.test.ts",
+      "passed": 0,
+      "failed": 3,
+      "observed_failure": "Actual query state 'success' != expected 'error' for missing owner, same user in another tenant, and another user in the same tenant. Browser identity remained A throughout."
+    }
+  ],
+  "after_fix": [
+    {
+      "working_directory": "backend",
+      "command": "python -m pytest tests/unit/test_stream_events_response_owner.py tests/unit/test_campaign_stream_events_rls.py -q",
+      "passed": 9,
+      "failed": 0,
+      "warnings": "One existing Starlette TestClient httpx deprecation warning."
+    },
+    {
+      "working_directory": "Talk-Leee",
+      "command": "node --test --import tsx --import ./src/test-utils/setup.ts src/components/notifications/qualified-lead-alerts.test.ts",
+      "passed": 10,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "working_directory": "Talk-Leee",
+      "command": "node node_modules/eslint/bin/eslint.js src/lib/backend-api.ts src/lib/event-stream-api.ts src/components/notifications/qualified-lead-alerts.test.ts",
+      "exit_code": 0
+    },
+    {
+      "working_directory": "backend",
+      "command": "python -m ruff check app/api/v1/endpoints/stream_events.py tests/unit/test_stream_events_response_owner.py --select F --extend-ignore F401,F841",
+      "exit_code": 0
+    }
+  ],
+  "limits": [
+    "Backend HTTP tests use dependency overrides and a synthetic database connection; they are not a live database or production session test.",
+    "Frontend tests execute the actual event hook and alert consumer with synthetic API responses; real multi-tab browser evidence is recorded separately.",
+    "Backend stamp must be deployed before or together with the frontend; a legacy unstamped response is deliberately rejected.",
+    "This change does not rewrite shared HTTP cookie/authentication lifecycle behavior tracked separately under CP08."
+  ]
+}

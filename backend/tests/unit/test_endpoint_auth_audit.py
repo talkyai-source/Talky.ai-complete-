@@ -39,7 +39,6 @@ import inspect
 
 import pytest
 
-
 # --- known-public allowlist ------------------------------------------
 #
 # Each entry is (METHOD, exact_path) plus the reason it's intentionally
@@ -66,8 +65,18 @@ _AUTH_FLOWS = {
 # Webhook callbacks from third parties / internal — these use payload
 # signature verification or short-lived state tokens, NOT session auth.
 _WEBHOOKS = {
+    "POST /api/v1/webhooks/alertmanager": (
+        "Alertmanager intake; dedicated write-only Bearer secret verified inline "
+        "before body/database access, without user or internal-service authority"
+    ),
     "POST /api/v1/billing/webhooks": "Stripe webhook; signature verified inline",
     "GET /api/v1/connectors/callback": "OAuth callback; state token verified inline",
+    "POST /api/v1/connectors/salesforce/callback-requests/{tenant_id}/{token}": (
+        "Salesforce -> Talky callback request; per-tenant webhook token verified inline"
+    ),
+    "POST /api/v1/connectors/salesforce/outbound-message/{tenant_id}/{token}": (
+        "Salesforce Outbound Message (SOAP); per-tenant webhook token + org id verified inline"
+    ),
     "POST /api/v1/webhooks/call/goal-achieved": "internal call hook; signature verified",
     "POST /api/v1/webhooks/call/mark-spam": "internal call hook; signature verified",
     "POST /api/v1/webhooks/secure/call/goal-achieved": "signature-verified webhook",
@@ -79,54 +88,20 @@ _WEBHOOKS = {
 # Public endpoints — no tenant data exposed.
 _PUBLIC = {
     "GET /api/v1/plans/": "public plan catalog (no per-tenant data)",
+    "GET /api/v1/plans/payg": "public pay-as-you-go prices (no per-tenant data)",
     "GET /api/v1/billing/plans": "billing-module passthrough to the same public plan catalog (no per-tenant data)",
-}
-
-# ---------------------------------------------------------------------
-# KNOWN TECH-DEBT — auth-gap bugs we have not yet fixed
-# ---------------------------------------------------------------------
-#
-# These endpoints DO need auth but currently lack ``Depends(get_current_user)``
-# at the route level. They are admin-only / RBAC-management /
-# audit-related routes that are likely guarded at the router level by
-# a different mechanism, OR they're genuine bugs nobody has hit yet.
-#
-# This list is the explicit punch-list — every entry should either be
-# removed (because the auth dep was added) or moved to ``_PUBLIC``
-# (because it was deemed intentionally public after audit).
-#
-# The test allows these to pass so the regression-prevention property
-# of this file holds for new endpoints, while the technical debt
-# stays visible in source instead of silently lurking.
-_KNOWN_AUTH_GAPS = {
-    # (Abuse-monitoring endpoints FIXED 2026-07-06 — the /admin/abuse router
-    # now Depends(require_admin); the 9 entries were removed so this gate
-    # PROVES the fix rather than laundering the vuln.)
-    # Audit-log statistics — should require_admin.
-    "GET /api/v1/admin/audit/stats/events-by-type": "TODO: add require_admin",
-    "GET /api/v1/admin/audit/stats/failed-logins": "TODO: add require_admin",
-    # Security-events admin — should require_admin.
-    "GET /api/v1/admin/security-events/events": "TODO: add require_admin",
-    "GET /api/v1/admin/security-events/events/{event_id}": "TODO: add require_admin",
-    "POST /api/v1/admin/security-events/events": "TODO: add require_admin",
-    "PATCH /api/v1/admin/security-events/events/{event_id}": "TODO: add require_admin",
-    "POST /api/v1/admin/security-events/events/{event_id}/resolve": "TODO: add require_admin",
-    "GET /api/v1/admin/security-events/alerts/open": "TODO: add require_admin",
-    "GET /api/v1/admin/security-events/alerts/overdue": "TODO: add require_admin",
-    "POST /api/v1/admin/security-events/events/{event_id}/escalate": "TODO: add require_admin",
-    # RBAC management — should require_admin (managing other users' access).
-    "POST /api/v1/rbac/roles/{role_id}/permissions": "TODO: add require_admin",
-    "DELETE /api/v1/rbac/roles/{role_id}/permissions/{permission_id}": "TODO: add require_admin",
-    "DELETE /api/v1/rbac/roles/{role_id}/permissions": "TODO: add require_admin",
-    "GET /api/v1/rbac/users/{user_id}/permissions": "TODO: add require_admin",
-    "GET /api/v1/rbac/tenant-users": "TODO: add require_admin",
-    "POST /api/v1/rbac/tenant-users": "TODO: add require_admin",
-    "PATCH /api/v1/rbac/tenant-users/{tenant_user_id}": "TODO: add require_admin",
-    "DELETE /api/v1/rbac/tenant-users/{tenant_user_id}": "TODO: add require_admin",
+    "POST /api/v1/public/contact-enquiries": (
+        "anonymous rate-limited, CSRF-checked enquiry intake; inserts platform-owned "
+        "records and returns only its receipt, never tenant data"
+    ),
+    "GET /api/v1/support/attachments/{attachment_id}/content": (
+        "local-storage support download; the HMAC-signed, 5-minute link minted only after "
+        "the authenticated GET /support/attachments/{id} permission check is the capability"
+    ),
 }
 
 KNOWN_PUBLIC_ROUTES: dict[str, str] = {
-    **_AUTH_FLOWS, **_WEBHOOKS, **_PUBLIC, **_KNOWN_AUTH_GAPS,
+    **_AUTH_FLOWS, **_WEBHOOKS, **_PUBLIC,
 }
 
 
@@ -301,9 +276,75 @@ def test_known_public_routes_actually_exist():
             real_routes.add(_norm_route_key(method, path))
 
     stale = [k for k in KNOWN_PUBLIC_ROUTES if k not in real_routes]
-    # Don't fail on stale entries — endpoint paths drift; flag for cleanup.
-    if stale:
-        pytest.skip(
-            f"KNOWN_PUBLIC_ROUTES has stale entries (clean these up):\n  "
-            + "\n  ".join(stale)
-        )
+    assert not stale, (
+        "KNOWN_PUBLIC_ROUTES has stale entries (remove or correct these):\n  "
+        + "\n  ".join(sorted(stale))
+    )
+
+
+def test_contact_intake_exception_does_not_exempt_admin_read_or_update():
+    """The public POST shares a module with private administration handlers."""
+    from app.main import app
+
+    expected = {
+        "GET /api/v1/admin/contact-enquiries",
+        "PATCH /api/v1/admin/contact-enquiries/{enquiry_id}",
+    }
+    found = set()
+    for path, route in _collect_api_routes(app.routes):
+        for method in route.methods:
+            key = _norm_route_key(method, path)
+            if key not in expected:
+                continue
+            found.add(key)
+            assert key not in KNOWN_PUBLIC_ROUTES
+            assert _route_has_db_dep(route.endpoint)
+            assert _route_level_auth(route)
+    assert found == expected
+
+
+def test_alertmanager_exception_does_not_exempt_admin_incident_controls():
+    """The dedicated integration credential grants one write-only POST route."""
+    from app.main import app
+    from app.api.v1.dependencies import require_platform_admin
+
+    webhook_path = "/api/v1/webhooks/alertmanager"
+    assert {
+        key for key in KNOWN_PUBLIC_ROUTES
+        if key.split(" ", 1)[1].startswith(webhook_path)
+    } == {f"POST {webhook_path}"}
+    assert not any(
+        key.split(" ", 1)[1].startswith("/api/v1/admin/")
+        for key in KNOWN_PUBLIC_ROUTES
+    )
+    expected = {
+        "GET /api/v1/admin/incidents",
+        "GET /api/v1/admin/incidents/{incident_id}",
+        "POST /api/v1/admin/incidents/{incident_id}/acknowledge",
+        "POST /api/v1/admin/incidents/{incident_id}/resolve",
+        "GET /api/v1/admin/alerts/settings",
+        "PUT /api/v1/admin/alerts/settings",
+    }
+    found = set()
+    for path, route in _collect_api_routes(app.routes):
+        for method in route.methods:
+            key = _norm_route_key(method, path)
+            if key not in expected:
+                continue
+            found.add(key)
+            assert key not in KNOWN_PUBLIC_ROUTES
+            assert _route_level_auth(route)
+            # An ordinary user-auth guard would not preserve platform authority.
+            stack = list(route.dependant.dependencies)
+            seen = set()
+            platform_guard_found = False
+            while stack:
+                dep = stack.pop()
+                if id(dep) in seen:
+                    continue
+                seen.add(id(dep))
+                if dep.call is require_platform_admin:
+                    platform_guard_found = True
+                stack.extend(dep.dependencies)
+            assert platform_guard_found, f"Platform-admin guard missing: {key}"
+    assert found == expected

@@ -1,0 +1,8 @@
+.s.s.s..ss.s.s.s...............                                          [100%]
+============================== warnings summary ===============================
+tests/unit/test_dialer_redis_reliability.py: 26 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+23 passed, 8 skipped, 26 warnings in 1.75s

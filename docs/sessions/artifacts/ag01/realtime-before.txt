@@ -1,0 +1,97 @@
+FFFFFFFFF                                                                [100%]
+================================== FAILURES ===================================
+____ test_campaign_nested_prompt_survives_create_reload_and_unrelated_edit ____
+tests\unit\test_realtime_profile_contract.py:55: in test_campaign_nested_prompt_survives_create_reload_and_unrelated_edit
+    assert "CAMPAIGN EXACT NOTE" in wire["instructions"]
+E   AssertionError: assert 'CAMPAIGN EXACT NOTE' in 'WHO YOU ARE\nYou are Alex, a friendly voice assistant for Acme. Your goal on this call: Help the caller using verifie...follow-up for review; recording a request does not arrange or guarantee follow-up and does not create a handoff route.'
+__________ test_legacy_campaign_nested_prompt_is_not_lost_at_runtime __________
+tests\unit\test_realtime_profile_contract.py:67: in test_legacy_campaign_nested_prompt_is_not_lost_at_runtime
+    assert "LEGACY CAMPAIGN NOTE" in result.realtime_session._instructions
+E   AssertionError: assert 'LEGACY CAMPAIGN NOTE' in 'WHO YOU ARE\nYou are Alex, a friendly voice assistant for Acme. Your goal on this call: Help the caller using verifie...follow-up for review; recording a request does not arrange or guarantee follow-up and does not create a handoff route.'
+E    +  where 'WHO YOU ARE\nYou are Alex, a friendly voice assistant for Acme. Your goal on this call: Help the caller using verifie...follow-up for review; recording a request does not arrange or guarantee follow-up and does not create a handoff route.' = <app.realtime.openai.OpenAIRealtimeSession object at 0x0000020CA64A2C60>._instructions
+E    +    where <app.realtime.openai.OpenAIRealtimeSession object at 0x0000020CA64A2C60> = VoiceSession(call_id='synthetic-call', talklee_call_id='synthetic-row', call_session=CallSession(call_id='synthetic-ca...Bridge object at 0x0000020CA65BF770>, pipeline_task=None, created_at=datetime.datetime(2026, 10, 4, 20, 43, 4, 294051)).realtime_session
+___________ test_explicit_xai_voice_reaches_real_runtime_serializer ___________
+tests\unit\test_realtime_profile_contract.py:75: in test_explicit_xai_voice_reaches_real_runtime_serializer
+    assert result.realtime_session._build_session_update()["session"]["voice"] == "eve"
+E   KeyError: 'voice'
+___ test_initial_effective_prompt_identity_includes_capability_instructions ___
+tests\unit\test_realtime_profile_contract.py:84: in test_initial_effective_prompt_identity_includes_capability_instructions
+    assert config.system_prompt == instructions
+E   AssertionError: assert 'WHO YOU ARE\...UCTURED STATE' == 'WHO YOU ARE\...andoff route.'
+E     Skipping 5419 identical leading characters in diff, use -v to show
+E     - TURED STATE
+E     ?            -
+E     + TURED STATE
+E     - 
+E     - ## Connected actions
+E     - Available actions for this call: end_call, send_email. Offer only those actions; an unlisted transfer or team follow-up route is unavailable. When an offered action tool matches the caller's request, call it before saying the action happened. Wait for its result. A result with success=false or confirmation_allowed=false must never be described as completed; state the limitation honestly and offer only the next step the result permits. Never...
+E     
+E     ...Full output truncated (1 line hidden), use '-vv' to show
+_ test_handshake_rejections_do_not_silently_change_selected_reasoning[error0] _
+tests\unit\test_realtime_profile_contract.py:118: in test_handshake_rejections_do_not_silently_change_selected_reasoning
+    assert await session.connect() is False
+E   assert True is False
+------------------------------ Captured log call ------------------------------
+ERROR    app.realtime.openai:openai.py:489 realtime handshake error call=realtime: {'code': 'invalid_api_key', 'param': None, 'message': 'Credentials rejected'}
+WARNING  app.realtime.openai:openai.py:338 realtime: session.update rejected; retrying once WITHOUT reasoning field call=realtime
+_ test_handshake_rejections_do_not_silently_change_selected_reasoning[error1] _
+tests\unit\test_realtime_profile_contract.py:118: in test_handshake_rejections_do_not_silently_change_selected_reasoning
+    assert await session.connect() is False
+E   assert True is False
+------------------------------ Captured log call ------------------------------
+ERROR    app.realtime.openai:openai.py:489 realtime handshake error call=realtime: {'code': 'model_not_found', 'param': 'model', 'message': 'Unavailable model'}
+WARNING  app.realtime.openai:openai.py:338 realtime: session.update rejected; retrying once WITHOUT reasoning field call=realtime
+_ test_handshake_rejections_do_not_silently_change_selected_reasoning[error2] _
+tests\unit\test_realtime_profile_contract.py:118: in test_handshake_rejections_do_not_silently_change_selected_reasoning
+    assert await session.connect() is False
+E   assert True is False
+------------------------------ Captured log call ------------------------------
+ERROR    app.realtime.openai:openai.py:489 realtime handshake error call=realtime: {'code': 'rate_limit_exceeded', 'param': None, 'message': 'Wait'}
+WARNING  app.realtime.openai:openai.py:338 realtime: session.update rejected; retrying once WITHOUT reasoning field call=realtime
+_ test_handshake_rejections_do_not_silently_change_selected_reasoning[error3] _
+tests\unit\test_realtime_profile_contract.py:118: in test_handshake_rejections_do_not_silently_change_selected_reasoning
+    assert await session.connect() is False
+E   assert True is False
+------------------------------ Captured log call ------------------------------
+ERROR    app.realtime.openai:openai.py:489 realtime handshake error call=realtime: {'code': 'unknown_parameter', 'param': 'session.speed', 'message': 'Unrelated unsupported control'}
+WARNING  app.realtime.openai:openai.py:338 realtime: session.update rejected; retrying once WITHOUT reasoning field call=realtime
+_ test_handshake_rejections_do_not_silently_change_selected_reasoning[error4] _
+tests\unit\test_realtime_profile_contract.py:118: in test_handshake_rejections_do_not_silently_change_selected_reasoning
+    assert await session.connect() is False
+E   assert True is False
+------------------------------ Captured log call ------------------------------
+ERROR    app.realtime.openai:openai.py:489 realtime handshake error call=realtime: {'message': 'unknown parameter: reasoning'}
+WARNING  app.realtime.openai:openai.py:338 realtime: session.update rejected; retrying once WITHOUT reasoning field call=realtime
+============================== warnings summary ===============================
+tests/unit/test_realtime_profile_contract.py::test_campaign_nested_prompt_survives_create_reload_and_unrelated_edit
+tests/unit/test_realtime_profile_contract.py::test_legacy_campaign_nested_prompt_is_not_lost_at_runtime
+tests/unit/test_realtime_profile_contract.py::test_explicit_xai_voice_reaches_real_runtime_serializer
+tests/unit/test_realtime_profile_contract.py::test_initial_effective_prompt_identity_includes_capability_instructions
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\realtime\runtime.py:184: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/unit/test_realtime_profile_contract.py::test_campaign_nested_prompt_survives_create_reload_and_unrelated_edit
+tests/unit/test_realtime_profile_contract.py::test_legacy_campaign_nested_prompt_is_not_lost_at_runtime
+tests/unit/test_realtime_profile_contract.py::test_explicit_xai_voice_reaches_real_runtime_serializer
+tests/unit/test_realtime_profile_contract.py::test_initial_effective_prompt_identity_includes_capability_instructions
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\realtime\runtime.py:185: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at=datetime.utcnow(),
+
+tests/unit/test_realtime_profile_contract.py::test_campaign_nested_prompt_survives_create_reload_and_unrelated_edit
+tests/unit/test_realtime_profile_contract.py::test_legacy_campaign_nested_prompt_is_not_lost_at_runtime
+tests/unit/test_realtime_profile_contract.py::test_explicit_xai_voice_reaches_real_runtime_serializer
+tests/unit/test_realtime_profile_contract.py::test_initial_effective_prompt_identity_includes_capability_instructions
+  <string>:17: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_realtime_profile_contract.py::test_campaign_nested_prompt_survives_create_reload_and_unrelated_edit
+FAILED tests/unit/test_realtime_profile_contract.py::test_legacy_campaign_nested_prompt_is_not_lost_at_runtime
+FAILED tests/unit/test_realtime_profile_contract.py::test_explicit_xai_voice_reaches_real_runtime_serializer
+FAILED tests/unit/test_realtime_profile_contract.py::test_initial_effective_prompt_identity_includes_capability_instructions
+FAILED tests/unit/test_realtime_profile_contract.py::test_handshake_rejections_do_not_silently_change_selected_reasoning[error0]
+FAILED tests/unit/test_realtime_profile_contract.py::test_handshake_rejections_do_not_silently_change_selected_reasoning[error1]
+FAILED tests/unit/test_realtime_profile_contract.py::test_handshake_rejections_do_not_silently_change_selected_reasoning[error2]
+FAILED tests/unit/test_realtime_profile_contract.py::test_handshake_rejections_do_not_silently_change_selected_reasoning[error3]
+FAILED tests/unit/test_realtime_profile_contract.py::test_handshake_rejections_do_not_silently_change_selected_reasoning[error4]
+9 failed, 12 warnings in 2.16s

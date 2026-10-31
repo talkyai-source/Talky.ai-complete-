@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { api, type IncidentItem } from '../lib/api';
+import { api } from '../lib/api';
+import { useAdminRead } from '../lib/use-admin-read';
+import { validIncidentList } from '../lib/incident-contracts';
 
 function relativeTime(iso: string): string {
     const ts = Date.parse(iso);
@@ -16,41 +17,17 @@ function relativeTime(iso: string): string {
     return new Date(ts).toLocaleDateString();
 }
 
-export function Incidents() {
-    const [incidents, setIncidents] = useState<IncidentItem[]>([]);
-    const [loading, setLoading] = useState(true);
+const loadOpenIncidents = () => api.getIncidents({ status: 'open', page: 1, page_size: 5 });
 
-    useEffect(() => {
-        let cancelled = false;
-        const fetchOnce = async () => {
-            try {
-                // Show only currently-open and recently-acknowledged incidents.
-                const res = await api.getIncidents({
-                    status: 'open',
-                    page: 1,
-                    page_size: 5,
-                });
-                if (cancelled) return;
-                setIncidents(res.data?.items ?? []);
-            } catch {
-                if (!cancelled) setIncidents([]);
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        };
-        void fetchOnce();
-        // Light poll — incidents update on a slow cadence.
-        const id = window.setInterval(fetchOnce, 30_000);
-        return () => {
-            cancelled = true;
-            window.clearInterval(id);
-        };
-    }, []);
+export function Incidents() {
+    const { data, loading, error } = useAdminRead(loadOpenIncidents, 30000, validIncidentList);
+    const incidents = data?.items ?? [];
 
     return (
         <div className="card">
             <div className="card-header">
                 <h3 className="card-title">Incidents</h3>
+                <a href="/incidents">Manage incidents</a>
             </div>
             <div className="card-body">
                 {loading && incidents.length === 0 && (
@@ -58,7 +35,15 @@ export function Incidents() {
                         <span className="incident-time">Loading…</span>
                     </div>
                 )}
-                {!loading && incidents.length === 0 && (
+                {error && (
+                    <div className="error-banner inline" role="alert">
+                        <p>
+                            Incidents unavailable: {error}
+                            {incidents.length > 0 ? ' Showing last known incidents, which may be stale.' : ' Open incidents may exist.'}
+                        </p>
+                    </div>
+                )}
+                {!loading && !error && incidents.length === 0 && (
                     <div className="incident-item">
                         <span className="incident-time">No open incidents.</span>
                     </div>
@@ -74,10 +59,10 @@ export function Incidents() {
                                 <span className="incident-time">{relativeTime(incident.triggered_at)}</span>
                             </div>
                         </div>
-                        <button className="btn btn-alert">
+                        <span className="badge badge-outline">
                             <AlertTriangle size={12} />
-                            {incident.severity === 'critical' ? 'Critical' : 'Alert'}
-                        </button>
+                            {incident.severity}
+                        </span>
                     </div>
                 ))}
             </div>

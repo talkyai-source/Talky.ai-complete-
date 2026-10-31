@@ -1,0 +1,373 @@
+_____ test_declared_corpus_runs_actual_native_boundaries_without_network ______
+tests\unit\test_ag04_native_qualification.py:33: in test_declared_corpus_runs_actual_native_boundaries_without_network
+    assert not failed, json.dumps(failed, indent=2)
+E   AssertionError: [
+E       [
+E         "native.dnc_close",
+E         "openai",
+E         {
+E           "id": "shutdowns",
+E           "pass": false,
+E           "detail": {
+E             "expected": 1,
+E             "observed": 0
+E           }
+E         }
+E       ],
+E       [
+E         "native.dnc_close",
+E         "openai",
+E         {
+E           "id": "submissions",
+E           "pass": false,
+E           "detail": {
+E             "expected": 1,
+E             "observed": 0
+E           }
+E         }
+E       ],
+E       [
+E         "native.dnc_close",
+E         "xai",
+E         {
+E           "id": "shutdowns",
+E           "pass": false,
+E           "detail": {
+E             "expected": 1,
+E             "observed": 0
+E           }
+E         }
+E       ],
+E       [
+E         "native.dnc_close",
+E         "xai",
+E         {
+E           "id": "submissions",
+E           "pass": false,
+E           "detail": {
+E             "expected": 1,
+E             "observed": 0
+E           }
+E         }
+E       ],
+E       [
+E         "native.dnc_question",
+E         "openai",
+E         {
+E           "id": "submissions",
+E           "pass": false,
+E           "detail": {
+E             "expected": 1,
+E             "observed": 0
+E           }
+E         }
+E       ],
+E       [
+E         "native.dnc_question",
+E         "xai",
+E         {
+E           "id": "submissions",
+E           "pass": false,
+E           "detail": {
+E             "expected": 1,
+E             "observed": 0
+E           }
+E         }
+E       ]
+E     ]
+E   assert not [('native.dnc_close', 'openai', {'detail': {'expected': 1, 'observed': 0}, 'id': 'shutdowns', 'pass': False}), ('nativ...alse}), ('native.dnc_question', 'xai', {'detail': {'expected': 1, 'observed': 0}, 'id': 'submissions', 'pass': False})]
+---------------------------- Captured stderr call -----------------------------
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_lookup call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 query_chars=16 hits=1
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_evidence call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 {"passages": 1, "policy": "admission_snapshot", "sources_sha256": "4e9dd784df09e9efb6b7a1eb50d57a01e7c650999d4a3dfdef7831be0942bfc7", "status": "matched"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 sha256=77a9a5fe8f7e37933eb40fe19866c40a2b6a083e161256dc96f5322a78ae5d29 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_lookup call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 query_chars=16 hits=1
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_evidence call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 {"passages": 1, "policy": "admission_snapshot", "sources_sha256": "4e9dd784df09e9efb6b7a1eb50d57a01e7c650999d4a3dfdef7831be0942bfc7", "status": "matched"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 sha256=77a9a5fe8f7e37933eb40fe19866c40a2b6a083e161256dc96f5322a78ae5d29 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-976f9dc1aa374e7fb9b55f894c5bd833 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-976f9dc1aa374e7fb9b55f894c5bd833 reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-a06ce2c8dff54841a30120ccb2bc7829 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-a06ce2c8dff54841a30120ccb2bc7829 reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-513fa2a3ba20494ebbd6507742c5d7a5 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-513fa2a3ba20494ebbd6507742c5d7a5 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-513fa2a3ba20494ebbd6507742c5d7a5 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-3e5a031c5bdc48e2a52517e0a6e5d447 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-3e5a031c5bdc48e2a52517e0a6e5d447 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-3e5a031c5bdc48e2a52517e0a6e5d447 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-[redacted digits=13 ..24]ed083d7d1cad04071f7 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-[redacted digits=13 ..24]ed083d7d1cad04071f7 reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-9cdf5ae22c724089bee671c7229e4c2a sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-9cdf5ae22c724089bee671c7229e4c2a reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-9080e42e357f4afcb707826e7f070a5f sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-9080e42e357f4afcb707826e7f070a5f reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-849f149753fc45dda2e6503bf698a9dd sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-849f149753fc45dda2e6503bf698a9dd reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-ae9470a84f9a4d23a549a3818ea5cbcc sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-ae9470a84f9a4d23a549a3818ea5cbcc reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-644f6c4b567f48cc8556c2537bc46ae3 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-644f6c4b567f48cc8556c2537bc46ae3 reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-5b716f1e74be487d9fa1924b7a5004f8 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-5b716f1e74be487d9fa1924b7a5004f8 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-5b716f1e74be487d9fa1924b7a5004f8 reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-dbdc47299d2b430aac74438b7b48dfe8 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-dbdc47299d2b430aac74438b7b48dfe8 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-dbdc47299d2b430aac74438b7b48dfe8 reason=contradicted_customer_relationship
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa sha256=59d52a3e8ea48acfe9bee34b8cebc628927537d2b038fe1336f92331c3b95555 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa sha256=7d0dd9ac[redacted digits=14 ..32]b[redacted digits=12 ..66]c7a237bd562fc9098bb877a00cf7d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa sha256=3bbc00ae15b6e4733e4c16e92ee20bb3a9845bf8c89dfbea947475a6b05f667a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d sha256=59d52a3e8ea48acfe9bee34b8cebc628927537d2b038fe1336f92331c3b95555 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d sha256=7d0dd9ac[redacted digits=14 ..32]b[redacted digits=12 ..66]c7a237bd562fc9098bb877a00cf7d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d sha256=3bbc00ae15b6e4733e4c16e92ee20bb3a9845bf8c89dfbea947475a6b05f667a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-95fc7ba1bb[redacted digits=11 ..17]ce57a7e7181 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-95fc7ba1bb[redacted digits=11 ..17]ce57a7e7181 sha256=fee0a85a6f6424eb25037ef4a6f99927d015fa1a7ca6556b76e6add95800247a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-95fc7ba1bb[redacted digits=11 ..17]ce57a7e7181 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-b3ab12cf28754928a7c788d3f1d2bfbc sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-b3ab12cf28754928a7c788d3f1d2bfbc sha256=fee0a85a6f6424eb25037ef4a6f99927d015fa1a7ca6556b76e6add95800247a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-b3ab12cf28754928a7c788d3f1d2bfbc utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-[redacted digits=11 ..86]d4af889393aa0f397bae9 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-[redacted digits=11 ..86]d4af889393aa0f397bae9 sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-[redacted digits=11 ..86]d4af889393aa0f397bae9 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-40104bd0ecc9441396f368c9a9919224 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-40104bd0ecc9441396f368c9a9919224 sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-40104bd0ecc9441396f368c9a9919224 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-8f1012bddca145698e32c3af24baaa89 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-8f1012bddca145698e32c3af24baaa89 sha256=299a6d3931428a3243ea9118f5b66aa63637f5617f5d1bbf303e150b3f64a4bf knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_opt_out_speech_withheld call=ag04-synthetic-8f1012bddca145698e32c3af24baaa89
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-2a896265bc044f4faebbb116a8a4ca73 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-2a896265bc044f4faebbb116a8a4ca73 sha256=299a6d3931428a3243ea9118f5b66aa63637f5617f5d1bbf303e150b3f64a4bf knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_opt_out_speech_withheld call=ag04-synthetic-2a896265bc044f4faebbb116a8a4ca73
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-9a8eb169c271490686fad7b6dcbb7af9 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_opt_out_speech_withheld call=ag04-synthetic-9a8eb169c271490686fad7b6dcbb7af9
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-4301e14e35a74510bd11d3cd0d57e1e7 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_opt_out_speech_withheld call=ag04-synthetic-4301e14e35a74510bd11d3cd0d57e1e7
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-e4893b53830f42c3aed143ff0380ff0f sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-e4893b53830f42c3aed143ff0380ff0f sha256=2d7cddd30cff51087eb1f3281335a41a5704b43fed73a8dcd5682d8b2ef083f6 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-e4893b53830f42c3aed143ff0380ff0f utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-5f0be4f497ef413495f9b10783e33ef6 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-5f0be4f497ef413495f9b10783e33ef6 sha256=2d7cddd30cff51087eb1f3281335a41a5704b43fed73a8dcd5682d8b2ef083f6 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-5f0be4f497ef413495f9b10783e33ef6 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-9631a928140249b3ba0cbe587f7a9b47 sha256=5d3e23c9857b115d1b391e998c96569ad3ca35e83719d5561826f456638897f9 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-9631a928140249b3ba0cbe587f7a9b47 sha256=091d9d82647ee255fdfa8d8155ef[redacted digits=11 ..60]d7ec8aca63dcf90907ad97e0b knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-9631a928140249b3ba0cbe587f7a9b47 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-cdbab08c212547818fede59203e97589 sha256=5d3e23c9857b115d1b391e998c96569ad3ca35e83719d5561826f456638897f9 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-cdbab08c212547818fede59203e97589 sha256=091d9d82647ee255fdfa8d8155ef[redacted digits=11 ..60]d7ec8aca63dcf90907ad97e0b knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-cdbab08c212547818fede59203e97589 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-b4beaff0969a41cd8686f[redacted digits=11 ..57] sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-b4beaff0969a41cd8686f[redacted digits=11 ..57] sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-b4beaff0969a41cd8686f[redacted digits=11 ..57] sha256=eaf33575e[redacted digits=17 ..15]e86052abe81f61cd1e3da1c60b4b7651dd65c1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-f0fb35f3343d443e9480e621a76a56aa sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-f0fb35f3343d443e9480e621a76a56aa sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-f0fb35f3343d443e9480e621a76a56aa sha256=eaf33575e[redacted digits=17 ..15]e86052abe81f61cd1e3da1c60b4b7651dd65c1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-7054ff685dd34f80b6b712109d894e6f sha256=22857ec1645173a61b1bec01a3d6cabbbd788c50f9cb6a39c6799e8acbd49d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-7054ff685dd34f80b6b712109d894e6f utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-b313c050fde1457abf35450818a619eb sha256=22857ec1645173a61b1bec01a3d6cabbbd788c50f9cb6a39c6799e8acbd49d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-b313c050fde1457abf35450818a619eb utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 sha256=47a691d2b38547d7620d6957cd8578078de204b98624f1ddc4de03762680c947 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce sha256=47a691d2b38547d7620d6957cd8578078de204b98624f1ddc4de03762680c947 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-8ddfd9795da148a9b4e74c243b947286 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-847ccffdde6e41f5a1db91aa9b074b4b sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-c6025e6e6bb14725a5dc33d6d09255eb sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-0dbe0da0b49f4857a8d835f453601bce sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-1715b4135a3f48acbd2da4dd419225f7 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-1715b4135a3f48acbd2da4dd419225f7 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-1715b4135a3f48acbd2da4dd419225f7 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-8679b9702a694a24910de76a4d58fed9 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-8679b9702a694a24910de76a4d58fed9 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-8679b9702a694a24910de76a4d58fed9 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-bf4a6aeba5d148d0ab3f4d5958edb623 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-bf4a6aeba5d148d0ab3f4d5958edb623 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-bf4a6aeba5d148d0ab3f4d5958edb623 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-74f155293a6b4309b47ea639213fb338 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:15 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-74f155293a6b4309b47ea639213fb338 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_playout call=ag04-synthetic-74f155293a6b4309b47ea639213fb338 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_lookup call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e query_chars=16 hits=0
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_evidence call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e {"passages": 0, "policy": "admission_snapshot", "sources_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "status": "no_match"}
+09:46:16 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e sha256=7684e0887a400366ba70b54a685128c28e987419a97e9fd6c8f5331079bd2cff knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:16 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e reason=unsupported_company_figure
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_lookup call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e query_chars=16 hits=0
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_kb_evidence call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e {"passages": 0, "policy": "admission_snapshot", "sources_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "status": "no_match"}
+09:46:16 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e sha256=7684e0887a400366ba70b54a685128c28e987419a97e9fd6c8f5331079bd2cff knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:16 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e reason=unsupported_company_figure
+09:46:16 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-33e5bc919ba4421eb61e2eeebede6e38 sha256=7c624de9f2a827ab3622fcb49095af1645b4a3195ba4a54b6cf7d381c6f7e80e knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:16 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=send_email success=False status=unavailable
+09:46:16 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-33e5bc919ba4421eb61e2eeebede6e38 sha256=a812f5af262407769a627200bf0a6b6c27c9751e415939d5dc063e89756e8d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:16 WARNING  [app.domain.services.llm_guardrails] [req=-] [call=-] Blocked failed/unconfirmed voice action claim: send_email status=unavailable
+09:46:16 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-33e5bc919ba4421eb61e2eeebede6e38 reason=action_failed:send_email:unavailable
+09:46:16 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-84e1a37764094a10b757432e5f675c0d sha256=7c624de9f2a827ab3622fcb49095af1645b4a3195ba4a54b6cf7d381c6f7e80e knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:16 INFO     [app.domain.services.voice_pipeline.action_tools] [req=-] [call=-] voice_action_result call=ag04-synthet action=send_email success=False status=unavailable
+09:46:16 INFO     [app.realtime.openai] [req=-] [call=-] realtime_instructions_submitted call=ag04-synthetic-84e1a37764094a10b757432e5f675c0d sha256=a812f5af262407769a627200bf0a6b6c27c9751e415939d5dc063e89756e8d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+09:46:16 WARNING  [app.domain.services.llm_guardrails] [req=-] [call=-] Blocked failed/unconfirmed voice action claim: send_email status=unavailable
+09:46:16 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_playout_rejected call=ag04-synthetic-84e1a37764094a10b757432e5f675c0d reason=action_failed:send_email:unavailable
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_bridge start call=ag04-synthetic-364babe0b72d45b499c28da6f78f7d46 internal_rate=8000 wire_rate=8000
+09:46:16 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_bridge connection_lost call=ag04-synthetic-364babe0b72d45b499c28da6f78f7d46 — realtime socket died mid-call; ending Realtime session
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_bridge end call=ag04-synthetic-364babe0b72d45b499c28da6f78f7d46
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_bridge start call=ag04-synthetic-6a8169aeaa8440cc9d9f42036ffd734a internal_rate=8000 wire_rate=8000
+09:46:16 WARNING  [app.realtime.bridge] [req=-] [call=-] realtime_bridge connection_lost call=ag04-synthetic-6a8169aeaa8440cc9d9f42036ffd734a — realtime socket died mid-call; ending Realtime session
+09:46:16 INFO     [app.realtime.bridge] [req=-] [call=-] realtime_bridge end call=ag04-synthetic-6a8169aeaa8440cc9d9f42036ffd734a
+------------------------------ Captured log call ------------------------------
+INFO     app.realtime.bridge:bridge.py:1757 realtime_kb_lookup call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 query_chars=16 hits=1
+INFO     app.realtime.bridge:bridge.py:1688 realtime_kb_evidence call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 {"passages": 1, "policy": "admission_snapshot", "sources_sha256": "4e9dd784df09e9efb6b7a1eb50d57a01e7c650999d4a3dfdef7831be0942bfc7", "status": "matched"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 sha256=77a9a5fe8f7e37933eb40fe19866c40a2b6a083e161256dc96f5322a78ae5d29 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-1eaa052699e54296bbfe38158bf49a07 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.bridge:bridge.py:1757 realtime_kb_lookup call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 query_chars=16 hits=1
+INFO     app.realtime.bridge:bridge.py:1688 realtime_kb_evidence call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 {"passages": 1, "policy": "admission_snapshot", "sources_sha256": "4e9dd784df09e9efb6b7a1eb50d57a01e7c650999d4a3dfdef7831be0942bfc7", "status": "matched"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 sha256=77a9a5fe8f7e37933eb40fe19866c40a2b6a083e161256dc96f5322a78ae5d29 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-e2c125d49e55425d96bdc0912f7cea55 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-976f9dc1aa374e7fb9b55f894c5bd833 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-976f9dc1aa374e7fb9b55f894c5bd833 reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-a06ce2c8dff54841a30120ccb2bc7829 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-a06ce2c8dff54841a30120ccb2bc7829 reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-513fa2a3ba20494ebbd6507742c5d7a5 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-513fa2a3ba20494ebbd6507742c5d7a5 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-513fa2a3ba20494ebbd6507742c5d7a5 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-3e5a031c5bdc48e2a52517e0a6e5d447 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-3e5a031c5bdc48e2a52517e0a6e5d447 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-3e5a031c5bdc48e2a52517e0a6e5d447 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-[redacted digits=13 ..24]ed083d7d1cad04071f7 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-[redacted digits=13 ..24]ed083d7d1cad04071f7 reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-9cdf5ae22c724089bee671c7229e4c2a sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-9cdf5ae22c724089bee671c7229e4c2a reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-9080e42e357f4afcb707826e7f070a5f sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-9080e42e357f4afcb707826e7f070a5f reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-849f149753fc45dda2e6503bf698a9dd sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-849f149753fc45dda2e6503bf698a9dd reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-ae9470a84f9a4d23a549a3818ea5cbcc sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-ae9470a84f9a4d23a549a3818ea5cbcc reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-644f6c4b567f48cc8556c2537bc46ae3 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-644f6c4b567f48cc8556c2537bc46ae3 reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-5b716f1e74be487d9fa1924b7a5004f8 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-5b716f1e74be487d9fa1924b7a5004f8 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-5b716f1e74be487d9fa1924b7a5004f8 reason=contradicted_customer_relationship
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-dbdc47299d2b430aac74438b7b48dfe8 sha256=f362c7bcaf0b981bce72d5eb85b10314180b5b1ed6838e644439998eaf39fefc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-dbdc47299d2b430aac74438b7b48dfe8 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-dbdc47299d2b430aac74438b7b48dfe8 reason=contradicted_customer_relationship
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa sha256=59d52a3e8ea48acfe9bee34b8cebc628927537d2b038fe1336f92331c3b95555 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa sha256=7d0dd9ac[redacted digits=14 ..32]b[redacted digits=12 ..66]c7a237bd562fc9098bb877a00cf7d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa sha256=3bbc00ae15b6e4733e4c16e92ee20bb3a9845bf8c89dfbea947475a6b05f667a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-0996e0290698480f8a4a55e01f8bc7fa utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d sha256=59d52a3e8ea48acfe9bee34b8cebc628927537d2b038fe1336f92331c3b95555 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d sha256=7d0dd9ac[redacted digits=14 ..32]b[redacted digits=12 ..66]c7a237bd562fc9098bb877a00cf7d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d sha256=3bbc00ae15b6e4733e4c16e92ee20bb3a9845bf8c89dfbea947475a6b05f667a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-7a93b790bb214675b64f024c4cb9605d utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-95fc7ba1bb[redacted digits=11 ..17]ce57a7e7181 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-95fc7ba1bb[redacted digits=11 ..17]ce57a7e7181 sha256=fee0a85a6f6424eb25037ef4a6f99927d015fa1a7ca6556b76e6add95800247a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-95fc7ba1bb[redacted digits=11 ..17]ce57a7e7181 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-b3ab12cf28754928a7c788d3f1d2bfbc sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-b3ab12cf28754928a7c788d3f1d2bfbc sha256=fee0a85a6f6424eb25037ef4a6f99927d015fa1a7ca6556b76e6add95800247a knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-b3ab12cf28754928a7c788d3f1d2bfbc utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-[redacted digits=11 ..86]d4af889393aa0f397bae9 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-[redacted digits=11 ..86]d4af889393aa0f397bae9 sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-[redacted digits=11 ..86]d4af889393aa0f397bae9 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-40104bd0ecc9441396f368c9a9919224 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-40104bd0ecc9441396f368c9a9919224 sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-40104bd0ecc9441396f368c9a9919224 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-8f1012bddca145698e32c3af24baaa89 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-8f1012bddca145698e32c3af24baaa89 sha256=299a6d3931428a3243ea9118f5b66aa63637f5617f5d1bbf303e150b3f64a4bf knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:850 realtime_opt_out_speech_withheld call=ag04-synthetic-8f1012bddca145698e32c3af24baaa89
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-2a896265bc044f4faebbb116a8a4ca73 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-2a896265bc044f4faebbb116a8a4ca73 sha256=299a6d3931428a3243ea9118f5b66aa63637f5617f5d1bbf303e150b3f64a4bf knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:850 realtime_opt_out_speech_withheld call=ag04-synthetic-2a896265bc044f4faebbb116a8a4ca73
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-9a8eb169c271490686fad7b6dcbb7af9 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:850 realtime_opt_out_speech_withheld call=ag04-synthetic-9a8eb169c271490686fad7b6dcbb7af9
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-4301e14e35a74510bd11d3cd0d57e1e7 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:850 realtime_opt_out_speech_withheld call=ag04-synthetic-4301e14e35a74510bd11d3cd0d57e1e7
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-e4893b53830f42c3aed143ff0380ff0f sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-e4893b53830f42c3aed143ff0380ff0f sha256=2d7cddd30cff51087eb1f3281335a41a5704b43fed73a8dcd5682d8b2ef083f6 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-e4893b53830f42c3aed143ff0380ff0f utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-5f0be4f497ef413495f9b10783e33ef6 sha256=145887f325f986f121bc396aaf2c37da1994d3c0ecbcfee6a522018afde4463d knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=end_call success=False status=caller_intent_unconfirmed
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-5f0be4f497ef413495f9b10783e33ef6 sha256=2d7cddd30cff51087eb1f3281335a41a5704b43fed73a8dcd5682d8b2ef083f6 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-5f0be4f497ef413495f9b10783e33ef6 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-9631a928140249b3ba0cbe587f7a9b47 sha256=5d3e23c9857b115d1b391e998c96569ad3ca35e83719d5561826f456638897f9 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-9631a928140249b3ba0cbe587f7a9b47 sha256=091d9d82647ee255fdfa8d8155ef[redacted digits=11 ..60]d7ec8aca63dcf90907ad97e0b knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-9631a928140249b3ba0cbe587f7a9b47 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-cdbab08c212547818fede59203e97589 sha256=5d3e23c9857b115d1b391e998c96569ad3ca35e83719d5561826f456638897f9 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-cdbab08c212547818fede59203e97589 sha256=091d9d82647ee255fdfa8d8155ef[redacted digits=11 ..60]d7ec8aca63dcf90907ad97e0b knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-cdbab08c212547818fede59203e97589 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-b4beaff0969a41cd8686f[redacted digits=11 ..57] sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-b4beaff0969a41cd8686f[redacted digits=11 ..57] sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-b4beaff0969a41cd8686f[redacted digits=11 ..57] sha256=eaf33575e[redacted digits=17 ..15]e86052abe81f61cd1e3da1c60b4b7651dd65c1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-f0fb35f3343d443e9480e621a76a56aa sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-f0fb35f3343d443e9480e621a76a56aa sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-f0fb35f3343d443e9480e621a76a56aa sha256=eaf33575e[redacted digits=17 ..15]e86052abe81f61cd1e3da1c60b4b7651dd65c1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-7054ff685dd34f80b6b712109d894e6f sha256=22857ec1645173a61b1bec01a3d6cabbbd788c50f9cb6a39c6799e8acbd49d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-7054ff685dd34f80b6b712109d894e6f utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-b313c050fde1457abf35450818a619eb sha256=22857ec1645173a61b1bec01a3d6cabbbd788c50f9cb6a39c6799e8acbd49d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-b313c050fde1457abf35450818a619eb utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 sha256=47a691d2b38547d7620d6957cd8578078de204b98624f1ddc4de03762680c947 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-95d726dffd7f437d9697daf15c9953d1 utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce sha256=7de63c84ff37d852594db1ba0cc9fcb82814d1c67b0e1d5df8215117abbde0dc knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce sha256=47a691d2b38547d7620d6957cd8578078de204b98624f1ddc4de03762680c947 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-e1401ee813814729bb3711c321aac1ce utterance=[redacted chars=4 sha=1f23b7da] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-8ddfd9795da148a9b4e74c243b947286 sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-847ccffdde6e41f5a1db91aa9b074b4b sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-c6025e6e6bb14725a5dc33d6d09255eb sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-0dbe0da0b49f4857a8d835f453601bce sha256=fed2d4ff567078718c7fc207bce965b797a44a41722b88db1c338aa844fe974f knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-1715b4135a3f48acbd2da4dd419225f7 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-1715b4135a3f48acbd2da4dd419225f7 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-1715b4135a3f48acbd2da4dd419225f7 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-8679b9702a694a24910de76a4d58fed9 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-8679b9702a694a24910de76a4d58fed9 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-8679b9702a694a24910de76a4d58fed9 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-bf4a6aeba5d148d0ab3f4d5958edb623 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-bf4a6aeba5d148d0ab3f4d5958edb623 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-bf4a6aeba5d148d0ab3f4d5958edb623 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-74f155293a6b4309b47ea639213fb338 sha256=4a57834a0439ff5ace69782fb1627693e703a9002dad23fa[redacted digits=14 ..75]d1 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-74f155293a6b4309b47ea639213fb338 sha256=8367ca8e74f18e00c84b2819f8192146786d3f3a3bcd93a00adaa1426e2201f4 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.realtime.bridge:bridge.py:947 realtime_playout call=ag04-synthetic-74f155293a6b4309b47ea639213fb338 utterance=[redacted chars=4 sha=a33d8c62] validation_to_first_submission_ms=0
+INFO     app.realtime.bridge:bridge.py:1757 realtime_kb_lookup call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e query_chars=16 hits=0
+INFO     app.realtime.bridge:bridge.py:1688 realtime_kb_evidence call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e {"passages": 0, "policy": "admission_snapshot", "sources_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "status": "no_match"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e sha256=7684e0887a400366ba70b54a685128c28e987419a97e9fd6c8f5331079bd2cff knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-285b79a4f58844c599fb4ba49c6cf68e reason=unsupported_company_figure
+INFO     app.realtime.bridge:bridge.py:1757 realtime_kb_lookup call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e query_chars=16 hits=0
+INFO     app.realtime.bridge:bridge.py:1688 realtime_kb_evidence call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e {"passages": 0, "policy": "admission_snapshot", "sources_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945", "status": "no_match"}
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e sha256=7684e0887a400366ba70b54a685128c28e987419a97e9fd6c8f5331079bd2cff knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-c9fa28b344574023aac6af082debbe5e reason=unsupported_company_figure
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-33e5bc919ba4421eb61e2eeebede6e38 sha256=7c624de9f2a827ab3622fcb49095af1645b4a3195ba4a54b6cf7d381c6f7e80e knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=send_email success=False status=unavailable
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-33e5bc919ba4421eb61e2eeebede6e38 sha256=a812f5af262407769a627200bf0a6b6c27c9751e415939d5dc063e89756e8d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=unavailable
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-33e5bc919ba4421eb61e2eeebede6e38 reason=action_failed:send_email:unavailable
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-84e1a37764094a10b757432e5f675c0d sha256=7c624de9f2a827ab3622fcb49095af1645b4a3195ba4a54b6cf7d381c6f7e80e knowledge={"snapshot_sha256": null, "status": "unversioned"}
+INFO     app.domain.services.voice_pipeline.action_tools:action_tools.py:306 voice_action_result call=ag04-synthet action=send_email success=False status=unavailable
+INFO     app.realtime.openai:openai.py:408 realtime_instructions_submitted call=ag04-synthetic-84e1a37764094a10b757432e5f675c0d sha256=a812f5af262407769a627200bf0a6b6c27c9751e415939d5dc063e89756e8d85 knowledge={"snapshot_sha256": null, "status": "unversioned"}
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=unavailable
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-84e1a37764094a10b757432e5f675c0d reason=action_failed:send_email:unavailable
+INFO     app.realtime.bridge:bridge.py:259 realtime_bridge start call=ag04-synthetic-364babe0b72d45b499c28da6f78f7d46 internal_rate=8000 wire_rate=8000
+WARNING  app.realtime.bridge:bridge.py:314 realtime_bridge connection_lost call=ag04-synthetic-364babe0b72d45b499c28da6f78f7d46 — realtime socket died mid-call; ending Realtime session
+INFO     app.realtime.bridge:bridge.py:329 realtime_bridge end call=ag04-synthetic-364babe0b72d45b499c28da6f78f7d46
+INFO     app.realtime.bridge:bridge.py:259 realtime_bridge start call=ag04-synthetic-6a8169aeaa8440cc9d9f42036ffd734a internal_rate=8000 wire_rate=8000
+WARNING  app.realtime.bridge:bridge.py:314 realtime_bridge connection_lost call=ag04-synthetic-6a8169aeaa8440cc9d9f42036ffd734a — realtime socket died mid-call; ending Realtime session
+INFO     app.realtime.bridge:bridge.py:329 realtime_bridge end call=ag04-synthetic-6a8169aeaa8440cc9d9f42036ffd734a
+============================== 

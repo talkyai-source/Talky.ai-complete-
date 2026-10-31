@@ -1,0 +1,17 @@
+..F...                                                                   [100%]
+================================== FAILURES ===================================
+____ test_notification_identity_and_foreign_key_reject_duplicate_or_orphan ____
+tests\integration\test_billing_webhook_migration.py:135: in test_notification_identity_and_foreign_key_reject_duplicate_or_orphan
+    async with conn.transaction():
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\transaction.py:91: in __aexit__
+    await self.__commit()
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\transaction.py:187: in __commit
+    await self._connection.execute(query)
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:350: in execute
+    result = await self._protocol.query(query, timeout)
+asyncpg\protocol\protocol.pyx:374: in query
+    ???
+E   asyncpg.exceptions.InFailedSQLTransactionError: current transaction is aborted, commands ignored until end of transaction block
+=========================== short test summary info ===========================
+FAILED tests/integration/test_billing_webhook_migration.py::test_notification_identity_and_foreign_key_reject_duplicate_or_orphan
+1 failed, 5 passed in 4.79s

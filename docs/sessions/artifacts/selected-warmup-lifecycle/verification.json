@@ -1,0 +1,170 @@
+{
+  "source_commit": "ccdbabf10150a28543be22d44ffe0e97121cb7ca",
+  "base_commit": "a07d9163f7da732897579bb66529fab5328cc02f",
+  "scope": "Offline actual lifecycle/adapter/endpoint methods with synthetic provider, guard, DB and media ports. No actual network, PostgreSQL, provider, PSTN, audio or customer effects.",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  },
+  "dependency_note": "Existing original Python venv unchanged. First overlay pins production-declared urllib3 2.8.0 and PyJWT 2.15.1; existing test-only Lua overlay follows it. No package/default choice made by this repair.",
+  "commands": [
+    {
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_selected_warmup_lifecycle.py",
+        "tests/unit/test_outbound_answered_duration.py",
+        "tests/unit/test_outbound_campaign_boundaries.py",
+        "tests/unit/test_telephony_bridge_first_speaker.py",
+        "tests/unit/test_telephony_state_backend.py",
+        "tests/unit/test_telephony_redis_state_backend.py",
+        "tests/unit/test_telephony_lifecycle_watchdog_hangup.py",
+        "tests/unit/test_telephony_zombie_reconcile.py",
+        "tests/unit/test_inbound_lifecycle_fail_closed.py",
+        "tests/unit/test_op02_provider_boundary_inventory.py",
+        "tests/unit/test_op02_lifecycle_ownership.py",
+        "tests/unit/test_global_concurrency.py",
+        "-q",
+        "--tb=short"
+      ],
+      "result": {
+        "passed": 264,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 45
+      },
+      "artifact": "final-related-tests.txt",
+      "note": "Final app source; before the additional cleanup-failure parameter was added to the test only."
+    },
+    {
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_selected_warmup_lifecycle.py",
+        "-q",
+        "--tb=short"
+      ],
+      "result": {
+        "passed": 27,
+        "failed": 0,
+        "skipped": 0
+      },
+      "artifact": "final-owned-tests.txt"
+    },
+    {
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "../tmp/lost_warmup_probe.py"
+      ],
+      "exit_code": 0,
+      "stdout": "lost-warmup-after.json",
+      "stderr": "lost-warmup-after-stderr.txt",
+      "replay": "Copy the preserved lost-warmup-probe.py to the worktree tmp/lost_warmup_probe.py; its relative import root is intentionally unchanged from the executed before/after probe."
+    },
+    {
+      "cwd": "backend",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "app/domain/services/telephony/lifecycle.py",
+        "app/infrastructure/telephony/asterisk_adapter.py",
+        "tests/unit/test_selected_warmup_lifecycle.py",
+        "tests/unit/test_op02_provider_boundary_inventory.py",
+        "--select",
+        "F",
+        "--ignore",
+        "F401,F841"
+      ],
+      "exit_code": 0,
+      "artifact": "final-lint.txt"
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "baseline_classification": {
+    "watchdog-before.txt": "6 failed, 3 passed: actual selected-session resource sweep defects.",
+    "answer-before.txt": "6 failed, 11 passed after watchdog repair: lost selection, duplicate capacity and terminal ordering defects.",
+    "ringing-wait-before.txt": "1 failed, 1 passed: terminal during ringing wait requested a second hangup.",
+    "late-ringing-before.txt": "1 failed: late ringing callback reached default factory after selected warmup loss.",
+    "ringing-owner-before.txt": "3 failed, 3 passed: factory await lost terminal/replacement/reservation ownership.",
+    "initial-fixture-errors.txt": "9 setup errors: sync network guard interfered with Windows test event-loop construction; guard moved inside async fixture.",
+    "answer-initial-fixture-errors.txt": "Wrong test constructor keyword password corrected to ari_password; not an app regression.",
+    "ringing-owner-initial-fixture-errors.txt": "Test treated existing terminal dict as set; corrected to actual terminal dispatcher, preserved true factory-race red results separately.",
+    "related-before-fixture-update.txt": "255 passed, 2 failures: pre-existing minimal state fake lacked new read-only lookup methods; fixture updated while original global-admission assertions retained."
+  },
+  "limitations": [
+    "Default 30-second ringing is not claimed to trigger the 180-second sweep bug. Actual endpoint/adapter forwarded supported 300 seconds, with local monotonic age 181 simulated.",
+    "Provider absence and registration are synthetic ports; no real call, hearing, vendor connection, network timing or durable settlement acceptance is claimed.",
+    "Unknown provider presence retains resources and may need operator/provider reconciliation. This does not introduce complete orphan recovery or seamless restart.",
+    "Ownership and terminal evidence remain existing process-local, bounded state; this does not add durable warmup reconstruction or unlimited stale-event retention.",
+    "Lost owned selection uses existing initialization-error hangup and terminal outcome handling; no new retry or success receipt is fabricated.",
+    "Unowned legacy/dev defaults remain compatible. Separately enabled Twilio/Vonage callbacks lack proven outbound tenant ownership from To and remain unqualified; no cloud campaign integration added."
+  ],
+  "source_sha256": {
+    "backend/app/domain/services/telephony/lifecycle.py": "1aa819e76531ad87a7492f514d2d1dee085f25637bacb6ef903148354b8ce8e4",
+    "backend/app/infrastructure/telephony/asterisk_adapter.py": "a6b1b18be9cc11ea43cea86aaa2ae3d8bcc6c6d29474affac02ef71baa243da2",
+    "backend/tests/unit/test_selected_warmup_lifecycle.py": "189cdf346197970a21c91d49bbfb76389347cb20fb6dc752d9f8df51cf2d2ac8",
+    "backend/tests/unit/test_op02_provider_boundary_inventory.py": "f5d5437b751aaa5acc13442a52822cfd8c1bc171320cc9719813e0ad79c8e69a"
+  },
+  "artifact_sha256": {
+    "answer-before.txt": "cd7c3ff33dcb883f67b0fd704d6e858c82535509f58ef9ccbddeaf8b4987bd5a",
+    "answer-initial-fixture-errors.txt": "8cfea98947813995d05cc7b0fcbb283c97982ecffc2707bfa23631418f7d0763",
+    "final-lint.txt": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+    "final-owned-tests.txt": "97dd080f0fdf243da48776fd9d3df27fcc7d759a6a7d855885a5d99be93202b5",
+    "final-related-tests.txt": "a7d86e3934235f16011de3a2ae18205b96694fd2de9951713ae59ff4bfd2e25d",
+    "independent-review.txt": "4359134c383e3e72bd4272a7c78f38968b4ddfd6b0b8c2cd25d9e7ea1cf0af87",
+    "initial-fixture-errors.txt": "1ff17d6289267c67c260abc8a79fda3f589b7b3c738dc2ec7b8b1609905ed607",
+    "late-ringing-before.txt": "6a02c6755f9a62213a78b6e41914f70898b00f4fc2e4e01543759a408f629af5",
+    "legacy-cloud-route-before.json": "831b8aabe669f255b7ff6defeb006423ab7f3d1396a8d3cb1d1dc6ced4b25a87",
+    "legacy-cloud-route-probe.py": "c3df63e752d655f53da0f0e7284b8d0e86005ed4f1210c845d4d29b327ddb230",
+    "lost-warmup-after-stderr.txt": "cf81db860614a4e3be4d26cf3b97d278126c3e2ea97cd5368a27cfdba52b471f",
+    "lost-warmup-after.json": "fa3936d07028e3e4f69bb396bcceed83ac9916fef07b2efdae41b6566dccbffe",
+    "lost-warmup-before.json": "d1568bc8ae2ccef04d0a67e1d82b9d08538545e6e76095ec8f09c41807798be3",
+    "lost-warmup-probe.py": "bce5f1dd22439126dbffe8ef244c101b228c9756142e654cfe77bfada68b586f",
+    "related-before-fixture-update.txt": "aaadd906f90e797c3e12c53e63a917d7f8172010b34b39dc20cd1e963764dee6",
+    "ringing-owner-before.txt": "7b979e555d11a59db032259b84bd3c920c687ffb7d2f7025d3335dc2708d0b17",
+    "ringing-owner-initial-fixture-errors.txt": "d25fb35b7fdee993775450b454f33c527afe15e3433234272e5cbeb8fc92ec2e",
+    "ringing-wait-before.txt": "b313174812a03d9b39c5ed33d4a531814b72bd7789f368de962eb35fff2a1190",
+    "watchdog-before.txt": "c277275472ab53cb267f2921513d74207dffc3fbc88874f7e8930f2136901943"
+  },
+  "hash_encoding_note": "source_sha256 and artifact_sha256 record executed Windows working-file bytes. Git normalizes text line endings; git_blob_sha256 records committed bytes for portable verification.",
+  "git_blob_sha256": {
+    "backend/app/domain/services/telephony/lifecycle.py": "1aa819e76531ad87a7492f514d2d1dee085f25637bacb6ef903148354b8ce8e4",
+    "backend/app/infrastructure/telephony/asterisk_adapter.py": "a6b1b18be9cc11ea43cea86aaa2ae3d8bcc6c6d29474affac02ef71baa243da2",
+    "backend/tests/unit/test_selected_warmup_lifecycle.py": "f98cc5e1b8bb245fd1249d354093fe8113657123b994d6e7b00055216e71cda7",
+    "backend/tests/unit/test_op02_provider_boundary_inventory.py": "f5d5437b751aaa5acc13442a52822cfd8c1bc171320cc9719813e0ad79c8e69a",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/answer-before.txt": "9e73468745c5922b2c0e6b0da4a931904c7c4adb7ef8d43ffce4cb1d261f66ee",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/answer-initial-fixture-errors.txt": "5973de029063996f6027f67992140f1a28d5795fc3d425b7bf5ea7848921e333",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/final-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/final-owned-tests.txt": "e6e7bd73ba8aa714230e359953c6cf141cdb91c82d2c25c8930a544559d67904",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/final-related-tests.txt": "2d09a93e4c5c1831f982fe7563c369ee86e44c09cb323576a92818886712b34f",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/independent-review.txt": "dd356ccdb7b84b7254dc2217943498df5fa6de0e82572ce1d4bcf89c00f6be52",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/initial-fixture-errors.txt": "1dc373a0cb20d1753176b2065a179d5df3b5965578f21c917a7e2d56372c48e7",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/late-ringing-before.txt": "c6395bdbb83e2f795a6ea7a2becb76a37fb42342acd65ae0c534ed8a687a0eb1",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/legacy-cloud-route-before.json": "66d21498e36e62f5fdf1378c5a577849bff495af9dfe8585e6ac2c4265e05c93",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/legacy-cloud-route-probe.py": "aeea490d32d0c43b0f65d3f922167b0b63ed677f6d63c6762485ca6fed392bd3",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/lost-warmup-after-stderr.txt": "85f6655c2ade62bc4e8eb6905c3f14b09c81ef37073738f3c83b3f56543afde0",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/lost-warmup-after.json": "1f7b87eaa93f7e3412ddf1bfa8b784efe010a47fb89ce2b386acd40be99ea789",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/lost-warmup-before.json": "a89ee740b3b957285612da2f7232da38683b1aae9728776f2b21a692ab9a665d",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/lost-warmup-probe.py": "c79bed8f74e17f4bb06c30488de8e118b4428c3a59963891c7163049a1914fda",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/related-before-fixture-update.txt": "c64c7027a908dd7552da5f8d9f5cff172a28e640178f1ac1981aab9dc5f4c405",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/ringing-owner-before.txt": "9ccce16e1b8c91adf8526fdb2f3b4daf80ce9871857e33accc851f35d061822f",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/ringing-owner-initial-fixture-errors.txt": "f13605fd25f370d8b5f80577cf41bfff3870650ccc92f1b4eb8b624a7d5b9c7d",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/ringing-wait-before.txt": "5b1f4c82e100f95d8822d88be0ece8ab5868bd3953acbbbd17f2a715d947fe21",
+    "docs/sessions/artifacts/selected-warmup-lifecycle/watchdog-before.txt": "29c28f69652ee3fef4e2b606e0f7be9f70120221efe07a66dc603b7f16ac3b2b"
+  }
+}

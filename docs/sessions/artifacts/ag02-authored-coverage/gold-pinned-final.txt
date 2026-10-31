@@ -1,0 +1,31 @@
+{
+  "path": "production pinned retrieval + shared evidence",
+  "matrix_sha256": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+  "corpus_mode": "raw_unenriched_fail_soft",
+  "metric_definitions": {
+    "recall_at_3": "Expected current-version node appears among three retrieved hits, even if its lexical coverage is weak.",
+    "sufficient_passage_rate": "Expected current-version node survives shared evidence qualification as matched and retains all declared source fragments. This is a deterministic availability proxy, not model answer fidelity or universal semantic sufficiency."
+  },
+  "question_count": 60,
+  "answerable_count": 45,
+  "targets_predeclared": {
+    "answerable_top3_expected_source_recall_min": 0.9,
+    "answerable_sufficient_passage_rate_min": 0.85,
+    "cross_tenant_evidence_max": 0,
+    "unsupported_critical_price_policy_claims_max": 0,
+    "notes": "Nonzero retrieval targets prevent universal abstention from passing. Critical claim fidelity requires independent human/provider review; automated tests cannot award that gate. No threshold lowering after results."
+  },
+  "recall_at_3": 0.9333333333333333,
+  "sufficient_passage_rate": 0.7111111111111111,
+  "retrieval_targets_met": false,
+  "provider_calls": 0,
+  "model_answer_fidelity": "not evaluated",
+  "human_approval": null,
+  "limitations": [
+    "Source presence and query coverage are not proof that a model answers faithfully.",
+    "A matched related passage may still require abstention; human answer review remains required.",
+    "Pinned evaluation accepts an already scoped admission snapshot; it does not prove SQL tenant/source selection."
+  ]
+}
+Missed source: ['Q06', 'Q18', 'Q21']
+Insufficient passage: ['Q03', 'Q06', 'Q09', 'Q12', 'Q14', 'Q15', 'Q18', 'Q21', 'Q24', 'Q27', 'Q30', 'Q33', 'Q36']

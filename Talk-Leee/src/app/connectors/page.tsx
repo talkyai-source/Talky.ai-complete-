@@ -6,20 +6,21 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { ConnectorCard } from "@/components/connectors/connector-card";
+import { SalesforceSettingsPanel } from "@/components/connectors/salesforce-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
 import type { ConnectorProviderStatus } from "@/lib/models";
-import { notificationsStore } from "@/lib/notifications";
+import type { ConnectorProviderType } from "@/lib/connectors-utils";
 import { cn } from "@/lib/utils";
-import { CalendarDays, Mail, UsersRound, HardDrive } from "lucide-react";
+import { CalendarDays, Cloud, Mail, UsersRound, HardDrive } from "lucide-react";
 
 function formatError(err: unknown) {
     if (isApiClientError(err)) return err.message;
     return err instanceof Error ? err.message : "Request failed";
 }
 
-type ProviderType = "calendar" | "email" | "crm" | "drive";
+type ProviderType = ConnectorProviderType;
 
 type ProviderCard = {
     type: ProviderType;
@@ -58,6 +59,13 @@ const PROVIDERS: ProviderCard[] = [
         accent: "border-amber-500/20 bg-gradient-to-br from-amber-500/10 to-orange-500/5",
         icon: HardDrive,
     },
+    {
+        type: "salesforce",
+        name: "Salesforce",
+        description: "Log every call as a Salesforce Task, create Leads for new callees, and let Salesforce request agent callbacks.",
+        accent: "border-blue-500/20 bg-gradient-to-br from-blue-500/10 to-cyan-500/5",
+        icon: Cloud,
+    },
 ];
 
 export default function ConnectorsPage() {
@@ -80,13 +88,8 @@ export default function ConnectorsPage() {
                 seenEvents.current.add(eventId);
             }
 
-            const ok = Boolean(obj.ok);
-            const message = typeof obj.message === "string" ? obj.message : undefined;
-            notificationsStore.create({
-                type: ok ? "success" : "error",
-                title: ok ? "Connector connected" : "Connector connection failed",
-                message: message ?? (ok ? "Connection completed successfully." : "Authorization failed. Please try again."),
-            });
+            // Popup/storage broadcasts do not prove the current account owns this
+            // connection. Refresh authoritative status without publishing their payload.
 
             void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
         };
@@ -144,7 +147,7 @@ export default function ConnectorsPage() {
     const byType = useMemo(() => {
         const map = new Map<ProviderType, ConnectorProviderStatus>();
         for (const item of q.data?.items ?? []) {
-            if (item.type === "calendar" || item.type === "email" || item.type === "crm" || item.type === "drive") {
+            if (item.type === "calendar" || item.type === "email" || item.type === "crm" || item.type === "drive" || item.type === "salesforce") {
                 map.set(item.type, item);
             }
         }
@@ -157,7 +160,7 @@ export default function ConnectorsPage() {
             .split(",")
             .map((x) => x.trim())
             .filter(Boolean);
-        const allowed: ProviderType[] = ["calendar", "email", "crm", "drive"];
+        const allowed: ProviderType[] = ["calendar", "email", "crm", "drive", "salesforce"];
         return list.filter((x): x is ProviderType => (allowed as string[]).includes(x));
     }, [searchParams]);
 
@@ -222,12 +225,17 @@ export default function ConnectorsPage() {
                                         provider={data?.provider}
                                         errorMessage={data?.error_message}
                                         oauthCallbackPath={`/connectors/${p.type}/callback`}
+                                        available={p.type !== "salesforce" || Boolean(data)}
+                                        unavailableReason={p.type === "salesforce" && !data
+                                            ? "Salesforce is not enabled by this server yet (SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET missing). No OAuth request will be started until the backend advertises the capability."
+                                            : undefined}
                                     />
                                 );
                             })}
                         </div>
                     </CardContent>
                 </Card>
+                {byType.has("salesforce") ? <SalesforceSettingsPanel connected={byType.get("salesforce")?.status === "connected"} /> : null}
             </div>
         </DashboardLayout>
     );

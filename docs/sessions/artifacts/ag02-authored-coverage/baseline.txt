@@ -1,0 +1,154 @@
+FFFFFF..F.F.                                                             [100%]
+================================== FAILURES ===================================
+_ test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance-0.0-keywords] _
+
+field = 'keywords', query = 'orbital guidance', expected = 0.0
+
+    @pytest.mark.parametrize("field", ["keywords", "example_questions"])
+    @pytest.mark.parametrize("query,expected", [("orbital guidance", 0.0), ("orbital guidance support", 1 / 3)])
+    def test_valid_same_node_aliases_route_without_authorizing_unrelated_source(field, query, expected):
+        node = indexed(field=field)
+        original = copy.deepcopy(node)
+        hits = retrieve_pinned_knowledge([node], query)
+        assert [hit["id"] for hit in hits] == ["original"]  # Keep the routing benefit.
+        evidence = prepare_knowledge_evidence(hits, query)
+>       assert evidence["status"] == "weak_match", evidence
+E       AssertionError: {'passages': [{'coverage': 1.0, 'node_id': 'original', 'source_id': 'guide', 'source_version': 2, ...}], 'status': 'matched', 'text': '- Support: Support is available during ordinary business hours each weekday.'}
+E       assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:41: AssertionError
+_ test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance-0.0-example_questions] _
+
+field = 'example_questions', query = 'orbital guidance', expected = 0.0
+
+    @pytest.mark.parametrize("field", ["keywords", "example_questions"])
+    @pytest.mark.parametrize("query,expected", [("orbital guidance", 0.0), ("orbital guidance support", 1 / 3)])
+    def test_valid_same_node_aliases_route_without_authorizing_unrelated_source(field, query, expected):
+        node = indexed(field=field)
+        original = copy.deepcopy(node)
+        hits = retrieve_pinned_knowledge([node], query)
+        assert [hit["id"] for hit in hits] == ["original"]  # Keep the routing benefit.
+        evidence = prepare_knowledge_evidence(hits, query)
+>       assert evidence["status"] == "weak_match", evidence
+E       AssertionError: {'passages': [{'coverage': 1.0, 'node_id': 'original', 'source_id': 'guide', 'source_version': 2, ...}], 'status': 'matched', 'text': '- Support: Support is available during ordinary business hours each weekday.'}
+E       assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:41: AssertionError
+_ test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance support-0.3333333333333333-keywords] _
+
+field = 'keywords', query = 'orbital guidance support'
+expected = 0.3333333333333333
+
+    @pytest.mark.parametrize("field", ["keywords", "example_questions"])
+    @pytest.mark.parametrize("query,expected", [("orbital guidance", 0.0), ("orbital guidance support", 1 / 3)])
+    def test_valid_same_node_aliases_route_without_authorizing_unrelated_source(field, query, expected):
+        node = indexed(field=field)
+        original = copy.deepcopy(node)
+        hits = retrieve_pinned_knowledge([node], query)
+        assert [hit["id"] for hit in hits] == ["original"]  # Keep the routing benefit.
+        evidence = prepare_knowledge_evidence(hits, query)
+>       assert evidence["status"] == "weak_match", evidence
+E       AssertionError: {'passages': [{'coverage': 1.0, 'node_id': 'original', 'source_id': 'guide', 'source_version': 2, ...}], 'status': 'matched', 'text': '- Support: Support is available during ordinary business hours each weekday.'}
+E       assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:41: AssertionError
+_ test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance support-0.3333333333333333-example_questions] _
+
+field = 'example_questions', query = 'orbital guidance support'
+expected = 0.3333333333333333
+
+    @pytest.mark.parametrize("field", ["keywords", "example_questions"])
+    @pytest.mark.parametrize("query,expected", [("orbital guidance", 0.0), ("orbital guidance support", 1 / 3)])
+    def test_valid_same_node_aliases_route_without_authorizing_unrelated_source(field, query, expected):
+        node = indexed(field=field)
+        original = copy.deepcopy(node)
+        hits = retrieve_pinned_knowledge([node], query)
+        assert [hit["id"] for hit in hits] == ["original"]  # Keep the routing benefit.
+        evidence = prepare_knowledge_evidence(hits, query)
+>       assert evidence["status"] == "weak_match", evidence
+E       AssertionError: {'passages': [{'coverage': 1.0, 'node_id': 'original', 'source_id': 'guide', 'source_version': 2, ...}], 'status': 'matched', 'text': '- Support: Support is available during ordinary business hours each weekday.'}
+E       assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:41: AssertionError
+___ test_legacy_fallback_derivatives_do_not_grant_factual_coverage[summary] ___
+
+field = 'summary'
+
+    @pytest.mark.parametrize("field", ["summary", "voice_answer"])
+    def test_legacy_fallback_derivatives_do_not_grant_factual_coverage(field):
+        node = indexed()
+        node.pop("search_text")
+        node[field] = "Orbital guidance"
+        hits = retrieve_pinned_knowledge([node], "orbital guidance")
+        assert hits and hits[0]["id"] == "original"
+>       assert prepare_knowledge_evidence(hits, "orbital guidance")["status"] == "weak_match"
+E       AssertionError: assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:55: AssertionError
+_ test_legacy_fallback_derivatives_do_not_grant_factual_coverage[voice_answer] _
+
+field = 'voice_answer'
+
+    @pytest.mark.parametrize("field", ["summary", "voice_answer"])
+    def test_legacy_fallback_derivatives_do_not_grant_factual_coverage(field):
+        node = indexed()
+        node.pop("search_text")
+        node[field] = "Orbital guidance"
+        hits = retrieve_pinned_knowledge([node], "orbital guidance")
+        assert hits and hits[0]["id"] == "original"
+>       assert prepare_knowledge_evidence(hits, "orbital guidance")["status"] == "weak_match"
+E       AssertionError: assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:55: AssertionError
+_ test_unchanged_ranking_keeps_alias_candidate_but_only_supported_source_is_admitted _
+
+    def test_unchanged_ranking_keeps_alias_candidate_but_only_supported_source_is_admitted():
+        alias = indexed()
+        alias["priority"] = 10
+        supported = indexed(heading="Orbital guidance", content="Orbital guidance requires calibration.")
+        supported["id"] = "supported"
+        hits = retrieve_pinned_knowledge([alias, supported], "orbital guidance", k=2)
+        assert [hit["id"] for hit in hits] == ["original", "supported"]
+        evidence = prepare_knowledge_evidence(hits, "orbital guidance")
+        assert evidence["status"] == "matched"
+>       assert [passage["node_id"] for passage in evidence["passages"]] == ["supported"]
+E       AssertionError: assert ['original', 'supported'] == ['supported']
+E         At index 0 diff: 'original' != 'supported'
+E         Left contains one more item: 'supported'
+E         Use -v to get more diff
+
+tests\unit\test_knowledge_authored_coverage.py:80: AssertionError
+_______ test_incoming_coverage_cannot_override_measured_source_coverage _______
+
+    def test_incoming_coverage_cannot_override_measured_source_coverage():
+        node = indexed()
+        node["coverage"] = 1
+        hits = retrieve_pinned_knowledge([node], "orbital guidance")
+>       assert prepare_knowledge_evidence(hits, "orbital guidance")["status"] == "weak_match"
+E       AssertionError: assert 'matched' == 'weak_match'
+E         - weak_match
+E         + matched
+
+tests\unit\test_knowledge_authored_coverage.py:94: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance-0.0-keywords]
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance-0.0-example_questions]
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance support-0.3333333333333333-keywords]
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_valid_same_node_aliases_route_without_authorizing_unrelated_source[orbital guidance support-0.3333333333333333-example_questions]
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_legacy_fallback_derivatives_do_not_grant_factual_coverage[summary]
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_legacy_fallback_derivatives_do_not_grant_factual_coverage[voice_answer]
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_unchanged_ranking_keeps_alias_candidate_but_only_supported_source_is_admitted
+FAILED tests/unit/test_knowledge_authored_coverage.py::test_incoming_coverage_cannot_override_measured_source_coverage
+8 failed, 4 passed in 6.93s

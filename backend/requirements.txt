@@ -3,9 +3,8 @@
 # ========================================
 
 # --- Core Framework ---
-# CVE-forced ahead of the prod venv (starlette<1.3.1 / python-multipart<0.0.31
-# carry known advisories; fastapi 0.139 is the matching starlette-1.3 release).
-# The prod venv still runs 0.109/0.35 — upgrade it as its own controlled step.
+# Security pins: fastapi 0.139 matches the starlette-1.3 release. Installed
+# runtime packages must be checked separately from requirements resolution.
 fastapi==0.139.0
 uvicorn[standard]==0.27.0
 starlette==1.3.1
@@ -32,15 +31,19 @@ hiredis==2.3.2
 
 # --- HTTP Clients ---
 httpx==0.28.1
-# CVE-forced ahead of the prod venv: aiohttp<3.14.1 carries known advisories.
-aiohttp==3.14.1
+# HTTPS proxy TLS fixes; pin the patch used in clean-environment acceptance.
+urllib3==2.8.0
+# Security floor (2026-10-20): 3.14.3 has three published advisories (GHSA-2g87-pp6c-29x5, CVE-2026-111063, CVE-2026-111064).
+aiohttp==3.14.4
 aiofiles==23.2.1
 
 # --- Email (SMTP) ---
 aiosmtplib>=2.0.0
 
 # --- WebSocket ---
-websockets==13.1
+# LangSmith >=0.8.18 requires the websockets 15 client contract.  The two
+# direct adapters use additional_headers (the supported 15.x spelling).
+websockets==15.0.1
 
 # --- AI Providers: STT ---
 deepgram-sdk==5.3.0
@@ -71,12 +74,15 @@ phonenumbers>=8.13.0
 stripe>=12.0.0,<15.0.0
 
 # --- Authentication & Security ---
-PyJWT>=2.8.0
+# Claim-validation and options-mutation fixes, verified with the auth suite.
+PyJWT==2.15.1
 email-validator>=2.0.0
 passlib[bcrypt]==1.7.4
 bcrypt==5.0.0
-# CVE-forced ahead of the prod venv: <48.0.1 carries GHSA-537c-gmf6-5ccf.
-cryptography==48.0.1
+# Security floor (2026-08-28): 50.0.0 closes the remaining 48.0.1 advisories.
+cryptography==50.0.0
+# webauthn pulls this transitively; 26.2.0 capped cryptography below 49.
+pyOpenSSL==26.4.0
 argon2-cffi==23.1.0
 pyotp==2.9.0
 qrcode==8.0
@@ -84,14 +90,15 @@ Pillow>=10.0.0
 webauthn==2.7.1
 
 # --- AI Assistant Agent ---
-# Pinned to the production-verified stack (live server venv, 2026-07-16).
-# The previous floating ranges (>=) let local, prod, and clean installs
-# resolve to three different — partly import-incompatible — version sets.
-langchain-core==1.3.3
-langgraph==1.1.10
-langgraph-prebuilt==1.0.13
+# Security floor: GHSA-3fx2-cqw9-xr3c / CVE-2026-118667.
+# LangGraph 1.2.14 requires SDK >=0.4.6 and core >=1.4.7.
+langchain-core==1.4.7
+langgraph==1.2.14
+langgraph-prebuilt==1.1.0
+langgraph-sdk==0.4.6
 langchain-groq==1.1.2
-langsmith==0.8.3
+# Security floor: 0.8.18 fixes GHSA-f4xh-w4cj-qxq8.
+langsmith==0.8.18
 
 # --- Template Engine ---
 Jinja2>=3.1.0
@@ -103,6 +110,10 @@ pydub==0.25.1
 # (resample_audio in app/utils/audio_utils.py). REQUIRED — without it every
 # outbound TTS chunk fails to encode and the agent is silent on calls.
 soxr>=0.3.7
+# WebRTC noise suppression for the caller audio STT hears (caller_denoise.py).
+# Off unless CALLER_NOISE_SUPPRESSION=webrtc. No Windows wheel; elsewhere the
+# denoiser reports "unavailable" and passes audio through.
+webrtc-noise-gain==1.3.0 ; sys_platform == "linux" and platform_machine == "x86_64"
 
 # --- Object Storage — S3 / R2 (NEW) ---
 boto3>=1.34.0

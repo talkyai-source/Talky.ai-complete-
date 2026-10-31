@@ -2,8 +2,9 @@
 
 Background
 ==========
-The five admin routers below (``admin/tenants.py``, ``admin/calls.py``,
-``admin/users.py``, ``admin/connectors.py``, ``admin/usage.py``) all query
+The six admin routers below (``admin/tenants.py``, ``admin/calls.py``,
+``admin/media.py``, ``admin/users.py``, ``admin/connectors.py``,
+``admin/usage.py``) all query
 **across every tenant** with no filter tied to the caller's own tenant
 (e.g. "List all tenants", "all active calls", "all connectors across all
 tenants", platform-wide usage). They were previously gated with
@@ -19,7 +20,7 @@ This test locks that in two ways:
 
 1. Behavioural — ``require_platform_admin`` 403s a tenant_admin (and every
    lower role) and passes a platform_admin. This proves the gate fails safe.
-2. Wiring — EVERY route in the five routers carries ``require_platform_admin``
+2. Wiring — EVERY route in the six routers carries ``require_platform_admin``
    in its resolved dependency tree and does NOT carry the weaker
    ``require_admin``. This proves the routes are actually wired to the strict
    gate, so a future edit that downgrades one back to ``require_admin`` fails
@@ -28,16 +29,18 @@ This test locks that in two ways:
 from __future__ import annotations
 
 import pytest
-from fastapi import HTTPException
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.routing import iter_route_contexts
 
 from app.api.v1.dependencies import CurrentUser, require_admin, require_platform_admin
-from app.api.v1.endpoints.admin import calls, connectors, tenants, usage, users
+from app.api.v1.endpoints.admin import calls, connectors, media, tenants, usage, users
 
 # The routers this agent owns for P0-3. Every route on each must be
 # platform_admin-only.
 _ADMIN_ROUTERS = {
     "admin/tenants.py": tenants.router,
     "admin/calls.py": calls.router,
+    "admin/media.py": media.router,
     "admin/users.py": users.router,
     "admin/connectors.py": connectors.router,
     "admin/usage.py": usage.router,
@@ -111,15 +114,17 @@ async def test_require_admin_would_have_admitted_tenant_admin():
 
 # --- 2. wiring: every admin console route is platform_admin-only -----
 
-def _all_routes():
-    for label, router in _ADMIN_ROUTERS.items():
-        for route in router.routes:
+def _all_routes(routers=None):
+    for label, router in (_ADMIN_ROUTERS if routers is None else routers).items():
+        # FastAPI's public walker resolves nested includes, their prefixes and
+        # inherited dependencies; never omit an internal router mount.
+        for route in iter_route_contexts(router.routes):
             methods = sorted(m for m in route.methods if m != "HEAD")
             yield label, methods, route
 
 
 def test_every_admin_console_route_requires_platform_admin():
-    """Every route in the five routers carries require_platform_admin and
+    """Every route in the six routers carries require_platform_admin and
     NOT the weaker require_admin."""
     offenders: list[str] = []
     checked = 0
@@ -134,3 +139,39 @@ def test_every_admin_console_route_requires_platform_admin():
 
     assert checked >= 20, f"expected >=20 admin routes, found {checked} (discovery broken)"
     assert not offenders, "admin console routes not gated to platform_admin:\n  " + "\n  ".join(offenders)
+
+
+def test_nested_supplier_routes_are_all_discovered_with_their_methods_and_gate():
+    found = {(method, route.path): _dep_names(route)
+             for label, methods, route in _all_routes()
+             if label == "admin/usage.py" and route.path.startswith("/usage/statements")
+             for method in methods}
+    assert set(found) == {
+        ("GET", "/usage/statements"),
+        ("POST", "/usage/statements"),
+        ("GET", "/usage/statements/imports/{request_id}"),
+        ("GET", "/usage/statements/{statement_id}"),
+        ("POST", "/usage/statements/{statement_id}/reviews"),
+        ("GET", "/usage/statements/{statement_id}/source"),
+    }
+    assert all("require_platform_admin" in names and "require_admin" not in names for names in found.values())
+
+
+def test_nested_route_discovery_keeps_prefixes_inherited_guard_and_weaker_dependency():
+    leaf = APIRouter()
+
+    @leaf.post("/source", dependencies=[Depends(require_admin)])
+    async def synthetic_source():
+        return None
+
+    middle = APIRouter()
+    middle.include_router(leaf, prefix="/inner")
+    outer = APIRouter()
+    outer.include_router(middle, prefix="/outer", dependencies=[Depends(require_platform_admin)])
+    routes = list(_all_routes({"synthetic": outer}))
+    assert len(routes) == 1
+    _, methods, route = routes[0]
+    assert methods == ["POST"] and route.path == "/outer/inner/source"
+    # Both names must reach the security audit: a weak nested dependency cannot
+    # disappear merely because the enclosing router also carries a strict gate.
+    assert {"require_platform_admin", "require_admin"} <= _dep_names(route)

@@ -37,7 +37,6 @@ import asyncio
 import logging
 
 from app.domain.services.telephony.config import (
-    _build_outbound_greeting,
     _build_call_greeting,
 )
 
@@ -180,26 +179,17 @@ def _disclosure_tenant_id(voice_session):
 
 
 async def _speak_recording_disclosure(voice_session) -> None:
-    """Speak the recording notice, if the tenant's policy requires one.
+    """Deliver the configured notice before the greeting and record transport proof.
 
-    Must run BEFORE any greeting audio: a disclosure delivered after the
-    callee has already spoken is worthless — their words were captured
-    before they were told. Being the first audio on the call also means
-    the notice itself sits at the head of the stored WAV, so the
-    recording carries its own proof of consent.
-
-    Always records an outcome in the disclosure ledger, and NEVER raises:
-    a failure here must not drop the call, it must drop the RECORDING.
-    The call itself is perfectly lawful without a recording; the
-    recording is not lawful without the notice. Every failure path
-    therefore lands on DISCLOSURE_FAILED, which
-    ``RecordingService.save_and_link`` treats as "do not retain".
+    Failure suppresses recording without terminating the call. This technical
+    receipt gate does not establish human hearing or legal consent.
     """
     from app.domain.models.conversation import Message, MessageRole
     from app.domain.services.recording_policy_service import (
         DISCLOSURE_FAILED,
         DISCLOSURE_NOT_REQUIRED,
         DISCLOSURE_SPOKEN,
+        DISCLOSURE_TRANSMITTED,
         RecordingPolicyService,
         record_disclosure_state,
         spoken_disclosure_text,
@@ -208,6 +198,13 @@ async def _speak_recording_disclosure(voice_session) -> None:
     call_ids = _disclosure_call_ids(voice_session)
     call_id = voice_session.call_id
     session = voice_session.call_session
+
+    # The inbound gate may deliver the disclosure before the pipeline starts;
+    # agent-first greeting code reaches this same shared helper later. Keep the
+    # notice strictly once-per-call so the caller never hears it twice.
+    if getattr(voice_session, "_recording_disclosure_attempted", False):
+        return
+    voice_session._recording_disclosure_attempted = True
 
     try:
         from app.core.container import get_container
@@ -253,7 +250,15 @@ async def _speak_recording_disclosure(voice_session) -> None:
         decision = await RecordingPolicyService(db_pool).decide(
             tenant_id=tenant_id,
         )
-        text = spoken_disclosure_text(decision)
+        pinned_override = getattr(
+            voice_session, "_recording_disclosure_text_override", None
+        )
+        if pinned_override is not None:
+            text = str(pinned_override).strip()
+            if not text:
+                raise RuntimeError("pinned recording disclosure is empty")
+        else:
+            text = spoken_disclosure_text(decision)
         if not text:
             record_disclosure_state(DISCLOSURE_NOT_REQUIRED, *call_ids)
             logger.info(
@@ -261,6 +266,35 @@ async def _speak_recording_disclosure(voice_session) -> None:
                 call_id[:12], getattr(decision, "reason", "-"),
             )
             return
+
+        # OUTBOUND RETENTION WINDOW (2026-09-24, call 6e0e221b): a telephony
+        # session's recording gate defaults OPEN at media start (only a
+        # TRUE-inbound session starts closed — see prepare_inbound_recording
+        # in modes/caller_first.py). On a callee-first (first_speaker="user")
+        # outbound call this function does not run until the callee's own
+        # pickup has been transcribed, which can be several seconds after
+        # answer — 6e0e221b answered at 18:09:18.094 but this notice did not
+        # start until 18:09:26.575, and every one of those 8.5s of the
+        # callee's "Hello?" plus two agent re-greet nudges was retained
+        # because the gate had been open the whole time. Reset the gate here,
+        # in the same synchronous stretch as the `await` below (no audio can
+        # be appended between these two calls), so the retained timeline
+        # starts exactly at the first byte of the notice: nothing from before
+        # it, and the notice itself survives as proof the disclosure was
+        # given. Skipped for true-inbound sessions, whose gate is already
+        # managed by prepare_inbound_recording and must not be double-driven
+        # here. Agent-first calls reach this same point ~21ms after session
+        # start (8b3176ca), so the reset costs them nothing observable.
+        from app.domain.services.telephony.recording import (
+            _is_true_inbound_session,
+        )
+
+        if not _is_true_inbound_session(voice_session):
+            gateway = getattr(voice_session, "media_gateway", None)
+            set_gate = getattr(gateway, "set_recording_enabled", None)
+            if callable(set_gate):
+                set_gate(call_id, False)
+                set_gate(call_id, True)
 
         logger.info(
             "recording_disclosure_speaking call_id=%s reason=%s text=%r",
@@ -282,20 +316,65 @@ async def _speak_recording_disclosure(voice_session) -> None:
         # can only ever REMOVE a retry that talked over the caller; it
         # cannot cause a recording to be kept that previously would not
         # have been.
-        interrupted = await voice_session.pipeline.synthesize_and_send_audio(
-            session, text, websocket=None
+        # track_latency=False (2026-09-24, call 6e0e221b): this notice is the
+        # FIRST audio on a callee-first outbound call, spoken before turn 0's
+        # own start_turn/mark_llm_start ever run. Left at the default (True)
+        # its TTS stamped tts_first_chunk/response_start/audio_start on the
+        # turn-0 LatencyMetrics, so when the real reply played later the
+        # subtraction went negative ("Turn 0 latency" garbage) -- the same
+        # class of bug fixed for the silence-monitor nudge on 2026-09-23.
+        session._tts_playback_receipt = None
+        session._tts_playback_utterance_id = None
+        session._tts_delivery_status = "pending"
+        # While the notice plays, a bare pickup "Hello?" must not cut it off
+        # (first_line_guard); on agent-first calls the notice starts at answer,
+        # exactly when callees say it (2026-10-21: 20 of 33 notices lost so).
+        # Restored, not cleared: caller_first_disclosure holds the flag around
+        # this whole helper.
+        disclosure_was_in_flight = getattr(session, "_disclosure_in_flight", False)
+        session._disclosure_in_flight = True
+        try:
+            interrupted = await voice_session.pipeline.synthesize_and_send_audio(
+                session, text, websocket=None, track_latency=False,
+            )
+        finally:
+            session._disclosure_in_flight = disclosure_was_in_flight
+        receipt = getattr(session, "_tts_playback_receipt", None)
+        # The phone gateway's finish receipt is status="transmitted" with
+        # evidence="transmitted" (voice_gateway /v1/sessions/tts/finish); the
+        # browser's is status="completed". Requiring "completed" alone failed
+        # every telephony notice from 2026-10-05 to 2026-10-21.
+        delivered = bool(
+            not interrupted
+            and getattr(session, "_tts_delivery_status", None) == "submitted"
+            and isinstance(receipt, dict)
+            and receipt.get("utterance_id")
+            and receipt.get("utterance_id") == getattr(session, "_tts_playback_utterance_id", None)
+            and (
+                (receipt.get("status") == "completed"
+                 and receipt.get("evidence") in {"transport_played", "transmitted"})
+                or (receipt.get("status") == "transmitted"
+                    and receipt.get("evidence") == "transmitted")
+            )
         )
-        if interrupted:
+        if not delivered:
             record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
             logger.warning(
-                "recording_disclosure_interrupted call_id=%s — notice cut "
+                "recording_disclosure_unconfirmed call_id=%s interrupted=%s delivery=%s "
+                "receipt_status=%s evidence=%s — notice incomplete or unproven "
                 "short; not retried (a restart would talk over the caller "
                 "a second time); recording will be suppressed",
-                call_id[:12],
+                call_id[:12], interrupted, getattr(session, "_tts_delivery_status", None),
+                receipt.get("status") if isinstance(receipt, dict) else None,
+                receipt.get("evidence") if isinstance(receipt, dict) else None,
             )
             return
 
-        record_disclosure_state(DISCLOSURE_SPOKEN, *call_ids)
+        record_disclosure_state(
+            DISCLOSURE_SPOKEN if receipt["evidence"] == "transport_played"
+            else DISCLOSURE_TRANSMITTED,
+            *call_ids,
+        )
         # Put it in history so the LLM knows the notice was already given
         # and does not repeat it (or contradict it) on the first turn.
         try:
@@ -304,7 +383,34 @@ async def _speak_recording_disclosure(voice_session) -> None:
             )
         except Exception:
             pass
-        logger.info("recording_disclosure_spoken call_id=%s", call_id[:12])
+        # 2026-09-24 (call 6e0e221b): conversation_history is process-memory
+        # only. TranscriptService.accumulate_turn is the ONLY writer that
+        # reaches calls.transcript_json, so a notice recorded above but not
+        # here is spoken on the call yet absent from the stored transcript —
+        # 6e0e221b's saved transcript had 3 words even though a 60-character
+        # disclosure was spoken. Records the delivered disclosure using the existing
+        # same-pattern fix for the silence-check phrase. Fail-soft: transcript
+        # bookkeeping must never break the call.
+        try:
+            pipeline = getattr(voice_session, "pipeline", None)
+            ts = getattr(pipeline, "transcript_service", None)
+            if ts is not None:
+                ts.accumulate_turn(
+                    call_id=call_id,
+                    role="assistant",
+                    content=text,
+                    talklee_call_id=getattr(session, "talklee_call_id", None),
+                    turn_index=getattr(session, "turn_id", 0),
+                    event_type="assistant_response",
+                    is_final=True,
+                    include_in_plaintext=True,
+                )
+        except Exception as exc:
+            logger.debug(
+                "recording_disclosure_transcript_accumulate_failed call_id=%s err=%s",
+                call_id[:12], exc,
+            )
+        logger.info("recording_disclosure_delivered call_id=%s evidence=%s", call_id[:12], receipt["evidence"])
     except Exception as exc:
         record_disclosure_state(DISCLOSURE_FAILED, *call_ids)
         logger.error(
@@ -457,6 +563,7 @@ async def _send_outbound_greeting(voice_session) -> None:
                     break
 
             # Flush remaining audio in the gateway buffer
+            context_submitted = not was_interrupted and chunks_sent > 0
             if not was_interrupted:
                 flush = getattr(voice_session.media_gateway, "flush_tts_buffer", None)
                 if not flush:
@@ -465,7 +572,15 @@ async def _send_outbound_greeting(voice_session) -> None:
                     try:
                         await flush(call_id)
                     except Exception:
-                        pass
+                        context_submitted = False
+
+            if (
+                context_submitted and session.tts_active
+                and not (barge_in_event and barge_in_event.is_set())
+            ):
+                from app.domain.services.stt_context import update_stt_agent_context
+
+                await update_stt_agent_context(getattr(voice_session, "stt_provider", None), call_id, greeting)
 
             session.tts_active = False
             _elapsed_ms = (_time.monotonic() - _t0) * 1000.0
@@ -489,7 +604,12 @@ async def _send_outbound_greeting(voice_session) -> None:
             first_speaker = (
                 getattr(voice_session, "_first_speaker", None) or "agent"
             )
-            greeting = _build_call_greeting(session, first_speaker=first_speaker)
+            pinned_inbound_greeting = str(
+                getattr(voice_session, "_pinned_inbound_greeting", "") or ""
+            ).strip()
+            greeting = pinned_inbound_greeting or _build_call_greeting(
+                session, first_speaker=first_speaker
+            )
 
             # 2026-07-08: last-resort opener-content guard. If even the
             # real-time greeting builder produced empty/filler-only text
@@ -499,7 +619,7 @@ async def _send_outbound_greeting(voice_session) -> None:
             # session. Wrapped so any failure here falls through to the
             # original (possibly degraded) greeting rather than crashing.
             try:
-                if not _has_real_opener_content(greeting):
+                if not pinned_inbound_greeting and not _has_real_opener_content(greeting):
                     from app.domain.services.telephony.config import (
                         _resolve_greeting_context,
                     )
@@ -522,8 +642,11 @@ async def _send_outbound_greeting(voice_session) -> None:
                 "outbound_greeting_realtime call_id=%s first_speaker=%s text=%r",
                 call_id[:12], first_speaker, greeting[:60],
             )
+            # track_latency=False: the greeting is not an LLM turn either
+            # (same 6e0e221b reasoning as the disclosure call above) -- it
+            # must not stamp turn-0 LatencyMetrics.
             await voice_session.pipeline.synthesize_and_send_audio(
-                session, greeting, websocket=None
+                session, greeting, websocket=None, track_latency=False,
             )
 
         # Persist the greeting so the LLM sees it as conversation history on the
@@ -553,6 +676,34 @@ async def _send_outbound_greeting(voice_session) -> None:
         session.conversation_history.append(
             Message(role=MessageRole.ASSISTANT, content=_spoken_text)
         )
+        # 2026-09-24 (call 53d16d3e/6e0e221b): conversation_history alone
+        # never reaches calls.transcript_json — only
+        # TranscriptService.accumulate_turn does — so the spoken opener was
+        # missing from every saved transcript ("Thanks for calling. How can
+        # I help?" was spoken but 53d16d3e.transcript.txt starts with the
+        # caller). Same fix as the disclosure append above, and the same
+        # delivered-assistant transcript pattern. _spoken_text is
+        # already trimmed to what actually played on a barge-in. Fail-soft:
+        # transcript bookkeeping must never break the call.
+        try:
+            pipeline = getattr(voice_session, "pipeline", None)
+            ts = getattr(pipeline, "transcript_service", None)
+            if ts is not None:
+                ts.accumulate_turn(
+                    call_id=call_id,
+                    role="assistant",
+                    content=_spoken_text,
+                    talklee_call_id=getattr(session, "talklee_call_id", None),
+                    turn_index=getattr(session, "turn_id", 0),
+                    event_type="assistant_response",
+                    is_final=True,
+                    include_in_plaintext=True,
+                )
+        except Exception as exc:
+            logger.debug(
+                "outbound_greeting_transcript_accumulate_failed call_id=%s err=%s",
+                call_id[:12], exc,
+            )
         # Flip the same flag turn_runner sets after the first LLM-generated
         # reply (see turn_runner.py) so live_state.py's per-turn LIVE STATE
         # block reflects reality — but ONLY when what was actually spoken
@@ -747,8 +898,20 @@ async def warm_llm_stream(pre_warm_session) -> None:
     from app.domain.models.conversation import Message, MessageRole
 
     config = getattr(pre_warm_session, "config", None)
-    real_prompt = (getattr(config, "system_prompt", "") or "").strip()
+    call_session = getattr(pre_warm_session, "call_session", None)
+    # The prompt the turns actually send (knowledge already injected) and the
+    # same cache key they pass. 2026-10-01: GPT-6 Luna's first request on a
+    # cold cache took 8.5 s, later ones 0.7-1.3 s -- a warm-up on a different
+    # prompt or cache key leaves turn 0 cold.
+    real_prompt = (
+        getattr(call_session, "system_prompt", "")
+        or getattr(config, "system_prompt", "")
+        or ""
+    ).strip()
     system_prompt = real_prompt or "Reply with a single word only."
+    campaign_id = getattr(config, "campaign_id", None) or getattr(
+        call_session, "campaign_id", None
+    )
 
     msgs = [Message(role=MessageRole.USER, content="hi")]
     try:
@@ -756,6 +919,7 @@ async def warm_llm_stream(pre_warm_session) -> None:
             msgs,
             system_prompt=system_prompt,
             max_tokens=2,
+            campaign_id=campaign_id,
         ):
             pass  # discard
         logger.info(

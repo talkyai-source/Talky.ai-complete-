@@ -267,7 +267,9 @@ async def test_end_to_end_a_silent_caller_still_triggers_failover():
     wrapper = ResilientSTTProvider(primary, secondary, policy=_policy())
     wrapper.set_agent_speaking_probe(lambda: bool(session.tts_active))
 
-    out = [c.text async for c in wrapper.stream_transcribe(_stream(200), call_id="c2")]
+    chunks = [c async for c in wrapper.stream_transcribe(_stream(200), call_id="c2")]
+    out = [c.text for c in chunks if c.text]
+    assert [c.metadata.get("stt_recovery") for c in chunks if c.metadata] == ["reset", "repeat_required"]
 
     assert out and set(out) == {"rescued"}, "the caller was lost"
     assert secondary.received > 0
@@ -280,7 +282,7 @@ async def test_without_a_probe_behaviour_is_exactly_as_before():
     primary, secondary = _Silent(), _Echo()
     wrapper = ResilientSTTProvider(primary, secondary, policy=_policy())
 
-    out = [c.text async for c in wrapper.stream_transcribe(_stream(200), call_id="c3")]
+    out = [c.text async for c in wrapper.stream_transcribe(_stream(200), call_id="c3") if c.text]
 
     assert out and set(out) == {"rescued"}
 
@@ -297,7 +299,7 @@ async def test_a_broken_probe_fails_toward_the_old_behaviour_and_is_counted():
     wrapper = ResilientSTTProvider(primary, secondary, policy=_policy())
     wrapper.set_agent_speaking_probe(_boom)
 
-    out = [c.text async for c in wrapper.stream_transcribe(_stream(200), call_id="c4")]
+    out = [c.text async for c in wrapper.stream_transcribe(_stream(200), call_id="c4") if c.text]
 
     assert out and set(out) == {"rescued"}, "detection was lost to a broken probe"
     assert wrapper._probe_errors > 0, "the failure was not counted"

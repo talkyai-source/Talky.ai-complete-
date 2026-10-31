@@ -1,0 +1,1172 @@
+"""OpenAI gpt-realtime-2 speech-to-speech WebSocket bridge (Realtime mode).
+
+ONE OpenAI Realtime session collapses the classic three-stage cascaded
+pipeline (STT → LLM → TTS) into a single duplex WebSocket: caller μ-law
+audio in, model μ-law audio out, the model's own voice, server-side
+semantic VAD (turn-taking) and function calling.
+
+This module is INTENTIONALLY separate from the cascaded pipeline. It does
+NOT import or invoke compose_prompt / compliance_floor / prompt_builder or
+the ElevenLabs/Cartesia audio-tag blocks. The `instructions` string it is
+handed is built by `app.realtime.prompts` — a clean,
+voice-appropriate composer written for a speech-to-speech model.
+
+Audio format
+------------
+Both directions use μ-law 8 kHz — exactly the telephony gateway's native
+format ({"type": "audio/pcmu"}). NO resampling anywhere. μ-law is
+1 byte/sample @ 8 kHz = 160 bytes per 20 ms frame. Over the wire the
+Realtime API carries audio as base64 of the raw μ-law bytes.
+
+Discipline (we just fixed a class of leaks in the gateway — do not regress)
+--------------------------------------------------------------------------
+* Exactly ONE background task (the receive loop). It is cancelled on close().
+* Audio is quarantined in a bounded per-response buffer until its final
+  transcript is available. Queue overflow ends the session explicitly.
+* Every await is guarded; teardown is wrapped so cleanup can never raise.
+* Fail-soft: any connection/stream error logs and ends the session cleanly.
+  A realtime failure must NEVER crash a call.
+
+Barge-in / interruption
+-----------------------
+semantic_vad means the SERVER owns turn detection. When the caller starts
+talking mid-response the server emits `input_audio_buffer.speech_started`
+and (once it cancels model generation) `response.done` with a cancelled/
+interrupted status. On EITHER signal we bump a monotonically increasing
+`_response_epoch` and FLUSH the outbound audio queue, so any model audio
+deltas still buffered from the now-abandoned turn are dropped and the agent
+stops talking over the caller. Deltas that arrive tagged to a stale epoch
+are ignored. The bridge separately truncates conversation history to the
+transport's acknowledged played position (zero when unknown), never to the
+amount of audio generated or queued.
+
+Reconnect policy (Phase 1)
+--------------------------
+One connection per call. On an unexpected drop we end the session cleanly
+(the receive loop exits, `closed()` becomes true, the gateway ends the
+call). A future Phase 1b reconnect would live in `_recv_loop`'s
+ConnectionClosed handler: re-run connect() and replay the last session.update
+before resuming — see the marked TODO there.
+"""
+from __future__ import annotations
+
+import asyncio
+import base64
+import json
+import logging
+import time
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
+
+import websockets
+from websockets.exceptions import ConnectionClosed
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
+
+from app.domain.services.voice_pipeline.live_structured_state import (
+    replace_live_state_block,
+)
+
+logger = logging.getLogger(__name__)
+
+# ── Wire constants ──────────────────────────────────────────────────────────
+_REALTIME_URL_TMPL = "wss://api.openai.com/v1/realtime?model={model}"
+
+# Bound model events; audio is separately quarantined in RealtimePlayoutBuffer.
+# Overflow fails explicitly instead of silently dropping evidence.
+_OUTBOUND_AUDIO_MAXLEN = 200
+
+# How long connect() waits for session.created / session.updated before it
+# gives up and fails soft.
+_CONNECT_HANDSHAKE_TIMEOUT_S = 15.0
+
+# Default turn-detection / noise-reduction / transcription, overridable via
+# the `settings` dict passed to __init__ (from AIProviderConfig.realtime_settings).
+#
+# Turn-taking is the #1 realtime quality lever. We default to semantic_vad at
+# eagerness "medium" — a gentler, telephony-sensible setting that lets the
+# caller finish more often than the old "high" (which was reported as
+# interrupting). Operators can override via realtime_settings, either with a
+# bare eagerness string ("low|medium|high|auto") or, for NOISY TELEPHONY audio,
+# a full server_vad object for predictable/tunable turn detection, e.g.
+#   {"type": "server_vad", "threshold": 0.6,
+#    "prefix_padding_ms": 300, "silence_duration_ms": 700}
+# (raise threshold to reject background noise; longer silence_duration_ms is
+# laggier but avoids cutting in on pauses; prefix_padding_ms avoids clipping
+# the onset). A dict with an explicit "type" is passed straight through.
+_DEFAULT_TURN_DETECTION = {"type": "semantic_vad", "eagerness": "medium"}
+_DEFAULT_NOISE_REDUCTION = {"type": "far_field"}
+_DEFAULT_TRANSCRIPTION_MODEL = "gpt-realtime-whisper"
+
+# Default reasoning effort for the voice path. OpenAI's realtime prompting guide
+# recommends "low" as the production voice default — a big latency win — raising
+# it only for harder tasks. Shape on the wire is session.reasoning = {"effort": …}
+# (values: minimal|low|medium|high|xhigh). Overridable via realtime_settings
+# ("reasoning_effort"); set it falsy / "none" to omit the field entirely.
+_DEFAULT_REASONING_EFFORT = "low"
+
+
+@dataclass
+class RealtimeFunctionCall:
+    """A tool/function-call request surfaced by the model.
+
+    Feed `output` back with `session.send_function_result(call_id, output)`.
+    """
+    call_id: str
+    name: str
+    arguments: str  # raw JSON string as emitted by the model
+
+    def parsed_arguments(self) -> Dict[str, Any]:
+        try:
+            return json.loads(self.arguments) if self.arguments else {}
+        except (ValueError, TypeError):
+            logger.warning("realtime: could not parse function args for %s", self.name)
+            return {}
+
+
+@dataclass
+class RealtimeEvent:
+    """A normalised event yielded by `OpenAIRealtimeSession.events()`.
+
+    Exactly one payload field is populated per event, keyed by `kind`:
+      "audio"              -> audio: μ-law bytes to send back to the caller
+      "agent_transcript"   -> text:  incremental words the agent is speaking
+      "caller_transcript"  -> text:  incremental caller transcription
+      "function_call"      -> function_call: a RealtimeFunctionCall to fulfil
+      "response_done"      -> (no payload) the model finished a response turn
+      "interrupted"        -> (no payload) caller barged in; audio was flushed
+      "error"              -> text:  human-readable error string
+    """
+    kind: str
+    text: Optional[str] = None
+    audio: Optional[bytes] = None
+    function_call: Optional[RealtimeFunctionCall] = None
+    raw: Optional[Dict[str, Any]] = None
+    # True on the terminal transcript event for a turn (agent transcript "done"
+    # / caller transcription "completed"), carrying the FULL turn text. The
+    # bridge persists only these finals so incremental deltas never double-count.
+    is_final: bool = False
+
+
+@dataclass
+class _RealtimeStats:
+    audio_frames_in: int = 0
+    audio_frames_out: int = 0
+    audio_frames_dropped_stale: int = 0
+    audio_frames_dropped_overflow: int = 0
+    function_calls: int = 0
+    errors: int = 0
+
+    def to_dict(self) -> dict:
+        return {
+            "realtime_audio_frames_in": self.audio_frames_in,
+            "realtime_audio_frames_out": self.audio_frames_out,
+            "realtime_frames_dropped_stale": self.audio_frames_dropped_stale,
+            "realtime_frames_dropped_overflow": self.audio_frames_dropped_overflow,
+            "realtime_function_calls": self.function_calls,
+            "realtime_errors": self.errors,
+        }
+
+
+class OpenAIRealtimeSession:
+    """Single-call bridge to OpenAI gpt-realtime-2.
+
+    Lifecycle:
+        session = OpenAIRealtimeSession(api_key=..., voice="marin",
+                                        instructions=..., tools=[...])
+        await session.connect()
+        await session.send_caller_audio(mulaw_20ms_frame)   # repeatedly
+        async for ev in session.events():                    # consume output
+            ...
+        await session.close()
+
+    All public coroutines are fail-soft: on a dead/closed socket they log and
+    return instead of raising, so a realtime hiccup can't crash the call.
+    """
+
+    # Documented response.create metadata is echoed on response events. This
+    # capability is deliberately disabled by adapters without that contract.
+    supports_response_metadata = True
+    observation_provider = "openai"
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str = "gpt-realtime-2",
+        voice: str = "marin",
+        instructions: str = "",
+        tools: Optional[List[Dict[str, Any]]] = None,
+        settings: Optional[Dict[str, Any]] = None,
+        call_id: Optional[str] = None,
+        observation_context: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not api_key:
+            raise ValueError("OpenAIRealtimeSession requires an api_key")
+        self._api_key = api_key
+        self._observation_context = observation_context
+        self._response_observation = None
+        self._observed_response_id = None
+        self._observation_valid_tool = False
+        self._observation_invalid_tool = False
+        from app.realtime.playout_buffer import RealtimePlayoutBuffer
+        self._playout = RealtimePlayoutBuffer()
+        self._dnc_repair_owner = None
+        self._model = model or "gpt-realtime-2"
+        self._voice = voice or "marin"
+        self._instructions = instructions or ""
+        self._last_published_instructions: Optional[str] = None
+        self._tools = list(tools or [])
+        from app.realtime.config import normalize_realtime_settings
+        self._settings = normalize_realtime_settings(settings)
+        self._handshake_error = None
+        self._requested_profile = None
+        self._submitted_profile = None
+        self._acknowledged_profile = None
+        self._session_update_acknowledged = False
+        self._compatibility_changes = []
+        self._call_id = call_id or "realtime"
+
+        self._ws: Optional[Any] = None
+        self._recv_task: Optional[asyncio.Task] = None
+        self._closed = asyncio.Event()
+
+        # Bounded model→gateway audio + normalised-event stream. maxsize is a
+        # hard cap; the receive loop evicts the oldest frame on overflow.
+        self._event_queue: asyncio.Queue = asyncio.Queue(maxsize=_OUTBOUND_AUDIO_MAXLEN)
+
+        # Barge-in epoch. Bumped on every speech_started / interruption; audio
+        # deltas from a superseded response are discarded.
+        self._response_epoch = 0
+        self._active_response_epoch = 0
+
+        # Active-response tracking for the function-call→continue flow. The
+        # Realtime API rejects a `response.create` while a response is already
+        # active ("conversation already has an active response"), so we only
+        # create when idle, and otherwise defer until the current response ends.
+        self._response_active = False
+        self._pending_response_create = False
+        self._last_audio_parts = {}
+        self._last_response_id = None
+        self._truncated_items = set()
+        self._tool_batches = {}
+        self._tool_call_batches = {}
+
+        # Per-turn latency instrumentation. T0 = the caller stopped talking
+        # (server VAD `speech_stopped`); we log the delta to the FIRST model
+        # audio delta of the turn (T1). This measures generation only: output
+        # is quarantined until validation. The bridge records first transport
+        # submission separately. None between turns / for the agent-first
+        # greeting (which has no preceding caller speech).
+        self._t_speech_stopped: Optional[float] = None
+
+        self.stats = _RealtimeStats()
+
+    # ── Properties ───────────────────────────────────────────────────────
+    @property
+    def call_id(self) -> str:
+        return self._call_id
+
+    def closed(self) -> bool:
+        return self._closed.is_set()
+
+    def _new_observation(self):
+        return ProviderAttempt("realtime", self.observation_provider,
+                               self._api_key, self._observation_context)
+
+    def _finish_response_observation(self, *, outcome="incomplete", error=None):
+        observation = self._response_observation
+        self._response_observation = None
+        self._observed_response_id = None
+        if observation is not None:
+            if outcome == "completed":
+                observation.complete()
+            observation.finish(error, outcome=outcome)
+
+    @staticmethod
+    def _provider_observation_error(details=None):
+        # Keep only an allowlisted status category, never provider message,
+        # transcript, arguments, session id or response id in telemetry.
+        error = RuntimeError("Realtime provider rejected the operation")
+        code = details.get("code") if isinstance(details, dict) else None
+        error.status_code = {
+            "invalid_api_key": 401, "authentication_error": 401,
+            "rate_limit_exceeded": 429, "insufficient_quota": 429,
+            "invalid_request_error": 400,
+        }.get(code)
+        return error
+
+    # ── Connect / handshake ──────────────────────────────────────────────
+    async def connect(self) -> bool:
+        """Open the WS, wait for session.created, send session.update, wait
+        for session.updated. Returns True on success, False on fail-soft.
+
+        Never raises — on any failure it logs, tears down, and returns False.
+        """
+        url = self._build_url()
+        # websockets 15 uses the asyncio client's ``additional_headers`` name.
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "User-Agent": "TalkyAI-VoiceAgent/1.0",
+        }
+        observation = self._new_observation()
+        try:
+            self._ws = await asyncio.wait_for(
+                websockets.connect(url, additional_headers=headers, max_size=None),
+                timeout=_CONNECT_HANDSHAKE_TIMEOUT_S,
+            )
+        except Exception as exc:  # noqa: BLE001 — fail-soft on any connect error
+            observation.finish(exc)
+            logger.error("realtime connect failed call=%s err=%s", self._call_id, exc)
+            self._closed.set()
+            return False
+        except asyncio.CancelledError as exc:
+            observation.finish(exc)
+            raise
+
+        try:
+            # 1. Server greets with session.created.
+            created = await asyncio.wait_for(
+                self._recv_json(), timeout=_CONNECT_HANDSHAKE_TIMEOUT_S
+            )
+            if not created or created.get("type") != "session.created":
+                observation.finish(self._provider_observation_error((created or {}).get("error")))
+                logger.error(
+                    "realtime: expected session.created, got %s call=%s",
+                    (created or {}).get("type"), self._call_id,
+                )
+                await self._teardown()
+                return False
+
+            # 2+3. Send our session.update and wait for session.updated.
+            ok = await self._send_session_update(include_reasoning=True)
+            # Preserve the bounded legacy compatibility retry only when the
+            # provider explicitly identifies this exact unsupported field.
+            # Auth, model, capacity and unclassified errors cannot change a
+            # selected setting. Record the omission as unapplied, not as proof
+            # that the requested reasoning effort is effective.
+            if not ok and self._reasoning_field_unsupported():
+                reff = self._settings.get("reasoning_effort", _DEFAULT_REASONING_EFFORT)
+                if reff and str(reff).lower() != "none":
+                    logger.warning(
+                        "realtime: session.update rejected; retrying once WITHOUT "
+                        "reasoning field call=%s", self._call_id,
+                    )
+                    self._compatibility_changes.append("reasoning_field_unsupported_omitted")
+                    ok = await self._send_session_update(include_reasoning=False)
+            if not ok:
+                observation.finish(self._provider_observation_error(self._handshake_error))
+                logger.error("realtime: session.update not confirmed call=%s",
+                             self._call_id)
+                await self._teardown()
+                return False
+            self._last_published_instructions = self._instructions
+        except Exception as exc:  # noqa: BLE001
+            observation.finish(exc)
+            logger.error("realtime handshake failed call=%s err=%s",
+                         self._call_id, exc)
+            await self._teardown()
+            return False
+        except asyncio.CancelledError as exc:
+            observation.finish(exc)
+            raise
+
+        # Handshake done — start the single receive task.
+        observation.accepted()
+        observation.finish(outcome="connected")
+        self._recv_task = asyncio.create_task(
+            self._recv_loop(), name=f"realtime-recv-{self._call_id}"
+        )
+        logger.info(
+            "realtime session ready call=%s model=%s voice=%s tools=%d",
+            self._call_id, self._model, self._voice, len(self._tools),
+        )
+        logger.info("realtime_effective_profile call=%s profile=%s",
+                    self._call_id, json.dumps(self.effective_profile(), sort_keys=True))
+        return True
+
+    def _reasoning_field_unsupported(self) -> bool:
+        error = self._handshake_error or {}
+        return (error.get("code") in {"unknown_parameter", "unsupported_parameter"}
+                and error.get("param") in {"session.reasoning", "session.reasoning.effort"})
+
+    def effective_profile(self) -> dict:
+        """Serialized/acknowledged evidence; no assumed provider defaults."""
+        from app.realtime.profile import instruction_digest, knowledge_reference
+        return {
+            "engine": "native_realtime", "provider": self._settings.get("provider", "openai"),
+            "agent_selection": bool(getattr(self, "_agent_id", None)),
+            "temperature": "not_applicable",
+            "prompt_identity": getattr(self, "_prompt_identity", None),
+            "requested_controls": {
+                "model": self._model,
+                "reasoning_effort": self._settings.get("reasoning_effort", "high" if self._settings.get("provider") == "xai" else _DEFAULT_REASONING_EFFORT),
+            },
+            "knowledge_reference": knowledge_reference(getattr(self, "_knowledge_reference_session", None)),
+            "requested": self._requested_profile,
+            "submitted": self._submitted_profile,
+            "acknowledged": self._acknowledged_profile,
+            "session_update_acknowledged": self._session_update_acknowledged,
+            "compatibility_changes": list(self._compatibility_changes),
+            "last_submitted_instructions_sha256": instruction_digest(self._last_published_instructions),
+        }
+
+    def _record_instruction_submission(self, instructions: str) -> None:
+        from app.realtime.profile import instruction_digest, knowledge_reference
+        self._last_published_instructions = instructions
+        logger.info("realtime_instructions_submitted call=%s sha256=%s knowledge=%s",
+                    self._call_id, instruction_digest(instructions),
+                    json.dumps(knowledge_reference(getattr(self, "_knowledge_reference_session", None)), sort_keys=True))
+
+    def _instruction_update(self, instructions):
+        return {"type": "realtime", "instructions": instructions}
+
+    def _build_url(self) -> str:
+        """Wire URL for this session's WebSocket connect().
+
+        Extension point: pulled out of connect() ONLY so a Realtime-compatible
+        provider adapter (e.g. xAI Grok Voice — see
+        app/realtime/xai.py) can subclass and target a
+        different host/query shape while reusing connect()'s handshake/retry
+        logic byte-for-byte. Behaviour for OpenAI itself is unchanged.
+        """
+        return _REALTIME_URL_TMPL.format(model=self._model)
+
+    def _build_session_update(self, *, include_reasoning: bool = True) -> Dict[str, Any]:
+        """The session.update payload. audio/pcmu in+out (no resampling),
+        our voice, our clean instructions, turn detection, noise reduction,
+        reasoning effort, and the tool list.
+
+        ``include_reasoning=False`` is the single compatibility retry for an
+        explicitly unsupported reasoning field, never an unrelated rejection.
+        """
+        # Accept both the full API objects and the simple values the AI-Options
+        # frontend sends (eagerness "low|medium|high|auto"; noise "near_field|
+        # far_field|none"). Normalise to the wire shape.
+        #   - a dict WITH an explicit "type" (e.g. server_vad) is respected and
+        #     its params (threshold/prefix_padding_ms/silence_duration_ms) pass
+        #     straight through;
+        #   - a dict WITHOUT "type" defaults to semantic_vad (back-compat);
+        #   - a bare string is eagerness shorthand for semantic_vad.
+        td = self._settings.get("turn_detection")
+        if isinstance(td, str):
+            turn_detection = {"type": "semantic_vad", "eagerness": td}
+        elif isinstance(td, dict):
+            if td.get("type"):
+                turn_detection = dict(td)
+            else:
+                turn_detection = {"type": "semantic_vad", **td}
+        else:
+            turn_detection = _DEFAULT_TURN_DETECTION
+
+        nr = self._settings.get("noise_reduction")
+        if isinstance(nr, str):
+            # Explicit null disables noise reduction; omission would delegate
+            # to the provider/session's default instead of stating the choice.
+            noise_reduction = None if nr == "none" else {"type": nr}
+        elif isinstance(nr, dict):
+            noise_reduction = nr
+        else:
+            noise_reduction = _DEFAULT_NOISE_REDUCTION
+
+        transcription_model = (
+            self._settings.get("transcription_model") or _DEFAULT_TRANSCRIPTION_MODEL
+        )
+
+        # Optional voice speed (audio.output.speed). Only sent when the operator
+        # set it — an unset value keeps today's exact payload so live calls are
+        # unaffected. Clamped to the API's documented 0.25–1.5 window.
+        output_block: Dict[str, Any] = {
+            "format": {"type": "audio/pcmu"},
+            "voice": self._voice,
+        }
+        speed = self._settings.get("speed")
+        if speed is not None:
+            try:
+                output_block["speed"] = max(0.25, min(1.5, float(speed)))
+            except (TypeError, ValueError):
+                pass
+
+        session: Dict[str, Any] = {
+            "type": "realtime",
+            "instructions": self._instructions,
+            "audio": {
+                "input": {
+                    "format": {"type": "audio/pcmu"},
+                    "transcription": {"model": transcription_model},
+                    "turn_detection": turn_detection,
+                    "noise_reduction": noise_reduction,
+                },
+                "output": output_block,
+            },
+            "output_modalities": ["audio"],
+        }
+
+        # Save, preview and runtime use the same normalized response budget.
+        # GA has no temperature control; legacy saved values are discarded.
+        max_output_tokens = self._settings.get("max_output_tokens")
+        if max_output_tokens is not None:
+            session["max_output_tokens"] = max_output_tokens
+
+        # Reasoning effort — the voice default is "low" for latency (research).
+        # Shape: session["reasoning"] = {"effort": …}. Fail-soft: omitted when
+        # falsy/"none" (provider default), and omitted on the exact supported
+        # compatibility retry. The profile records that omission separately.
+        reasoning_effort = self._settings.get("reasoning_effort", _DEFAULT_REASONING_EFFORT)
+        if include_reasoning and reasoning_effort and str(reasoning_effort).lower() != "none":
+            session["reasoning"] = {"effort": reasoning_effort}
+
+        if self._tools:
+            session["tools"] = self._tools
+        return {"type": "session.update", "session": session}
+
+    async def _send_session_update(self, *, include_reasoning: bool) -> bool:
+        """Send one session.update and wait for the server's session.updated
+        confirmation. Returns True on confirmation, False on an error event or
+        timeout. Does NOT tear down — connect() decides whether to retry
+        (fail-soft) or give up, so the socket stays usable for a retry."""
+        if self._ws is None:
+            return False
+        from app.realtime.profile import session_profile
+        payload = self._build_session_update(include_reasoning=include_reasoning)
+        self._handshake_error = None
+        # A console agent chooses its own model; the local label does not prove
+        # that model was submitted or selected by the provider.
+        selected_model = None if getattr(self, "_agent_id", None) else self._model
+        self._submitted_profile = session_profile(payload["session"], model=selected_model)
+        if self._requested_profile is None:
+            self._requested_profile = self._submitted_profile
+        await self._ws.send(json.dumps(payload))
+        # Ignore interleaved non-terminal events while we wait for the terminal
+        # session.updated / error.
+        for _ in range(10):
+            msg = await asyncio.wait_for(
+                self._recv_json(), timeout=_CONNECT_HANDSHAKE_TIMEOUT_S
+            )
+            if not msg:
+                return False
+            if msg.get("type") == "session.updated":
+                self._session_update_acknowledged = True
+                echo = msg.get("session")
+                self._acknowledged_profile = session_profile(echo) if isinstance(echo, dict) else None
+                return True
+            if msg.get("type") == "error":
+                error = msg.get("error")
+                self._handshake_error = error if isinstance(error, dict) else {}
+                # Provider error messages can contain submitted user content.
+                # Only the bounded compatibility classification is logged.
+                logger.error("realtime handshake rejected call=%s reasoning_field_unsupported=%s",
+                             self._call_id, self._reasoning_field_unsupported())
+                return False
+        return False
+
+    # ── Caller → model ───────────────────────────────────────────────────
+    async def send_caller_audio(self, mulaw_bytes: bytes) -> None:
+        """Append one μ-law frame (or several concatenated) from the caller.
+
+        Fail-soft: no-op once the socket is closed. Semantic VAD means we do
+        NOT commit the buffer or trigger responses manually — the server
+        decides when the caller's turn ends.
+        """
+        if not mulaw_bytes or self._ws is None or self._closed.is_set():
+            return
+        try:
+            b64 = base64.b64encode(mulaw_bytes).decode("ascii")
+            await self._ws.send(json.dumps(
+                {"type": "input_audio_buffer.append", "audio": b64}
+            ))
+            self.stats.audio_frames_in += 1
+        except ConnectionClosed:
+            self._finish_response_observation(error=ConnectionError("Realtime transport closed"))
+            self._closed.set()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("realtime send_caller_audio failed call=%s err=%s",
+                           self._call_id, exc)
+
+    async def update_live_state(self, block: str) -> None:
+        """Replace the one marked live-state block for subsequent responses.
+
+        A session-level instruction persists across every realtime model turn.
+        Replacing it (rather than appending conversation messages) keeps prompt
+        size bounded and avoids promoting assistant text to evidence.  The
+        current caller utterance is already direct model input; this update
+        makes its final, confirmed facts durable for every following turn.
+        """
+        try:
+            updated = replace_live_state_block(self._instructions, block)
+        except ValueError as exc:
+            logger.warning(
+                "realtime live-state update rejected call=%s err=%s",
+                self._call_id,
+                exc,
+            )
+            return
+        self._instructions = updated
+        if (
+            self._ws is None
+            or self._closed.is_set()
+            or updated == self._last_published_instructions
+        ):
+            return
+        try:
+            await self._ws.send(
+                json.dumps(
+                    {
+                        "type": "session.update",
+                        # The GA Realtime API rejects a session.update without
+                        # session.type (browser tests 980a2caa/0457b4b9,
+                        # 2026-09-30: "Missing required parameter:
+                        # 'session.type'" on the first live-state update, which
+                        # then ended the call).
+                        "session": self._instruction_update(updated),
+                    }
+                )
+            )
+            self._record_instruction_submission(updated)
+        except ConnectionClosed:
+            self._closed.set()
+        except Exception as exc:  # noqa: BLE001 - state update is fail-soft
+            logger.warning(
+                "realtime live-state publish failed call=%s err=%s",
+                self._call_id,
+                exc,
+            )
+
+    async def send_function_result(self, call_id: str, output: Any) -> None:
+        """Return a tool/function result to the model and ask it to continue.
+
+        `output` is JSON-serialised if not already a string.
+        """
+        if self._ws is None or self._closed.is_set():
+            return
+        payload_out = output if isinstance(output, str) else json.dumps(output)
+        try:
+            await self._ws.send(json.dumps({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "function_call_output",
+                    "call_id": call_id,
+                    "output": payload_out,
+                },
+            }))
+            batch = self._tool_call_batches.pop(call_id, None)
+            if batch is not None:
+                response_id, epoch = batch
+                outstanding = self._tool_batches.get(response_id, set())
+                outstanding.discard(call_id)
+                if outstanding:
+                    return  # One continuation only after every parallel result.
+                self._tool_batches.pop(response_id, None)
+                if epoch != self._response_epoch:
+                    return  # Preserve the result, but never restart a barged-in turn.
+            # Nudge the model to speak its answer — but ONLY if no response is
+            # currently active. The Realtime API rejects a response.create while
+            # one is in flight ("conversation already has an active response").
+            # If active, defer: response.done will fire the create for us.
+            if self._response_active:
+                self._pending_response_create = True
+            else:
+                await self._create_response()
+        except ConnectionClosed:
+            self._closed.set()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("realtime send_function_result failed call=%s err=%s",
+                           self._call_id, exc)
+
+    async def request_response(self) -> None:
+        """Continue from current session state without rewriting delivered history."""
+        await self._create_response()
+
+    async def _create_response(self) -> None:
+        """Send response.create, tolerating the benign 'active response' race
+        (in case the flag lagged a concurrent server-side response)."""
+        if self._ws is None or self._closed.is_set():
+            return
+        if self._response_active:
+            self._pending_response_create = True
+            return
+        try:
+            self._response_active = True  # Claim before awaiting the socket ACK.
+            await self._ws.send(json.dumps({"type": "response.create"}))
+        except websockets.exceptions.ConnectionClosed:
+            self._closed.set()
+        except Exception as exc:  # noqa: BLE001
+            logger.debug("realtime response.create send failed call=%s err=%s",
+                         self._call_id, exc)
+
+    async def repair_unspoken_response(self, response: dict, *, required_text=None, repair_id=None) -> None:
+        epoch = self._response_epoch
+        config = {"instructions": self._instructions + "\nREPAIR THIS TURN: Your previous reply was withheld and was not heard. Give one short honest reply. Keep required contact readbacks and source qualifications. Reuse completed tool results; do not repeat actions. Do not claim an email, booking, submission or transfer succeeded unless a matching successful tool result permits confirmation."}
+        if required_text is not None:
+            config["instructions"] += (
+                "\nThe do-not-call write is not acknowledged. Say exactly the following text, "
+                "with no additions and no tool calls: " + required_text)
+        if repair_id is not None:
+            if not self.supports_response_metadata or required_text is None:
+                raise ValueError("Correlated exact repair is unavailable")
+            self._dnc_repair_owner = {"id": repair_id, "epoch": epoch, "response_id": None}
+            config["metadata"] = {"talky_dnc_repair_id": repair_id}
+        for item in response.get("output") or []:
+            if item.get("type") == "message" and item.get("id"):
+                await self._ws.send(json.dumps({"type": "conversation.item.delete", "item_id": item["id"]}))
+        if required_text is not None and epoch != self._response_epoch:
+            return  # Caller interrupted while the withheld history was removed.
+        await self._ws.send(json.dumps({"type": "response.create", "response": config}))
+
+    async def truncate_response(self, raw: dict, played_ms: int = 0) -> None:
+        """Remove unheard audio from provider history. Unknown position is zero.
+
+        Positions come from transport receipts, never elapsed send time. A
+        conservative zero may remove heard context, but cannot invent hearing.
+        """
+        if self._ws is None or self._closed.is_set():
+            return
+        parts = raw.get("audio_parts") or []
+        remaining = max(0, int(played_ms))
+        for part in parts:
+            item_id = part.get("item_id")
+            index = part.get("content_index", 0)
+            if not item_id or (item_id, index) in self._truncated_items:
+                continue
+            duration = max(0, int(part.get("audio_bytes", 0) / 8))
+            end = min(remaining, duration)
+            remaining = max(0, remaining - duration)
+            await self._ws.send(json.dumps({"type": "conversation.item.truncate",
+                "item_id": item_id, "content_index": index, "audio_end_ms": end}))
+            self._truncated_items.add((item_id, index))
+        if len(self._truncated_items) > 256:
+            self._truncated_items = set(list(self._truncated_items)[-128:])
+
+    async def trigger_greeting(self) -> None:
+        """Make the agent speak first (agent-first outbound): request an
+        initial response so the model greets per its instructions, without any
+        caller input. No-op if a response is already active."""
+        if self._response_active:
+            return
+        await self._create_response()
+
+    async def send_text(self, text: str, *, create_response: bool = True) -> None:
+        """Inject a user *text* turn (used by the text-in test harness and any
+        future system-initiated prompt). Not used on the live audio path."""
+        if not text or self._ws is None or self._closed.is_set():
+            return
+        try:
+            await self._ws.send(json.dumps({
+                "type": "conversation.item.create",
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": text}],
+                },
+            }))
+            if create_response:
+                await self._ws.send(json.dumps({"type": "response.create"}))
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("realtime send_text failed call=%s err=%s",
+                           self._call_id, exc)
+
+
+    # ── Model → caller (normalised event stream) ─────────────────────────
+    async def events(self):
+        """Async iterator over normalised RealtimeEvents until the session
+        closes. Consume this to get model audio, transcripts, and function
+        calls. Exits cleanly when the session ends."""
+        while True:
+            if self._closed.is_set() and self._event_queue.empty():
+                return
+            try:
+                ev = await asyncio.wait_for(self._event_queue.get(), timeout=0.25)
+            except asyncio.TimeoutError:
+                continue
+            if ev is None:  # sentinel: stream finished
+                return
+            yield ev
+
+    # ── Receive loop (the single background task) ────────────────────────
+    async def _recv_loop(self) -> None:
+        try:
+            async for raw in self._ws:
+                try:
+                    data = json.loads(raw)
+                except (ValueError, TypeError):
+                    continue
+                await self._handle_server_event(data)
+        except websockets.exceptions.ConnectionClosed:
+            self._finish_response_observation(error=ConnectionError("Realtime transport closed"))
+            logger.info("realtime WS closed call=%s", self._call_id)
+            # PHASE 1b RECONNECT HOOK: to add mid-call reconnect, re-run
+            # connect() here (re-sending session.update) and `continue` the
+            # loop instead of falling through to teardown. Phase 1 ends cleanly.
+        except asyncio.CancelledError:
+            self._finish_response_observation(outcome="cancelled")
+            raise
+        except Exception as exc:  # noqa: BLE001 — never let the loop crash a call
+            self._finish_response_observation(error=exc)
+            logger.error("realtime recv loop error call=%s err=%s",
+                         self._call_id, exc)
+        finally:
+            self._finish_response_observation()
+            self._closed.set()
+            # Wake any consumer blocked in events().
+            self._offer_event(None)
+
+    async def _handle_server_event(self, data: Dict[str, Any]) -> None:
+        etype = data.get("type", "")
+
+        # ---- Model audio out (μ-law base64) --------------------------------
+        if etype == "response.output_audio.delta":
+            # Drop deltas from a superseded (barged-over) response.
+            resp_epoch = self._active_response_epoch
+            if resp_epoch < self._response_epoch:
+                self.stats.audio_frames_dropped_stale += 1
+                return
+            b64 = data.get("delta")
+            if not b64:
+                return
+            try:
+                audio = base64.b64decode(b64)
+            except Exception:  # noqa: BLE001
+                return
+            self.stats.audio_frames_out += 1
+            if audio and self._playout.owns(data) and self._response_observation is not None:
+                self._response_observation.first_output()
+            if self._playout.owns(data):
+                part_key = (data.get("item_id"), data.get("content_index", 0))
+                part = self._last_audio_parts.setdefault(part_key, {
+                    "item_id": part_key[0], "content_index": part_key[1], "audio_bytes": 0})
+                part["audio_bytes"] += len(audio)
+            # T1: first model audio of this turn. Log the caller-stopped → first-
+            # generated-audio latency (not caller playback latency) and
+            # disarm so we only log once per turn.
+            if self._t_speech_stopped is not None:
+                ms = int((time.monotonic() - self._t_speech_stopped) * 1000)
+                self._t_speech_stopped = None
+                logger.info(
+                    "realtime_turn_latency call=%s speech_end_to_first_generated_audio_ms=%d",
+                    self._call_id, ms,
+                    extra={"call_id": self._call_id,
+                           "realtime_speech_end_to_first_generated_audio_ms": ms},
+                )
+            self._playout.add_audio(data, audio)
+            return
+
+        # ---- Agent's spoken words (text) -----------------------------------
+        if etype == "response.output_audio_transcript.delta":
+            return  # text is generated, not yet validated or spoken
+        if etype == "response.output_audio_transcript.done":
+            self._playout.add_transcript(data)
+            return
+
+        # ---- Caller transcription (incremental) ----------------------------
+        if etype == "conversation.item.input_audio_transcription.delta":
+            delta = data.get("delta")
+            if delta:
+                self._offer_event(RealtimeEvent(kind="caller_transcript", text=delta))
+            return
+
+        # Terminal caller transcript for the turn — full text, persisted.
+        if etype == "conversation.item.input_audio_transcription.completed":
+            text = data.get("transcript")
+            if isinstance(text, str):
+                self._offer_event(RealtimeEvent(
+                    kind="caller_transcript", text=text, is_final=True, raw=data))
+            return
+
+        # ---- Barge-in: caller started talking ------------------------------
+        if etype == "input_audio_buffer.speech_started":
+            self._on_interruption("speech_started", caller_event=data)
+            return
+
+        if etype == "input_audio_buffer.committed":
+            # Transcription completion can arrive out of speech order. Retain
+            # the committed item chain even when no VAD speech-start is sent.
+            self._offer_event(RealtimeEvent(kind="caller_turn", raw={
+                key: data[key] for key in ("item_id", "previous_item_id") if key in data
+            }))
+            return
+
+        # ---- Caller stopped talking (server VAD end-of-speech) = T0 --------
+        # Latency mark only: the model's response follows; we time from here to
+        # its first audio delta above. No behaviour change — turn-taking is
+        # server-owned.
+        if etype == "input_audio_buffer.speech_stopped":
+            self._t_speech_stopped = time.monotonic()
+            return
+
+        # ---- A new model response begins -----------------------------------
+        if etype == "response.created":
+            response = data.get("response") or {}
+            repair_id = (response.get("metadata") or {}).get("talky_dnc_repair_id")
+            if repair_id:
+                owner = self._dnc_repair_owner
+                if (not owner or owner["id"] != repair_id or owner["epoch"] != self._response_epoch
+                        or not response.get("id") or owner["response_id"] is not None):
+                    return  # A delayed old repair must not take a fresh epoch/buffer.
+                owner["response_id"] = response["id"]
+            response_id = response.get("id")
+            if isinstance(response_id, str) and response_id and response_id != self._observed_response_id:
+                self._finish_response_observation()
+                self._observed_response_id = response_id
+                self._response_observation = self._new_observation()
+                self._response_observation.accepted()
+            self._playout.reset((data.get("response") or {}).get("id"))
+            self._observation_valid_tool = False
+            self._observation_invalid_tool = False
+            self._last_response_id = self._playout.response_id
+            self._last_audio_parts = {}
+            # Tag audio deltas that follow to the current epoch so a later
+            # barge-in can invalidate exactly this turn's buffered audio.
+            self._active_response_epoch = self._response_epoch
+            self._response_active = True
+            return
+
+        # ---- Function / tool call ready to fulfil --------------------------
+        if etype == "response.function_call_arguments.done":
+            call_id = data.get("call_id") or ""
+            name = data.get("name") or ""
+            args = data.get("arguments") or ""
+            if call_id and name:
+                self.stats.function_calls += 1
+                if self._playout.owns(data):
+                    try:
+                        valid_arguments = isinstance(json.loads(args), dict)
+                    except (ValueError, TypeError):
+                        valid_arguments = False
+                    if valid_arguments and self._response_observation is not None:
+                        self._response_observation.first_output()
+                    self._observation_valid_tool = self._observation_valid_tool or valid_arguments
+                    self._observation_invalid_tool = self._observation_invalid_tool or not valid_arguments
+                    self._playout.tools.append(RealtimeEvent(
+                        kind="function_call", function_call=RealtimeFunctionCall(call_id, name, args), raw=data))
+            return
+
+        # ---- Response finished ---------------------------------------------
+        if etype == "response.done":
+            resp = data.get("response") or {}
+            if resp.get("id") != self._playout.response_id:
+                return  # late terminal event from an interrupted response
+            repair_id = (resp.get("metadata") or {}).get("talky_dnc_repair_id")
+            owner = self._dnc_repair_owner
+            if repair_id or (owner and owner["response_id"] == resp.get("id")):
+                if (not owner or repair_id != owner["id"] or owner["epoch"] != self._response_epoch
+                        or owner["response_id"] != resp.get("id")):
+                    self._playout.reset()
+                    self._finish_response_observation()
+                    self._response_active = False
+                    self._offer_event(RealtimeEvent(kind="response_unplayable", text="Uncorrelated exact repair", raw=data))
+                    return
+            candidate = self._playout.finish(resp)
+            status = resp.get("status")
+            if status == "failed":
+                self._finish_response_observation(error=self._provider_observation_error(
+                    (resp.get("status_details") or {}).get("error")))
+            elif status == "cancelled" or (status == "incomplete" and
+                    (resp.get("status_details") or {}).get("reason") in {"turn_detected", "interruption", "cancelled"}):
+                self._finish_response_observation(outcome="cancelled")
+            elif (status == "completed" and not self._playout.invalid
+                    and not self._observation_invalid_tool and (candidate or self._observation_valid_tool)):
+                self._finish_response_observation(outcome="completed")
+            else:
+                self._finish_response_observation()
+            data = {**data, "audio_parts": list(self._last_audio_parts.values())}
+            if candidate:
+                audio, transcript = candidate
+                self._offer_event(RealtimeEvent(kind="response_candidate", audio=audio, text=transcript, raw=data))
+            elif resp.get("status") == "completed" and (self._playout.audio or self._playout.invalid):
+                self._offer_event(RealtimeEvent(kind="generation_incomplete", text="Realtime response was incomplete or exceeded the playback limit", raw=data))
+            if resp.get("status") == "incomplete" and (resp.get("status_details") or {}).get("reason") not in {"turn_detected", "interruption", "cancelled"}:
+                self._offer_event(RealtimeEvent(kind="generation_incomplete", text="Realtime response did not complete", raw=data))
+            if resp.get("status") == "failed":
+                self._offer_event(RealtimeEvent(kind="error", text="Realtime response failed"))
+            if resp.get("status") == "completed" and not self._playout.invalid:
+                batch_ids = {tool.function_call.call_id for tool in self._playout.tools}
+                if batch_ids:
+                    self._tool_batches[resp["id"]] = batch_ids
+                    for tool_id in batch_ids:
+                        self._tool_call_batches[tool_id] = (resp["id"], self._active_response_epoch)
+                for tool in self._playout.tools:
+                    self._offer_event(tool)
+            self._playout.reset()
+            self._response_active = False
+            resp = data.get("response") or {}
+            status = resp.get("status")
+            # A cancelled/interrupted response means the caller barged in and
+            # the server truncated the turn — flush any stale queued audio.
+            if status in ("cancelled", "incomplete") and \
+                    (resp.get("status_details") or {}).get("reason") in (
+                        "turn_detected", "interruption", "cancelled"):
+                self._on_interruption("response_done_cancelled")
+            # A function-call result was submitted while this response was
+            # active — now that it has ended, ask the model to speak the answer.
+            if self._pending_response_create:
+                self._pending_response_create = False
+                await self._create_response()
+            self._offer_event(RealtimeEvent(kind="response_done", raw=data))
+            return
+
+        # ---- Errors --------------------------------------------------------
+        if etype == "error":
+            err = data.get("error") or data
+            # Benign race: a response.create landed while one was already
+            # active. We already guard against this, but tolerate the server
+            # echo without surfacing it as a call-ending error.
+            msg = str(err).lower()
+            if "active response" in msg or "already has an active response" in msg:
+                logger.debug("realtime benign active-response race call=%s: %s",
+                             self._call_id, err)
+                return
+            self.stats.errors += 1
+            if self._response_observation is not None:
+                self._finish_response_observation(error=self._provider_observation_error(err))
+            else:
+                self._new_observation().finish(self._provider_observation_error(err))
+            logger.warning("realtime server error call=%s: %s", self._call_id, err)
+            # Rejected mid-call instructions can leave stale contact/policy
+            # state active. Let the owning lifecycle end visibly instead of
+            # pretending the update was applied and continuing silently.
+            self._offer_event(RealtimeEvent(kind="error", text=str(err), raw=data))
+            return
+
+        # Everything else (session.updated echoes, buffer commits, rate-limit
+        # notices, etc.) is intentionally ignored in Phase 1.
+
+    # ── Barge-in handling ────────────────────────────────────────────────
+    def _on_interruption(self, reason: str, *, caller_event: Optional[Dict[str, Any]] = None) -> None:
+        """Caller took the floor: invalidate the in-flight response and FLUSH
+        any model audio still queued, so the agent stops mid-sentence instead
+        of talking over the caller."""
+        self._finish_response_observation(outcome="cancelled")
+        self._playout.audio.clear()
+        self._playout.parts.clear()
+        self._playout.transcripts.clear()
+        self._playout.tools.clear()
+        self._playout.invalid = True
+        during_response = self._response_active
+        self._response_epoch += 1
+        dropped = self._flush_audio_events()
+        logger.debug(
+            "realtime barge-in call=%s reason=%s flushed=%d epoch=%d",
+            self._call_id, reason, dropped, self._response_epoch,
+        )
+        self._offer_event(RealtimeEvent(
+            kind="interrupted",
+            raw={"reason": reason, "during_response": during_response,
+                 "response_id": self._last_response_id,
+                 "audio_parts": list(self._last_audio_parts.values()),
+                 **{key: caller_event[key] for key in ("item_id", "audio_start_ms")
+                    if caller_event and key in caller_event}},
+        ))
+
+    def _flush_audio_events(self) -> int:
+        """Drain queued 'audio' events (stale, superseded by barge-in).
+        Non-audio events (transcripts, function calls) are preserved."""
+        kept: List[Any] = []
+        dropped = 0
+        while True:
+            try:
+                item = self._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if item is not None and getattr(item, "kind", None) in {"audio", "response_candidate"}:
+                dropped += 1
+            else:
+                kept.append(item)
+        for item in kept:
+            try:
+                self._event_queue.put_nowait(item)
+            except asyncio.QueueFull:
+                break
+        return dropped
+
+    def _offer_event(self, ev: Optional[RealtimeEvent]) -> None:
+        """Enqueue without blocking; overflow ends the session without losing evidence."""
+        try:
+            self._event_queue.put_nowait(ev)
+            return
+        except asyncio.QueueFull:
+            pass
+        # Losing a transcript/control event would invalidate playback ownership.
+        # Stop the session explicitly instead of silently evicting evidence.
+        while not self._event_queue.empty():
+            self._event_queue.get_nowait()
+        self._closed.set()
+        self._finish_response_observation()
+        self._playout.reset()
+        self._event_queue.put_nowait(RealtimeEvent(kind="error", text="Realtime event queue overflow"))
+
+    def _evict_one_audio(self) -> bool:
+        """Remove the single OLDEST 'audio' event from the queue, preserving
+        the order of everything else. Returns True if one was removed."""
+        items: List[Any] = []
+        removed = False
+        while True:
+            try:
+                item = self._event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            if (not removed and item is not None
+                    and getattr(item, "kind", None) in {"audio", "response_candidate"}):
+                removed = True
+                continue
+            items.append(item)
+        for item in items:
+            try:
+                self._event_queue.put_nowait(item)
+            except asyncio.QueueFull:
+                break
+        return removed
+
+    # ── Teardown ─────────────────────────────────────────────────────────
+    async def close(self) -> None:
+        """Idempotent, exception-proof teardown: cancel the receive task and
+        close the socket. Safe to call multiple times."""
+        self._finish_response_observation(outcome="cancelled")
+        await self._teardown()
+
+    async def _teardown(self) -> None:
+        self._closed.set()
+        # Cancel the single background task.
+        task = self._recv_task
+        self._recv_task = None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+        # Close the socket.
+        ws = self._ws
+        self._ws = None
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception:  # noqa: BLE001 — cleanup must never raise
+                pass
+        # Wake any consumer blocked in events().
+        try:
+            self._event_queue.put_nowait(None)
+        except Exception:  # noqa: BLE001
+            pass
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+    async def _recv_json(self) -> Optional[Dict[str, Any]]:
+        if self._ws is None:
+            return None
+        raw = await self._ws.recv()
+        try:
+            return json.loads(raw)
+        except (ValueError, TypeError):
+            return None
+
+
+# ── Tool schema helper ──────────────────────────────────────────────────────
+def knowledge_lookup_tool() -> Dict[str, Any]:
+    """Native adapter for the shared exact-section reader, never query search."""
+    from copy import deepcopy
+    from app.services.scripts.knowledge.sections import SECTION_TOOL_DESCRIPTION, SECTION_TOOL_PARAMETERS
+
+    return {
+        "type": "function",
+        "name": "knowledge_lookup",
+        "description": SECTION_TOOL_DESCRIPTION,
+        "parameters": deepcopy(SECTION_TOOL_PARAMETERS),
+    }

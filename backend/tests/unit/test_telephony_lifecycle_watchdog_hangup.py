@@ -44,6 +44,115 @@ def _call_session(*, last_activity_ago_s: float = 0.0, age_s: float = 0.0):
     return _CS()
 
 
+def test_recording_emergency_stop_clears_only_live_inbound_sessions(monkeypatch):
+    calls: list[tuple[str, bool]] = []
+
+    class _Gateway:
+        def set_recording_enabled(self, call_id: str, enabled: bool) -> bool:
+            calls.append((call_id, enabled))
+            return True
+
+    inbound = SimpleNamespace(
+        call_id="voice-inbound",
+        media_gateway=_Gateway(),
+        _recording_allowed=True,
+    )
+    outbound = SimpleNamespace(
+        call_id="voice-outbound",
+        media_gateway=_Gateway(),
+        _recording_allowed=True,
+    )
+    sessions = {"pbx-inbound": inbound, "pbx-outbound": outbound}
+    monkeypatch.setattr(
+        lifecycle,
+        "_inbound_admissions_in_flight",
+        {"pbx-inbound": {"call_id": "durable-inbound"}},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_state",
+        lambda: SimpleNamespace(get_voice_session=lambda call_id: sessions.get(call_id)),
+    )
+
+    assert lifecycle.disable_live_inbound_recordings() == 1
+    assert calls == [("voice-inbound", False)]
+    assert inbound._recording_allowed is False
+    assert outbound._recording_allowed is True
+
+
+def test_recording_emergency_stop_only_reports_a_real_transition(monkeypatch):
+    """Recording is OFF platform-wide, so the 30-second admission heartbeat
+    re-enters this function for the whole life of every inbound call. Counting
+    an already-closed buffer as a fresh stop made it log an EMERGENCY warning
+    every 30 seconds, so one ordinary call read back as a recurring incident
+    (2026-09-21). Enforcement must still run on each sweep; only the count --
+    and therefore the warning -- is latched to an actual state change.
+    """
+    calls: list[tuple[str, bool]] = []
+
+    class _Gateway:
+        def set_recording_enabled(self, call_id: str, enabled: bool) -> bool:
+            calls.append((call_id, enabled))
+            return True
+
+    inbound = SimpleNamespace(
+        call_id="voice-inbound",
+        media_gateway=_Gateway(),
+        _recording_allowed=True,
+    )
+    sessions = {"pbx-inbound": inbound}
+    monkeypatch.setattr(
+        lifecycle,
+        "_inbound_admissions_in_flight",
+        {"pbx-inbound": {"call_id": "durable-inbound"}},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_state",
+        lambda: SimpleNamespace(get_voice_session=lambda call_id: sessions.get(call_id)),
+    )
+
+    assert lifecycle.disable_live_inbound_recordings() == 1
+    # Every later sweep: still enforced on the gateway, no longer reported.
+    assert lifecycle.disable_live_inbound_recordings() == 0
+    assert lifecycle.disable_live_inbound_recordings() == 0
+    assert calls == [("voice-inbound", False)] * 3
+    assert inbound._recording_allowed is False
+
+
+def test_recording_emergency_stop_reports_again_if_recording_is_re_enabled(
+    monkeypatch,
+):
+    """The latch is the session flag, not a one-shot: a call that starts
+    recording again must be reported the next time it is stopped."""
+    class _Gateway:
+        def set_recording_enabled(self, call_id: str, enabled: bool) -> bool:
+            return True
+
+    inbound = SimpleNamespace(
+        call_id="voice-inbound",
+        media_gateway=_Gateway(),
+        _recording_allowed=True,
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_inbound_admissions_in_flight",
+        {"pbx-inbound": {"call_id": "durable-inbound"}},
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_state",
+        lambda: SimpleNamespace(
+            get_voice_session=lambda call_id: {"pbx-inbound": inbound}.get(call_id)
+        ),
+    )
+
+    assert lifecycle.disable_live_inbound_recordings() == 1
+    assert lifecycle.disable_live_inbound_recordings() == 0
+    inbound._recording_allowed = True
+    assert lifecycle.disable_live_inbound_recordings() == 1
+
+
 # ---------------------------------------------------------------------------
 # FIX #11 — _collect_expired_sessions
 # ---------------------------------------------------------------------------
@@ -132,10 +241,14 @@ class _RecordingAdapter:
         if self._raise:
             raise RuntimeError("simulated ARI hangup failure")
 
+    async def hangup_confirmed(self, call_id: str) -> bool:
+        await self.hangup(call_id)
+        return True
+
 
 class TestForceEndAndHangup:
     @pytest.mark.asyncio
-    async def test_hangs_up_after_on_call_ended(self, monkeypatch):
+    async def test_confirms_hangup_before_on_call_ended(self, monkeypatch):
         call_order: list[str] = []
 
         async def fake_on_call_ended(call_id: str) -> None:
@@ -143,20 +256,28 @@ class TestForceEndAndHangup:
 
         adapter = _RecordingAdapter()
 
+        async def ordered_hangup(call_id: str) -> None:
+            adapter.hangup_calls.append(call_id)
+            call_order.append(f"hangup:{call_id}")
+
+        adapter.hangup = ordered_hangup
+
         monkeypatch.setattr(lifecycle, "_on_call_ended", fake_on_call_ended)
         monkeypatch.setattr(lifecycle, "get_adapter", lambda: adapter)
 
         await lifecycle._force_end_and_hangup("call-123")
 
-        assert call_order == ["on_call_ended:call-123"]
+        assert call_order == ["hangup:call-123", "on_call_ended:call-123"]
         assert adapter.hangup_calls == ["call-123"]
 
     @pytest.mark.asyncio
     async def test_hangup_failure_does_not_raise(self, monkeypatch):
         """Teardown must be best-effort: a raising adapter.hangup can never
         abort the caller (watchdog loop / done-callback)."""
+        finalized: list[str] = []
+
         async def fake_on_call_ended(call_id: str) -> None:
-            return None
+            finalized.append(call_id)
 
         adapter = _RecordingAdapter(raise_on_hangup=True)
 
@@ -166,6 +287,7 @@ class TestForceEndAndHangup:
         # Must not raise.
         await lifecycle._force_end_and_hangup("call-456")
         assert adapter.hangup_calls == ["call-456"]
+        assert finalized == []
 
     @pytest.mark.asyncio
     async def test_noop_hangup_when_no_adapter_configured(self, monkeypatch):

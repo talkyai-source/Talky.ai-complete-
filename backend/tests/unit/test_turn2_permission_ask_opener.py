@@ -1,42 +1,6 @@
-"""Turn 2 — the relocated identity + permission-ask + reason turn.
-
-WHY THIS FILE EXISTS (2026-08-11)
-----------------------------------
-Turn 1 is now a bare human-pickup greeting ("Hi there." / "Hello?") with no
-name, no company, no reason — see telephony_session_config.build_telephony_
-greeting and the "2026-08-11" notes above each persona's OPENING/STAGE 1
-block. Identity now belongs on turn 2, spoken by the model itself once the
-callee has replied.
-
-The owner's ask for that turn, verbatim: "once client spoken start it like
-my name is this if you don't mind do you have a minute than based on that
-and that and that like natural conversation" — name, then a light permission
-ask, then let the reply shape what follows.
-
-The evidence (Gong, 300M+ recorded cold calls) says permission-based openers
-("have you got a minute?") convert near the BEST measured (~11.18%, inside
-the context -> own-the-cold-call -> permission structure), while asking
-whether now happens to be an inconvenient moment for THEM is the WORST family
-measured (0.9%-2.15%). Those are different sentences, not two names for the
-same idea, and this file pins that the persona prompts keep them apart —
-without ever writing the bad-time phrasing into the prompt text itself
-(a banned phrase in a prompt primes the model toward it even when the
-sentence around it is a prohibition — the two prior incidents this codebase
-already had with that mistake are why guardrails.py and the spoken-greeting
-templates never quote the phrase they ban, and this rewrite follows the same
-rule).
-
-WHAT IS PINNED HERE
---------------------
-1. Turn 2 (the quoted shape) carries name, a permission ask, and the reason
-   for the call, in that order — for lead_gen (both directions) and for the
-   customer_support / receptionist outbound callback openings.
-2. Turn 2 stays inside the one-breath / under-twenty-word budget every one
-   of these blocks states in prose.
-3. The bad-time family ("bad time", "bad moment", "get lost", "buzz off")
-   never appears in the composed prompt for any of the three personas.
-4. The permission ask itself is the SAME phrase across all three personas —
-   one shape, not three competing ones.
+"""The first generated reply identifies the agent, gives the call reason,
+and asks permission in one short breath. Preserve the invitation and response
+boundary while allowing the personas to put the reason before or after it.
 """
 from __future__ import annotations
 
@@ -116,7 +80,7 @@ def _shape_quote(block: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# 1. Ordering: name -> permission ask -> reason, in the same breath.
+# 1. Identity first, with reason and permission in the same breath.
 # ---------------------------------------------------------------------------
 
 
@@ -137,13 +101,13 @@ def _shape_quote(block: str) -> str:
         ),
     ],
 )
-def test_turn2_shape_is_name_then_permission_then_reason(name, block, reason_marker):
+def test_turn2_shape_identifies_agent_and_gives_reason_and_permission(name, block, reason_marker):
     shape = _shape_quote(block)
     name_idx = shape.index("{agent_name}")
     permission_idx = shape.lower().index(_PERMISSION_PHRASE)
     reason_idx = shape.index(reason_marker)
-    assert name_idx < permission_idx < reason_idx, (
-        f"{name}: expected name -> permission ask -> reason, got shape {shape!r} "
+    assert name_idx < min(permission_idx, reason_idx), (
+        f"{name}: expected identity before reason and permission, got shape {shape!r} "
         f"(name={name_idx}, permission={permission_idx}, reason={reason_idx})"
     )
 
@@ -258,15 +222,10 @@ def test_the_opening_blocks_themselves_never_quote_the_bad_time_phrasing(name, v
 # ---------------------------------------------------------------------------
 
 
-def test_lead_gen_outbound_explains_the_permission_ask_is_not_the_bad_time_ask():
-    """The 2026-08-06 pass banned ALL availability-based openers, conflating
-    the permission-to-proceed ask with the bad-time question. This pass
-    un-conflates them — the prose has to say so, or a future edit re-merges
-    them by accident."""
+def test_lead_gen_outbound_requests_permission_and_then_listens():
+    """A concise invitation yields the floor without lengthy framing prose."""
     low = LEAD_GEN_OPENINGS["outbound"].lower()
-    assert "different move" in low
-    # The distinguishing description uses a paraphrase, never the banned
-    # phrase itself.
-    assert "inconvenient moment" in low
+    assert "light permission question" in low
+    assert "stop and let them answer" in low
     for banned in _BAD_TIME_FAMILY:
         assert banned not in low

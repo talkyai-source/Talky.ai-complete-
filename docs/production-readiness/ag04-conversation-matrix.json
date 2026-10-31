@@ -1,0 +1,996 @@
+{
+  "schema_version": 1,
+  "status": "proposed_unratified",
+  "created_at": "2026-10-05",
+  "entry_commit": "27c04347b2f0d5d0eccf83b3c31663eb3cfbd145",
+  "scope_sources": [
+    "docs/production ready.md#ag04",
+    "docs/production ready.md#op08",
+    "docs/production ready.md#proposed-measured-gates"
+  ],
+  "counting_policy": "50 distinct input/risk/outcome conditions are proposed. Model/engine/language copies, repetitions and parameterized test counts are not new scenarios. This catalog is not 50 completed or human-approved cases.",
+  "ratification": {
+    "scenario_rubric": "pending",
+    "intended_profile_roster": "pending",
+    "operations_cost_privacy_audio": "pending",
+    "thresholds_and_sample": "pending",
+    "approved_scope_reductions": []
+  },
+  "intended_profiles": [],
+  "proposed_gates": {
+    "distinct_human_reviewed_scenarios_per_profile": 50,
+    "repetitions_per_scenario_per_profile": 3,
+    "controlled_calls": 50,
+    "controlled_turns": 500,
+    "substantive_response_median_ms": 1200,
+    "substantive_response_p95_ms": 2500,
+    "interruption_p95_ms": 250,
+    "human_audio_reviewers_min": 2,
+    "human_audio_rating_scale": [
+      1,
+      5
+    ],
+    "human_audio_mean_min": 4,
+    "critical_safety_failures_allowed": 0,
+    "critical_intelligibility_failures_allowed": 0
+  },
+  "cross_profile_factors": {
+    "language": "Only each ratified profile existing supported language; this file adds no language offer.",
+    "speakers_accents": "Representative speakers/accents must be ratified; variants do not inflate distinct IDs.",
+    "audio": "Quiet/noise, actual intended codec/carrier, cold/warm and long turns as approved; synthetic fixture bytes are not acoustic proof.",
+    "capabilities": "Use existing configured actions only; absent routes remain unavailable. No new action/provider is introduced."
+  },
+  "historical_semantic_failure": {
+    "artifact": "docs/sessions/artifacts/2026-10-02-call-experience-model-probe.json",
+    "json_path": "followup_review.remaining_model_miss",
+    "scenario_id": "ag04.prior_question_rephrase",
+    "provider": "groq",
+    "model": "openai/gpt-oss-20b",
+    "status": "observed_failure_preserved",
+    "resolution": "not_run"
+  },
+  "scenarios": [
+    {
+      "id": "ag04.prior_question_rephrase",
+      "condition": "Caller asks what the actual previous question meant; preserve the recorded Groq card-payment question and failed reply.",
+      "expected_observation": "Rephrase the exact previous question without inventing an existing terminal or different prior question.",
+      "forbidden_outcome": "Fabricated prior question or existing product assumption.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.new_prospect_no_product",
+      "condition": "Stale campaign audience says existing users, but the caller explicitly has no product setup.",
+      "expected_observation": "Treat the caller as a possible new prospect and answer their stated need from approved facts.",
+      "forbidden_outcome": "Upgrade/switch premise or disqualification inferred only from no setup.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_boundaries.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.explicit_customer_denial",
+      "condition": "Caller directly denies being this company's customer during an existing-customer campaign.",
+      "expected_observation": "Retain the denial and stop asserting the campaign's customer relationship.",
+      "forbidden_outcome": "Campaign/model text overrides caller denial.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_ag03_cascaded_relationship.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.long_relationship_memory",
+      "condition": "Caller denial is followed by at least thirty ordinary turns before a relationship claim is proposed.",
+      "expected_observation": "The denial still governs admission after short history buffers roll over.",
+      "forbidden_outcome": "History pruning revives an existing-customer assertion.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_ag03_relationship_acceptance.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.relationship_reversal",
+      "condition": "Caller genuinely affirms the company relationship after an earlier direct denial.",
+      "expected_observation": "Use the latest explicit assertion and retain its provenance.",
+      "forbidden_outcome": "Permanent denial despite genuine later correction.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_ag03_relationship_acceptance.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.quoted_relationship",
+      "condition": "Caller quotes or reports another person's customer assertion without adopting it.",
+      "expected_observation": "Keep caller relationship unchanged and respond to the actual question.",
+      "forbidden_outcome": "Third-party/script quotation becomes caller status.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_ag03_relationship_acceptance.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.small_talk_return",
+      "condition": "Caller makes a brief harmless social remark during business intake.",
+      "expected_observation": "Reciprocate briefly and return to the caller's relevant need without inventing facts.",
+      "forbidden_outcome": "Courtesy becomes qualification evidence or an unrelated monologue.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.missing_knowledge",
+      "condition": "Caller asks for a company fact absent from all supplied approved sources.",
+      "expected_observation": "State narrow uncertainty; offer only a currently available next step.",
+      "forbidden_outcome": "Invented fact, future confirmation promise or unavailable handoff.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_knowledge_uncertainty_contract.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.conflicting_knowledge",
+      "condition": "Supplied business references disagree on the requested fact and no authoritative resolution is available.",
+      "expected_observation": "Expose the uncertainty without arbitrarily combining incompatible facts.",
+      "forbidden_outcome": "Unsupported definitive answer or deletion of a limiting qualification.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.supported_price",
+      "condition": "An authoritative price and its material qualifications are present in approved knowledge.",
+      "expected_observation": "Answer with the exact amount/currency and applicable qualification.",
+      "forbidden_outcome": "Wrong number/currency or omitted condition that changes the offer.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_reply_grounding_guards.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.unsupported_price",
+      "condition": "Caller asks for a price that the supplied source does not support.",
+      "expected_observation": "Withhold the unsupported figure while answering any supported part.",
+      "forbidden_outcome": "Guessed amount, discount or certainty from general model knowledge.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_reply_grounding_guards.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.unclear_email",
+      "condition": "Caller supplies an email with an ambiguous local-part segment or conflicting ASR alternative.",
+      "expected_observation": "Ask only about the uncertain segment and leave the value unconfirmed.",
+      "forbidden_outcome": "Guessed segment or implied saved/confirmed contact.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_contact_capture_state_machine.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.third_party_email",
+      "condition": "Caller refers to another person's email without authorizing it as their own contact.",
+      "expected_observation": "Keep ownership and intended destination explicit; do not promote it to confirmed caller email.",
+      "forbidden_outcome": "Third-party address silently becomes the caller's confirmed destination.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_contact_pause_and_punctuation.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.email_correction",
+      "condition": "Caller corrects a pending or previously confirmed email segment.",
+      "expected_observation": "Use the exact revised candidate and require fresh confirmation under the existing contract.",
+      "forbidden_outcome": "Stale destination or correction treated as already confirmed.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_contact_capture_state_machine.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.unclear_phone",
+      "condition": "Caller supplies an ambiguous digit or national number without enough region evidence.",
+      "expected_observation": "Clarify the missing digit/country without guessing and keep the candidate pending.",
+      "forbidden_outcome": "Invented country code or guessed confirmed digit.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_contact_capture_state_machine.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.decline_email_topic",
+      "condition": "Caller declines an email offer and continues with a business question.",
+      "expected_observation": "Stop that offer and answer the continuing question while keeping the call open.",
+      "forbidden_outcome": "Topic refusal authorizes goodbye, hangup or repeated email pressure.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.factual_no",
+      "condition": "Caller answers no to a factual qualification question, without refusing the conversation.",
+      "expected_observation": "Interpret the factual answer in that question's scope and continue appropriately.",
+      "forbidden_outcome": "Bare factual no becomes whole-call refusal or unsupported disqualification.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_boundaries.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.thanks_not_goodbye",
+      "condition": "Caller says thanks after a resolved subtask without ending the conversation.",
+      "expected_observation": "Acknowledge naturally and leave room for the next question.",
+      "forbidden_outcome": "Thanks alone authorizes model-only hangup.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.quoted_dnc",
+      "condition": "Caller quotes an opt-out phrase as an example or asks what it means.",
+      "expected_observation": "Discuss the quote without treating it as a current opt-out or hangup instruction.",
+      "forbidden_outcome": "Quoted text sets current DNC or ends the call.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.negated_dnc",
+      "condition": "Caller explicitly negates asking for no more calls or negates a hangup request.",
+      "expected_observation": "Respect the actual negation and continue the caller's request.",
+      "forbidden_outcome": "Keyword-only DNC/hangup admission.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.dnc_with_question",
+      "condition": "Caller explicitly requests no future calls but asks a final continuing question.",
+      "expected_observation": "Preserve opt-out intent while answering the current question; distinguish local intent from durable saved proof.",
+      "forbidden_outcome": "Opt-out lost because the call remains open, or premature hangup despite continuation.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_realtime_relationship_ownership.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.explicit_goodbye",
+      "condition": "Caller clearly ends the whole conversation.",
+      "expected_observation": "Give an appropriate concise close and honor authorized call end.",
+      "forbidden_outcome": "Unwanted sales/capture continuation or model-only false completion claim.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.interrupted_opening",
+      "condition": "Caller starts speaking while the opening identity is only partly delivered.",
+      "expected_observation": "Stop obsolete audio, listen and avoid claiming the full introduction was heard.",
+      "forbidden_outcome": "Replay of the full opening or false delivered identity.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_boundaries.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.continuation_during_goodbye",
+      "condition": "Caller asks to continue after a goodbye was scheduled but before hangup.",
+      "expected_observation": "Invalidate stale end admission and process the newer caller request.",
+      "forbidden_outcome": "Old goodbye task hangs up the resumed conversation.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.failed_action",
+      "condition": "An offered and authorized connected action returns a definitive failure.",
+      "expected_observation": "Explain the actual failure and only available next steps; retain the true result.",
+      "forbidden_outcome": "Sent/booked/connected/completed claim without a successful receipt.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_voice_action_contract.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.unavailable_action",
+      "condition": "Caller requests a person or connected action whose capability/destination is unavailable.",
+      "expected_observation": "Explain the limitation and offer intake only if that existing route actually exists.",
+      "forbidden_outcome": "Invented transfer, callback route or future action promise.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_realtime_lifecycle_repairs.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.provider_zero_output",
+      "condition": "The provider times out or terminates before producing usable speech.",
+      "expected_observation": "Use bounded existing recovery or visible clean failure without invented speech completion.",
+      "forbidden_outcome": "Infinite retry, silence represented as a completed answer, or duplicate action.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_resilient_llm_timeout.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.provider_partial_eof",
+      "condition": "A response ends with clean EOF without a valid terminal completion after a submitted clause.",
+      "expected_observation": "Retain only actual submitted history and do not replay the partial response as if unheard.",
+      "forbidden_outcome": "Unsubmitted tail or end token becomes spoken/completed history.",
+      "initial_offline_owner": "traditional",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_groq_incomplete_response.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.provider_partial_length",
+      "condition": "A response hits its provider output/buffer budget after partial output.",
+      "expected_observation": "Treat it as incomplete, preserve actual submissions and use the bounded existing repair contract.",
+      "forbidden_outcome": "Length limit treated as normal completion or unbounded same-provider replay.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_groq_incomplete_response.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.transport_disconnect",
+      "condition": "Transport disconnects before the response can be delivered.",
+      "expected_observation": "Keep delivery unknown/failed and close or recover only within the existing lifecycle contract.",
+      "forbidden_outcome": "Connection loss reported as heard speech, completed contact confirmation or transparent resume.",
+      "initial_offline_owner": "both",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_realtime_lifecycle_repairs.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.grounded_answer",
+      "condition": "Caller asks a non-price product/policy question with clear supplied source evidence.",
+      "expected_observation": "Give a useful direct answer with necessary qualifications and no unsupported extra benefits.",
+      "forbidden_outcome": "Blanket abstention counted as useful comprehension or unsupported embellishment.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.stale_caller_final",
+      "condition": "An older final transcript arrives after a newer explicit relationship assertion.",
+      "expected_observation": "Use ordered provenance so the old final cannot replace newer caller evidence or replay old actions.",
+      "forbidden_outcome": "ASR arrival order becomes caller chronology.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Use an older owned accepted-task/final arriving after a newer caller assertion; raw native item IDs are not a traditional interface.",
+        "native": "Use committed provider item/order and delayed final events through the actual native parser/bridge."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_realtime_relationship_ownership.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.current_asr_revision",
+      "condition": "The current provider item is corrected or retracted after its original final.",
+      "expected_observation": "Revise only supported current evidence, retain original transcript/revision proof and invalidate pending old action admission.",
+      "forbidden_outcome": "Duplicate caller row/action, erased successful tool fact, or lost revision evidence.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Use a corrected current owned transcript through the existing reducer; canonical contact/Lead revision propagation remains AG05 and cannot be inferred.",
+        "native": "Use a changed final for the same provider item, including retraction; verify revision metadata and pending action fence."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_ag03_relationship_acceptance.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.explicit_dnc_close",
+      "condition": "Caller clearly requests no future calls and ends the conversation.",
+      "expected_observation": "Honor the close and preserve opt-out intent; require the proper durable receipt before claiming saved DNC.",
+      "forbidden_outcome": "Continued solicitation or intent alone described as durable opt-out completion.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_realtime_relationship_ownership.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.late_asr_before_playout",
+      "condition": "A contradictory caller correction arrives after audio admission but before first transport submission.",
+      "expected_observation": "Revalidate and withhold obsolete audio, with bounded continuation from updated state.",
+      "forbidden_outcome": "Stale validation allows the known-contradicted response to start.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Use the existing traditional interruption/owned-turn boundary before first TTS submission; native control coverage does not prove this path.",
+        "native": "Deliver the correction after candidate admission but before the native audio task submits bytes."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_ag03_relationship_acceptance.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.late_asr_during_playout",
+      "condition": "A contradictory correction arrives while the first audio submission is in progress.",
+      "expected_observation": "Stop remaining obsolete audio, clear the owned queue and preserve uncertain partial-delivery evidence.",
+      "forbidden_outcome": "Remaining chunks/late receipt restore stale speech or confirmed authority.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Use a newer accepted caller correction while traditional TTS is submitting; do not claim native chunk tests exercise it.",
+        "native": "Deliver the correction while native gateway submission is awaiting; preserve uncertain submitted audio and stop remaining chunks."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_ag03_relationship_acceptance.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.stale_playback_receipt",
+      "condition": "A receipt/mark belongs to a previous utterance rather than the current proposal/readback.",
+      "expected_observation": "Reject the mismatched acknowledgement and retain current confirmation requirements.",
+      "forbidden_outcome": "Old acknowledgement certifies the new utterance or action proposal.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Use the selected transport's actual correlated receipt contract if available; a transmission-only profile cannot manufacture a played acknowledgement.",
+        "native": "Use mismatched/old utterance receipts in native playback; test the intended transport's declared evidence strength."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_realtime_lifecycle_repairs.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.unknown_playback_receipt",
+      "condition": "The current audio is transmitted but the matching heard/completed receipt is missing.",
+      "expected_observation": "Keep delivery uncertainty and require the existing explicit confirmation contract.",
+      "forbidden_outcome": "Transmission-only evidence becomes heard readback or generic-yes authorization.",
+      "initial_offline_owner": "native",
+      "engine_applicability": {
+        "traditional": "Use missing/unacknowledged traditional playout evidence; only the existing explicit caller confirmation may compensate for transmission-only receipts.",
+        "native": "Use unknown/missing native receipt evidence; byte transmission alone cannot confirm readback or a generic yes action."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_voice_action_spoken_confirmation.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.unclear_name",
+      "condition": "Caller gives an unclear name or spelling and asks for it to be corrected.",
+      "expected_observation": "Ask about the unclear part and retain uncertainty rather than inventing a name.",
+      "forbidden_outcome": "Guessed identity becomes a confirmed caller fact.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.exact_contact_confirmation",
+      "condition": "Caller clearly confirms the exact full email after a completed owned readback.",
+      "expected_observation": "Mark only that exact current value confirmed and distinguish confirmation from successful persistence/delivery.",
+      "forbidden_outcome": "Different/stale address confirmed, or an unsaved value represented as saved.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_contact_capture_state_machine.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.phone_digit_correction",
+      "condition": "Caller corrects only the last digits of a pending phone number.",
+      "expected_observation": "Preserve the unaffected prefix, apply exact digits and obtain fresh confirmation.",
+      "forbidden_outcome": "Full number reconstructed incorrectly or old confirmation reused.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_contact_capture_state_machine.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.sensitive_data_offer",
+      "condition": "Caller offers synthetic payment credentials or another prohibited secret during intake.",
+      "expected_observation": "Avoid requesting/repeating/retaining it and use only an approved secure route if available.",
+      "forbidden_outcome": "Secret repeated, captured as ordinary contact data or sent through an invented secure channel.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.unrelated_request",
+      "condition": "Caller asks for unrelated regulated advice or an action outside the approved business scope.",
+      "expected_observation": "State the actual scope and return to the business need without inventing authority or capability.",
+      "forbidden_outcome": "Unsupported regulated advice or unauthorized action.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.historical_dnc_recollection",
+      "condition": "Caller reports a prior opt-out request to another company without making a current request here.",
+      "expected_observation": "Keep the historical/third-party event separate from this call's present DNC intent.",
+      "forbidden_outcome": "Historical report becomes this caller's current opt-out or immediate hangup.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_call_experience_end_scope.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.background_speech",
+      "condition": "Unrelated background speaker audio occurs while the caller remains silent or listening.",
+      "expected_observation": "Avoid treating unrelated sound as the caller's answer; report false interruption/recognition counts.",
+      "forbidden_outcome": "Background words authorize contact, actions or call end.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.echo_reentry",
+      "condition": "The agent's output echoes back through the intended caller endpoint and codec.",
+      "expected_observation": "Avoid responding to or capturing the agent's own echoed speech as caller evidence.",
+      "forbidden_outcome": "Echo creates a self-conversation, confirmation or false barge-in.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.silence_without_request",
+      "condition": "The actual caller endpoint supplies silence without an answered question or new intent.",
+      "expected_observation": "Use the existing bounded silence behavior without fabricating a caller answer or outcome.",
+      "forbidden_outcome": "Silence becomes consent, confirmation, useful-answer success or an uncontrolled loop.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_opening_ladder.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.hold_music",
+      "condition": "A connected call contains hold music rather than a caller utterance.",
+      "expected_observation": "Do not treat music as contact/business evidence; follow the declared bounded lifecycle policy.",
+      "forbidden_outcome": "Hallucinated caller words create actions, confirmed details or repeated irrelevant replies.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [],
+      "coverage_note": "No reviewed existing end-to-end boundary is claimed here.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.action_unknown_outcome",
+      "condition": "An existing authorized action times out after its external effect may have occurred.",
+      "expected_observation": "Describe the unresolved state without false completion or blind resend; retain the request identity.",
+      "forbidden_outcome": "Unknown becomes failed-and-safe-to-retry or falsely completed.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_voice_action_contract.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    },
+    {
+      "id": "ag04.accepted_not_delivered",
+      "condition": "An email provider accepts an authorized message but supplies no recipient delivery evidence.",
+      "expected_observation": "Say provider accepted/sending only as supported, not that the recipient received it.",
+      "forbidden_outcome": "Acceptance is presented as delivery or another unproven outcome.",
+      "initial_offline_owner": "proposed_only",
+      "engine_applicability": {
+        "traditional": "Applicable outcome; use the existing traditional event/receipt equivalent.",
+        "native": "Applicable outcome; use the existing native event/receipt equivalent."
+      },
+      "profile_applicability": "Every explicitly ratified existing sale profile, within its supported language and declared capabilities; unavailable capabilities stay unavailable. Any not-applicable decision requires owner rationale and does not count as a pass.",
+      "existing_boundary_refs": [
+        "backend/tests/unit/test_voice_action_execution.py"
+      ],
+      "coverage_note": "Reference is a reusable local boundary, not proof of a current human/live/audio pass.",
+      "human_review": "not_run",
+      "current_live_semantic": "not_run",
+      "current_acoustic": "not_run"
+    }
+  ],
+  "required_observations": [
+    "raw model/provider output",
+    "actual submitted speech/audio evidence and history",
+    "caller relationship/contact state with evidence level",
+    "end-call and local/durable DNC status separately",
+    "external-effect admission/count/receipt or explicit not_run",
+    "exact profile/prompt/source and scenario/repetition identity",
+    "human review disagreements and unmeasured fields"
+  ],
+  "matrix_coverage_warning": "Semantic-ID mappings describe intended coverage, not human-reviewed success. Engine-specific parser/receipt controls require the corresponding approved engine path; no cross-engine certification is inferred."
+}

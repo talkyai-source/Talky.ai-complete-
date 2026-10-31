@@ -1,0 +1,10 @@
+[
+  {
+    "ProcessId": 8364,
+    "CommandLine": "\"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" -B docs/sessions/artifacts/contact-contract-tests/run.py first-final"
+  },
+  {
+    "ProcessId": 22020,
+    "CommandLine": "\"C:\\Users\\AL AZIZ TECH\\AppData\\Roaming\\uv\\python\\cpython-3.12.12-windows-x86_64-none\\python.exe\" -B docs/sessions/artifacts/contact-contract-tests/run.py first-final"
+  }
+]

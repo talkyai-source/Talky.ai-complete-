@@ -20,8 +20,8 @@ Progressive lockout thresholds (consecutive failures → lockout seconds):
   ≥ 20 failures →  30 minutes
   ≥ 50 failures →  24 hours  (manual admin review recommended)
 
-The observation window is 15 minutes: only failures recorded within the
-last 15 minutes count towards the threshold.  A successful login clears
+The observation window is 24 hours (the longest tier): only failures recorded
+within the last 24 hours count towards the threshold.  A successful login clears
 the window by inserting a success record; the query skips success rows.
 """
 
@@ -40,7 +40,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 # How far back to look when counting consecutive failures.
-OBSERVATION_WINDOW_MINUTES: int = 15
+# Must cover the longest lockout tier (24 h) or the 20/50-failure tiers are unreachable.
+OBSERVATION_WINDOW_MINUTES: int = 24 * 60
 
 # (min_failures, lockout_duration_seconds)
 # Evaluated in order — the LAST matching threshold wins (highest penalty).
@@ -94,6 +95,11 @@ async def get_consecutive_failures(
     naturally because old rows fall outside the ``created_at >= $2``
     bound; the "after most recent success" clause adds a second reset
     boundary so a successful login also clears the slate.
+
+    Attempts rejected *because* the account was already locked
+    (``failure_reason = 'account_locked'``) are still written for audit but are
+    not counted: otherwise a user retrying during a lock would extend and
+    escalate it. NULL reasons still count.
     """
     window_start = datetime.now(timezone.utc) - timedelta(
         minutes=OBSERVATION_WINDOW_MINUTES
@@ -105,6 +111,7 @@ async def get_consecutive_failures(
         FROM   login_attempts
         WHERE  email      = $1
           AND  success    = FALSE
+          AND  failure_reason IS DISTINCT FROM 'account_locked'
           AND  created_at >= $2
           AND  created_at > COALESCE(
                    (SELECT MAX(created_at)
@@ -158,6 +165,7 @@ async def check_account_locked(
         FROM   login_attempts
         WHERE  email      = $1
           AND  success    = FALSE
+          AND  failure_reason IS DISTINCT FROM 'account_locked'
           AND  created_at >= $2
           AND  created_at > COALESCE(
                    (SELECT MAX(created_at)

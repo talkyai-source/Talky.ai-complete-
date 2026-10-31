@@ -6,6 +6,7 @@ revocation, query, verification) lives in that operation's module.
 """
 from __future__ import annotations
 
+import os
 import hashlib
 import logging
 from datetime import datetime, timezone
@@ -28,7 +29,19 @@ SESSION_LIFETIME_HOURS: int = 24
 
 # Sliding idle timeout — if no activity for this many minutes the session
 # is considered stale and is revoked on the next access attempt.
-SESSION_IDLE_TIMEOUT_MINUTES: int = 30
+# Env-overridable (SESSION_IDLE_TIMEOUT_MINUTES) since 2026-09-08: the check
+# became live for REST that day (the middleware could not see sessions under
+# RLS before), so the owner needs a knob that is not a code change.
+def _idle_timeout_minutes() -> int:
+    raw = (os.environ.get("SESSION_IDLE_TIMEOUT_MINUTES") or "").strip()
+    try:
+        value = int(raw) if raw else 30
+    except ValueError:
+        value = 30
+    return value if value > 0 else 30
+
+
+SESSION_IDLE_TIMEOUT_MINUTES: int = _idle_timeout_minutes()
 
 # Cookie name written by the caller (centralised here so it's one source of truth).
 SESSION_COOKIE_NAME: str = "talky_sid"

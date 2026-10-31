@@ -1,15 +1,9 @@
 /**
  * Temperature guidance for the AI Options slider.
  *
- * Single source of truth, data-backed: bands come from Talk-Lee's own 2026-06
- * temperature sweep across the live model menu (email/number read-back accuracy,
- * price-hallucination, and naturalness) plus 2026 voice-agent best practice.
- *
- * Takeaway from the sweep: core-field accuracy is robust at every temperature
- * once the prompt is right, so temperature is a *secondary* lever — but lower is
- * consistently at least as good, with better instruction-following and fewer
- * invented details. ~0.5 is the sweet spot (accurate + still warm); >1.0 is the
- * noisiest setting and gains nothing for live calls.
+ * Describe response variation without implying a factual-accuracy guarantee.
+ * Provider behavior differs; source checks and caller confirmation remain
+ * required at every setting.
  */
 export type TemperatureTone = "good" | "ok" | "warn" | "bad";
 
@@ -23,20 +17,20 @@ export interface TemperatureAdvice {
 export function temperatureAdvice(temp: number): TemperatureAdvice {
     if (temp <= 0.3) {
         return {
-            band: "Precise",
+            band: "Low variation",
             tone: "ok",
             recommended: false,
             message:
-                "Most accurate and consistent — best when getting emails, numbers and bookings exactly right matters most. Can sound a touch flat.",
+                "More consistent wording. Knowledge checks and caller confirmation are still required for facts and contact details.",
         };
     }
     if (temp <= 0.6) {
         return {
-            band: "Recommended",
+            band: "Balanced variation",
             tone: "good",
-            recommended: true,
+            recommended: false,
             message:
-                "Best balance of accuracy and natural warmth — recommended for most calls. Around 0.5 is the sweet spot for reliable, human-sounding results.",
+                "Allows more varied phrasing. Check the selected model with your campaign before using it for live calls.",
         };
     }
     if (temp <= 0.85) {
@@ -45,7 +39,7 @@ export function temperatureAdvice(temp: number): TemperatureAdvice {
             tone: "ok",
             recommended: false,
             message:
-                "A little more lively and varied, but slightly less consistent on read-backs. Fine for low-stakes calls where extra personality helps.",
+                "More varied replies. Confirm names, numbers and agreed actions with the caller.",
         };
     }
     if (temp <= 1.1) {
@@ -54,14 +48,14 @@ export function temperatureAdvice(temp: number): TemperatureAdvice {
             tone: "warn",
             recommended: false,
             message:
-                "Noticeably less reliable — occasional off-script replies or invented details. Not recommended for production calls.",
+                "Greater response variation. Use a lower setting when consistent phrasing matters.",
         };
     }
     return {
-        band: "Risky",
+        band: "Very high variation",
         tone: "bad",
         recommended: false,
         message:
-            "Very unpredictable — frequent inconsistencies and made-up details. Avoid this range for live calls; bring it down toward 0.5.",
+            "Very high response variation. Validate this setting with the selected model before live use; temperature alone does not prevent incorrect answers.",
     };
 }

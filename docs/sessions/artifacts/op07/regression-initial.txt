@@ -1,0 +1,372 @@
+...............................................FF.F....F............F... [ 45%]
+......................F......sF............................F....FF...... [ 90%]
+................                                                         [100%]
+================================== FAILURES ===================================
+____ test_pinned_inbound_consent_is_exact_first_audio_for_both_modes[user] ____
+
+first_speaker = 'user'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("first_speaker", ["user", "agent"])
+    async def test_pinned_inbound_consent_is_exact_first_audio_for_both_modes(first_speaker):
+        log = []
+        voice_session, session = _make_voice_session(log)
+        voice_session._first_speaker = first_speaker
+        voice_session._inbound_admission["config_snapshot"]["inbound_config"][
+            "consent_message"
+        ] = "This exact inbound call is recorded."
+        gateway = _GatedInboundMediaGateway(log)
+        voice_session.media_gateway = gateway
+        p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+        with p_container, p_policy:
+>           assert await prepare_inbound_recording(voice_session) is True
+E           assert False is True
+
+tests\unit\test_recording_disclosure.py:194: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.modes.agent_first:agent_first.py:345 recording_disclosure_unconfirmed call_id=11111111-111 � notice incomplete or unproven short; not retried (a restart would talk over the caller a second time); recording will be suppressed
+___ test_pinned_inbound_consent_is_exact_first_audio_for_both_modes[agent] ____
+
+first_speaker = 'agent'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("first_speaker", ["user", "agent"])
+    async def test_pinned_inbound_consent_is_exact_first_audio_for_both_modes(first_speaker):
+        log = []
+        voice_session, session = _make_voice_session(log)
+        voice_session._first_speaker = first_speaker
+        voice_session._inbound_admission["config_snapshot"]["inbound_config"][
+            "consent_message"
+        ] = "This exact inbound call is recorded."
+        gateway = _GatedInboundMediaGateway(log)
+        voice_session.media_gateway = gateway
+        p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+        with p_container, p_policy:
+>           assert await prepare_inbound_recording(voice_session) is True
+E           assert False is True
+
+tests\unit\test_recording_disclosure.py:194: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.modes.agent_first:agent_first.py:345 recording_disclosure_unconfirmed call_id=11111111-111 � notice incomplete or unproven short; not retried (a restart would talk over the caller a second time); recording will be suppressed
+_______ test_inbound_recording_gate_opens_only_after_shared_disclosure ________
+
+    @pytest.mark.asyncio
+    async def test_inbound_recording_gate_opens_only_after_shared_disclosure():
+        log = []
+        voice_session, _ = _make_voice_session(log)
+        gateway = _GatedInboundMediaGateway(log)
+        voice_session.media_gateway = gateway
+        p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+        with p_container, p_policy:
+            allowed = await prepare_inbound_recording(voice_session)
+
+>       assert allowed is True
+E       assert False is True
+
+tests\unit\test_recording_disclosure.py:243: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.modes.agent_first:agent_first.py:345 recording_disclosure_unconfirmed call_id=11111111-111 � notice incomplete or unproven short; not retried (a restart would talk over the caller a second time); recording will be suppressed
+______________ test_disclosure_marks_ledger_and_history_in_order ______________
+
+    @pytest.mark.asyncio
+    async def test_disclosure_marks_ledger_and_history_in_order():
+        log, session = await _run_greeting(_ANNOUNCE)
+
+>       assert get_disclosure_state(CALL_UUID) == DISCLOSURE_SPOKEN
+E       AssertionError: assert 'failed' == 'spoken'
+E         - spoken
+E         + failed
+
+tests\unit\test_recording_disclosure.py:322: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.modes.agent_first:agent_first.py:345 recording_disclosure_unconfirmed call_id=11111111-111 � notice incomplete or unproven short; not retried (a restart would talk over the caller a second time); recording will be suppressed
+_____________ test_two_party_default_still_announces_and_records ______________
+
+    @pytest.mark.asyncio
+    async def test_two_party_default_still_announces_and_records():
+        """Non-regression on the flip side of the disabled test above: the
+        ordinary two-party default (what every tenant gets unless disabled is
+        set explicitly) must still both SPEAK the notice and RETAIN the
+        recording. Disabling must be an opt-in per-tenant choice, never an
+        accidental side effect of this fix."""
+        log, _ = await _run_greeting(_ANNOUNCE)
+        assert "tts" in [k for k, _ in log], "two-party default must still announce"
+>       assert get_disclosure_state(CALL_UUID) == DISCLOSURE_SPOKEN
+E       AssertionError: assert 'failed' == 'spoken'
+E         - spoken
+E         + failed
+
+tests\unit\test_recording_disclosure.py:602: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.modes.agent_first:agent_first.py:345 recording_disclosure_unconfirmed call_id=11111111-111 � notice incomplete or unproven short; not retried (a restart would talk over the caller a second time); recording will be suppressed
+________________ test_local_save_offloaded_and_byte_identical _________________
+
+tmp_path = WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-768/test_local_save_offloaded_and_0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000201E667D6A0>
+
+    @pytest.mark.asyncio
+    async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
+        monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))
+        # Storage encoding (MP3 by default) is covered in test_recording_encoding;
+        # this test is about the offloaded write being byte-identical to the WAV.
+        import app.domain.services.recording_service as _rs
+        monkeypatch.setattr(_rs, "RECORDING_AUDIO_CODEC", "wav")
+
+        buf = RecordingBuffer(call_id="call-1", sample_rate=16000, channels=2, bit_depth=16)
+        buf.add_chunk(b"\x01\x02" * 500)
+        expected_wav = buf.get_wav_bytes()
+
+        calls = []
+        real_to_thread = asyncio.to_thread
+
+        async def spy_to_thread(func, *args, **kwargs):
+            calls.append(func.__name__ if hasattr(func, "__name__") else func)
+            return await real_to_thread(func, *args, **kwargs)
+
+        svc = RecordingService(db_pool=AsyncMock())
+        with patch(
+            "app.domain.services.recording_service.asyncio.to_thread",
+            side_effect=spy_to_thread,
+        ), patch.object(
+            svc, "_insert_recording_record", AsyncMock(return_value=None)
+        ):
+            result = await svc._save_local(
+                call_id="call-1", buffer=buf, tenant_id="t1", campaign_id="c1",
+            )
+
+>       assert "_write_wav_file" in calls, (
+            "the makedirs+open+write sequence must run via asyncio.to_thread"
+        )
+E       AssertionError: the makedirs+open+write sequence must run via asyncio.to_thread
+E       assert '_write_wav_file' in []
+
+tests\unit\test_recording_offload.py:293: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.recording_service:recording_service.py:559 recording_retention_admission_unavailable call=call-1
+____________ test_local_save_stores_the_encoded_file_with_its_mime ____________
+
+tmp_path = WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-768/test_local_save_stores_the_enc0')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000201E65D6E40>
+
+    @pytest.mark.asyncio
+    async def test_local_save_stores_the_encoded_file_with_its_mime(tmp_path, monkeypatch):
+        from unittest.mock import AsyncMock
+
+        monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))
+        monkeypatch.setattr(rs, "encode_recording_audio", lambda wav, codec=None, **kw: (b"MP3DATA", ".mp3", "audio/mpeg"))
+        buf = rs.RecordingBuffer(call_id="call-9", sample_rate=16000, channels=2, bit_depth=16)
+        buf.add_chunk(b"\x01\x02" * 400)
+        svc = rs.RecordingService(db_pool=AsyncMock())
+        inserted = {}
+
+        async def fake_insert(**kwargs):
+            inserted.update(kwargs)
+            return None
+
+        monkeypatch.setattr(svc, "_insert_recording_record", fake_insert)
+        result = await svc._save_local(call_id="call-9", buffer=buf, tenant_id="t1", campaign_id="c1")
+        # Local fallback recordings live under the same tenant/campaign hierarchy
+        # as object storage, not a flat cross-tenant namespace.
+>       assert (tmp_path / "t1" / "c1" / "call-9.mp3").read_bytes() == b"MP3DATA"
+
+tests\unit\test_recording_encoding.py:103:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\pathlib.py:1019: in read_bytes
+    with self.open(mode='rb') as f:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = WindowsPath('C:/Users/AL AZIZ TECH/AppData/Local/Temp/pytest-of-UZAIR/pytest-768/test_local_save_stores_the_enc0/t1/c1/call-9.mp3')
+mode = 'rb', buffering = -1, encoding = None, errors = None, newline = None
+
+    def open(self, mode='r', buffering=-1, encoding=None,
+             errors=None, newline=None):
+        """
+        Open the file pointed to by this path and return a file object, as
+        the built-in open() function does.
+        """
+        if "b" not in mode:
+            encoding = io.text_encoding(encoding)
+>       return io.open(self, mode, buffering, encoding, errors, newline)
+E       FileNotFoundError: [Errno 2] No such file or directory: 'C:\\Users\\AL AZIZ TECH\\AppData\\Local\\Temp\\pytest-of-UZAIR\\pytest-768\\test_local_save_stores_the_enc0\\t1\\c1\\call-9.mp3'
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\pathlib.py:1013: FileNotFoundError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.recording_service:recording_service.py:559 recording_retention_admission_unavailable call=call-9
+_________ TestRecordingService.test_save_recording_uploads_to_storage _________
+
+self = <tests.unit.test_day10.TestRecordingService object at 0x00000201E62D5130>
+
+    @pytest.mark.asyncio
+    async def test_save_recording_uploads_to_storage(self):
+        """Test recording upload to storage."""
+        mock_supabase = MagicMock()
+        mock_storage = MagicMock()
+        mock_bucket = MagicMock()
+        mock_supabase.storage.from_.return_value = mock_bucket
+
+        service = RecordingService(mock_supabase)
+
+        buffer = RecordingBuffer(call_id="test")
+        buffer.add_chunk(b'\x00' * 1000)
+
+        result = await service.save_recording(
+            call_id="test",
+            buffer=buffer,
+            tenant_id="tenant",
+            campaign_id="campaign"
+        )
+
+        # Verify upload was called
+>       mock_bucket.upload.assert_called_once()
+
+tests\unit\test_day10.py:248:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <MagicMock name='mock.storage.from_().upload' id='2207183894432'>
+
+    def assert_called_once(self):
+        """assert that the mock was called only once.
+        """
+        if not self.call_count == 1:
+            msg = ("Expected '%s' to have been called once. Called %s times.%s"
+                   % (self._mock_name or 'mock',
+                      self.call_count,
+                      self._calls_repr()))
+>           raise AssertionError(msg)
+E           AssertionError: Expected 'upload' to have been called once. Called 0 times.
+
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:928: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.recording_service:recording_service.py:559 recording_retention_admission_unavailable call=test
+________ test_disclosure_is_written_to_the_persisted_transcript_buffer ________
+
+    @pytest.mark.asyncio
+    async def test_disclosure_is_written_to_the_persisted_transcript_buffer():
+        """Reproduces 6e0e221b: the spoken notice must reach the transcript
+        buffer TranscriptService.accumulate_turn feeds, not just history."""
+        voice_session, session = _make_voice_session()
+        ts = voice_session.pipeline.transcript_service
+        p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+        with p_container, p_policy:
+            await _speak_recording_disclosure(voice_session)
+
+        contents = [t.content for t in ts.get_turns(CALL_UUID)]
+>       assert contents, (
+            "the persisted transcript buffer must contain the spoken notice � "
+            "it was silently missing before this fix"
+        )
+E       AssertionError: the persisted transcript buffer must contain the spoken notice � it was silently missing before this fix
+E       assert []
+
+tests\unit\test_agent_first_transcript_persistence.py:137: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.modes.agent_first:agent_first.py:345 recording_disclosure_unconfirmed call_id=11111111-111 � notice incomplete or unproven short; not retried (a restart would talk over the caller a second time); recording will be suppressed
+______ test_greeting_and_disclosure_both_land_in_the_transcript_in_order ______
+
+    @pytest.mark.asyncio
+    async def test_greeting_and_disclosure_both_land_in_the_transcript_in_order():
+        """Reproduces 53d16d3e/6e0e221b end to end: both the notice and the
+        opener must appear in calls.transcript_json, in the order spoken."""
+        voice_session, session = _make_voice_session()
+        ts = voice_session.pipeline.transcript_service
+        p_container, p_policy = _patched_policy(_ANNOUNCE)
+
+        with p_container, p_policy:
+            await _send_outbound_greeting(voice_session)
+
+        contents = [t.content for t in ts.get_turns(CALL_UUID)]
+>       assert len(contents) == 2, (
+            f"expected [notice, greeting] in the persisted transcript, got {contents!r}"
+        )
+E       AssertionError: expected [notice, greeting] in the persisted transcript, got ['Hi, this is Sarah calling from Acme � do you have a quick minute?']
+E       assert 1 == 2
+E        +  where 1 = len(['Hi, this is Sarah calling from Acme � do you have a quick minute?'])
+
+tests\unit\test_agent_first_transcript_persistence.py:157: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony.modes.agent_first:agent_first.py:345 recording_disclosure_unconfirmed call_id=11111111-111 � notice incomplete or unproven short; not retried (a restart would talk over the caller a second time); recording will be suppressed
+============================== warnings summary ===============================
+tests/unit/test_op07_disclosure_receipts.py::test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim
+tests/unit/test_recording_gate_timing.py::test_callee_first_outbound_purges_pre_notice_audio_when_notice_starts
+tests/unit/test_recording_gate_timing.py::test_agent_first_outbound_notice_start_is_not_lost_by_the_gate_reset
+tests/unit/test_recording_gate_timing.py::test_agent_first_outbound_notice_start_is_not_lost_by_the_gate_reset
+tests/unit/test_recording_gate_timing.py::test_one_party_outbound_never_touches_the_gate
+tests/unit/test_recording_gate_timing.py::test_true_inbound_session_is_not_double_driven_by_the_new_gate_reset
+  <string>:8: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_recording_retention.py: 36 warnings
+tests/unit/test_recording_disclosure.py: 6 warnings
+tests/unit/test_recording_offload.py: 4 warnings
+tests/unit/test_recording_encoding.py: 1 warning
+tests/unit/test_day10.py: 10 warnings
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_notice_was_spoken
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_no_notice_required
+tests/unit/test_recording_offload.py::test_s3_upload_offloaded_to_thread
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:625: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_started = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_notice_was_spoken
+tests/unit/test_recording_disclosure.py::test_recording_retained_when_no_notice_required
+tests/unit/test_recording_offload.py::test_s3_upload_offloaded_to_thread
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:643: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_finished = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[local]
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[configured-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-local]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:739: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_day10.py: 8 warnings
+tests/unit/test_agent_first_transcript_persistence.py: 3 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_recording_disclosure_passes_track_latency_false
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_recording_disclosure_passes_track_latency_false
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_slow_path_greeting_passes_track_latency_false
+tests/unit/test_agent_first_nonturn_audio_latency_not_tracked.py::test_slow_path_greeting_passes_track_latency_false
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:749: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+tests/unit/test_tts_playback_waits_for_real_playback.py::test_unmute_waits_for_the_browsers_real_playback_complete_signal
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:755: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_recording_disclosure.py::test_pinned_inbound_consent_is_exact_first_audio_for_both_modes[user]
+FAILED tests/unit/test_recording_disclosure.py::test_pinned_inbound_consent_is_exact_first_audio_for_both_modes[agent]
+FAILED tests/unit/test_recording_disclosure.py::test_inbound_recording_gate_opens_only_after_shared_disclosure
+FAILED tests/unit/test_recording_disclosure.py::test_disclosure_marks_ledger_and_history_in_order
+FAILED tests/unit/test_recording_disclosure.py::test_two_party_default_still_announces_and_records
+FAILED tests/unit/test_recording_offload.py::test_local_save_offloaded_and_byte_identical
+FAILED tests/unit/test_recording_encoding.py::test_local_save_stores_the_encoded_file_with_its_mime
+FAILED tests/unit/test_day10.py::TestRecordingService::test_save_recording_uploads_to_storage
+FAILED tests/unit/test_agent_first_transcript_persistence.py::test_disclosure_is_written_to_the_persisted_transcript_buffer
+FAILED tests/unit/test_agent_first_transcript_persistence.py::test_greeting_and_disclosure_both_land_in_the_transcript_in_order
+10 failed, 149 passed, 1 skipped, 101 warnings in 11.62s

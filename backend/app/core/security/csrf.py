@@ -64,6 +64,12 @@ _EXEMPT_PATH_PREFIXES = (
     # silent on every call. Hardening follow-up: have the gateway present
     # X-Internal-Service-Token so this can be authenticated rather than exempt.
     "/api/v1/sip/telephony/audio",
+    # Salesforce -> Talky webhooks (Flow HTTP callout / Outbound Message).
+    # Server-to-server POSTs: no browser, no cookie, no Origin header. They
+    # authenticate with a per-tenant secret token in the URL (SHA-256 compared
+    # in constant time by the endpoint), so CSRF protection adds nothing here.
+    "/api/v1/connectors/salesforce/callback-requests/",
+    "/api/v1/connectors/salesforce/outbound-message/",
 )
 
 
@@ -95,6 +101,11 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
+        # Stripe is a server-to-server sender without a browser Origin. Only
+        # this exact route is exempt; its handler verifies the raw-body Stripe
+        # signature before processing. Other billing writes keep CSRF checks.
+        if request.method == "POST" and path == "/api/v1/billing/webhooks":
+            return await call_next(request)
         if any(path.startswith(prefix) for prefix in _EXEMPT_PATH_PREFIXES):
             return await call_next(request)
 

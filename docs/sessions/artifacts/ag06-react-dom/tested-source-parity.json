@@ -1,0 +1,337 @@
+[
+  {
+    "path": "Admin/frontend/src/App.css",
+    "sha256": "a0715e0a09edbd0fbde65816a75e0fa0fc8b314c5260c0768c19bf3aac22621a",
+    "fixture_sha256": "a0715e0a09edbd0fbde65816a75e0fa0fc8b314c5260c0768c19bf3aac22621a"
+  },
+  {
+    "path": "Admin/frontend/src/App.tsx",
+    "sha256": "c4d9b61bf216f88708cf5d7affa000bf88d0151d5872043d376887e10a6bada5",
+    "fixture_sha256": "c4d9b61bf216f88708cf5d7affa000bf88d0151d5872043d376887e10a6bada5"
+  },
+  {
+    "path": "Admin/frontend/src/assets/react.svg",
+    "sha256": "35ef61ed53b323ae94a16a8ec659b3d0af3880698791133f23b084085ab1c2e5",
+    "fixture_sha256": "35ef61ed53b323ae94a16a8ec659b3d0af3880698791133f23b084085ab1c2e5"
+  },
+  {
+    "path": "Admin/frontend/src/components/ActionDetailDrawer.tsx",
+    "sha256": "f6afdc3d9cc17575a4a09267dedbc164e11af314eb243d7ebc53f07243f6d743",
+    "fixture_sha256": "f6afdc3d9cc17575a4a09267dedbc164e11af314eb243d7ebc53f07243f6d743"
+  },
+  {
+    "path": "Admin/frontend/src/components/ActionReceiptPanel.tsx",
+    "sha256": "a3d5e372e410dea90fd3e66253a71e87469ff677e4a609b9239d82e4170b80b2",
+    "fixture_sha256": "a3d5e372e410dea90fd3e66253a71e87469ff677e4a609b9239d82e4170b80b2"
+  },
+  {
+    "path": "Admin/frontend/src/components/ActionStatusBadge.tsx",
+    "sha256": "19bd3c13d9af0220d1c5b9e52ce6ca14306a5bced670b95fa86fda97c0434252",
+    "fixture_sha256": "19bd3c13d9af0220d1c5b9e52ce6ca14306a5bced670b95fa86fda97c0434252"
+  },
+  {
+    "path": "Admin/frontend/src/components/ActionsTable.tsx",
+    "sha256": "a73a9e26beb584a26b1f1a2a6ba21456a0951f156f6acb7516a613461f7daae4",
+    "fixture_sha256": "a73a9e26beb584a26b1f1a2a6ba21456a0951f156f6acb7516a613461f7daae4"
+  },
+  {
+    "path": "Admin/frontend/src/components/AdminMediaPlayer.tsx",
+    "sha256": "da619273638e4a5557d1e036d4f2cc1eaa514fbe4e5341573c6b0c70e49e0780",
+    "fixture_sha256": "da619273638e4a5557d1e036d4f2cc1eaa514fbe4e5341573c6b0c70e49e0780"
+  },
+  {
+    "path": "Admin/frontend/src/components/AdminRouteGuard.tsx",
+    "sha256": "76da7725f9688b28fd68ab837647c941f4de4e5ca0810956269da19593e6d067",
+    "fixture_sha256": "76da7725f9688b28fd68ab837647c941f4de4e5ca0810956269da19593e6d067"
+  },
+  {
+    "path": "Admin/frontend/src/components/CallDetailDrawer.tsx",
+    "sha256": "8505f1e7d93191156e3f06a99f6e4b222f45be4ce10015d970ac0ab27b83e2ac",
+    "fixture_sha256": "8505f1e7d93191156e3f06a99f6e4b222f45be4ce10015d970ac0ab27b83e2ac"
+  },
+  {
+    "path": "Admin/frontend/src/components/CallHistoryTable.tsx",
+    "sha256": "9a35c872e0ec1db918a9f4e2402665050800f1b995e13c629bf89364660108fe",
+    "fixture_sha256": "9a35c872e0ec1db918a9f4e2402665050800f1b995e13c629bf89364660108fe"
+  },
+  {
+    "path": "Admin/frontend/src/components/CallTerminationAction.tsx",
+    "sha256": "c08e7dede5f8df0901fab83b0544dacab1545b8d120a4c040c07fdd729f83aa1",
+    "fixture_sha256": "c08e7dede5f8df0901fab83b0544dacab1545b8d120a4c040c07fdd729f83aa1"
+  },
+  {
+    "path": "Admin/frontend/src/components/ConfirmationModal.css",
+    "sha256": "76adb92c2d34ed0dc08cd5b48825943cda55b4d1afcc55d639a0ecdde4625b4c",
+    "fixture_sha256": "76adb92c2d34ed0dc08cd5b48825943cda55b4d1afcc55d639a0ecdde4625b4c"
+  },
+  {
+    "path": "Admin/frontend/src/components/ConfirmationModal.tsx",
+    "sha256": "73a97e19547fae7e4ba506ab669b626f739e2d044300168444ce604882430eee",
+    "fixture_sha256": "73a97e19547fae7e4ba506ab669b626f739e2d044300168444ce604882430eee"
+  },
+  {
+    "path": "Admin/frontend/src/components/ConnectorDetailDrawer.tsx",
+    "sha256": "6b3ddcab80af8e073aa3f1e5752dbc5be3ebd32130a3e76483af07237f037a69",
+    "fixture_sha256": "6b3ddcab80af8e073aa3f1e5752dbc5be3ebd32130a3e76483af07237f037a69"
+  },
+  {
+    "path": "Admin/frontend/src/components/ConnectorsTable.tsx",
+    "sha256": "f0eda57be8eb6d31b97663ac3dc75ab00a7a61e40199233ba9ee80f4ee53800c",
+    "fixture_sha256": "f0eda57be8eb6d31b97663ac3dc75ab00a7a61e40199233ba9ee80f4ee53800c"
+  },
+  {
+    "path": "Admin/frontend/src/components/DatabaseHealthCard.tsx",
+    "sha256": "d85ed641c41b39cfc1295a45e813a4606b8712f13d07b97ede9fb6c11e672b87",
+    "fixture_sha256": "d85ed641c41b39cfc1295a45e813a4606b8712f13d07b97ede9fb6c11e672b87"
+  },
+  {
+    "path": "Admin/frontend/src/components/FeedbackTable.tsx",
+    "sha256": "c16f5e053a892070a620260a981fd50b4c311519ff91c54982c394792aa3bce4",
+    "fixture_sha256": "c16f5e053a892070a620260a981fd50b4c311519ff91c54982c394792aa3bce4"
+  },
+  {
+    "path": "Admin/frontend/src/components/Footer.tsx",
+    "sha256": "ea3cd31ec6b77dc35af2dbb728fa960bb28474fdab5b83426cdb99b53abee2ea",
+    "fixture_sha256": "ea3cd31ec6b77dc35af2dbb728fa960bb28474fdab5b83426cdb99b53abee2ea"
+  },
+  {
+    "path": "Admin/frontend/src/components/Header.tsx",
+    "sha256": "60e86d7a01f1759da5bd1c92ac4a4f44245280cce404baff08c0599c80b96888",
+    "fixture_sha256": "60e86d7a01f1759da5bd1c92ac4a4f44245280cce404baff08c0599c80b96888"
+  },
+  {
+    "path": "Admin/frontend/src/components/HealthOverviewCards.tsx",
+    "sha256": "95b394a5c2399468c0ed3d35a9f8cbd377ce43644ef57edd5d14d071c06f4da8",
+    "fixture_sha256": "95b394a5c2399468c0ed3d35a9f8cbd377ce43644ef57edd5d14d071c06f4da8"
+  },
+  {
+    "path": "Admin/frontend/src/components/Incidents.tsx",
+    "sha256": "16bb61ead8eb8bad9b2fac0fd1bb300d33f7a0376b486cd9e19fa635e794e4af",
+    "fixture_sha256": "16bb61ead8eb8bad9b2fac0fd1bb300d33f7a0376b486cd9e19fa635e794e4af"
+  },
+  {
+    "path": "Admin/frontend/src/components/LiveCalls.tsx",
+    "sha256": "cdb3ee2ed466d3c80a11bd613886dfc979dde93e7ceda09a851321f4f89149fa",
+    "fixture_sha256": "cdb3ee2ed466d3c80a11bd613886dfc979dde93e7ceda09a851321f4f89149fa"
+  },
+  {
+    "path": "Admin/frontend/src/components/LiveCallsTable.tsx",
+    "sha256": "630cb0a68878e462318e4a00185552bd705297a39301a781473b26779a170e15",
+    "fixture_sha256": "630cb0a68878e462318e4a00185552bd705297a39301a781473b26779a170e15"
+  },
+  {
+    "path": "Admin/frontend/src/components/QueueDepthChart.tsx",
+    "sha256": "0a2832dc0b3b3e3608821156aa1f1a8dda7dc54eb55e612beac63035cbb40e73",
+    "fixture_sha256": "0a2832dc0b3b3e3608821156aa1f1a8dda7dc54eb55e612beac63035cbb40e73"
+  },
+  {
+    "path": "Admin/frontend/src/components/QuotaUsage.tsx",
+    "sha256": "9e3048170d1cfa5cfd3cfa75a982a75c263fe87aa7170c89e3728fb4618087dd",
+    "fixture_sha256": "9e3048170d1cfa5cfd3cfa75a982a75c263fe87aa7170c89e3728fb4618087dd"
+  },
+  {
+    "path": "Admin/frontend/src/components/RecordingsTable.tsx",
+    "sha256": "042626124571ff2bb8f8ac37b24a2e98b70f6161567701845ee60b1b52000acc",
+    "fixture_sha256": "042626124571ff2bb8f8ac37b24a2e98b70f6161567701845ee60b1b52000acc"
+  },
+  {
+    "path": "Admin/frontend/src/components/Sidebar.tsx",
+    "sha256": "70ea22baca7d51e5f372011f4e565043a122c0f46cab1106726d99dca8e63495",
+    "fixture_sha256": "70ea22baca7d51e5f372011f4e565043a122c0f46cab1106726d99dca8e63495"
+  },
+  {
+    "path": "Admin/frontend/src/components/StatsGrid.tsx",
+    "sha256": "a0864dec2993c54fac9d4704b5055cbdf39ace48b77b1b8fd2e6fe539a66a1c8",
+    "fixture_sha256": "a0864dec2993c54fac9d4704b5055cbdf39ace48b77b1b8fd2e6fe539a66a1c8"
+  },
+  {
+    "path": "Admin/frontend/src/components/SystemHealth.tsx",
+    "sha256": "38b71ca56d566a5f1fcf12c3533ccf0c040d8052a34ca814edff8f9d772e6478",
+    "fixture_sha256": "38b71ca56d566a5f1fcf12c3533ccf0c040d8052a34ca814edff8f9d772e6478"
+  },
+  {
+    "path": "Admin/frontend/src/components/TenantsTable.tsx",
+    "sha256": "c4cfab1767c3bc0a9641a39d182d4e6381cc36ff458922e16bd646cc4700569c",
+    "fixture_sha256": "c4cfab1767c3bc0a9641a39d182d4e6381cc36ff458922e16bd646cc4700569c"
+  },
+  {
+    "path": "Admin/frontend/src/components/TopTenantsList.tsx",
+    "sha256": "37043d6018c377178273e696efcc5cfda870d15de6a6b936fc9a601d0c689ab3",
+    "fixture_sha256": "37043d6018c377178273e696efcc5cfda870d15de6a6b936fc9a601d0c689ab3"
+  },
+  {
+    "path": "Admin/frontend/src/components/TopTenantsPanel.tsx",
+    "sha256": "dbb74339efc2da3fad05237d1823a969a67beda7a65fdb159305d5170d140468",
+    "fixture_sha256": "dbb74339efc2da3fad05237d1823a969a67beda7a65fdb159305d5170d140468"
+  },
+  {
+    "path": "Admin/frontend/src/components/UsageBreakdownCard.tsx",
+    "sha256": "655ebaaebf6a2f6d43484c07df227c9a80d929ee4f31ac56914f65a348f5ffb1",
+    "fixture_sha256": "655ebaaebf6a2f6d43484c07df227c9a80d929ee4f31ac56914f65a348f5ffb1"
+  },
+  {
+    "path": "Admin/frontend/src/components/WorkerStatusTable.tsx",
+    "sha256": "338b872aef5e8c0997124793d84762d5b7498b60450acbe95c3f64a99b0122bc",
+    "fixture_sha256": "338b872aef5e8c0997124793d84762d5b7498b60450acbe95c3f64a99b0122bc"
+  },
+  {
+    "path": "Admin/frontend/src/index.css",
+    "sha256": "88816565faf17ee9f18c031f7af98ae6b5167a8cd14353367970b0b1c68e7417",
+    "fixture_sha256": "88816565faf17ee9f18c031f7af98ae6b5167a8cd14353367970b0b1c68e7417"
+  },
+  {
+    "path": "Admin/frontend/src/lib/api.ts",
+    "sha256": "7bc0ca33bef3f86775c95b3f95174a4624e324c8281cb24387bff0f8a04bd188",
+    "fixture_sha256": "7bc0ca33bef3f86775c95b3f95174a4624e324c8281cb24387bff0f8a04bd188"
+  },
+  {
+    "path": "Admin/frontend/src/lib/auth.tsx",
+    "sha256": "ced0d006cf3ef911be9c06cd5ecc0a2fe4f0c8e6b433399281bc730c2934d4e2",
+    "fixture_sha256": "ced0d006cf3ef911be9c06cd5ecc0a2fe4f0c8e6b433399281bc730c2934d4e2"
+  },
+  {
+    "path": "Admin/frontend/src/lib/call-cost.ts",
+    "sha256": "466061b35c5907d7e14373de3ddc80871385d4bae8d13bbb76b14dfe68dff35c",
+    "fixture_sha256": "466061b35c5907d7e14373de3ddc80871385d4bae8d13bbb76b14dfe68dff35c"
+  },
+  {
+    "path": "Admin/frontend/src/lib/call-termination.ts",
+    "sha256": "55667e99e93dd72475801dd93cdc9d29ee6a899b06a59e21cb5d7547aefeaa7b",
+    "fixture_sha256": "55667e99e93dd72475801dd93cdc9d29ee6a899b06a59e21cb5d7547aefeaa7b"
+  },
+  {
+    "path": "Admin/frontend/src/lib/passkeys.ts",
+    "sha256": "3387563f5dfc1ac23a5abd6a46291089ebacb3ac15178393823e3bde77ba1387",
+    "fixture_sha256": "3387563f5dfc1ac23a5abd6a46291089ebacb3ac15178393823e3bde77ba1387"
+  },
+  {
+    "path": "Admin/frontend/src/lib/usage-evidence.ts",
+    "sha256": "802aa055fefd07c1438009f7f8c13cb1f3bba75e0eeb4851ad8dfa376c3b102c",
+    "fixture_sha256": "802aa055fefd07c1438009f7f8c13cb1f3bba75e0eeb4851ad8dfa376c3b102c"
+  },
+  {
+    "path": "Admin/frontend/src/main.tsx",
+    "sha256": "baca4d80e64c2bc0650ed2e4c7f28823988732274899e53a977b2134ed000602",
+    "fixture_sha256": "baca4d80e64c2bc0650ed2e4c7f28823988732274899e53a977b2134ed000602"
+  },
+  {
+    "path": "Admin/frontend/src/pages/ActionsLogPage.tsx",
+    "sha256": "3a12fde5649d228f59a5b73599468c65eedfa6d0531ff835e90e8a846f38d55b",
+    "fixture_sha256": "3a12fde5649d228f59a5b73599468c65eedfa6d0531ff835e90e8a846f38d55b"
+  },
+  {
+    "path": "Admin/frontend/src/pages/ActionsPage.tsx",
+    "sha256": "5cadee2447b6cb4cc8fd692a02d6ecc7401c9374850acc77321f40bd078ba181",
+    "fixture_sha256": "5cadee2447b6cb4cc8fd692a02d6ecc7401c9374850acc77321f40bd078ba181"
+  },
+  {
+    "path": "Admin/frontend/src/pages/CallsPage.tsx",
+    "sha256": "aef49e989d7321129cf212752ce6ceff6d4a0906f5f85a7b68a60baac17d304c",
+    "fixture_sha256": "aef49e989d7321129cf212752ce6ceff6d4a0906f5f85a7b68a60baac17d304c"
+  },
+  {
+    "path": "Admin/frontend/src/pages/CommandCenterPage.tsx",
+    "sha256": "50485c33a6857e62010825060536162e360b6e973c9c856acf8ce8bad559cd92",
+    "fixture_sha256": "50485c33a6857e62010825060536162e360b6e973c9c856acf8ce8bad559cd92"
+  },
+  {
+    "path": "Admin/frontend/src/pages/ConnectorsPage.tsx",
+    "sha256": "f8684be46fb96343a810215d7ba546aaa9ecad45e87e5958da55c562152aebb5",
+    "fixture_sha256": "f8684be46fb96343a810215d7ba546aaa9ecad45e87e5958da55c562152aebb5"
+  },
+  {
+    "path": "Admin/frontend/src/pages/ContactEnquiriesPage.tsx",
+    "sha256": "e9cc231aeac3965be598c6cf57bed9deea03c25ca6da231dfe3a99d1b38b66dd",
+    "fixture_sha256": "e9cc231aeac3965be598c6cf57bed9deea03c25ca6da231dfe3a99d1b38b66dd"
+  },
+  {
+    "path": "Admin/frontend/src/pages/InboundControlPage.tsx",
+    "sha256": "e7912ef62834a62821d966213bab10a06a2f54700eb5d83338fe2e7e9173626f",
+    "fixture_sha256": "e7912ef62834a62821d966213bab10a06a2f54700eb5d83338fe2e7e9173626f"
+  },
+  {
+    "path": "Admin/frontend/src/pages/IncidentsPage.tsx",
+    "sha256": "f5279105aeb80d0b4a073d098fce6ff0f9e8c4b7df84849fce63bf26238157e6",
+    "fixture_sha256": "f5279105aeb80d0b4a073d098fce6ff0f9e8c4b7df84849fce63bf26238157e6"
+  },
+  {
+    "path": "Admin/frontend/src/pages/LoginPage.tsx",
+    "sha256": "0e972d03d9e855707690298132925b18f4806b7de75cfaf3d63b431b1069b2e2",
+    "fixture_sha256": "0e972d03d9e855707690298132925b18f4806b7de75cfaf3d63b431b1069b2e2"
+  },
+  {
+    "path": "Admin/frontend/src/pages/SystemConfigPage.tsx",
+    "sha256": "d3971494a115fafaa6320a88ee54cba08f0d61bce1845414608ec53c0764d0c0",
+    "fixture_sha256": "d3971494a115fafaa6320a88ee54cba08f0d61bce1845414608ec53c0764d0c0"
+  },
+  {
+    "path": "Admin/frontend/src/pages/SystemHealthPage.tsx",
+    "sha256": "232bd656f5ec4026692a9a0933a45f0a222506390a2a90771f65652b3e893b3e",
+    "fixture_sha256": "232bd656f5ec4026692a9a0933a45f0a222506390a2a90771f65652b3e893b3e"
+  },
+  {
+    "path": "Admin/frontend/src/pages/TenantsPage.tsx",
+    "sha256": "d7d4fa95c0ff64dd5c14059b2779f4de23ec61ef247dbed85dea08f65681a35a",
+    "fixture_sha256": "d7d4fa95c0ff64dd5c14059b2779f4de23ec61ef247dbed85dea08f65681a35a"
+  },
+  {
+    "path": "Admin/frontend/src/pages/UsageCostPage.tsx",
+    "sha256": "4a8d2ff5ed5472182ecdd83725830ac0d6f430215537ee39bd23114f6216999d",
+    "fixture_sha256": "4a8d2ff5ed5472182ecdd83725830ac0d6f430215537ee39bd23114f6216999d"
+  },
+  {
+    "path": "Admin/frontend/src/pages/UsersPage.tsx",
+    "sha256": "890a4a8b76b7c5a3695011042510f7cacf95ca8127df7db6d8124e95a3e12230",
+    "fixture_sha256": "890a4a8b76b7c5a3695011042510f7cacf95ca8127df7db6d8124e95a3e12230"
+  },
+  {
+    "path": "Admin/frontend/src/styles/system-health.css",
+    "sha256": "750cb2fc58f519e7f5df0527df7f4c6e5b991d0f678abb4ceaaa2649a3efb4ed",
+    "fixture_sha256": "750cb2fc58f519e7f5df0527df7f4c6e5b991d0f678abb4ceaaa2649a3efb4ed"
+  },
+  {
+    "path": "Admin/frontend/package.json",
+    "sha256": "07385e37fb2f39cb38be8d34a21e7fab9c5b1ffc97edd034e27642b461b06541",
+    "fixture_sha256": "07385e37fb2f39cb38be8d34a21e7fab9c5b1ffc97edd034e27642b461b06541"
+  },
+  {
+    "path": "Admin/frontend/package-lock.json",
+    "sha256": "3127da2910e4f01f2a9eb6b1e3659500203db7e0e00be00bc15ba6c17ff824f7",
+    "fixture_sha256": "3127da2910e4f01f2a9eb6b1e3659500203db7e0e00be00bc15ba6c17ff824f7"
+  },
+  {
+    "path": "Admin/frontend/tests/action-recovery-react-dom.test.mjs",
+    "sha256": "5896cf7208ae421541ee256472edb650ab7c2b46ce4c461f438fd15ec19406f7",
+    "fixture_sha256": "5896cf7208ae421541ee256472edb650ab7c2b46ce4c461f438fd15ec19406f7"
+  },
+  {
+    "path": "Admin/frontend/tsconfig.json",
+    "sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808",
+    "fixture_sha256": "770b4140bbb581e2dfd9ea9946ffc9c75a1d86ba7d2db5f77c83e37cbdf9d808"
+  },
+  {
+    "path": "Admin/frontend/tsconfig.app.json",
+    "sha256": "922bc5bfb41bdc0768023b2487d54b3ae23c587d999024d4f32cde879ae6f4d8",
+    "fixture_sha256": "922bc5bfb41bdc0768023b2487d54b3ae23c587d999024d4f32cde879ae6f4d8"
+  },
+  {
+    "path": "Admin/frontend/tsconfig.node.json",
+    "sha256": "c3dd0fb522feba3596713f51b95bd53d781d845d24aedbfa2ac093d8b39c5120",
+    "fixture_sha256": "c3dd0fb522feba3596713f51b95bd53d781d845d24aedbfa2ac093d8b39c5120"
+  },
+  {
+    "path": "Admin/frontend/eslint.config.js",
+    "sha256": "4efe97b16d1200fac0eaf07aa00930a8668b1f96a0be1891ace8c1e712ff0ccb",
+    "fixture_sha256": "4efe97b16d1200fac0eaf07aa00930a8668b1f96a0be1891ace8c1e712ff0ccb"
+  },
+  {
+    "path": "Admin/frontend/vite.config.ts",
+    "sha256": "a6c7a8f58ae589baffce12d685e07e07704280b8c164a6eedb2c105b3d0af4a9",
+    "fixture_sha256": "a6c7a8f58ae589baffce12d685e07e07704280b8c164a6eedb2c105b3d0af4a9"
+  },
+  {
+    "path": "Admin/frontend/index.html",
+    "sha256": "6009eb672b3a50f43ab75d3215c4c072eea85f8cbd4c677b6f25401078b793b0",
+    "fixture_sha256": "6009eb672b3a50f43ab75d3215c4c072eea85f8cbd4c677b6f25401078b793b0"
+  }
+]

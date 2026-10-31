@@ -43,6 +43,7 @@ class DialerQueueService:
     PRIORITY_QUEUE = "dialer:priority:queue"
     TENANT_QUEUE_PREFIX = "dialer:tenant:{tenant_id}:queue"
     SCHEDULED_ZSET = "dialer:scheduled"
+    RETRY_IDEMPOTENCY_PREFIX = "dialer:retry-dispatch:"
     PROCESSING_ZSET = "dialer:processing"
     # Durable in-flight store (BUG 1 crash-safety). A job is moved OUT of its
     # queue and INTO this list in a SINGLE atomic LMOVE, so a worker that dies
@@ -142,6 +143,38 @@ class DialerQueueService:
             logger.error(f"Failed to connect to Redis: {e}")
             raise
     
+    async def schedule_job_once(self, job: DialerJob, *, idempotency_key: str) -> bool:
+        """Publish an already-persisted callback with exact time and attempt 1.
+
+        The durable assistant action retries this handoff using the same key;
+        the marker and delayed member become visible in one Redis transaction.
+        """
+        if not self._initialized:
+            await self.initialize()
+        if not idempotency_key:
+            return False
+        script = """
+            local marker_type = redis.call('TYPE', KEYS[1]).ok
+            local schedule_type = redis.call('TYPE', KEYS[2]).ok
+            if marker_type ~= 'none' and marker_type ~= 'string' then
+                return redis.error_reply('callback marker has wrong type')
+            end
+            if schedule_type ~= 'none' and schedule_type ~= 'zset' then
+                return redis.error_reply('callback schedule has wrong type')
+            end
+            if redis.call('EXISTS', KEYS[1]) == 1 then return 0 end
+            redis.call('ZADD', KEYS[2], ARGV[1], ARGV[2])
+            redis.call('SET', KEYS[1], ARGV[2])
+            return 1
+        """
+        try:
+            await self._redis.eval(script, 2, self.RETRY_IDEMPOTENCY_PREFIX + idempotency_key,
+                self.SCHEDULED_ZSET, job.scheduled_at.timestamp(), json.dumps(job.to_redis_dict()))
+            return True
+        except Exception:
+            logger.warning("callback_schedule_handoff_failed job=%s", job.job_id)
+            return False
+
     async def enqueue_job(self, job: DialerJob) -> bool:
         """
         Enqueue a dialer job.
@@ -379,6 +412,133 @@ class DialerQueueService:
         except Exception as e:
             logger.error(f"Failed to schedule retry for job {job.job_id}: {e}")
             return False
+
+    async def schedule_retry_once(
+        self,
+        job: DialerJob,
+        *,
+        delay_seconds: int,
+        idempotency_key: str,
+    ) -> bool:
+        """Atomically enqueue one durable terminal-settlement retry.
+
+        PostgreSQL's call-settlement outbox may replay after a Redis success
+        when the subsequent DB acknowledgement was interrupted. A plain ZADD
+        is not idempotent here because its member is the serialized job (and
+        contains a jittered timestamp). This Lua transaction binds a stable
+        idempotency key and the exact ZSET member in one Redis script. The
+        script validates both key types before its first write, then makes the
+        marker and schedule visible atomically. Replays report success without
+        adding a second delayed job.
+        """
+
+        if not self._initialized:
+            await self.initialize()
+        if not idempotency_key or not str(idempotency_key).strip():
+            logger.error("schedule_retry_once requires an idempotency key")
+            return False
+
+        try:
+            job.attempt_number += 1
+            job.status = JobStatus.RETRY_SCHEDULED
+            jitter = random.uniform(0, min(delay_seconds * 0.25, 15.0))
+            effective_delay = delay_seconds + jitter
+            now = datetime.now(timezone.utc)
+            job.scheduled_at = now + timedelta(seconds=effective_delay)
+            execute_at = now.timestamp() + effective_delay
+            job_data = json.dumps(job.to_redis_dict())
+
+            marker_key = (
+                self.RETRY_IDEMPOTENCY_PREFIX + str(idempotency_key).strip()
+            )
+            script = """
+                local marker_type = redis.call('TYPE', KEYS[1]).ok
+                local schedule_type = redis.call('TYPE', KEYS[2]).ok
+                if marker_type ~= 'none' and marker_type ~= 'string' then
+                    return redis.error_reply('retry marker has wrong type')
+                end
+                if schedule_type ~= 'none' and schedule_type ~= 'zset' then
+                    return redis.error_reply('retry schedule has wrong type')
+                end
+                if redis.call('EXISTS', KEYS[1]) == 1 then
+                    return 0
+                end
+                redis.call('ZADD', KEYS[2], ARGV[1], ARGV[2])
+                redis.call('SET', KEYS[1], ARGV[2])
+                return 1
+            """
+            inserted = await self._redis.eval(
+                script,
+                2,
+                marker_key,
+                self.SCHEDULED_ZSET,
+                execute_at,
+                job_data,
+            )
+
+            # The schedule is already durable at this point. In-flight cleanup
+            # is idempotent and best effort; a stale-processing reaper can also
+            # repair it, while returning False here would cause needless DB
+            # outbox retention despite the retry being safely queued.
+            try:
+                await self._untrack_inflight(job.job_id)
+                await self._redis.zrem(self.PROCESSING_ZSET, job.job_id)
+            except Exception as cleanup_exc:  # noqa: BLE001
+                logger.warning(
+                    "schedule_retry_once cleanup deferred job=%s err=%s",
+                    job.job_id,
+                    cleanup_exc,
+                )
+
+            logger.info(
+                "Scheduled idempotent retry for job %s attempt=%s in %ss (%s)",
+                job.job_id,
+                job.attempt_number,
+                delay_seconds,
+                "inserted" if int(inserted or 0) == 1 else "replayed",
+            )
+            return True
+        except Exception as exc:  # noqa: BLE001 - caller retains DB outbox
+            logger.error(
+                "Failed idempotent retry schedule for job %s: %s",
+                job.job_id,
+                exc,
+            )
+            return False
+
+    async def confirm_retry_once(
+        self,
+        idempotency_key: str,
+        *,
+        retention_seconds: int = 90 * 24 * 3600,
+    ) -> bool:
+        """Age an idempotency marker only after PostgreSQL acks enqueue.
+
+        Before the database outbox acknowledgement the marker has no expiry:
+        an arbitrarily long database outage must not permit a second queued
+        retry. Once CallService durably records ``terminal_retry_enqueued_at``,
+        keeping the marker for 90 days is sufficient audit/replay protection
+        without leaking one Redis key forever for every historical attempt.
+        This cleanup is best effort and never changes enqueue durability.
+        """
+
+        if not idempotency_key or not str(idempotency_key).strip():
+            return False
+        marker_key = self.RETRY_IDEMPOTENCY_PREFIX + str(idempotency_key).strip()
+        try:
+            return bool(
+                await self._redis.expire(
+                    marker_key,
+                    max(1, int(retention_seconds)),
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - marker may safely linger
+            logger.debug(
+                "retry idempotency retention update failed key=%s err=%s",
+                str(idempotency_key)[:48],
+                exc,
+            )
+            return False
     
     async def process_scheduled_jobs(self) -> int:
         """
@@ -510,11 +670,14 @@ class DialerQueueService:
         except Exception as exc:  # noqa: BLE001
             logger.debug("untrack_inflight failed job=%s err=%s", job_id, exc)
 
-    async def _redefer_inflight(self, job_id: str, reason: str) -> bool:
-        """Non-destructively re-schedule a paused/quota-blocked job.
+    async def _redefer_inflight(
+        self, job_id: str, reason: str, *, delay_seconds: int | None = None,
+        scheduled_at: datetime | None = None,
+    ) -> bool:
+        """Non-destructively re-schedule a held job without a new attempt.
 
         Reads the ORIGINAL payload from the inflight index, re-schedules it into
-        the scheduled ZSET after a short delay (WITHOUT bumping attempt_number —
+        the scheduled ZSET after the selected delay (WITHOUT bumping attempt_number —
         this is a defer, not a retry, so it never burns the retry budget), and
         clears the inflight tracking. Returns True if the job was re-deferred,
         False if there was no inflight copy to recover.
@@ -525,8 +688,10 @@ class DialerQueueService:
                 return False
             job = DialerJob.from_redis_dict(json.loads(payload))
             job.status = JobStatus.PENDING
-            delay = self._pause_redefer_seconds()
-            execute_at = datetime.now(timezone.utc).timestamp() + delay
+            delay = (self._pause_redefer_seconds() if delay_seconds is None
+                     else max(1, int(delay_seconds)))
+            execute_at = (scheduled_at.timestamp() if scheduled_at is not None
+                          else datetime.now(timezone.utc).timestamp() + delay)
             new_payload = json.dumps(job.to_redis_dict())
             await self._redis.zadd(self.SCHEDULED_ZSET, {new_payload: execute_at})
             # Only now drop the inflight copy — the lead is safely staged in the
@@ -789,24 +954,19 @@ class DialerQueueService:
         if not entries:
             return 0
 
-        kept_entries: list[str] = []
+        # Remove only the matching entries, one atomic LREM each. The previous
+        # LRANGE + DELETE + RPUSH rewrite dropped any job pushed after the
+        # snapshot and re-delivered any job a worker had already popped.
         removed = 0
         for entry in entries:
             try:
                 payload = json.loads(entry)
             except Exception:
-                kept_entries.append(entry)
                 continue
 
             if payload.get("campaign_id") == campaign_id:
-                removed += 1
-            else:
-                kept_entries.append(entry)
-
-        if removed:
-            await self._redis.delete(key)
-            if kept_entries:
-                await self._redis.rpush(key, *kept_entries)
+                if await self._redis.lrem(key, 1, entry):
+                    removed += 1
 
         return removed
 
@@ -850,6 +1010,60 @@ class DialerQueueService:
         except Exception as exc:  # noqa: BLE001
             logger.debug("remove_campaign_inflight failed campaign=%s err=%s", campaign_id, exc)
         return removed
+
+    async def find_present_job_ids(
+        self, tenant_id: str, job_ids: List[str]
+    ) -> Optional[set]:
+        """Read-only: which of ``job_ids`` still have a payload anywhere in Redis.
+
+        Looks in the scheduled set, the priority queue, the tenant's queue and
+        the in-flight list/index/processing set (read in reverse pipeline order
+        so a payload moving forward between reads is still seen). Only payloads
+        whose ``tenant_id`` matches are counted. Returns ``None`` when presence
+        cannot be established (Redis error) so callers fail closed.
+        """
+        wanted = {str(j) for j in job_ids if j}
+        if not wanted:
+            return set()
+        if not self._initialized:
+            await self.initialize()
+        tenant = str(tenant_id)
+        found: set = set()
+
+        def _note(raw) -> None:
+            try:
+                payload = json.loads(raw)
+            except Exception:  # noqa: BLE001
+                return
+            if (
+                isinstance(payload, dict)
+                and str(payload.get("job_id")) in wanted
+                and str(payload.get("tenant_id")) == tenant
+            ):
+                found.add(str(payload.get("job_id")))
+
+        try:
+            for raw in await self._redis.zrange(self.SCHEDULED_ZSET, 0, -1) or []:
+                _note(raw)
+            for key in (
+                self.PRIORITY_QUEUE,
+                self.TENANT_QUEUE_PREFIX.format(tenant_id=tenant),
+            ):
+                for raw in await self._redis.lrange(key, 0, -1) or []:
+                    _note(raw)
+            for raw in await self._redis.lrange(self.INFLIGHT_LIST, 0, -1) or []:
+                _note(raw)
+            index = await self._redis.hgetall(self.INFLIGHT_HASH) or {}
+            for raw in index.values() if isinstance(index, dict) else []:
+                _note(raw)
+            for member in await self._redis.zrange(self.PROCESSING_ZSET, 0, -1) or []:
+                member = member.decode() if isinstance(member, bytes) else str(member)
+                if member in wanted:
+                    found.add(member)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("find_present_job_ids failed tenant=%s err=%s", tenant, exc)
+            return None
+        return found
 
     async def close(self) -> None:
         """Close Redis connection."""

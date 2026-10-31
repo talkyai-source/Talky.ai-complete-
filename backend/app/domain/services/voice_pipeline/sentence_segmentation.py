@@ -10,6 +10,8 @@ inter-token stall guard to expire — shaving perceived latency.
 """
 from __future__ import annotations
 
+from collections.abc import Iterable
+
 # Coordinating conjunctions that mark a clause boundary right after a comma.
 # Trailing space avoids matching "and" inside a word.
 CLAUSE_CONJUNCTIONS = ("and ", "but ", "so ", "or ", "yet ", "nor ")
@@ -28,7 +30,20 @@ COMMON_ABBREVIATIONS = {
     "etc",
     "e.g",
     "i.e",
+    "a.m",
+    "p.m",
+    "approx",
+    "inc",
+    "ltd",
 }
+
+# Abbreviations that are always followed by a name or number, so a period after
+# them is never a sentence end ("Dr. Patel", "12 St. James Street").
+_NEVER_TERMINAL = {"mr", "mrs", "ms", "dr", "prof", "sr", "jr", "st", "vs", "e.g", "i.e"}
+
+# Abbreviations that can also close a sentence ("...at 5 p.m. Thanks."). Mid
+# buffer they end one only when the next word starts a new sentence.
+_TERMINAL_CAPABLE = {"etc", "a.m", "p.m", "approx", "inc", "ltd", "no"}
 
 
 def is_terminal_period_boundary(text: str, index: int) -> bool:
@@ -42,10 +57,91 @@ def is_terminal_period_boundary(text: str, index: int) -> bool:
         return False
     if len(token) == 1 and token.isalpha() and token.isupper():
         return False
+    # A lone lowercase letter plus a period is the start of "a.m." / "p.m." /
+    # "e.g." arriving token by token; wait for the rest instead of speaking "9 a."
+    if len(token) == 1 and token.isalpha() and token.islower():
+        return False
     return True
 
 
-def find_sentence_end(text: str, allow_clause: bool = False) -> int:
+def _period_space_ends_sentence(text: str, index: int) -> bool:
+    """True when the '. ' at ``index`` ends a sentence.
+
+    ``find_sentence_end`` used to return on any '. ' mid-buffer, so "Dr. Patel",
+    "12 St. James Street" and "9 a.m. to 5 p.m." were each spoken as separate
+    utterances. Titles and initials never end one; sentence-capable
+    abbreviations do only when an uppercase word follows ("at 5 p.m. Thanks.").
+    """
+    prefix = text[:index].rstrip()
+    if not prefix:
+        return True
+    token = prefix.rsplit(maxsplit=1)[-1].strip("\"'([{")
+    lowered = token.lower()
+    rest = text[index + 1:].lstrip()
+    if lowered in _NEVER_TERMINAL:
+        return False
+    # Initials: "J. Smith". The pronoun "I" is a real sentence end.
+    if len(token) == 1 and token.isalpha() and token.isupper() and token != "I":
+        return False
+    if lowered in _TERMINAL_CAPABLE:
+        # Nothing after the space yet: wait, as the end-of-buffer rule does.
+        return bool(rest) and rest[0].isalpha() and rest[0].isupper()
+    return True
+
+
+def _is_missing_space_boundary(text: str, index: int) -> bool:
+    """True when the terminator at ``index`` ends a sentence with no space after.
+
+    The model writes turn boundaries with no separator - "...best option?Yes."
+    - and every splitter here required whitespace after the terminator, so a
+    whole fabricated exchange counted as one sentence and neither the stream
+    nor the cap could break it (call c01404ba, 2026-09-22).
+
+    '?' and '!' are unambiguous: no English construction puts a letter hard
+    against them mid-sentence. A '.' is a boundary only before an UPPERCASE
+    letter, and only when the abbreviation guard agrees, so "Mr.Smith",
+    "e.g.Something", initials and decimals are left alone.
+    """
+    nxt = text[index + 1] if index + 1 < len(text) else ""
+    if not nxt.isalpha():
+        return False
+    if text[index] in "!?":
+        return True
+    if not nxt.isupper():
+        return False
+    if not is_terminal_period_boundary(text, index):
+        return False
+    prefix = text[:index].rstrip()
+    token = prefix.rsplit(maxsplit=1)[-1] if prefix else ""
+    return "." not in token
+
+
+def _period_has_address_context(text: str, index: int, known_hosts: tuple[str, ...]) -> bool:
+    """Disambiguate ``.Upper`` only with a URL marker or a factual host.
+
+    A bare, unknown ``word.Upper`` is indistinguishable from the model's
+    fabricated turn boundary. Preserve that existing defense, without a TLD
+    catalog or a general URI parser. Prefix matching keeps a host together
+    while its uppercase suffix is still arriving; the complete address must
+    still pass the independent grounding check before speech.
+    """
+    start = index
+    while start and not text[start - 1].isspace() and text[start - 1] not in "\"'“”‘’()[]{}<>,;":
+        start -= 1
+    prefix = text[start:index + 2].casefold()
+    if prefix.startswith(("http://", "https://", "www.")):
+        return True
+    return any(
+        host.startswith(prefix)
+        or prefix.startswith(host + ".")
+        or prefix.startswith(host + "/")
+        for host in known_hosts
+    )
+
+
+def find_sentence_end(
+    text: str, allow_clause: bool = False, *, known_hosts: Iterable[str] = (),
+) -> int:
     """
     Return the index of the first sentence-ending character.
 
@@ -65,13 +161,22 @@ def find_sentence_end(text: str, allow_clause: bool = False) -> int:
 
         Only activates when the buffer is long enough that we know we are
         stuck waiting — short responses still flush on hard punctuation.
+
+    known_hosts:
+        Factual URL hosts, refreshed from current knowledge evidence by the
+        caller. Together with explicit URL markers, these prevent an uppercase
+        address suffix from being mistaken for a fabricated caller turn.
+        Unknown bare ``word.Upper`` keeps the existing ambiguity defense.
     """
+    protected_hosts = tuple(str(host).casefold().strip(".") for host in known_hosts or () if host)
     clause_candidate = -1
     i = 0
     while i < len(text):
         ch = text[i]
         if ch in "!?":
             if i + 1 == len(text) or (i + 1 < len(text) and text[i + 1] == " "):
+                return i
+            if _is_missing_space_boundary(text, i):
                 return i
         elif ch == ".":
             # Skip ellipsis: advance past ALL consecutive dots so the last
@@ -81,8 +186,20 @@ def find_sentence_end(text: str, allow_clause: bool = False) -> int:
                     i += 1
                 # After the ellipsis just continue scanning — don't return.
             elif i + 1 < len(text) and text[i + 1] == " ":
+                if _period_space_ends_sentence(text, i):
+                    return i
+            elif (
+                i + 1 == len(text)
+                # "1." / "£11." at the end of what has arrived may be half of
+                # a decimal: wait for the next token instead of speaking
+                # "one." and "five percent" (or "£11" and "99") separately.
+                and not (i > 0 and text[i - 1].isdigit())
+                and is_terminal_period_boundary(text, i)
+            ):
                 return i
-            elif i + 1 == len(text) and is_terminal_period_boundary(text, i):
+            elif _is_missing_space_boundary(text, i) and not _period_has_address_context(
+                text, i, protected_hosts,
+            ):
                 return i
         elif (
             allow_clause

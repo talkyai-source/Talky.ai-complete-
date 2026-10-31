@@ -1,0 +1,24 @@
+✔ registration and a successful old probe do not claim calling readiness (580.1753ms)
+✔ editing a saved trunk preserves credentials without asking for its password (666.3095ms)
+✔ switching to IP authentication clears credentials and registration together (463.3595ms)
+✔ changing username without a replacement password is blocked (421.9544ms)
+✔ delete explicitly disables first and retains the server conflict in the dialog (197.0157ms)
+✔ IP trunk can be ready without registration or credentials (71.1558ms)
+✔ an inbound-only IP trunk uses inbound proof despite an unanswered outbound probe (68.8731ms)
+✔ successful credential checks cannot enable production cloud activation (762.9989ms)
+✔ legacy saved cloud selection needs attention without changing the pointer or credentials (164.57ms)
+✔ unsaved provider cards still show backend unavailability (107.4472ms)
+✔ legacy response without availability never infers calling availability (147.534ms)
+✔ malformed availability cannot turn a false string into an enabled action (18.7747ms)
+✔ older successful check remains unspecified and never becomes route proof (97.9093ms)
+✔ a failed account timeout with null HTTP status does not hide saved settings (105.8525ms)
+✔ account and local SDK checks are distinguished from call readiness (126.2033ms)
+✔ explicit nonproduction activation is qualification only and does not promise routing (241.4558ms)
+ℹ tests 16
+ℹ suites 0
+ℹ pass 16
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 9107.7912

@@ -3,14 +3,22 @@ Security Events API Endpoints
 
 Management of high-priority security alerts requiring action.
 """
+import asyncio
 from datetime import datetime, timedelta
-from typing import Optional
+from typing import Annotated, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import get_audit_logger, get_db_pool, require_permissions
+from app.api.v1.endpoints.audit_logs import (
+    require_platform_partner_filter,
+    resolve_tenant_scope,
+    validate_read_bounds,
+)
+from app.core.db_utils import acquire_with_tenant
+from app.core.security.rbac import UserRole, normalize_role
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 router = APIRouter(prefix="/admin/security-events", tags=["Security Events"])
@@ -77,7 +85,7 @@ class SecurityEventResponse(BaseModel):
     tenant_id: Optional[UUID]
     user_id: Optional[UUID]
     title: str
-    description: str
+    description: Optional[str]
     detection_source: str
     evidence: Optional[dict]
     assigned_to: Optional[UUID]
@@ -90,17 +98,27 @@ class SecurityEventResponse(BaseModel):
 
 @router.get("/events", response_model=list[SecurityEventResponse])
 async def list_security_events(
-    status: Optional[str] = Query(None, enum=["open", "investigating", "resolved", "false_positive", "escalated"]),
-    severity: Optional[str] = Query(None, enum=["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]),
+    status: Optional[Literal["open", "investigating", "resolved", "false_positive", "escalated"]] = None,
+    severity: Optional[Literal["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]] = None,
     tenant_id: Optional[UUID] = None,
     assigned_to: Optional[UUID] = None,
     detection_source: Optional[str] = None,
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    event_type: Annotated[Optional[str], Query(max_length=50, description="Exact event type")] = None,
+    event_group: Optional[Literal["failed_login", "rate_limit_violation", "suspicious_activity"]] = None,
+    user_query: Annotated[Optional[str], Query(max_length=255, description="Literal current subject name/email or saved subject UUID")] = None,
+    partner_id: Annotated[Optional[UUID], Query(description="Platform only: current child tenant assignment")] = None,
+    start_date: Annotated[Optional[datetime], Query(description="Inclusive start, with timezone")] = None,
+    end_date: Annotated[Optional[datetime], Query(description="Inclusive end, with timezone")] = None,
+    before_time: Optional[datetime] = None,
+    before_id: Optional[UUID] = None,
     current_user: dict = Depends(require_permissions(["security:read"])),
     db_pool=Depends(get_db_pool),
 ):
-    """List security events with filters"""
+    """Read canonical raw rows; optional seek preserves live descending order."""
+    validate_read_bounds(start_date, end_date, before_time, before_id, offset)
+    require_platform_partner_filter(current_user, partner_id)
     conditions = []
     params = []
     param_idx = 1
@@ -122,14 +140,12 @@ async def list_security_events(
     # predicate is the only isolation there is.
     #
     # The param is kept as an operator convenience but is now VALIDATED, never
-    # trusted: it may only ever narrow to the caller's own tenant. Same
-    # validate-then-403 shape already used by GET /events/{id} in this file.
-    user_tenant_id = current_user.get("tenant_id")
-    if tenant_id and user_tenant_id and str(tenant_id) != str(user_tenant_id):
-        raise HTTPException(
-            status_code=403, detail="Cannot access other tenant events"
-        )
-    scoped_tenant_id = user_tenant_id or tenant_id
+    # trusted: for a tenant caller it may only ever narrow to their own tenant.
+    # A platform_admin is the cross-tenant role and may name any tenant (or
+    # none); a home tenant on their profile does not pin them.
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, tenant_id, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         conditions.append(f"tenant_id = ${param_idx}")
         params.append(scoped_tenant_id)
@@ -142,20 +158,70 @@ async def list_security_events(
         conditions.append(f"detection_source = ${param_idx}")
         params.append(detection_source)
         param_idx += 1
+    if event_type:
+        conditions.append(f"event_type = ${param_idx}")
+        params.append(event_type)
+        param_idx += 1
+    if event_group:
+        groups = {
+            "failed_login": ("failed_login", "failed_login_user_not_found", "failed_login_wrong_password", "account_lockout"),
+            "rate_limit_violation": ("rate_limit_violation", "rate_limit_exceeded"),
+            "suspicious_activity": ("suspicious_activity", "session_hijacking_detected"),
+        }
+        conditions.append(f"event_type = ANY(${param_idx}::text[])")
+        params.append(list(groups[event_group]))
+        param_idx += 1
+    if user_query and user_query.strip():
+        literal = user_query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        conditions.append(f"""(s.user_id::text ILIKE ${param_idx} OR EXISTS (
+            SELECT 1 FROM user_profiles p WHERE p.id=s.user_id
+            AND (p.name ILIKE ${param_idx} OR p.email ILIKE ${param_idx})))""")
+        params.append("%" + literal + "%")
+        param_idx += 1
+    if partner_id:
+        conditions.append(f"""EXISTS (SELECT 1 FROM tenants t WHERE t.id=s.tenant_id
+            AND t.white_label_partner_id=${param_idx})""")
+        params.append(partner_id)
+        param_idx += 1
+    if start_date is not None:
+        conditions.append(f"created_at >= ${param_idx}")
+        params.append(start_date)
+        param_idx += 1
+    if end_date is not None:
+        conditions.append(f"created_at <= ${param_idx}")
+        params.append(end_date)
+        param_idx += 1
+    if before_time is not None:
+        conditions.append(f"(created_at,event_id) < (${param_idx},${param_idx + 1})")
+        params.extend([before_time, before_id])
+        param_idx += 2
 
     where_clause = f"WHERE {' AND '.join(conditions)}" if conditions else ""
     query = f"""
-        SELECT *
-        FROM security_events
+        SELECT s.*
+        FROM security_events s
         {where_clause}
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC,event_id DESC
         LIMIT ${param_idx} OFFSET ${param_idx + 1}
     """
     params.extend([limit, offset])
 
-    async with db_pool.acquire() as conn:
-        rows = await conn.fetch(query, *params)
-    return [_row_to_response(row) for row in rows]
+    # A verified platform list can search current subjects in another tenant;
+    # the requested event tenant/partner remain explicit SQL predicates.
+    platform_read = normalize_role(current_user.get("role")) == UserRole.PLATFORM_ADMIN
+    try:
+        async with asyncio.timeout(5):
+            async with acquire_with_tenant(db_pool, None if platform_read else scoped_tenant_id) as conn:
+                rows = await conn.fetch(query, *params)
+            return [_row_to_response(row) for row in rows]
+    except asyncio.CancelledError:
+        raise
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={
+            "code": "security_events_unavailable", "message": "Security events are temporarily unavailable",
+        }) from exc
 
 
 @router.get("/events/{event_id}", response_model=SecurityEventResponse)
@@ -165,7 +231,11 @@ async def get_security_event(
     db_pool=Depends(get_db_pool),
 ):
     """Get a specific security event"""
-    async with db_pool.acquire() as conn:
+    user_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
+    # A platform operator may resolve an event before its tenant is known.
+    async with acquire_with_tenant(db_pool, user_tenant_id) as conn:
         row = await conn.fetchrow(
             "SELECT * FROM security_events WHERE event_id = $1",
             event_id,
@@ -175,7 +245,6 @@ async def get_security_event(
     # Compare as strings — asyncpg returns uuid columns as `uuid.UUID` while
     # current_user.tenant_id is a string from the JWT, so a direct `!=` would
     # always trip and 403 the legitimate owner.
-    user_tenant_id = current_user.get("tenant_id")
     if user_tenant_id and str(row["tenant_id"]) != str(user_tenant_id):
         raise HTTPException(status_code=403, detail="Cannot access other tenant events")
     return _row_to_response(row)
@@ -194,17 +263,11 @@ async def create_security_event(
     # could insert events attributed to ANY tenant — poisoning another
     # customer's security console, or burying a real event under noise.
     # The field may only narrow to the caller's own tenant.
-    _user_tenant_id = current_user.get("tenant_id")
-    if (
-        data.tenant_id
-        and _user_tenant_id
-        and str(data.tenant_id) != str(_user_tenant_id)
-    ):
-        raise HTTPException(
-            status_code=403, detail="Cannot access other tenant events"
-        )
-    scoped_tenant_id = _user_tenant_id or data.tenant_id
-    async with db_pool.acquire() as conn:
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, data.tenant_id, denied_detail="Cannot access other tenant events"
+    )
+    # A tenant-less platform operator may create a platform-level event.
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO security_events (
@@ -271,18 +334,18 @@ async def update_security_event(
     if not assignments:
         raise HTTPException(status_code=400, detail="No updates provided")
 
-    # Object-level authz: security_events has no RLS, so scope the mutation to
-    # the caller's tenant. A cross-tenant event_id then updates zero rows and
-    # returns not-found — indistinguishable from a nonexistent event. A caller
-    # with no tenant in their token (platform admin) stays unscoped, matching
-    # the read endpoints above.
+    # Keep the explicit tenant predicate as defence in depth alongside RLS. A
+    # cross-tenant event_id updates zero rows; a tenant-less platform admin is
+    # intentionally unscoped.
     params.append(event_id)
     tenant_clause = f"WHERE event_id = ${idx}"
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += f" AND tenant_id = ${idx + 1}"
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             f"""
             UPDATE security_events
@@ -320,15 +383,16 @@ async def resolve_security_event(
     db_pool=Depends(get_db_pool),
 ):
     """Mark a security event as resolved"""
-    # Scope to the caller's tenant so another tenant's event resolves as
-    # not-found rather than being mutated (security_events has no RLS).
+    # Keep the explicit tenant predicate as defence in depth alongside RLS.
     params = [datetime.utcnow(), current_user["id"], resolution_notes, event_id]
     tenant_clause = "WHERE event_id = $4"
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += " AND tenant_id = $5"
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             f"""
             UPDATE security_events
@@ -362,13 +426,15 @@ async def get_open_alerts(
     db_pool=Depends(get_db_pool),
 ):
     """Get open high-priority security alerts"""
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     params = []
     tenant_clause = ""
     if scoped_tenant_id:
         tenant_clause = "AND tenant_id = $1"
         params.append(scoped_tenant_id)
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         rows = await conn.fetch(
             f"""
             SELECT *
@@ -395,13 +461,15 @@ async def get_overdue_alerts(
     db_pool=Depends(get_db_pool),
 ):
     """Get alerts past their SLA deadline"""
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     params = [datetime.utcnow()]
     tenant_clause = ""
     if scoped_tenant_id:
         tenant_clause = "AND tenant_id = $2"
         params.append(scoped_tenant_id)
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         rows = await conn.fetch(
             f"""
             SELECT *
@@ -429,15 +497,16 @@ async def escalate_event(
     db_pool=Depends(get_db_pool),
 ):
     """Escalate a security event to senior team"""
-    # Scope to the caller's tenant so a cross-tenant event_id escalates zero
-    # rows and returns not-found (security_events has no RLS).
+    # Keep the explicit tenant predicate as defence in depth alongside RLS.
     params = [reason, event_id]
     tenant_clause = "WHERE event_id = $2"
-    scoped_tenant_id = current_user.get("tenant_id")
+    scoped_tenant_id = resolve_tenant_scope(
+        current_user, None, denied_detail="Cannot access other tenant events"
+    )
     if scoped_tenant_id:
         params.append(scoped_tenant_id)
         tenant_clause += " AND tenant_id = $3"
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(db_pool, scoped_tenant_id) as conn:
         row = await conn.fetchrow(
             f"""
             UPDATE security_events

@@ -118,7 +118,7 @@ def _account_response(*, expires_at, refresh="encrypted-refresh"):
 
 
 @pytest.mark.asyncio
-async def test_resolver_refreshes_inside_safety_margin_and_checks_writeback(monkeypatch):
+async def test_resolver_refreshes_inside_safety_margin_through_lifecycle(monkeypatch):
     expires_soon = (datetime.now(timezone.utc) + timedelta(seconds=30)).isoformat()
     db = _ScriptedDB(
         connectors=[_active_connector_response()],
@@ -141,12 +141,15 @@ async def test_resolver_refreshes_inside_safety_margin_and_checks_writeback(monk
     monkeypatch.setattr(connector_resolver, "get_encryption_service", lambda: _Encryption())
     monkeypatch.setattr(connector_resolver.ConnectorFactory, "create", lambda **_kwargs: connector)
 
+    from app.services import connector_lifecycle
+    refresh = AsyncMock(return_value=(OAuthTokens(access_token="new-access"), {"id": "account-1"}))
+    monkeypatch.setattr(connector_lifecycle, "ConnectorLifecycle", lambda _db, **_context: SimpleNamespace(refresh=refresh))
     resolved, _, _ = await connector_resolver.resolve_active_connector(db, "tenant-1", "email")
 
     assert resolved is connector
-    connector.refresh_tokens.assert_awaited_once_with("refresh-token")
+    refresh.assert_awaited_once_with("tenant-1", "connector-1", connector=connector, account_id="account-1")
     connector.set_access_token.assert_awaited_once_with("new-access")
-    assert db.operations[-1] == ("connector_accounts", "update")
+    assert db.operations[-1] == ("connector_accounts", "select")
 
 
 @pytest.mark.asyncio
@@ -181,6 +184,9 @@ async def test_resolver_writeback_failure_is_temporary_not_reconnect(monkeypatch
     monkeypatch.setattr(connector_resolver, "get_encryption_service", lambda: _Encryption())
     monkeypatch.setattr(connector_resolver.ConnectorFactory, "create", lambda **_kwargs: connector)
 
+    from app.services import connector_lifecycle
+    monkeypatch.setattr(connector_lifecycle, "ConnectorLifecycle", lambda _db, **_context: SimpleNamespace(
+        refresh=AsyncMock(side_effect=RuntimeError("synthetic database unavailable"))))
     with pytest.raises(connector_resolver.ConnectorLookupError) as caught:
         await connector_resolver.resolve_active_connector(db, "tenant-1", "email")
 
@@ -209,6 +215,9 @@ async def test_resolver_preserves_non_auth_refresh_category(monkeypatch):
     monkeypatch.setattr(connector_resolver, "get_encryption_service", lambda: _Encryption())
     monkeypatch.setattr(connector_resolver.ConnectorFactory, "create", lambda **_kwargs: connector)
 
+    from app.services import connector_lifecycle
+    monkeypatch.setattr(connector_lifecycle, "ConnectorLifecycle", lambda _db, **_context: SimpleNamespace(
+        refresh=AsyncMock(side_effect=provider_error)))
     with pytest.raises(ConnectorProviderError) as caught:
         await connector_resolver.resolve_active_connector(db, "tenant-1", "email")
 
@@ -286,8 +295,9 @@ async def test_read_emails_retries_one_401_after_forced_refresh(monkeypatch):
         message="invalid credentials",
         status_code=401,
     )
-    old = SimpleNamespace(list_emails=AsyncMock(side_effect=rejected))
+    old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", account_row_id="authorization-1", list_emails=AsyncMock(side_effect=rejected))
     refreshed = SimpleNamespace(
+        provider_name="gmail", external_account_id="account-1", account_row_id="authorization-1",
         list_emails=AsyncMock(
             return_value=[EmailMessage(id="m-1", subject="Hello", body="Preview")]
         )
@@ -310,7 +320,7 @@ async def test_read_emails_retries_one_401_after_forced_refresh(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_unrecoverable_401_downgrades_connector_status(monkeypatch):
+async def test_unrecoverable_401_without_generation_does_not_write_broad_status(monkeypatch):
     rejected = ConnectorProviderError(
         provider="gmail",
         operation="list_emails",
@@ -318,7 +328,7 @@ async def test_unrecoverable_401_downgrades_connector_status(monkeypatch):
         message="invalid credentials",
         status_code=401,
     )
-    old = SimpleNamespace(list_emails=AsyncMock(side_effect=rejected))
+    old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", account_row_id="authorization-1", list_emails=AsyncMock(side_effect=rejected))
     resolver = AsyncMock(
         side_effect=[
             (old, "connector-1", "gmail"),
@@ -341,8 +351,8 @@ async def test_unrecoverable_401_downgrades_connector_status(monkeypatch):
     assert result["success"] is False
     assert result["email_required"] is True
     assert result["error_code"] == "email_not_connected"
-    assert ("connector_accounts", "update") in db.operations
-    assert ("connectors", "update") in db.operations
+    # Connector ID alone cannot identify the rejected credential generation.
+    assert db.operations == []
 
 
 @pytest.mark.asyncio
@@ -368,7 +378,7 @@ async def test_local_connector_failure_does_not_expire_database_status(monkeypat
 
 
 @pytest.mark.asyncio
-async def test_401_then_same_connector_missing_refresh_marks_expired(monkeypatch):
+async def test_401_then_missing_refresh_without_generation_does_not_write_broad_status(monkeypatch):
     rejected = ConnectorProviderError(
         provider="gmail",
         operation="list_emails",
@@ -376,7 +386,7 @@ async def test_401_then_same_connector_missing_refresh_marks_expired(monkeypatch
         message="invalid access token",
         status_code=401,
     )
-    old = SimpleNamespace(list_emails=AsyncMock(side_effect=rejected))
+    old = SimpleNamespace(provider_name="gmail", external_account_id="account-1", account_row_id="authorization-1", list_emails=AsyncMock(side_effect=rejected))
     resolver = AsyncMock(
         side_effect=[
             (old, "connector-1", "gmail"),
@@ -397,8 +407,8 @@ async def test_401_then_same_connector_missing_refresh_marks_expired(monkeypatch
     result = await read_emails("tenant-1", db, max_results=5)
 
     assert result["error_code"] == "email_not_connected"
-    assert ("connector_accounts", "update") in db.operations
-    assert ("connectors", "update") in db.operations
+    # Connector ID alone cannot identify the rejected credential generation.
+    assert db.operations == []
 
 
 def test_status_health_rejects_missing_gmail_read_scope(monkeypatch):
@@ -548,6 +558,8 @@ async def test_oauth_callback_refuses_missing_gmail_scope_before_token_store(mon
         lambda _tenant_id: None,
     )
 
+    lifecycle = SimpleNamespace(begin_oauth=AsyncMock(), activate=AsyncMock(return_value={"id": "account-new"}), reject_pending=AsyncMock())
+    monkeypatch.setattr(connector_endpoints, "ConnectorLifecycle", lambda _db, **_context: lifecycle)
     response = await connector_endpoints.oauth_callback(
         Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
         state="state",
@@ -606,6 +618,8 @@ async def test_oauth_callback_refuses_gmail_when_live_capability_probe_fails(mon
         lambda _tenant_id: None,
     )
 
+    lifecycle = SimpleNamespace(begin_oauth=AsyncMock(), activate=AsyncMock(return_value={"id": "account-new"}), reject_pending=AsyncMock())
+    monkeypatch.setattr(connector_endpoints, "ConnectorLifecycle", lambda _db, **_context: lifecycle)
     response = await connector_endpoints.oauth_callback(
         Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
         state="state",
@@ -619,7 +633,7 @@ async def test_oauth_callback_refuses_gmail_when_live_capability_probe_fails(mon
 
 
 @pytest.mark.asyncio
-async def test_oauth_callback_activates_new_connector_before_retiring_old(monkeypatch):
+async def test_oauth_callback_delegates_verified_grant_to_atomic_activation(monkeypatch):
     state_data = {
         "tenant_id": "tenant-1",
         "user_id": "user-1",
@@ -671,6 +685,8 @@ async def test_oauth_callback_activates_new_connector_before_retiring_old(monkey
         lambda _tenant_id: None,
     )
 
+    lifecycle = SimpleNamespace(begin_oauth=AsyncMock(), activate=AsyncMock(return_value={"id": "account-new"}), reject_pending=AsyncMock())
+    monkeypatch.setattr(connector_endpoints, "ConnectorLifecycle", lambda _db, **_context: lifecycle)
     response = await connector_endpoints.oauth_callback(
         Request({"type": "http", "method": "GET", "path": "/", "headers": []}),
         state="state",
@@ -680,15 +696,13 @@ async def test_oauth_callback_activates_new_connector_before_retiring_old(monkey
     )
 
     assert "status=success" in response.headers["location"]
-    assert db.operations == [
-        ("connectors", "select"),
-        ("connector_accounts", "insert"),
-        ("connectors", "update"),
-        ("connector_accounts", "delete"),
-        ("connectors", "select"),
-        ("connectors", "update"),
-        ("connector_accounts", "delete"),
-    ]
+    assert db.operations == [("connectors", "select")]
+    lifecycle.activate.assert_awaited_once()
+    args = lifecycle.activate.await_args.args
+    assert args[:4] == ("tenant-1", "connector-new", "gmail", "email")
+    assert args[4]["access_token_encrypted"] == "encrypted:access"
+    assert args[4]["account_email"] == "owner@example.com"
+
 
 
 @pytest.mark.asyncio

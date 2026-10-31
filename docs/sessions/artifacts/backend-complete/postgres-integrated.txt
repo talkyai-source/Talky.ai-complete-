@@ -1,0 +1,56 @@
+............F.F......................................................... [ 17%]
+.......................................F................................ [ 35%]
+........................................................................ [ 52%]
+....................F................................................... [ 70%]
+........................................................................ [ 87%]
+..................................................                       [100%]
+================================== FAILURES ===================================
+__ test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts ___
+tests\integration\test_bootstrap_contract_repair.py:747: in test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts
+    assert (
+E   AssertionError: assert 286 == 3
+E    +  where 286 = <bound method Result.scalar_one of <sqlalchemy.engine.cursor.CursorResult object at 0x000001CE9D3D3E00>>()
+E    +    where <bound method Result.scalar_one of <sqlalchemy.engine.cursor.CursorResult object at 0x000001CE9D3D3E00>> = <sqlalchemy.engine.cursor.CursorResult object at 0x000001CE9D3D3E00>.scalar_one
+E    +      where <sqlalchemy.engine.cursor.CursorResult object at 0x000001CE9D3D3E00> = <bound method Connection.execute of <sqlalchemy.engine.base.Connection object at 0x000001CE9D697B30>>(<sqlalchemy.sql.elements.TextClause object at 0x000001CE9D5F4EC0>)
+E    +        where <bound method Connection.execute of <sqlalchemy.engine.base.Connection object at 0x000001CE9D697B30>> = <sqlalchemy.engine.base.Connection object at 0x000001CE9D697B30>.execute
+E    +        and   <sqlalchemy.sql.elements.TextClause object at 0x000001CE9D5F4EC0> = text('SELECT count(*) FROM billing_ledger')
+_ test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity _
+tests\integration\test_bootstrap_contract_repair.py:873: in test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity
+    assert "Refusing to downgrade 0048" in result.stderr
+E   assert 'Refusing to downgrade 0048' in 'INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\nINFO  [alembic.runtime.migration] Will assume transac...t evidence during rollback")\nRuntimeError: Refusing to discard original CRM contact effect evidence during rollback\n'
+E    +  where 'INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\nINFO  [alembic.runtime.migration] Will assume transac...t evidence during rollback")\nRuntimeError: Refusing to discard original CRM contact effect evidence during rollback\n' = CompletedProcess(args=['C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe', '-... evidence during rollback")\nRuntimeError: Refusing to discard original CRM contact effect evidence during rollback\n').stderr
+__________ test_actual_alembic_downgrade_refuses_to_destroy_receipts __________
+tests\integration\test_billing_webhook_migration.py:195: in test_actual_alembic_downgrade_refuses_to_destroy_receipts
+    assert process.returncode != 0 and any(message in output for message in (
+E   assert (1 != 0 and False)
+E    +  where 1 = <Process 13236>.returncode
+E    +  and   False = any(<generator object test_actual_alembic_downgrade_refuses_to_destroy_receipts.<locals>.<genexpr> at 0x000001CE9DA29E50>)
+_________ test_committed_concurrent_claim_and_lost_response_recovery __________
+tests\integration\test_ag06_dashboard_receipts.py:68: in test_committed_concurrent_claim_and_lost_response_recovery
+    assert db.migration_head in {"0058_crm_contact_effect", "0059_auth_identity_contract"}
+E   AssertionError: assert '0061_dnc_runtime_contract' in {'0058_crm_contact_effect', '0059_auth_identity_contract'}
+E    +  where '0061_dnc_runtime_contract' = namespace(admin=<asyncpg.connection.Connection object at 0x000001CE9D596030>, pool=<asyncpg.pool.Pool object at 0x0000...UUID('123332fb-f4a6-4cd8-bca0-12f47375f71d')], client=namespace(pool=<asyncpg.pool.Pool object at 0x000001CE9D5AAF00>)).migration_head
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/integration/test_call_redial.py: 5 warnings
+tests/integration/test_action_execution_receipts.py: 3 warnings
+tests/integration/test_ag06_action_cancellation.py: 3 warnings
+tests/integration/test_op05_pre_attempt_holds.py: 22 warnings
+tests/integration/test_op05_pacing_holds.py: 20 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/integration/test_ag05_lead_evidence.py: 23 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_bootstrap_contract_repair.py::test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts
+FAILED tests/integration/test_bootstrap_contract_repair.py::test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity
+FAILED tests/integration/test_billing_webhook_migration.py::test_actual_alembic_downgrade_refuses_to_destroy_receipts
+FAILED tests/integration/test_ag06_dashboard_receipts.py::test_committed_concurrent_claim_and_lost_response_recovery
+4 failed, 406 passed, 77 warnings in 314.67s (0:05:14)

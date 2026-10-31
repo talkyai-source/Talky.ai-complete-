@@ -1,0 +1,57 @@
+........................................................................ [ 85%]
+....FF......                                                             [100%]
+================================== FAILURES ===================================
+_ test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[I can't confirm whether the email was sent, but the email was sent now.] _
+
+text = "I can't confirm whether the email was sent, but the email was sent now."
+
+    @pytest.mark.parametrize("text", [
+        "The email was sent to you.",
+        "I can't confirm whether the email was sent. The email was sent now.",
+        "I can't confirm whether the email was sent, but the email was sent now.",
+        "I can't confirm that the email was sent, but the email was sent now.",
+        "I cannot confirm whether the email was sent; however, I have sent it now.",
+        "The email could not be sent, but the email was sent now.",
+        "The old error said 'the email could not be sent'; the email was sent now.",
+        "If the email could not be sent, the details were sent to you instead.",
+        "Do not resend the email, but please send the email again.",
+        "The sending outcome is unknown. Please resend the email.",
+    ])
+    def test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat(text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt()}) == (
+            False, "action_failed:send_email:unknown",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:114: AssertionError
+_ test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[I can't confirm that the email was sent, but the email was sent now.] _
+
+text = "I can't confirm that the email was sent, but the email was sent now."
+
+    @pytest.mark.parametrize("text", [
+        "The email was sent to you.",
+        "I can't confirm whether the email was sent. The email was sent now.",
+        "I can't confirm whether the email was sent, but the email was sent now.",
+        "I can't confirm that the email was sent, but the email was sent now.",
+        "I cannot confirm whether the email was sent; however, I have sent it now.",
+        "The email could not be sent, but the email was sent now.",
+        "The old error said 'the email could not be sent'; the email was sent now.",
+        "If the email could not be sent, the details were sent to you instead.",
+        "Do not resend the email, but please send the email again.",
+        "The sending outcome is unknown. Please resend the email.",
+    ])
+    def test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat(text):
+>       assert LLMGuardrails().validate_response(text, action_results={"send_email": receipt()}) == (
+            False, "action_failed:send_email:unknown",
+        )
+E       AssertionError: assert (True, None) == (False, 'acti...mail:unknown')
+E         At index 0 diff: True != False
+E         Use -v to get more diff
+
+tests\unit\test_unresolved_action_speech.py:114: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[I can't confirm whether the email was sent, but the email was sent now.]
+FAILED tests/unit/test_unresolved_action_speech.py::test_uncertainty_or_negation_cannot_license_a_separate_claim_or_repeat[I can't confirm that the email was sent, but the email was sent now.]
+2 failed, 82 passed in 1.22s

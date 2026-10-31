@@ -86,7 +86,7 @@ from app.infrastructure.assistant.tools.campaign_ai_options import (
 QUERY_TOOLS = {
     "get_dashboard_stats": {
         "function": get_dashboard_stats,
-        "description": "Get today's call statistics, success rate, and active campaigns",
+        "description": "Call statistics for one day, for the account or one campaign",
         "input_schema": GetDashboardStatsInput
     },
     "get_usage_info": {
@@ -154,12 +154,12 @@ QUERY_TOOLS = {
     },
     "get_campaigns": {
         "function": get_campaigns,
-        "description": "Get all campaigns with their status and progress",
+        "description": "Find campaigns by name, or list them, with status and progress",
         "input_schema": None
     },
     "get_recent_calls": {
         "function": get_recent_calls,
-        "description": "Get recent calls with outcomes and durations",
+        "description": "Get recent calls with outcomes, durations and campaign, optionally for one campaign",
         "input_schema": None
     },
     "get_actions_today": {
@@ -187,8 +187,8 @@ QUERY_TOOLS = {
     "retrieve_knowledge": {
         "function": retrieve_knowledge,
         "description": (
-            "Run the live RAG retriever for a query against a campaign's knowledge tree; "
-            "returns top-3 matching nodes (heading, voice_answer, summary) without bumping hit_count"
+            "Browse a scoped source catalog with catalog_offset, then read exact section_ids; "
+            "returns complete authored sections and provenance without lexical matching or hit-count writes"
         ),
         "input_schema": None,
     },
@@ -221,7 +221,7 @@ ACTION_TOOLS = {
             "stuck on a technical problem (calls not going through, voice/provider "
             "errors, login/billing/dashboard problems). Gather a clear description "
             "first; it auto-includes the tenant id, the account email, and a "
-            "timestamp, then emails support immediately."
+            "timestamp, then previews an email report for the user to apply."
         ),
         "input_schema": ReportIssueInput
     },

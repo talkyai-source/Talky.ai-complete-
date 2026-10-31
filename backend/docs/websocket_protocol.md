@@ -1,4 +1,12 @@
 # WebSocket Protocol Specification
+
+> **Scope note (2026-09-09).** This document describes the browser/Vonage-style **WebSocket**
+> voice streaming path (PCM16, 16 kHz, JSON control frames). It does **not** describe the
+> production Asterisk path: there the C++ media gateway (`services/voice-gateway-cpp/`) speaks
+> RTP/G.711 µ-law with Asterisk and talks to the backend over **HTTP** — caller audio is POSTed to
+> `/api/v1/sip/telephony/audio/{session_id}` with `X-Internal-Service-Token`, and the backend
+> drives the gateway via `/v1/sessions/start|stop|tts/play|tts/interrupt`. See
+> `services/voice-gateway-cpp/README.md` and `docs/sessions/2026-09-09-telephony-edge-audit.md`.
 ## Talky.ai Voice Streaming
 
 ### Protocol Choice: WebSocket

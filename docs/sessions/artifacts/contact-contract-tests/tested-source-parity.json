@@ -1,0 +1,7 @@
+{
+  "path": "backend/tests/unit/test_contact_capture_state_machine.py",
+  "tested_lf_sha256": "7dc0e309a46c9d7f3ee3c08c93f4e36b66e36d9b50bd7ef6609b9f8a22f95783",
+  "final_lf_sha256": "ad39aa6f27cf0133250566815ce45f1396b284fa4155fa4657918d73cb46b360",
+  "delta": "Removed only extra blank lines at EOF after passing test run; Python AST identical. No test rerun for whitespace.",
+  "removed_trailing_lf_count": 2
+}

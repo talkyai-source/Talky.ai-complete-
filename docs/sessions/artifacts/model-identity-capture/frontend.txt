@@ -1,0 +1,35 @@
+✔ captured full_name displays awaiting_confirmation without changing imported identity (531.482ms)
+✔ captured full_name displays confirmed without changing imported identity (73.2626ms)
+✔ captured full_name displays cancelled without changing imported identity (66.3621ms)
+✔ captured company_name displays awaiting_confirmation without changing imported identity (69.9226ms)
+✔ captured company_name displays confirmed without changing imported identity (74.367ms)
+✔ captured company_name displays cancelled without changing imported identity (58.6781ms)
+✔ inconsistent pending identity flags are never shown confirmed (47.9063ms)
+✔ lead notes preserve negation and show review evidence separately from confirmed contacts (49.0431ms)
+✔ failed or historical analysis is not presented as a conversation with no captured facts (16.0565ms)
+✔ CRM success and uncertain delivery remain separate for each provider (43.9388ms)
+✔ uncertain CRM delivery retains the original account and provider references for review (63.0504ms)
+✔ an empty awaiting_confirmation contact does not invent a caller refusal (46.6557ms)
+✔ an empty needs_clarification contact does not invent a caller refusal (42.0239ms)
+✔ an empty invalid contact does not invent a caller refusal (45.6403ms)
+✔ an empty cancelled contact does not invent a caller refusal (44.9861ms)
+✔ an empty legacy contact does not invent a caller refusal (50.6587ms)
+✔ a parsed contact is visible without being labeled confirmed (34.4209ms)
+✔ manual removal is not labeled a verified contact (26.8914ms)
+✔ completed analysis does not hide partial transcript evidence (15.807ms)
+✔ completed analysis does not hide failed transcript evidence (15.3411ms)
+✔ completed analysis does not hide unknown transcript evidence (12.5672ms)
+✔ the source revision and confirmation turn are separate evidence (33.4159ms)
+✔ a contact with no calls does not show a transcript warning (7.7954ms)
+✔ incomplete legacy source metadata cannot hide the saved field or fabricate a revision (34.2964ms)
+✔ withdrawal evidence does not present the old confirmation as current (40.1731ms)
+✔ a failed manual save keeps the original evidence visible and shows the error (373.0156ms)
+✔ campaign lead-field reads and writes use the campaign-scoped contract (120.6595ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 44502.6612

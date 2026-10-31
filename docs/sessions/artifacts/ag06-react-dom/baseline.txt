@@ -1,0 +1,79 @@
+✔ real StrictMode lifecycle waits for coherent parent detail after accepted POST (513.1805ms)
+✔ real DOM close and reopen preserves uncertain request without automatic replay (228.1455ms)
+✔ actual unmount remount keeps same pending review within authentication generation (210.125ms)
+✔ real selection change discards late successful A response and leaves B untouched (176.0337ms)
+✔ real batched drawer refresh retires another validated review without claiming this request (227.0753ms)
+✔ real error reload remains disabled until explicit fresh receipt and reuses the exact request (176.9249ms)
+✔ real successful POST with failed detail refresh remains unknown and replays exact body (135.6782ms)
+✔ mounted old-session DOM reload button cannot adopt a newer API session before rerender (123.0026ms)
+✔ actual AuthProvider DOM logout/login discards old review and old in-flight response (214.7316ms)
+✖ actual AuthProvider cannot restore an old identity when initial verification finishes after logout (72.0688ms)
+✖ old failed verification cannot clear a newer successful actual AuthProvider login (93.5442ms)
+✖ late actual AuthProvider logout completion cannot erase a newer login (225.2102ms)
+ℹ tests 12
+ℹ suites 0
+ℹ pass 9
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 41356.6236
+
+✖ failing tests:
+
+test at tests\action-recovery-react-dom.test.mjs:237:1
+✖ actual AuthProvider cannot restore an old identity when initial verification finishes after logout (72.0688ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'old-admin'
+  - 'signed out'
+  
+      at TestContext.<anonymous> (file:///C:/Users/AL%20AZIZ%20TECH/Desktop/Talky.ai-complete-/tmp/ag06-admin-dom-validation-online-20261006/tests/action-recovery-react-dom.test.mjs:248:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'old-admin',
+    expected: 'signed out',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\action-recovery-react-dom.test.mjs:252:1
+✖ old failed verification cannot clear a newer successful actual AuthProvider login (93.5442ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + null
+  - 'new-login-token'
+  
+      at TestContext.<anonymous> (file:///C:/Users/AL%20AZIZ%20TECH/Desktop/Talky.ai-complete-/tmp/ag06-admin-dom-validation-online-20261006/tests/action-recovery-react-dom.test.mjs:263:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'new-login-token',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests\action-recovery-react-dom.test.mjs:267:1
+✖ late actual AuthProvider logout completion cannot erase a newer login (225.2102ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + null
+  - 'new-login-token'
+  
+      at TestContext.<anonymous> (file:///C:/Users/AL%20AZIZ%20TECH/Desktop/Talky.ai-complete-/tmp/ag06-admin-dom-validation-online-20261006/tests/action-recovery-react-dom.test.mjs:280:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 'new-login-token',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

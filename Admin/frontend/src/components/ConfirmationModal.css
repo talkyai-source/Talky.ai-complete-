@@ -117,6 +117,49 @@
     margin: 0;
 }
 
+.modal-reason-field {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 18px;
+}
+
+.modal-reason-field > span {
+    color: var(--color-text, #fff);
+    font-size: 0.88rem;
+    font-weight: 600;
+}
+
+.modal-reason-field textarea {
+    width: 100%;
+    box-sizing: border-box;
+    resize: vertical;
+    min-height: 78px;
+    padding: 10px 12px;
+    color: var(--color-text, #fff);
+    background: var(--color-surface-elevated, #252540);
+    border: 1px solid var(--color-border, #2d2d44);
+    border-radius: 8px;
+    font: inherit;
+    line-height: 1.45;
+}
+
+.modal-reason-field textarea:focus {
+    outline: 2px solid rgba(255, 77, 79, 0.35);
+    outline-offset: 1px;
+    border-color: #ff7875;
+}
+
+.modal-reason-field textarea:disabled {
+    opacity: 0.7;
+}
+
+.modal-reason-field small {
+    color: var(--color-text-secondary, #aaa);
+    font-size: 0.78rem;
+    line-height: 1.4;
+}
+
 /* Modal Footer */
 .modal-footer {
     display: flex;

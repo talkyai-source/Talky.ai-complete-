@@ -1,0 +1,34 @@
+.F                                                                       [100%]
+================================== FAILURES ===================================
+__ test_actual_resolver_does_not_retry_when_row_lost_during_refresh[revoked] __
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002B095E6ED50>
+canonical_gmail = (<tests.unit.test_inbox_original_account._Rows object at 0x000002B095E6EF90>, {'access_token_encrypted': 'synthetic:sy...tic@example.invalid', 'connector_id': 'connector-a', 'external_account_id': None, ...}, <AsyncMock id='2957452513056'>)
+change = 'revoked'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("change", ["reconnect", "revoked"])
+    async def test_actual_resolver_does_not_retry_when_row_lost_during_refresh(
+        monkeypatch, canonical_gmail, change
+    ):
+        db, account, refresh = canonical_gmail
+        tokens = refresh.return_value
+        async def changed_during_refresh(_token):
+            if change == "reconnect":
+                db.rows["connector_accounts"] = [{**account, "id": str(uuid4())}]
+            else:
+                account["status"] = "revoked"
+            return tokens
+        refresh.side_effect = changed_during_refresh
+        operation = AsyncMock(side_effect=[rejected(), EmailMessage(id="should-not-read")])
+        monkeypatch.setattr(GmailConnector, "get_email", operation)
+        marker = Mock()
+        monkeypatch.setattr(inbox, "_mark_email_authorization_expired", marker)
+        result = await inbox.read_email("tenant-a", db, "synthetic-message")
+>       assert result["success"] is False
+E       assert True is False
+
+tests\unit\test_inbox_original_account.py:500: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_inbox_original_account.py::test_actual_resolver_does_not_retry_when_row_lost_during_refresh[revoked]
+1 failed, 1 passed, 32 deselected in 1.39s

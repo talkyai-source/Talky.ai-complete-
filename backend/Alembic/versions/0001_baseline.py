@@ -4,17 +4,21 @@ This is a BASELINE migration. It does NOT create tables — the database
 was already created from complete_schema.sql. This migration simply
 establishes the starting point so Alembic can track future changes.
 
-To use on a fresh database, run:
-  1. psql $DATABASE_URL -f database/complete_schema.sql
-  2. alembic upgrade head   (applies this baseline + any newer migrations)
+Do not use ``stamp head`` to bootstrap a historical snapshot: that silently
+skips newer migrations. Follow ``database/MIGRATIONS.md`` instead. Both the
+maintained ``complete_schema.sql`` bootstrap and the preserved 2026-06-02
+snapshot use the conservative ``0008_tenant_voice_tuning`` floor followed by
+``alembic upgrade head``. A 2026-08-28 audit retired the unsafe 0021 shortcut
+after proving that the maintained snapshot omitted several pre-0021 objects.
 
-To use on an existing database that already has the schema applied:
-  1. alembic stamp head     (marks this revision as current without running SQL)
+For an existing database, preserve its real ``alembic_version`` and run
+``alembic upgrade head``. Stamping is metadata repair, not migration execution.
 
 Revision ID: 0001_baseline
 Revises:
 Create Date: 2026-04-01 00:00:00.000000
 """
+
 from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
@@ -38,10 +42,12 @@ def upgrade() -> None:
     """
     # Verify baseline tables exist (will raise if schema is missing)
     conn = op.get_bind()
-    result = conn.execute(text(
-        "SELECT COUNT(*) FROM information_schema.tables "
-        "WHERE table_schema = 'public' AND table_name = 'tenants'"
-    ))
+    result = conn.execute(
+        text(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_name = 'tenants'"
+        )
+    )
     count = result.scalar()
     if count == 0:
         raise RuntimeError(
@@ -51,7 +57,9 @@ def upgrade() -> None:
         )
 
     # Create recordings_s3 table for object-storage-backed recordings
-    op.execute(text("""
+    op.execute(
+        text(
+            """
         CREATE TABLE IF NOT EXISTS recordings_s3 (
             id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
             call_id         UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
@@ -72,24 +80,40 @@ def upgrade() -> None:
             updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             UNIQUE(s3_bucket, s3_key)
         )
-    """))
+    """
+        )
+    )
 
-    op.execute(text("""
+    op.execute(
+        text(
+            """
         CREATE INDEX IF NOT EXISTS idx_recordings_s3_call_id
         ON recordings_s3(call_id)
-    """))
-    op.execute(text("""
+    """
+        )
+    )
+    op.execute(
+        text(
+            """
         CREATE INDEX IF NOT EXISTS idx_recordings_s3_tenant_id
         ON recordings_s3(tenant_id)
-    """))
-    op.execute(text("""
+    """
+        )
+    )
+    op.execute(
+        text(
+            """
         CREATE INDEX IF NOT EXISTS idx_recordings_s3_status
         ON recordings_s3(status)
-    """))
+    """
+        )
+    )
 
     # Row-level security for tenant isolation
     op.execute(text("ALTER TABLE recordings_s3 ENABLE ROW LEVEL SECURITY"))
-    op.execute(text("""
+    op.execute(
+        text(
+            """
         DO $$ BEGIN
             IF NOT EXISTS (
                 SELECT 1 FROM pg_policies
@@ -100,7 +124,9 @@ def upgrade() -> None:
                 USING (tenant_id::text = current_setting('app.current_tenant_id', true));
             END IF;
         END $$
-    """))
+    """
+        )
+    )
 
 
 def downgrade() -> None:

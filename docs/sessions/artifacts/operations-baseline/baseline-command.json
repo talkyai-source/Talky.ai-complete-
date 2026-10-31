@@ -1,0 +1,23 @@
+{
+  "candidate_revision": "e5cfff12773b259db516ab76ad53d417c3f5edc0",
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_inbound_alerting_contract.py",
+    "tests/unit/test_db_backup_unit.py",
+    "tests/unit/test_release_operational_safety.py",
+    "tests/unit/test_release_load_tools.py",
+    "tests/unit/test_systemd_readiness.py",
+    "tests/unit/test_readiness.py",
+    "tests/unit/test_latency_tracker.py",
+    "tests/unit/test_latency_alerter.py",
+    "tests/unit/test_latency_tracker_negative.py",
+    "-q",
+    "--tb=short"
+  ],
+  "module_count": 9,
+  "scope": "Existing offline metrics, alert configuration, backup/restore guards and release tooling. No backup created/restored, pager sent, live call, remote host inspected, provider request or deployment.",
+  "exit_code": 0,
+  "source_revision_unchanged": true
+}

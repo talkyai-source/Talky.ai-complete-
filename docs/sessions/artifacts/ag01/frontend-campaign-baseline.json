@@ -1,0 +1,197 @@
+{
+  "as_of": "2026-10-05",
+  "base_commit": "7c0ffac7db5ea02baca152a91f291fc83e605f1a",
+  "candidate_commit": "4f47123f18af3cb01f2330138c635c76aae7182c",
+  "scope": "Static recursive local import closure of the failing campaign readiness test and the actual Node setup, plus frontend package manifest, dependency lock and TypeScript resolution configuration.",
+  "entrypoints": [
+    "Talk-Leee/src/components/campaigns/campaign-readiness.test.tsx",
+    "Talk-Leee/src/test-utils/setup.ts"
+  ],
+  "normalization": "SHA-256 over file bytes after CRLF to LF normalization only; no whitespace, content or BOM stripping.",
+  "proof": {
+    "file_count": 21,
+    "all_normalized_bytes_identical": true,
+    "git_diff_name_only": [],
+    "comparison": "baseline Git blobs versus candidate Git blobs versus current working files"
+  },
+  "files": [
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-performance-table.tsx",
+      "base_sha256": "e407301dad9f4a0f8850ce6b6811e544c12917428fadc70ae170a7fb79bdc8e6",
+      "candidate_sha256": "e407301dad9f4a0f8850ce6b6811e544c12917428fadc70ae170a7fb79bdc8e6",
+      "working_tree_sha256": "e407301dad9f4a0f8850ce6b6811e544c12917428fadc70ae170a7fb79bdc8e6",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-readiness.test.tsx",
+      "base_sha256": "d60733eec1f8cd00c3a21f6ededc5a4ec8d4ad2f4568070d1d913341e00b9839",
+      "candidate_sha256": "d60733eec1f8cd00c3a21f6ededc5a4ec8d4ad2f4568070d1d913341e00b9839",
+      "working_tree_sha256": "d60733eec1f8cd00c3a21f6ededc5a4ec8d4ad2f4568070d1d913341e00b9839",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/campaign-readiness.tsx",
+      "base_sha256": "a6683dddcead5bf74ab75524510475739ddcac37ede8f9f88117082d164f7d76",
+      "candidate_sha256": "a6683dddcead5bf74ab75524510475739ddcac37ede8f9f88117082d164f7d76",
+      "working_tree_sha256": "a6683dddcead5bf74ab75524510475739ddcac37ede8f9f88117082d164f7d76",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/components/campaigns/command-bar.tsx",
+      "base_sha256": "33f239ed4b48d4517ec5dc2f2c534fc02ad086619f40b6fe20002e78bcb25e90",
+      "candidate_sha256": "33f239ed4b48d4517ec5dc2f2c534fc02ad086619f40b6fe20002e78bcb25e90",
+      "working_tree_sha256": "33f239ed4b48d4517ec5dc2f2c534fc02ad086619f40b6fe20002e78bcb25e90",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/components/realtime/types.ts",
+      "base_sha256": "3f6ec369c4de1f5693104638ad4ecc8540dbd634933ec9f69f66a7fc3c387772",
+      "candidate_sha256": "3f6ec369c4de1f5693104638ad4ecc8540dbd634933ec9f69f66a7fc3c387772",
+      "working_tree_sha256": "3f6ec369c4de1f5693104638ad4ecc8540dbd634933ec9f69f66a7fc3c387772",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/components/ui/button.tsx",
+      "base_sha256": "5143ee37175534286d168646a47c8d79a4a241ea46c33fc2ea76d25617ec61ea",
+      "candidate_sha256": "5143ee37175534286d168646a47c8d79a4a241ea46c33fc2ea76d25617ec61ea",
+      "working_tree_sha256": "5143ee37175534286d168646a47c8d79a4a241ea46c33fc2ea76d25617ec61ea",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/components/ui/input.tsx",
+      "base_sha256": "eb41555d8d7a0dd7918bb230afa368cbc674eda31a15c7c00037f13bd547e410",
+      "candidate_sha256": "eb41555d8d7a0dd7918bb230afa368cbc674eda31a15c7c00037f13bd547e410",
+      "working_tree_sha256": "eb41555d8d7a0dd7918bb230afa368cbc674eda31a15c7c00037f13bd547e410",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/components/ui/modal.tsx",
+      "base_sha256": "c0cf78d6052dd4c17ed9dcd30429a03a06dac9eacf08d6b93a1bfafb9715a049",
+      "candidate_sha256": "c0cf78d6052dd4c17ed9dcd30429a03a06dac9eacf08d6b93a1bfafb9715a049",
+      "working_tree_sha256": "c0cf78d6052dd4c17ed9dcd30429a03a06dac9eacf08d6b93a1bfafb9715a049",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/api.ts",
+      "base_sha256": "8979911018932cae596b7de30ef9c6d1bc9623a014e93639ce006da21be31403",
+      "candidate_sha256": "8979911018932cae596b7de30ef9c6d1bc9623a014e93639ce006da21be31403",
+      "working_tree_sha256": "8979911018932cae596b7de30ef9c6d1bc9623a014e93639ce006da21be31403",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/auth-token.ts",
+      "base_sha256": "7bd2b909b3dd4904d46f4df5bf8166aedf308fb57fa0c616445acac10cea8dc9",
+      "candidate_sha256": "7bd2b909b3dd4904d46f4df5bf8166aedf308fb57fa0c616445acac10cea8dc9",
+      "working_tree_sha256": "7bd2b909b3dd4904d46f4df5bf8166aedf308fb57fa0c616445acac10cea8dc9",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/campaign-brief.ts",
+      "base_sha256": "ad73ce28b508c86dd96dae94460a1edeecd2dba475a944a766b3567e751438bd",
+      "candidate_sha256": "ad73ce28b508c86dd96dae94460a1edeecd2dba475a944a766b3567e751438bd",
+      "working_tree_sha256": "ad73ce28b508c86dd96dae94460a1edeecd2dba475a944a766b3567e751438bd",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/campaign-performance.ts",
+      "base_sha256": "5c0b803b4c8f2698bdc5d3f93fe526e5f44500969b76c319d9b7f80b912355de",
+      "candidate_sha256": "5c0b803b4c8f2698bdc5d3f93fe526e5f44500969b76c319d9b7f80b912355de",
+      "working_tree_sha256": "5c0b803b4c8f2698bdc5d3f93fe526e5f44500969b76c319d9b7f80b912355de",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/dashboard-api.ts",
+      "base_sha256": "29d2c38f882a4b396c66b0eceff7803c1d785eeef1c3236582a7fb9e9bc3a074",
+      "candidate_sha256": "29d2c38f882a4b396c66b0eceff7803c1d785eeef1c3236582a7fb9e9bc3a074",
+      "working_tree_sha256": "29d2c38f882a4b396c66b0eceff7803c1d785eeef1c3236582a7fb9e9bc3a074",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/env.ts",
+      "base_sha256": "e5260d65584e5ce752bd076d15f7900cae2d0e22bf801acfbc5299086e381013",
+      "candidate_sha256": "e5260d65584e5ce752bd076d15f7900cae2d0e22bf801acfbc5299086e381013",
+      "working_tree_sha256": "e5260d65584e5ce752bd076d15f7900cae2d0e22bf801acfbc5299086e381013",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/http-client.ts",
+      "base_sha256": "d9505179df12bc94decfbebd8f021523bb6b167c4a0cdba946232a0141f5f8c6",
+      "candidate_sha256": "d9505179df12bc94decfbebd8f021523bb6b167c4a0cdba946232a0141f5f8c6",
+      "working_tree_sha256": "d9505179df12bc94decfbebd8f021523bb6b167c4a0cdba946232a0141f5f8c6",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/lib/utils.ts",
+      "base_sha256": "7c8c3dfc0cdd370d44932828eb067ef771c8fe7996693221d5d4b90af6d54f2d",
+      "candidate_sha256": "7c8c3dfc0cdd370d44932828eb067ef771c8fe7996693221d5d4b90af6d54f2d",
+      "working_tree_sha256": "7c8c3dfc0cdd370d44932828eb067ef771c8fe7996693221d5d4b90af6d54f2d",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/test-utils/dom.ts",
+      "base_sha256": "717eac33d2b213b78a740655291c3db66872e6e6da56c075c33a71364f826729",
+      "candidate_sha256": "717eac33d2b213b78a740655291c3db66872e6e6da56c075c33a71364f826729",
+      "working_tree_sha256": "717eac33d2b213b78a740655291c3db66872e6e6da56c075c33a71364f826729",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/src/test-utils/setup.ts",
+      "base_sha256": "3368d3b90a31f490364d970c01675bcc6fc5d5359497f3eb7dbdf92a984e313a",
+      "candidate_sha256": "3368d3b90a31f490364d970c01675bcc6fc5d5359497f3eb7dbdf92a984e313a",
+      "working_tree_sha256": "3368d3b90a31f490364d970c01675bcc6fc5d5359497f3eb7dbdf92a984e313a",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/package.json",
+      "base_sha256": "5aed5b1408fd328fc05635bc48333de53054863bed451e00ab70f5052f74a489",
+      "candidate_sha256": "5aed5b1408fd328fc05635bc48333de53054863bed451e00ab70f5052f74a489",
+      "working_tree_sha256": "5aed5b1408fd328fc05635bc48333de53054863bed451e00ab70f5052f74a489",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/package-lock.json",
+      "base_sha256": "834c420ccd9c84cf75ac8a8ece012a4d01413b3e2530ea9ae71f7b7226a526dc",
+      "candidate_sha256": "834c420ccd9c84cf75ac8a8ece012a4d01413b3e2530ea9ae71f7b7226a526dc",
+      "working_tree_sha256": "834c420ccd9c84cf75ac8a8ece012a4d01413b3e2530ea9ae71f7b7226a526dc",
+      "unchanged": true
+    },
+    {
+      "path": "Talk-Leee/tsconfig.json",
+      "base_sha256": "d2e2ee30994d25f27d3eb0e82bbfdcd3b72fcd0b854d33c4508d566d0cee5a7f",
+      "candidate_sha256": "d2e2ee30994d25f27d3eb0e82bbfdcd3b72fcd0b854d33c4508d566d0cee5a7f",
+      "working_tree_sha256": "d2e2ee30994d25f27d3eb0e82bbfdcd3b72fcd0b854d33c4508d566d0cee5a7f",
+      "unchanged": true
+    }
+  ],
+  "reproduction": {
+    "working_directory": "Talk-Leee",
+    "command": "node --test --import tsx --import ./src/test-utils/setup.ts src/lib/queries/ai-options-queries.test.tsx src/components/campaigns/campaign-readiness.test.tsx",
+    "combined_result": {
+      "passed": 10,
+      "failed": 1
+    },
+    "campaign_readiness_result": {
+      "passed": 5,
+      "failed": 1
+    },
+    "failed_test": "table row resume is disabled but viewing details stays available",
+    "failure_location": "Talk-Leee/src/components/campaigns/campaign-readiness.test.tsx:87",
+    "failure": "Unable to find an accessible button named Row actions."
+  },
+  "root_cause": {
+    "classification": "stale baseline test expectation",
+    "explanation": "The test expects a Row actions dropdown and Resume Campaign/View Details menuitems. The current table has no Row actions dropdown; its campaign-name button opens details and its separate expansion button expands row details.",
+    "evidence": [
+      "Talk-Leee/src/components/campaigns/campaign-readiness.test.tsx:83",
+      "Talk-Leee/src/components/campaigns/campaign-readiness.test.tsx:87",
+      "Talk-Leee/src/components/campaigns/campaign-performance-table.tsx:971",
+      "Talk-Leee/src/components/campaigns/campaign-performance-table.tsx:979"
+    ],
+    "attribution": "The reproduced failure is baseline-equivalent under the compared source/config/lock closure and is not evidence of an AG01 table or readiness regression."
+  },
+  "limitations": [
+    "No separate historical checkout or baseline test process was executed. This is a current reproduction plus identical baseline/candidate source/config/lock evidence, not a claim that a historical CI run failed.",
+    "The closure follows statically written local imports resolved through relative paths and the @/ alias. External package source bytes and environment state were not separately hashed; the unchanged package manifest and lock are included.",
+    "This evidence does not establish all campaign behaviors or production readiness. No unrelated table or test repair was performed."
+  ]
+}

@@ -1,0 +1,759 @@
+{
+  "scope": "Synthetic fixtures only; no provider, customer, hearing or deployed login proof",
+  "migration_head": "0057_transcript_save_state",
+  "examples": {
+    "cancelled_additional_contact": {
+      "annotated_expected": "Only the withdrawn second contact is null/unconfirmed; first remains confirmed.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": "first@example.org",
+            "source": "caller_stated",
+            "confirmed": true,
+            "is_required": false,
+            "raw_value": "first@example.org",
+            "normalized_value": "first@example.org",
+            "validation_status": "confirmed",
+            "confirmed_at": "2026-10-04 23:47:05.598116+00:00",
+            "evidence": {
+              "readback": null,
+              "value_source": {
+                "revision_sha256": "7f425b932be58d9b4ed28698b929c1d4845daba47fca70d7c66cbe1989e927bf",
+                "provider_item_id": "synthetic-value-7f425b932be5",
+                "caller_turn_order": 1
+              },
+              "status_source": null,
+              "confirmation_source": {
+                "revision_sha256": "6c2882ca6559ce64f7fffc0317889b7e6762ba7fb463ba169053ccbdfc7b6c3a",
+                "provider_item_id": "synthetic-confirmation-7f425b932be5",
+                "caller_turn_order": 2
+              },
+              "confirmation_evidence": "caller_repeatback",
+              "source_checks": {
+                "value_source": "matched",
+                "confirmation_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04 23:47:05.624670+00:00"
+          },
+          {
+            "field_key": "email_2",
+            "field_type": "email",
+            "value": null,
+            "source": "caller_stated",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": null,
+            "normalized_value": null,
+            "validation_status": "cancelled",
+            "confirmed_at": null,
+            "evidence": {
+              "status": "revoked",
+              "readback": null,
+              "value_source": {
+                "revision_sha256": "653ca1df5d5a60b376c860cbf8d51654237cee241ee7753683c5c4bfe81f7b48",
+                "provider_item_id": "synthetic-value-653ca1df5d5a",
+                "caller_turn_order": 1
+              },
+              "status_source": null,
+              "confirmation_source": {
+                "revision_sha256": "e446fa761a96169b49499e337bcd84703ea2b49fed28f3822d77e807191d5d5f",
+                "provider_item_id": "synthetic-confirmation-653ca1df5d5a",
+                "caller_turn_order": 2
+              },
+              "confirmation_evidence": "caller_repeatback",
+              "source_checks": {
+                "value_source": "matched",
+                "confirmation_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04 23:47:05.658183+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "unknown",
+        "crm_deliveries": []
+      }
+    },
+    "invalid_contact": {
+      "annotated_expected": "Null invalid contact is not a caller refusal or confirmation.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": null,
+            "source": "caller_stated",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": null,
+            "normalized_value": null,
+            "validation_status": "invalid",
+            "confirmed_at": null,
+            "evidence": {
+              "status": "revoked",
+              "readback": null,
+              "value_source": {
+                "revision_sha256": "7f425b932be58d9b4ed28698b929c1d4845daba47fca70d7c66cbe1989e927bf",
+                "provider_item_id": "synthetic-value-7f425b932be5",
+                "caller_turn_order": 1
+              },
+              "status_source": null,
+              "confirmation_source": {
+                "revision_sha256": "6c2882ca6559ce64f7fffc0317889b7e6762ba7fb463ba169053ccbdfc7b6c3a",
+                "provider_item_id": "synthetic-confirmation-7f425b932be5",
+                "caller_turn_order": 2
+              },
+              "confirmation_evidence": "caller_repeatback",
+              "source_checks": {
+                "value_source": "matched",
+                "confirmation_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04 23:47:11.714922+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "unknown",
+        "crm_deliveries": []
+      }
+    },
+    "manual_withdrawal": {
+      "annotated_expected": "Manual withdrawal remains null/cancelled despite a later caller-source retry.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": null,
+            "source": "manual_edit",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": null,
+            "normalized_value": null,
+            "validation_status": "cancelled",
+            "confirmed_at": null,
+            "evidence": {
+              "status": "manually_withdrawn"
+            },
+            "updated_at": "2026-10-04 23:47:12.663090+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "unknown",
+        "crm_deliveries": []
+      }
+    },
+    "legacy_unknown_asgi": {
+      "annotated_expected": "No completed transcript is inferred from a saved contact.",
+      "scope": "Actual ASGI routes and PostgreSQL; authenticated identity and permission lookup are synthetic",
+      "observed": {
+        "details": [
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": "first@example.org",
+            "source": "caller_stated",
+            "confirmed": true,
+            "is_required": false,
+            "raw_value": "first@example.org",
+            "normalized_value": "first@example.org",
+            "validation_status": "confirmed",
+            "confirmed_at": "2026-10-04T23:47:24.631917+00:00",
+            "evidence": {
+              "readback": null,
+              "value_source": {
+                "revision_sha256": "7f425b932be58d9b4ed28698b929c1d4845daba47fca70d7c66cbe1989e927bf",
+                "provider_item_id": "synthetic-value-7f425b932be5",
+                "caller_turn_order": 1
+              },
+              "status_source": null,
+              "confirmation_source": {
+                "revision_sha256": "6c2882ca6559ce64f7fffc0317889b7e6762ba7fb463ba169053ccbdfc7b6c3a",
+                "provider_item_id": "synthetic-confirmation-7f425b932be5",
+                "caller_turn_order": 2
+              },
+              "confirmation_evidence": "caller_repeatback",
+              "source_checks": {
+                "value_source": "matched",
+                "confirmation_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04T23:47:24.659835+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "unknown",
+        "crm_deliveries": []
+      }
+    },
+    "native_pending": {
+      "annotated_expected": "Caller-stated value is saved without confirmation.",
+      "scope": "Actual native event parser, bridge, PostgreSQL and direct API; synthetic wire/receipt, no provider/hearing proof",
+      "observed": {
+        "details": [
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": "alex@example.com",
+            "source": "caller_stated",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": "alex at example dot com",
+            "normalized_value": "alex@example.com",
+            "validation_status": "awaiting_confirmation",
+            "confirmed_at": null,
+            "evidence": {
+              "readback": null,
+              "value_source": {
+                "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1",
+                "provider_item_id": "source",
+                "caller_turn_order": 1
+              },
+              "status_source": {
+                "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1",
+                "provider_item_id": "source",
+                "caller_turn_order": 1
+              },
+              "confirmation_source": null,
+              "confirmation_evidence": null,
+              "source_checks": {
+                "value_source": "matched",
+                "status_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04 23:47:25.541578+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "partial",
+        "crm_deliveries": []
+      }
+    },
+    "native_confirmed": {
+      "annotated_expected": "Independent value/confirmation turns and synthetic matching receipt are retained.",
+      "scope": "Actual native event parser, bridge, PostgreSQL and direct API; synthetic wire/receipt, no provider/hearing proof",
+      "observed": {
+        "details": [
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": "alex@example.com",
+            "source": "caller_stated",
+            "confirmed": true,
+            "is_required": false,
+            "raw_value": "alex at example dot com",
+            "normalized_value": "alex@example.com",
+            "validation_status": "confirmed",
+            "confirmed_at": "2026-10-04 23:47:25.919339+00:00",
+            "evidence": {
+              "readback": {
+                "status": "completed",
+                "evidence": "transport_played",
+                "utterance_id": "rt-1"
+              },
+              "value_source": {
+                "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1",
+                "provider_item_id": "source",
+                "caller_turn_order": 1
+              },
+              "status_source": {
+                "revision_sha256": "9f5eb1cd3890ebc3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae",
+                "provider_item_id": "confirmation",
+                "caller_turn_order": 2
+              },
+              "confirmation_source": {
+                "revision_sha256": "9f5eb1cd3890ebc3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae",
+                "provider_item_id": "confirmation",
+                "caller_turn_order": 2
+              },
+              "confirmation_evidence": "readback_and_caller_affirmation",
+              "source_checks": {
+                "value_source": "matched",
+                "confirmation_source": "matched",
+                "status_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04 23:47:25.921881+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "partial",
+        "crm_deliveries": []
+      }
+    },
+    "native_revised": {
+      "annotated_expected": "Replacing the yes final removes its confirmation; transcript remains partial.",
+      "scope": "Actual native event parser, bridge, PostgreSQL and direct API; synthetic wire/receipt, no provider/hearing proof",
+      "observed": {
+        "details": [
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": null,
+            "source": "caller_stated",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": "alex at example dot com",
+            "normalized_value": null,
+            "validation_status": "needs_clarification",
+            "confirmed_at": null,
+            "evidence": {
+              "readback": null,
+              "value_source": {
+                "revision_sha256": "9e33e9968ef7234cc3962d97d98213e3c3eda8005630367438ecf0098aa18567",
+                "provider_item_id": "confirmation",
+                "caller_turn_order": 2
+              },
+              "status_source": {
+                "revision_sha256": "9e33e9968ef7234cc3962d97d98213e3c3eda8005630367438ecf0098aa18567",
+                "provider_item_id": "confirmation",
+                "caller_turn_order": 2
+              },
+              "confirmation_source": null,
+              "confirmation_evidence": null,
+              "source_checks": {
+                "value_source": "matched",
+                "status_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04 23:47:25.951846+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "partial",
+        "crm_deliveries": []
+      }
+    },
+    "business_needs_review": {
+      "annotated_expected": "Anchored caller quote is reviewable evidence, not verified qualification or an arranged action.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [
+          {
+            "field_key": "identified_need",
+            "field_type": "notes",
+            "value": "I need information about accepting card payments.",
+            "source": "caller_stated",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": null,
+            "normalized_value": null,
+            "validation_status": null,
+            "confirmed_at": null,
+            "evidence": {
+              "status": "needs_review",
+              "subject": "unverified",
+              "extraction": "post_call",
+              "turn_index": 0,
+              "validation": "caller_quote_only",
+              "source_quote": "I need information about accepting card payments.",
+              "time_resolution": null,
+              "transcript_revision": "1307af389a3af6468b6f2e3260a85af94e45937dbb8383caf86e5d064b0f2f6d"
+            },
+            "updated_at": "2026-10-04 23:47:27.651179+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "complete",
+        "transcript_save_state": "partial",
+        "crm_deliveries": []
+      }
+    },
+    "transcript_failed": {
+      "annotated_expected": "Final child-write failure rolls back both final snapshots; earlier committed text remains.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "failed",
+        "crm_deliveries": []
+      }
+    },
+    "transcript_complete": {
+      "annotated_expected": "Successful same-process retry atomically stores call and child snapshot; completeness is not accuracy/hearing.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "complete",
+        "crm_deliveries": []
+      }
+    },
+    "contact_save_recovered": {
+      "annotated_expected": "Hangup retries the failed contact after transcript commit.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [
+          {
+            "field_key": "contact_followup",
+            "field_type": "notes",
+            "value": null,
+            "source": "agent_inferred",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": null,
+            "normalized_value": null,
+            "validation_status": null,
+            "confirmed_at": null,
+            "evidence": {
+              "status": "contact_save_recovered"
+            },
+            "updated_at": "2026-10-04 23:47:32.978074+00:00"
+          },
+          {
+            "field_key": "email",
+            "field_type": "email",
+            "value": "first@example.org",
+            "source": "caller_stated",
+            "confirmed": true,
+            "is_required": false,
+            "raw_value": "first@example.org",
+            "normalized_value": "first@example.org",
+            "validation_status": "confirmed",
+            "confirmed_at": "2026-10-04 23:47:32.876062+00:00",
+            "evidence": {
+              "readback": null,
+              "value_source": {
+                "revision_sha256": "7f425b932be58d9b4ed28698b929c1d4845daba47fca70d7c66cbe1989e927bf",
+                "provider_item_id": "synthetic-value-7f425b932be5",
+                "caller_turn_order": 1
+              },
+              "status_source": null,
+              "confirmation_source": {
+                "revision_sha256": "6c2882ca6559ce64f7fffc0317889b7e6762ba7fb463ba169053ccbdfc7b6c3a",
+                "provider_item_id": "synthetic-confirmation-7f425b932be5",
+                "caller_turn_order": 2
+              },
+              "confirmation_evidence": "caller_repeatback",
+              "source_checks": {
+                "value_source": "matched",
+                "confirmation_source": "matched"
+              },
+              "provenance_status": "matched"
+            },
+            "updated_at": "2026-10-04 23:47:32.972917+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "pending",
+        "transcript_save_state": "complete",
+        "crm_deliveries": []
+      }
+    },
+    "contact_save_failed": {
+      "annotated_expected": "Known contact-save failure remains distinct even when transcript save and analysis complete.",
+      "scope": "Actual PostgreSQL and direct API projection",
+      "observed": {
+        "details": [
+          {
+            "field_key": "contact_followup",
+            "field_type": "notes",
+            "value": "Contact evidence could not be saved for: email. Review the call before using these details.",
+            "source": "agent_inferred",
+            "confirmed": false,
+            "is_required": false,
+            "raw_value": null,
+            "normalized_value": null,
+            "validation_status": null,
+            "confirmed_at": null,
+            "evidence": {
+              "status": "contact_save_failed",
+              "failed_fields": [
+                "email"
+              ]
+            },
+            "updated_at": "2026-10-04 23:47:33.854214+00:00"
+          }
+        ],
+        "missing_required": [],
+        "processing_status": "complete",
+        "transcript_save_state": "complete",
+        "crm_deliveries": []
+      }
+    },
+    "failed_revoke_projection": {
+      "annotated_expected": "Durable replacement of the confirmation invalidates API trust despite a failed contact write; audit row is retained.",
+      "scope": "Actual parser/bridge and PostgreSQL; contact UPDATE denied, later API uses only durable data",
+      "observed": {
+        "call_api": {
+          "details": [
+            {
+              "field_key": "email",
+              "field_type": "email",
+              "value": "alex@example.com",
+              "source": "caller_stated",
+              "confirmed": false,
+              "is_required": false,
+              "raw_value": "alex at example dot com",
+              "normalized_value": "alex@example.com",
+              "validation_status": "awaiting_confirmation",
+              "confirmed_at": null,
+              "evidence": {
+                "readback": {
+                  "status": "completed",
+                  "evidence": "transport_played",
+                  "utterance_id": "rt-1"
+                },
+                "value_source": {
+                  "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1",
+                  "provider_item_id": "source",
+                  "caller_turn_order": 1
+                },
+                "status_source": {
+                  "revision_sha256": "9f5eb1cd3890ebc3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae",
+                  "provider_item_id": "confirmation",
+                  "caller_turn_order": 2
+                },
+                "confirmation_source": {
+                  "revision_sha256": "9f5eb1cd3890ebc3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae",
+                  "provider_item_id": "confirmation",
+                  "caller_turn_order": 2
+                },
+                "confirmation_evidence": "readback_and_caller_affirmation",
+                "source_checks": {
+                  "value_source": "matched",
+                  "confirmation_source": "changed",
+                  "status_source": "changed"
+                },
+                "provenance_status": "needs_review",
+                "status": "needs_review",
+                "stored_confirmation_at": "2026-10-04 23:47:34.685619+00:00"
+              },
+              "updated_at": "2026-10-04 23:47:34.687381+00:00"
+            }
+          ],
+          "missing_required": [],
+          "processing_status": "pending",
+          "transcript_save_state": "partial",
+          "crm_deliveries": []
+        },
+        "contact_api": {
+          "details": [
+            {
+              "field_key": "email",
+              "field_type": "email",
+              "value": "alex@example.com",
+              "source": "caller_stated",
+              "confirmed": false,
+              "is_required": false,
+              "updated_at": "2026-10-04 23:47:34.687381+00:00",
+              "validation_status": "awaiting_confirmation",
+              "evidence": {
+                "readback": {
+                  "status": "completed",
+                  "evidence": "transport_played",
+                  "utterance_id": "rt-1"
+                },
+                "value_source": {
+                  "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1",
+                  "provider_item_id": "source",
+                  "caller_turn_order": 1
+                },
+                "status_source": {
+                  "revision_sha256": "9f5eb1cd3890ebc3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae",
+                  "provider_item_id": "confirmation",
+                  "caller_turn_order": 2
+                },
+                "confirmation_source": {
+                  "revision_sha256": "9f5eb1cd3890ebc3c2c6283f8f4f2d4acbeaec7166ae1a124920f6dcf0835eae",
+                  "provider_item_id": "confirmation",
+                  "caller_turn_order": 2
+                },
+                "confirmation_evidence": "readback_and_caller_affirmation",
+                "source_checks": {
+                  "value_source": "matched",
+                  "confirmation_source": "changed",
+                  "status_source": "changed"
+                },
+                "provenance_status": "needs_review",
+                "status": "needs_review",
+                "stored_confirmation_at": "2026-10-04 23:47:34.685619+00:00"
+              },
+              "call_id": "00000000-0000-0000-0000-000004000001",
+              "raw_value": "alex at example dot com",
+              "normalized_value": "alex@example.com",
+              "confirmed_at": null
+            }
+          ],
+          "missing_required": [],
+          "processing_status": "pending",
+          "transcript_save_state": "partial",
+          "crm_deliveries": []
+        },
+        "call_list_api": {
+          "items": [
+            {
+              "id": "00000000-0000-0000-0000-000004000001",
+              "talklee_call_id": null,
+              "timestamp": "2026-10-04T23:47:34.469283+00:00",
+              "from_number": null,
+              "to_number": "+15550001001",
+              "status": "answered",
+              "duration_seconds": null,
+              "outcome": null,
+              "campaign_name": "Synthetic AG05",
+              "campaign_id": "00000000-0000-0000-0000-000002000001",
+              "summary": null,
+              "recording_id": null,
+              "lead_outcome": null,
+              "captured_phone": null,
+              "captured_email": "alex@example.com",
+              "captured_phone_confirmed": null,
+              "captured_email_confirmed": false,
+              "has_feedback": false,
+              "direction": "outbound",
+              "caller_ani": null,
+              "called_did": null,
+              "inbound_campaign_id": null,
+              "assignment_id": null,
+              "route_id": null,
+              "route_version": null,
+              "config_version": null,
+              "config_checksum": null,
+              "admission_status": "pending",
+              "admission_reason": null,
+              "consent_status": "unknown",
+              "processing_status": "pending",
+              "billing_status": "none",
+              "billing_hold_reason": null,
+              "recording_status": null,
+              "transcript_status": "partial",
+              "transcript_save_state": "partial",
+              "media_state": null
+            }
+          ],
+          "page": 1,
+          "page_size": 20,
+          "total": 1
+        },
+        "raw_stored_value": "alex@example.com",
+        "raw_stored_confirmed": true
+      }
+    },
+    "manual_revision_immune": {
+      "annotated_expected": "Manual review remains authoritative.",
+      "scope": "Actual parser/bridge and PostgreSQL; contact UPDATE denied, later API uses only durable data",
+      "observed": {
+        "call_api": {
+          "details": [
+            {
+              "field_key": "email",
+              "field_type": "email",
+              "value": "operator@example.org",
+              "source": "manual_edit",
+              "confirmed": true,
+              "is_required": false,
+              "raw_value": "operator@example.org",
+              "normalized_value": "operator@example.org",
+              "validation_status": "confirmed",
+              "confirmed_at": "2026-10-04 23:47:35.645668+00:00",
+              "evidence": {
+                "status": "manually_verified"
+              },
+              "updated_at": "2026-10-04 23:47:35.645963+00:00"
+            }
+          ],
+          "missing_required": [],
+          "processing_status": "pending",
+          "transcript_save_state": "partial",
+          "crm_deliveries": []
+        },
+        "contact_api": {
+          "details": [
+            {
+              "field_key": "email",
+              "field_type": "email",
+              "value": "operator@example.org",
+              "source": "manual_edit",
+              "confirmed": true,
+              "is_required": false,
+              "updated_at": "2026-10-04 23:47:35.645963+00:00",
+              "validation_status": "confirmed",
+              "evidence": {
+                "status": "manually_verified"
+              },
+              "call_id": "00000000-0000-0000-0000-000004000001",
+              "raw_value": "operator@example.org",
+              "normalized_value": "operator@example.org",
+              "confirmed_at": "2026-10-04 23:47:35.645668+00:00"
+            }
+          ],
+          "missing_required": [],
+          "processing_status": "pending",
+          "transcript_save_state": "partial",
+          "crm_deliveries": []
+        },
+        "call_list_api": {
+          "items": [
+            {
+              "id": "00000000-0000-0000-0000-000004000001",
+              "talklee_call_id": null,
+              "timestamp": "2026-10-04T23:47:35.402322+00:00",
+              "from_number": null,
+              "to_number": "+15550001001",
+              "status": "answered",
+              "duration_seconds": null,
+              "outcome": null,
+              "campaign_name": "Synthetic AG05",
+              "campaign_id": "00000000-0000-0000-0000-000002000001",
+              "summary": null,
+              "recording_id": null,
+              "lead_outcome": null,
+              "captured_phone": null,
+              "captured_email": "operator@example.org",
+              "captured_phone_confirmed": null,
+              "captured_email_confirmed": true,
+              "has_feedback": false,
+              "direction": "outbound",
+              "caller_ani": null,
+              "called_did": null,
+              "inbound_campaign_id": null,
+              "assignment_id": null,
+              "route_id": null,
+              "route_version": null,
+              "config_version": null,
+              "config_checksum": null,
+              "admission_status": "pending",
+              "admission_reason": null,
+              "consent_status": "unknown",
+              "processing_status": "pending",
+              "billing_status": "none",
+              "billing_hold_reason": null,
+              "recording_status": null,
+              "transcript_status": "partial",
+              "transcript_save_state": "partial",
+              "media_state": null
+            }
+          ],
+          "page": 1,
+          "page_size": 20,
+          "total": 1
+        },
+        "raw_stored_value": "operator@example.org",
+        "raw_stored_confirmed": true
+      }
+    }
+  }
+}

@@ -1,0 +1,20 @@
+...................F..                                                   [100%]
+================================== FAILURES ===================================
+__________ test_actual_rejected_login_keeps_durable_failure_counter ___________
+
+identity_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002BD6D76B110>, pool=<asyncpg.pool.Pool object at 0x0000...amespace(pool=<asyncpg.pool.Pool object at 0x000002BD6D6F3ED0>), http=<httpx.AsyncClient object at 0x000002BD6D77F320>)
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002BD6D853B90>
+
+    async def test_actual_rejected_login_keeps_durable_failure_counter(identity_db,monkeypatch):
+        db=identity_db
+        await db.admin.execute("UPDATE user_profiles SET password_hash='synthetic' WHERE id=$1",db.users[0])
+        monkeypatch.setattr(login_ep,'verify_password',lambda *args:False)
+        result=await db.http.post('/auth/login',json={'email':f'{db.users[0]}@example.test','password':'wrong-password'})
+>       assert result.status_code==401
+E       assert 422 == 401
+E        +  where 422 = <Response [422 Unprocessable Entity]>.status_code
+
+tests\integration\test_cp08_current_identity.py:245: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_current_identity.py::test_actual_rejected_login_keeps_durable_failure_counter
+1 failed, 21 passed in 28.80s

@@ -1,0 +1,29 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "."
+  },
+  "baseline_argv": [
+    "../tmp/knowledge-conditions-probe.py",
+    "baseline"
+  ],
+  "final_argv": [
+    "../tmp/knowledge-conditions-probe.py",
+    "final"
+  ],
+  "lint_argv": [
+    "-m",
+    "ruff",
+    "check",
+    "--select",
+    "F",
+    "app/services/scripts/knowledge/passages.py",
+    "tests/unit/test_knowledge_required_conditions.py"
+  ],
+  "archived_runner_note": "Copy probe.py to repository tmp/ before reproducing; use a new evidence directory to preserve existing files."
+}

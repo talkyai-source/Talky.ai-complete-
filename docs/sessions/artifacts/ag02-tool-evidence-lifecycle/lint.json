@@ -1,0 +1,1676 @@
+{
+  "baseline": {
+    "exit_code": 1,
+    "diagnostics": [
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 105
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from __future__ import annotations\r\n\r\nimport asyncio\r\nimport json\r\nimport logging\r\nimport os\r\nimport re\r\nimport time\r\nfrom typing import Optional\r\n\r\nfrom fastapi import WebSocket\r\n\r\nfrom app.domain.models.conversation import MessageRole\r\nfrom app.domain.models.session import CallSession\r\nfrom app.domain.services.ask_ai_constants import (\r\n    PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS,\r\n)\r\nfrom app.domain.services.ask_ai_constants import (\r\n    TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO,\r\n)\r\nfrom app.domain.services.end_session_action import (\r\n    build_end_session_tool_instructions,\r\n    parse_end_session_action,\r\n)\r\nfrom app.domain.services.llm_guardrails import get_guardrails\r\nfrom app.domain.services.voice_pipeline import expressive_caps\r\nfrom app.domain.services.voice_pipeline.action_tools import (\r\n    action_from_validation_reason,\r\n    action_results_for_session,\r\n    action_tool_system_addendum,\r\n    action_tools_for_turn,\r\n    execution_failure_result,\r\n    result_json,\r\n    run_voice_action,\r\n    safe_failure_speech,\r\n)\r\nfrom app.domain.services.voice_pipeline.conversation_guards import (\r\n    CALLBACK_PREFERENCE,\r\n    PHONE_REASK,\r\n    answered_note,\r\n    answered_questions,\r\n    closing_while_contact_open,\r\n    contradicted_customer_claim,\r\n    declined_note,\r\n    is_bare_no,\r\n    is_repeated_question,\r\n    phone_readback_changed,\r\n    promises_timed_callback,\r\n    repeats_answered_question,\r\n    unbacked_contact_claim,\r\n)\r\nfrom app.domain.services.voice_pipeline.end_call import strip_and_flag\r\nfrom app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures\r\nfrom app.domain.services.voice_pipeline.grounded_links import (\r\n    ground_spoken_links,\r\n    grounded_url_hosts,\r\n)\r\nfrom app.domain.services.voice_pipeline.knowledge_tool import (\r\n    KB_TOOL_NAME,\r\n    NO_KB_FACTS,\r\n    knowledge_tools_for,\r\n    run_knowledge_lookup,\r\n    tool_system_addendum,\r\n)\r\nfrom app.domain.services.voice_pipeline.live_structured_state import (\r\n    ToolResultEvidence,\r\n    reduce_cascaded_session_live_state,\r\n    reduce_live_state,\r\n    render_live_state_block,\r\n)\r\nfrom app.domain.services.voice_pipeline.readback_guard import phone_readback_guard\r\nfrom app.domain.services.voice_pipeline.sentence_cap import (\r\n    cap_allows_another,\r\n)\r\nfrom app.domain.services.voice_pipeline.sentence_segmentation import (\r\n    _is_missing_space_boundary,\r\n)\r\nfrom app.infrastructure.llm.groq import LLMTimeoutError\r\nfrom app.services.scripts import model_prompt_addendum\r\nfrom app.services.scripts.prompt_builder import turn_directive, with_turn_directive\r\nfrom app.services.scripts.prompts.accent_fillers import (\r\n    accent_filler_block,\r\n    contextual_filler,\r\n    resolve_accent,\r\n    strip_echoed_acknowledgement,\r\n)\r\nfrom app.services.scripts.prompts.build import build_turn_prompt\r\nfrom app.services.scripts.prompts.guardrails import (\r\n    CARTESIA_LAUGHTER_INSTRUCTIONS,\r\n    ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS,\r\n)\r\nfrom app.services.scripts.prompts.live_state import build_live_state_block\r\n\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 105
+              },
+              "location": {
+                "column": 1,
+                "row": 17
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 17
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 17,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 184
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_CHUNK_CHARS,\r\n    _KB_MAX_CHUNKS,\r\n    _KB_TOTAL_CHARS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    knowledge_match_is_weak,\r\n    needs_previous_turn_context,\r\n    prepare_knowledge_evidence,\r\n    should_retrieve_knowledge,\r\n)\r\n\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 184
+              },
+              "location": {
+                "column": 1,
+                "row": 173
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 173
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 173,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 20,
+          "row": 175
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_MAX_CHUNKS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    prepare_knowledge_evidence,\r\n    needs_previous_turn_context,\r\n    should_retrieve_knowledge,\r\n)",
+              "end_location": {
+                "column": 2,
+                "row": 182
+              },
+              "location": {
+                "column": 1,
+                "row": 173
+              }
+            }
+          ],
+          "message": "Remove unused import"
+        },
+        "location": {
+          "column": 5,
+          "row": 175
+        },
+        "message": "`app.domain.services.voice_pipeline.kb_budget._KB_CHUNK_CHARS` imported but unused",
+        "noqa_row": 175,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 20,
+          "row": 176
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_MAX_CHUNKS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    prepare_knowledge_evidence,\r\n    needs_previous_turn_context,\r\n    should_retrieve_knowledge,\r\n)",
+              "end_location": {
+                "column": 2,
+                "row": 182
+              },
+              "location": {
+                "column": 1,
+                "row": 173
+              }
+            }
+          ],
+          "message": "Remove unused import"
+        },
+        "location": {
+          "column": 5,
+          "row": 176
+        },
+        "message": "`app.domain.services.voice_pipeline.kb_budget._KB_TOTAL_CHARS` imported but unused",
+        "noqa_row": 176,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 28,
+          "row": 178
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_MAX_CHUNKS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    prepare_knowledge_evidence,\r\n    needs_previous_turn_context,\r\n    should_retrieve_knowledge,\r\n)",
+              "end_location": {
+                "column": 2,
+                "row": 182
+              },
+              "location": {
+                "column": 1,
+                "row": 173
+              }
+            }
+          ],
+          "message": "Remove unused import"
+        },
+        "location": {
+          "column": 5,
+          "row": 178
+        },
+        "message": "`app.domain.services.voice_pipeline.kb_budget.knowledge_match_is_weak` imported but unused",
+        "noqa_row": 178,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 251
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "        from app.services.scripts.knowledge.retrieval import (\r\n            render_node_answer,\r\n            retrieve_knowledge,\r\n            retrieve_pinned_knowledge,\r\n        )\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 251
+              },
+              "location": {
+                "column": 1,
+                "row": 246
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 246
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 246,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 31,
+          "row": 247
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.services.scripts.knowledge.retrieval import (\r\n            retrieve_pinned_knowledge,\r\n            retrieve_knowledge,\r\n        )",
+              "end_location": {
+                "column": 10,
+                "row": 250
+              },
+              "location": {
+                "column": 9,
+                "row": 246
+              }
+            }
+          ],
+          "message": "Remove unused import: `app.services.scripts.knowledge.retrieval.render_node_answer`"
+        },
+        "location": {
+          "column": 13,
+          "row": 247
+        },
+        "message": "`app.services.scripts.knowledge.retrieval.render_node_answer` imported but unused",
+        "noqa_row": 247,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "UP041",
+        "end_location": {
+          "column": 40,
+          "row": 284
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "TimeoutError",
+              "end_location": {
+                "column": 40,
+                "row": 284
+              },
+              "location": {
+                "column": 20,
+                "row": 284
+              }
+            }
+          ],
+          "message": "Replace `asyncio.TimeoutError` with builtin `TimeoutError`"
+        },
+        "location": {
+          "column": 20,
+          "row": 284
+        },
+        "message": "Replace aliased errors with `TimeoutError`",
+        "noqa_row": 284,
+        "url": "https://docs.astral.sh/ruff/rules/timeout-error-alias"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 39,
+          "row": 388
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "WebSocket | None",
+              "end_location": {
+                "column": 39,
+                "row": 388
+              },
+              "location": {
+                "column": 20,
+                "row": 388
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 20,
+          "row": 388
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 388,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 410
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "        from app.domain.services.voice_pipeline.action_execution import (\r\n            enabled_voice_actions,\r\n            prepare_voice_action_context,\r\n        )\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 410
+              },
+              "location": {
+                "column": 1,
+                "row": 407
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 407
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 407,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "SIM105",
+        "end_location": {
+          "column": 21,
+          "row": 516
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "import contextlib\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 183
+              },
+              "location": {
+                "column": 1,
+                "row": 183
+              }
+            },
+            {
+              "content": "with contextlib.suppress(Exception)",
+              "end_location": {
+                "column": 16,
+                "row": 513
+              },
+              "location": {
+                "column": 13,
+                "row": 513
+              }
+            },
+            {
+              "content": "",
+              "end_location": {
+                "column": 1,
+                "row": 517
+              },
+              "location": {
+                "column": 1,
+                "row": 515
+              }
+            }
+          ],
+          "message": "Replace with `contextlib.suppress(Exception)`"
+        },
+        "location": {
+          "column": 13,
+          "row": 513
+        },
+        "message": "Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`",
+        "noqa_row": 513,
+        "url": "https://docs.astral.sh/ruff/rules/suppressible-exception"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 46,
+          "row": 695
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 46,
+                "row": 695
+              },
+              "location": {
+                "column": 33,
+                "row": 695
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 33,
+          "row": 695
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 695,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 42,
+          "row": 705
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 42,
+                "row": 705
+              },
+              "location": {
+                "column": 29,
+                "row": 705
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 29,
+          "row": 705
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 705,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 50,
+          "row": 713
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 50,
+                "row": 713
+              },
+              "location": {
+                "column": 37,
+                "row": 713
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 37,
+          "row": 713
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 713,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "SIM103",
+        "end_location": {
+          "column": 24,
+          "row": 778
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "return not (tgt is not None and _my_epoch and tgt < _my_epoch)",
+              "end_location": {
+                "column": 24,
+                "row": 778
+              },
+              "location": {
+                "column": 13,
+                "row": 776
+              }
+            }
+          ],
+          "message": "Inline condition"
+        },
+        "location": {
+          "column": 13,
+          "row": 776
+        },
+        "message": "Return the negated condition directly",
+        "noqa_row": 776,
+        "url": "https://docs.astral.sh/ruff/rules/needless-bool"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 95,
+          "row": 780
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 95,
+                "row": 780
+              },
+              "location": {
+                "column": 82,
+                "row": 780
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 82,
+          "row": 780
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 780,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 37,
+          "row": 969
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "float | None",
+              "end_location": {
+                "column": 37,
+                "row": 969
+              },
+              "location": {
+                "column": 22,
+                "row": 969
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 22,
+          "row": 969
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 969,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 35,
+          "row": 970
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "float | None",
+              "end_location": {
+                "column": 35,
+                "row": 970
+              },
+              "location": {
+                "column": 20,
+                "row": 970
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 20,
+          "row": 970
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 970,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "SIM105",
+        "end_location": {
+          "column": 33,
+          "row": 1053
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "import contextlib\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 183
+              },
+              "location": {
+                "column": 1,
+                "row": 183
+              }
+            },
+            {
+              "content": "with contextlib.suppress(Exception)",
+              "end_location": {
+                "column": 28,
+                "row": 1050
+              },
+              "location": {
+                "column": 25,
+                "row": 1050
+              }
+            },
+            {
+              "content": "",
+              "end_location": {
+                "column": 1,
+                "row": 1054
+              },
+              "location": {
+                "column": 1,
+                "row": 1052
+              }
+            }
+          ],
+          "message": "Replace with `contextlib.suppress(Exception)`"
+        },
+        "location": {
+          "column": 25,
+          "row": 1050
+        },
+        "message": "Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`",
+        "noqa_row": 1050,
+        "url": "https://docs.astral.sh/ruff/rules/suppressible-exception"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 52,
+          "row": 1172
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 52,
+                "row": 1172
+              },
+              "location": {
+                "column": 39,
+                "row": 1172
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 39,
+          "row": 1172
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 1172,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "SIM102",
+        "end_location": {
+          "column": 19,
+          "row": 1338
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": null,
+        "location": {
+          "column": 9,
+          "row": 1334
+        },
+        "message": "Use a single `if` statement instead of nested `if` statements",
+        "noqa_row": 1334,
+        "url": "https://docs.astral.sh/ruff/rules/collapsible-if"
+      },
+      {
+        "cell": null,
+        "code": "SIM102",
+        "end_location": {
+          "column": 19,
+          "row": 1338
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "            if not _barged() and cap_allows_another(\r\n                sentences_done, max_sentences, buf, grace_used=question_grace_used\r\n            ):\r\n                # Same extract-first ordering as the per-sentence loop:\r\n                # this trailing tail is the MOST common place the sentinel\r\n                # actually lands (the model's closing line ends in\r\n                # punctuation, which flushes as a full sentence above, and\r\n                # \" [[END_CALL]]\" is left over as the unterminated tail).\r\n                raw_tail = strip_and_flag(session, buf.strip())\r\n                sentence = guardrails.clean_response(\r\n                    raw_tail, tts_model_id=_tts_model_id,\r\n                    protected_values=_protected_readback,\r\n                )\r\n                _tail_reason: Optional[str] = None\r\n                if sentence:\r\n                    sentence, _tail_reason = _validate_for_tts(sentence)\r\n                    if _tail_reason:\r\n                        guardrail_block_reason = _tail_reason\r\n                if sentence:\r\n                    await _settle_filler()\r\n                    sentence = _after_filler(sentence)\r\n                    if t_tts_first is None:\r\n                        t_tts_first = time.monotonic()\r\n                        self._p.latency_tracker.mark_tts_start(call_id)\r\n                    session.tts_active = True\r\n                    session._voice_action_delivered_text = \"\"\r\n                    tts_was_interrupted = await self._p.synthesize_and_send_audio(\r\n                        session, sentence, websocket, track_latency=first_sentence,\r\n                    )\r\n                    _record_action_playback(sentence, tts_was_interrupted)\r\n                    first_sentence = False\r\n                    t_tts_end = time.monotonic()\r\n                    if not tts_was_interrupted:\r\n                        session._spoken_sentences.append(sentence)\r\n                        if _tail_reason:\r\n                            guardrail_blocked_response = \" \".join(\r\n                                session._spoken_sentences\r\n                            ).strip()\r\n                            raw_response_text = guardrail_blocked_response",
+              "end_location": {
+                "column": 79,
+                "row": 1374
+              },
+              "location": {
+                "column": 1,
+                "row": 1335
+              }
+            }
+          ],
+          "message": "Combine `if` statements using `and`"
+        },
+        "location": {
+          "column": 13,
+          "row": 1335
+        },
+        "message": "Use a single `if` statement instead of nested `if` statements",
+        "noqa_row": 1335,
+        "url": "https://docs.astral.sh/ruff/rules/collapsible-if"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 48,
+          "row": 1349
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 48,
+                "row": 1349
+              },
+              "location": {
+                "column": 35,
+                "row": 1349
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 35,
+          "row": 1349
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 1349,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 1386
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "        from app.domain.services.end_session_action import (\r\n            caller_signaled_end,\r\n            previous_assistant_turn,\r\n        )\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 1386
+              },
+              "location": {
+                "column": 1,
+                "row": 1385
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 1385
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 1385,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      }
+    ]
+  },
+  "current": {
+    "exit_code": 1,
+    "diagnostics": [
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 104
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from __future__ import annotations\r\n\r\nimport asyncio\r\nimport json\r\nimport logging\r\nimport os\r\nimport re\r\nimport time\r\nfrom typing import Optional\r\n\r\nfrom fastapi import WebSocket\r\n\r\nfrom app.domain.models.conversation import MessageRole\r\nfrom app.domain.models.session import CallSession\r\nfrom app.domain.services.ask_ai_constants import (\r\n    PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS,\r\n)\r\nfrom app.domain.services.ask_ai_constants import (\r\n    TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO,\r\n)\r\nfrom app.domain.services.end_session_action import (\r\n    build_end_session_tool_instructions,\r\n    parse_end_session_action,\r\n)\r\nfrom app.domain.services.llm_guardrails import get_guardrails\r\nfrom app.domain.services.voice_pipeline import expressive_caps\r\nfrom app.domain.services.voice_pipeline.action_tools import (\r\n    action_from_validation_reason,\r\n    action_results_for_session,\r\n    action_tool_system_addendum,\r\n    action_tools_for_turn,\r\n    execution_failure_result,\r\n    result_json,\r\n    run_voice_action,\r\n    safe_failure_speech,\r\n)\r\nfrom app.domain.services.voice_pipeline.conversation_guards import (\r\n    CALLBACK_PREFERENCE,\r\n    PHONE_REASK,\r\n    answered_note,\r\n    answered_questions,\r\n    closing_while_contact_open,\r\n    contradicted_customer_claim,\r\n    declined_note,\r\n    is_bare_no,\r\n    is_repeated_question,\r\n    phone_readback_changed,\r\n    promises_timed_callback,\r\n    repeats_answered_question,\r\n    unbacked_contact_claim,\r\n)\r\nfrom app.domain.services.voice_pipeline.end_call import strip_and_flag\r\nfrom app.domain.services.voice_pipeline.grounded_figures import ground_spoken_figures\r\nfrom app.domain.services.voice_pipeline.grounded_links import (\r\n    ground_spoken_links,\r\n    grounded_url_hosts,\r\n)\r\nfrom app.domain.services.voice_pipeline.knowledge_tool import (\r\n    KB_TOOL_NAME,\r\n    knowledge_tools_for,\r\n    run_knowledge_lookup,\r\n    tool_system_addendum,\r\n)\r\nfrom app.domain.services.voice_pipeline.live_structured_state import (\r\n    ToolResultEvidence,\r\n    reduce_cascaded_session_live_state,\r\n    reduce_live_state,\r\n    render_live_state_block,\r\n)\r\nfrom app.domain.services.voice_pipeline.readback_guard import phone_readback_guard\r\nfrom app.domain.services.voice_pipeline.sentence_cap import (\r\n    cap_allows_another,\r\n)\r\nfrom app.domain.services.voice_pipeline.sentence_segmentation import (\r\n    _is_missing_space_boundary,\r\n)\r\nfrom app.infrastructure.llm.groq import LLMTimeoutError\r\nfrom app.services.scripts import model_prompt_addendum\r\nfrom app.services.scripts.prompt_builder import turn_directive, with_turn_directive\r\nfrom app.services.scripts.prompts.accent_fillers import (\r\n    accent_filler_block,\r\n    contextual_filler,\r\n    resolve_accent,\r\n    strip_echoed_acknowledgement,\r\n)\r\nfrom app.services.scripts.prompts.build import build_turn_prompt\r\nfrom app.services.scripts.prompts.guardrails import (\r\n    CARTESIA_LAUGHTER_INSTRUCTIONS,\r\n    ELEVEN_V3_AUDIO_TAGS_INSTRUCTIONS,\r\n)\r\nfrom app.services.scripts.prompts.live_state import build_live_state_block\r\n\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 104
+              },
+              "location": {
+                "column": 1,
+                "row": 17
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 17
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 17,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 183
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_CHUNK_CHARS,\r\n    _KB_MAX_CHUNKS,\r\n    _KB_TOTAL_CHARS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    knowledge_match_is_weak,\r\n    needs_previous_turn_context,\r\n    prepare_knowledge_evidence,\r\n    should_retrieve_knowledge,\r\n)\r\n\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 183
+              },
+              "location": {
+                "column": 1,
+                "row": 172
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 172
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 172,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 20,
+          "row": 174
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_MAX_CHUNKS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    prepare_knowledge_evidence,\r\n    needs_previous_turn_context,\r\n    should_retrieve_knowledge,\r\n)",
+              "end_location": {
+                "column": 2,
+                "row": 181
+              },
+              "location": {
+                "column": 1,
+                "row": 172
+              }
+            }
+          ],
+          "message": "Remove unused import"
+        },
+        "location": {
+          "column": 5,
+          "row": 174
+        },
+        "message": "`app.domain.services.voice_pipeline.kb_budget._KB_CHUNK_CHARS` imported but unused",
+        "noqa_row": 174,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 20,
+          "row": 175
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_MAX_CHUNKS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    prepare_knowledge_evidence,\r\n    needs_previous_turn_context,\r\n    should_retrieve_knowledge,\r\n)",
+              "end_location": {
+                "column": 2,
+                "row": 181
+              },
+              "location": {
+                "column": 1,
+                "row": 172
+              }
+            }
+          ],
+          "message": "Remove unused import"
+        },
+        "location": {
+          "column": 5,
+          "row": 175
+        },
+        "message": "`app.domain.services.voice_pipeline.kb_budget._KB_TOTAL_CHARS` imported but unused",
+        "noqa_row": 175,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 28,
+          "row": 177
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.domain.services.voice_pipeline.kb_budget import (  # noqa: E402\r\n    _KB_MAX_CHUNKS,\r\n    _KNOWLEDGE_RETRIEVE_TIMEOUT_S,\r\n    prepare_knowledge_evidence,\r\n    needs_previous_turn_context,\r\n    should_retrieve_knowledge,\r\n)",
+              "end_location": {
+                "column": 2,
+                "row": 181
+              },
+              "location": {
+                "column": 1,
+                "row": 172
+              }
+            }
+          ],
+          "message": "Remove unused import"
+        },
+        "location": {
+          "column": 5,
+          "row": 177
+        },
+        "message": "`app.domain.services.voice_pipeline.kb_budget.knowledge_match_is_weak` imported but unused",
+        "noqa_row": 177,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 250
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "        from app.services.scripts.knowledge.retrieval import (\r\n            render_node_answer,\r\n            retrieve_knowledge,\r\n            retrieve_pinned_knowledge,\r\n        )\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 250
+              },
+              "location": {
+                "column": 1,
+                "row": 245
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 245
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 245,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "F401",
+        "end_location": {
+          "column": 31,
+          "row": 246
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "from app.services.scripts.knowledge.retrieval import (\r\n            retrieve_pinned_knowledge,\r\n            retrieve_knowledge,\r\n        )",
+              "end_location": {
+                "column": 10,
+                "row": 249
+              },
+              "location": {
+                "column": 9,
+                "row": 245
+              }
+            }
+          ],
+          "message": "Remove unused import: `app.services.scripts.knowledge.retrieval.render_node_answer`"
+        },
+        "location": {
+          "column": 13,
+          "row": 246
+        },
+        "message": "`app.services.scripts.knowledge.retrieval.render_node_answer` imported but unused",
+        "noqa_row": 246,
+        "url": "https://docs.astral.sh/ruff/rules/unused-import"
+      },
+      {
+        "cell": null,
+        "code": "UP041",
+        "end_location": {
+          "column": 40,
+          "row": 283
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "TimeoutError",
+              "end_location": {
+                "column": 40,
+                "row": 283
+              },
+              "location": {
+                "column": 20,
+                "row": 283
+              }
+            }
+          ],
+          "message": "Replace `asyncio.TimeoutError` with builtin `TimeoutError`"
+        },
+        "location": {
+          "column": 20,
+          "row": 283
+        },
+        "message": "Replace aliased errors with `TimeoutError`",
+        "noqa_row": 283,
+        "url": "https://docs.astral.sh/ruff/rules/timeout-error-alias"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 39,
+          "row": 387
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "WebSocket | None",
+              "end_location": {
+                "column": 39,
+                "row": 387
+              },
+              "location": {
+                "column": 20,
+                "row": 387
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 20,
+          "row": 387
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 387,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 414
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "        from app.domain.services.voice_pipeline.action_execution import (\r\n            enabled_voice_actions,\r\n            prepare_voice_action_context,\r\n        )\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 414
+              },
+              "location": {
+                "column": 1,
+                "row": 411
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 411
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 411,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      },
+      {
+        "cell": null,
+        "code": "SIM105",
+        "end_location": {
+          "column": 21,
+          "row": 520
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "import contextlib\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 182
+              },
+              "location": {
+                "column": 1,
+                "row": 182
+              }
+            },
+            {
+              "content": "with contextlib.suppress(Exception)",
+              "end_location": {
+                "column": 16,
+                "row": 517
+              },
+              "location": {
+                "column": 13,
+                "row": 517
+              }
+            },
+            {
+              "content": "",
+              "end_location": {
+                "column": 1,
+                "row": 521
+              },
+              "location": {
+                "column": 1,
+                "row": 519
+              }
+            }
+          ],
+          "message": "Replace with `contextlib.suppress(Exception)`"
+        },
+        "location": {
+          "column": 13,
+          "row": 517
+        },
+        "message": "Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`",
+        "noqa_row": 517,
+        "url": "https://docs.astral.sh/ruff/rules/suppressible-exception"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 46,
+          "row": 699
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 46,
+                "row": 699
+              },
+              "location": {
+                "column": 33,
+                "row": 699
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 33,
+          "row": 699
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 699,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 42,
+          "row": 709
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 42,
+                "row": 709
+              },
+              "location": {
+                "column": 29,
+                "row": 709
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 29,
+          "row": 709
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 709,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 50,
+          "row": 717
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 50,
+                "row": 717
+              },
+              "location": {
+                "column": 37,
+                "row": 717
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 37,
+          "row": 717
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 717,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "SIM103",
+        "end_location": {
+          "column": 24,
+          "row": 782
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "return not (tgt is not None and _my_epoch and tgt < _my_epoch)",
+              "end_location": {
+                "column": 24,
+                "row": 782
+              },
+              "location": {
+                "column": 13,
+                "row": 780
+              }
+            }
+          ],
+          "message": "Inline condition"
+        },
+        "location": {
+          "column": 13,
+          "row": 780
+        },
+        "message": "Return the negated condition directly",
+        "noqa_row": 780,
+        "url": "https://docs.astral.sh/ruff/rules/needless-bool"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 95,
+          "row": 784
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 95,
+                "row": 784
+              },
+              "location": {
+                "column": 82,
+                "row": 784
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 82,
+          "row": 784
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 784,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 37,
+          "row": 973
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "float | None",
+              "end_location": {
+                "column": 37,
+                "row": 973
+              },
+              "location": {
+                "column": 22,
+                "row": 973
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 22,
+          "row": 973
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 973,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 35,
+          "row": 974
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "float | None",
+              "end_location": {
+                "column": 35,
+                "row": 974
+              },
+              "location": {
+                "column": 20,
+                "row": 974
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 20,
+          "row": 974
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 974,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "SIM105",
+        "end_location": {
+          "column": 33,
+          "row": 1063
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "import contextlib\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 182
+              },
+              "location": {
+                "column": 1,
+                "row": 182
+              }
+            },
+            {
+              "content": "with contextlib.suppress(Exception)",
+              "end_location": {
+                "column": 28,
+                "row": 1060
+              },
+              "location": {
+                "column": 25,
+                "row": 1060
+              }
+            },
+            {
+              "content": "",
+              "end_location": {
+                "column": 1,
+                "row": 1064
+              },
+              "location": {
+                "column": 1,
+                "row": 1062
+              }
+            }
+          ],
+          "message": "Replace with `contextlib.suppress(Exception)`"
+        },
+        "location": {
+          "column": 25,
+          "row": 1060
+        },
+        "message": "Use `contextlib.suppress(Exception)` instead of `try`-`except`-`pass`",
+        "noqa_row": 1060,
+        "url": "https://docs.astral.sh/ruff/rules/suppressible-exception"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 52,
+          "row": 1182
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 52,
+                "row": 1182
+              },
+              "location": {
+                "column": 39,
+                "row": 1182
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 39,
+          "row": 1182
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 1182,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "SIM102",
+        "end_location": {
+          "column": 19,
+          "row": 1348
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": null,
+        "location": {
+          "column": 9,
+          "row": 1344
+        },
+        "message": "Use a single `if` statement instead of nested `if` statements",
+        "noqa_row": 1344,
+        "url": "https://docs.astral.sh/ruff/rules/collapsible-if"
+      },
+      {
+        "cell": null,
+        "code": "SIM102",
+        "end_location": {
+          "column": 19,
+          "row": 1348
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "unsafe",
+          "edits": [
+            {
+              "content": "            if not _barged() and cap_allows_another(\r\n                sentences_done, max_sentences, buf, grace_used=question_grace_used\r\n            ):\r\n                # Same extract-first ordering as the per-sentence loop:\r\n                # this trailing tail is the MOST common place the sentinel\r\n                # actually lands (the model's closing line ends in\r\n                # punctuation, which flushes as a full sentence above, and\r\n                # \" [[END_CALL]]\" is left over as the unterminated tail).\r\n                raw_tail = strip_and_flag(session, buf.strip())\r\n                sentence = guardrails.clean_response(\r\n                    raw_tail, tts_model_id=_tts_model_id,\r\n                    protected_values=_protected_readback,\r\n                )\r\n                _tail_reason: Optional[str] = None\r\n                if sentence:\r\n                    sentence, _tail_reason = _validate_for_tts(sentence)\r\n                    if _tail_reason:\r\n                        guardrail_block_reason = _tail_reason\r\n                if sentence:\r\n                    await _settle_filler()\r\n                    sentence = _after_filler(sentence)\r\n                    if t_tts_first is None:\r\n                        t_tts_first = time.monotonic()\r\n                        self._p.latency_tracker.mark_tts_start(call_id)\r\n                    session.tts_active = True\r\n                    session._voice_action_delivered_text = \"\"\r\n                    tts_was_interrupted = await self._p.synthesize_and_send_audio(\r\n                        session, sentence, websocket, track_latency=first_sentence,\r\n                    )\r\n                    _record_action_playback(sentence, tts_was_interrupted)\r\n                    first_sentence = False\r\n                    t_tts_end = time.monotonic()\r\n                    if not tts_was_interrupted:\r\n                        session._spoken_sentences.append(sentence)\r\n                        if _tail_reason:\r\n                            guardrail_blocked_response = \" \".join(\r\n                                session._spoken_sentences\r\n                            ).strip()\r\n                            raw_response_text = guardrail_blocked_response",
+              "end_location": {
+                "column": 79,
+                "row": 1384
+              },
+              "location": {
+                "column": 1,
+                "row": 1345
+              }
+            }
+          ],
+          "message": "Combine `if` statements using `and`"
+        },
+        "location": {
+          "column": 13,
+          "row": 1345
+        },
+        "message": "Use a single `if` statement instead of nested `if` statements",
+        "noqa_row": 1345,
+        "url": "https://docs.astral.sh/ruff/rules/collapsible-if"
+      },
+      {
+        "cell": null,
+        "code": "UP007",
+        "end_location": {
+          "column": 48,
+          "row": 1359
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "str | None",
+              "end_location": {
+                "column": 48,
+                "row": 1359
+              },
+              "location": {
+                "column": 35,
+                "row": 1359
+              }
+            }
+          ],
+          "message": "Convert to `X | Y`"
+        },
+        "location": {
+          "column": 35,
+          "row": 1359
+        },
+        "message": "Use `X | Y` for type annotations",
+        "noqa_row": 1359,
+        "url": "https://docs.astral.sh/ruff/rules/non-pep604-annotation"
+      },
+      {
+        "cell": null,
+        "code": "I001",
+        "end_location": {
+          "column": 1,
+          "row": 1396
+        },
+        "filename": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-tool-evidence-lifecycle-20261007\\backend\\app\\domain\\services\\voice_pipeline\\turn_streamer.py",
+        "fix": {
+          "applicability": "safe",
+          "edits": [
+            {
+              "content": "        from app.domain.services.end_session_action import (\r\n            caller_signaled_end,\r\n            previous_assistant_turn,\r\n        )\r\n",
+              "end_location": {
+                "column": 1,
+                "row": 1396
+              },
+              "location": {
+                "column": 1,
+                "row": 1395
+              }
+            }
+          ],
+          "message": "Organize imports"
+        },
+        "location": {
+          "column": 1,
+          "row": 1395
+        },
+        "message": "Import block is un-sorted or un-formatted",
+        "noqa_row": 1395,
+        "url": "https://docs.astral.sh/ruff/rules/unsorted-imports"
+      }
+    ]
+  },
+  "same_diagnostic_types_and_counts": true,
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "ruff",
+    "check",
+    "--output-format",
+    "json",
+    "--stdin-filename",
+    "backend/app/domain/services/voice_pipeline/turn_streamer.py",
+    "-"
+  ],
+  "test": {
+    "argv": [
+      "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+      "-m",
+      "ruff",
+      "check",
+      "backend/tests/unit/test_knowledge_tool_evidence_lifecycle.py"
+    ],
+    "exit_code": 0,
+    "stdout": "All checks passed!\n",
+    "stderr": ""
+  }
+}

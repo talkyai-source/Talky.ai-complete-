@@ -1,0 +1,20 @@
+......FF...                                                              [100%]
+================================== FAILURES ===================================
+_ test_cancel_preserves_cancellation_and_ownership_when_cleanup_has_error[pipe_error] _
+tests\unit\test_pjsip_reload_receipts.py:284: in test_cancel_preserves_cancellation_and_ownership_when_cleanup_has_error
+    assert isinstance(results[0], asyncio.CancelledError)
+E   AssertionError: assert False
+E    +  where False = isinstance(PJSIPReloadResult(status='failed', detail='PJSIP reload failed: OSError.'), <class 'asyncio.exceptions.CancelledError'>)
+E    +    where <class 'asyncio.exceptions.CancelledError'> = asyncio.CancelledError
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.telephony.pjsip_config_generator:pjsip_config_generator.py:506 pjsip_reload_error err=synthetic pipe failure
+_ test_cancel_preserves_cancellation_and_ownership_when_cleanup_has_error[kill_error] _
+tests\unit\test_pjsip_reload_receipts.py:282: in test_cancel_preserves_cancellation_and_ownership_when_cleanup_has_error
+    assert count_before_finish == 1
+E   assert 2 == 1
+------------------------------ Captured log call ------------------------------
+ERROR    app.infrastructure.telephony.pjsip_config_generator:pjsip_config_generator.py:506 pjsip_reload_error err=synthetic kill denied
+=========================== short test summary info ===========================
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_cancel_preserves_cancellation_and_ownership_when_cleanup_has_error[pipe_error]
+FAILED tests/unit/test_pjsip_reload_receipts.py::test_cancel_preserves_cancellation_and_ownership_when_cleanup_has_error[kill_error]
+2 failed, 9 passed in 1.99s

@@ -1,0 +1,55 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+___________ test_smoke_captures_complete_response_candidate[False] ____________
+tests\unit\test_ag04_realtime_smoke.py:31: in test_smoke_captures_complete_response_candidate
+    assert await realtime_smoke.run() == 0
+E   assert 1 == 0
+---------------------------- Captured stdout call -----------------------------
+OPENAI_API_KEY configured: yes
+Mode: TEXT-IN   Model: gpt-realtime-2   Voice: marin
+Instructions composed: 5619 chars, 65 lines
+OK: connected, session.created + session.updated handshake complete
+Sending text turn: 'Hi! I just wanted to hear how you sound. Can you introduce yourself in a friendly way and tell me a quick joke?'
+  [response.done] model finished a response turn
+
+───────── RESULTS ─────────
+Agent transcript:   ''
+Audio received:     0 μ-law bytes (~0.00s @ 8kHz)
+Function calls:     none
+Errors:             none
+Stats:              {'synthetic': True}
+Closed cleanly.
+
+CHECK: review output above
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-2' coro=<<async_generator_athrow without __name__>()>>
+____________ test_smoke_captures_complete_response_candidate[True] ____________
+tests\unit\test_ag04_realtime_smoke.py:31: in test_smoke_captures_complete_response_candidate
+    assert await realtime_smoke.run() == 0
+E   assert 1 == 0
+---------------------------- Captured stdout call -----------------------------
+OPENAI_API_KEY configured: yes
+Mode: TEXT-IN   Model: gpt-realtime-2   Voice: marin
+Instructions composed: 5619 chars, 65 lines
+OK: connected, session.created + session.updated handshake complete
+Sending text turn: 'Hi! I just wanted to hear how you sound. Can you introduce yourself in a friendly way and tell me a quick joke?'
+  [function_call] lookup_knowledge args={'query': 'synthetic'}
+  [response.done] model finished a response turn
+
+───────── RESULTS ─────────
+Agent transcript:   ''
+Audio received:     0 μ-law bytes (~0.00s @ 8kHz)
+Function calls:     ["lookup_knowledge({'query': 'synthetic'})"]
+Errors:             none
+Stats:              {'synthetic': True}
+Closed cleanly.
+
+CHECK: review output above
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-4' coro=<<async_generator_athrow without __name__>()>>
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_realtime_smoke.py::test_smoke_captures_complete_response_candidate[False]
+FAILED tests/unit/test_ag04_realtime_smoke.py::test_smoke_captures_complete_response_candidate[True]
+2 failed in 2.30s

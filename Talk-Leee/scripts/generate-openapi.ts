@@ -1,9 +1,9 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { zodToJsonSchema } from "zod-to-json-schema";
 import {
-    AssistantActionSchema,
+    AssistantRunSchema,
+    AssistantActionsResponseSchema,
     ConnectorAccountSchema,
     ConnectorSchema,
     ListResponseSchema,
@@ -16,14 +16,10 @@ import { z } from "zod";
 const argv = new Set(process.argv.slice(2));
 const mode = argv.has("--check") ? "check" : "write";
 
-function schemaFromZod(name: string, schema: z.ZodTypeAny) {
-    const json = zodToJsonSchema(schema, { name, $refStrategy: "none" });
-    const defs = (json as unknown as { definitions?: Record<string, unknown> }).definitions;
-    const def = defs?.[name];
-    if (def && typeof def === "object") return def as Record<string, unknown>;
-    const { $schema, definitions, ...rest } = json as unknown as Record<string, unknown>;
+function schemaFromZod(schema: z.ZodType) {
+    // Describe the wire input before the client schemas normalize it.
+    const { $schema, ...rest } = z.toJSONSchema(schema, { io: "input", target: "draft-7" });
     void $schema;
-    void definitions;
     return rest;
 }
 
@@ -35,19 +31,19 @@ const ConnectorListResponse = ListResponseSchema(ConnectorSchema);
 const ConnectorAccountListResponse = ListResponseSchema(ConnectorAccountSchema);
 const MeetingListResponse = ListResponseSchema(MeetingSchema);
 const ReminderListResponse = ListResponseSchema(ReminderSchema);
-const AssistantActionListResponse = ListResponseSchema(AssistantActionSchema);
+const AssistantActionListResponse = AssistantActionsResponseSchema;
 
 const schemas = {
-    Connector: schemaFromZod("Connector", ConnectorSchema),
-    ConnectorAccount: schemaFromZod("ConnectorAccount", ConnectorAccountSchema),
-    Meeting: schemaFromZod("Meeting", MeetingSchema),
-    Reminder: schemaFromZod("Reminder", ReminderSchema),
-    AssistantAction: schemaFromZod("AssistantAction", AssistantActionSchema),
-    ConnectorListResponse: schemaFromZod("ConnectorListResponse", ConnectorListResponse),
-    ConnectorAccountListResponse: schemaFromZod("ConnectorAccountListResponse", ConnectorAccountListResponse),
-    MeetingListResponse: schemaFromZod("MeetingListResponse", MeetingListResponse),
-    ReminderListResponse: schemaFromZod("ReminderListResponse", ReminderListResponse),
-    AssistantActionListResponse: schemaFromZod("AssistantActionListResponse", AssistantActionListResponse),
+    Connector: schemaFromZod(ConnectorSchema),
+    ConnectorAccount: schemaFromZod(ConnectorAccountSchema),
+    Meeting: schemaFromZod(MeetingSchema),
+    Reminder: schemaFromZod(ReminderSchema),
+    AssistantAction: schemaFromZod(AssistantRunSchema),
+    ConnectorListResponse: schemaFromZod(ConnectorListResponse),
+    ConnectorAccountListResponse: schemaFromZod(ConnectorAccountListResponse),
+    MeetingListResponse: schemaFromZod(MeetingListResponse),
+    ReminderListResponse: schemaFromZod(ReminderListResponse),
+    AssistantActionListResponse: schemaFromZod(AssistantActionListResponse),
     HealthResponse: {
         type: "object",
         additionalProperties: false,

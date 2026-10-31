@@ -5,8 +5,11 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.api.v1.dependencies import CurrentUser, get_audit_logger, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.rbac import UserRole, normalize_role
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from ._shared import normalize_optional_text
 from .schemas import MeResponse, UpdateMeRequest
@@ -39,7 +42,7 @@ async def get_me(
     AuthContext.user without firing a parallel /auth/me query. The fields
     are nullable for users without a tenant or without a partner link.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         row = await conn.fetchrow(
             """
             SELECT t.id                       AS tenant_id,
@@ -83,6 +86,7 @@ async def get_me(
         business_name=current_user.business_name,
         role=current_user.role,
         minutes_remaining=current_user.minutes_remaining,
+        minutes_state=current_user.minutes_state,
         partner_id=partner_id,
         tenant_id=tenant_id or current_user.tenant_id,
         partner_status=partner_status,
@@ -98,8 +102,14 @@ async def update_me(
     body: UpdateMeRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> MeResponse:
-    """Update editable profile fields (name, business_name)."""
+    """Update editable profile fields (name, business_name).
+
+    ``business_name`` is tenant-wide (agent prompts, receipts), so changing it
+    needs a tenant-admin role; the settings form re-sends the unchanged value
+    for every member, which is accepted as a no-op.
+    """
     next_name = normalize_optional_text(body.name) if body.name is not None else None
     next_business_name = (
         normalize_optional_text(body.business_name)
@@ -113,6 +123,18 @@ async def update_me(
             detail="business_name cannot be empty.",
         )
 
+    renames_tenant = (
+        body.business_name is not None
+        and next_business_name != current_user.business_name
+    )
+    if renames_tenant and not normalize_role(current_user.role).can_access(
+        UserRole.TENANT_ADMIN
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a tenant admin can change the business name.",
+        )
+
     if body.name is None and body.business_name is None:
         return MeResponse(
             id=current_user.id,
@@ -121,9 +143,10 @@ async def update_me(
             business_name=current_user.business_name,
             role=current_user.role,
             minutes_remaining=current_user.minutes_remaining,
+            minutes_state=current_user.minutes_state,
         )
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         async with conn.transaction():
             if body.name is not None:
                 await conn.execute(
@@ -131,7 +154,7 @@ async def update_me(
                     next_name,
                     current_user.id,
                 )
-            if body.business_name is not None:
+            if renames_tenant:
                 if not current_user.tenant_id:
                     raise HTTPException(
                         status_code=status.HTTP_400_BAD_REQUEST,
@@ -160,15 +183,28 @@ async def update_me(
             detail="User profile not found.",
         )
 
-    minutes_remaining = max(
-        0,
-        (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0),
-    )
+    if renames_tenant:
+        await audit_logger.log(
+            event_type=AuditEvent.TENANT_UPDATED,
+            action="tenant_business_name_changed",
+            actor_id=current_user.id,
+            actor_role=current_user.role,
+            tenant_id=current_user.tenant_id,
+            resource_type="tenant",
+            resource_id=current_user.tenant_id,
+            description="Tenant business name changed via PATCH /auth/me",
+            before_state={"business_name": current_user.business_name},
+            after_state={"business_name": next_business_name},
+        )
+
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(db_client.pool, current_user.tenant_id)
+
     return MeResponse(
         id=str(row["id"]),
         email=row["email"],
         name=row["name"],
         business_name=row["business_name"],
         role=row["role"],
-        minutes_remaining=minutes_remaining,
+        **meter.allowance(),
     )

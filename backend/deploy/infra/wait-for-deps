@@ -1,0 +1,21 @@
+#!/bin/sh
+# Block until the production Postgres and Redis containers report healthy.
+#
+# Installed to /opt/talky-infra/bin/wait-for-deps and run as ExecStartPre by
+# talky-api and the workers (systemd/talky-deps.conf), so after a reboot or a
+# database restart the Python services start against a ready database instead
+# of racing it. Exits non-zero after WAIT_SECONDS so systemd retries later.
+WAIT_SECONDS="${WAIT_SECONDS:-180}"
+deadline=$(( $(date +%s) + WAIT_SECONDS ))
+while :; do
+    pg=$(docker inspect -f '{{.State.Health.Status}}' talky-postgres-1 2>/dev/null)
+    rd=$(docker inspect -f '{{.State.Health.Status}}' talky-redis-1 2>/dev/null)
+    if [ "$pg" = "healthy" ] && [ "$rd" = "healthy" ]; then
+        exit 0
+    fi
+    if [ "$(date +%s)" -ge "$deadline" ]; then
+        echo "talky deps not healthy after ${WAIT_SECONDS}s (postgres=${pg:-missing} redis=${rd:-missing})" >&2
+        exit 1
+    fi
+    sleep 2
+done

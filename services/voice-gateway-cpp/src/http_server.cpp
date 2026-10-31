@@ -25,6 +25,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <vector>
@@ -32,6 +33,8 @@
 namespace voice_gateway {
 
 namespace {
+
+constexpr const char* kBuildSha = VOICE_GATEWAY_BUILD_SHA;
 
 // Aggregate in-flight request-body budget (D remainder). The per-request 8 MiB
 // cap bounds ONE request, but 256 concurrent handlers x 8 MiB is ~2 GiB — a
@@ -464,6 +467,7 @@ std::string session_stats_json(const SessionStatsSnapshot& stats) {
     std::ostringstream out;
     out << "{"
         << "\"session_id\":\"" << escape_json(stats.session_id) << "\"," 
+        << "\"config_digest\":\"" << escape_json(stats.config_digest) << "\","
         << "\"state\":\"" << escape_json(stats.state) << "\"," 
         << "\"stop_reason\":\"" << escape_json(stats.stop_reason) << "\"," 
         << "\"packets_in\":" << stats.packets_in << ','
@@ -493,6 +497,11 @@ std::string session_stats_json(const SessionStatsSnapshot& stats) {
         << "\"tts_frames_dropped_total\":" << stats.tts_frames_dropped_total << ','
         << "\"tts_queue_depth_frames\":" << stats.tts_queue_depth_frames << ','
         << "\"tts_last_stop_reason\":\"" << escape_json(stats.tts_last_stop_reason) << "\","
+        << "\"callback_delivery_healthy\":" << (stats.callback_delivery.healthy ? "true" : "false") << ','
+        << "\"callback_failure_streak_ms\":" << stats.callback_delivery.failure_streak_ms << ','
+        << "\"callback_batches_delivered_total\":" << stats.callback_delivery.delivered << ','
+        << "\"callback_batches_failed_total\":" << stats.callback_delivery.failed << ','
+        << "\"callback_batches_dropped_total\":" << stats.callback_delivery.dropped << ','
         << "\"stt_frames_emitted_total\":" << stats.stt_frames_emitted_total << ','
         << "\"stt_floor_dropped_total\":" << stats.stt_floor_dropped_total << ','
         << "\"stt_probation_dropped_total\":" << stats.stt_probation_dropped_total << ','
@@ -505,9 +514,13 @@ std::string session_stats_json(const SessionStatsSnapshot& stats) {
 std::string process_stats_json(const ProcessStatsSnapshot& stats) {
     std::ostringstream out;
     out << "{"
+        << "\"build_sha\":\"" << escape_json(kBuildSha) << "\","
         << "\"sessions_started_total\":" << stats.sessions_started_total << ','
         << "\"sessions_stopped_total\":" << stats.sessions_stopped_total << ','
         << "\"sessions_reaped_total\":" << stats.sessions_reaped_total << ','
+        << "\"callback_batches_delivered_total\":" << stats.callback_batches_delivered_total << ','
+        << "\"callback_batches_failed_total\":" << stats.callback_batches_failed_total << ','
+        << "\"callback_batches_dropped_total\":" << stats.callback_batches_dropped_total << ','
         << "\"active_sessions\":" << stats.active_sessions << ','
         << "\"stopped_sessions\":" << stats.stopped_sessions << ','
         << "\"packets_in\":" << stats.packets_in << ','
@@ -547,8 +560,11 @@ std::string sessions_list_json(const std::vector<SessionStatsSnapshot>& sessions
         const auto& s = sessions[i];
         out << "{"
             << "\"session_id\":\"" << escape_json(s.session_id) << "\","
+            << "\"config_digest\":\"" << escape_json(s.config_digest) << "\","
             << "\"state\":\"" << escape_json(s.state) << "\","
             << "\"stop_reason\":\"" << escape_json(s.stop_reason) << "\","
+            << "\"callback_delivery_healthy\":" << (s.callback_delivery.healthy ? "true" : "false") << ','
+            << "\"callback_failure_streak_ms\":" << s.callback_delivery.failure_streak_ms << ','
             << "\"tts_queue_depth_frames\":" << s.tts_queue_depth_frames
             << "}";
     }
@@ -627,9 +643,9 @@ std::string base64_encode(const std::vector<uint8_t>& input) {
     return output;
 }
 
-// Owns a raw fd for the duration of a scope so an exception thrown anywhere in
-// http_post (e.g. std::bad_alloc appending to the response string) can no
-// longer leak the socket (review: sender-exception socket leak).
+// Owns a not-yet-published fd while a persistent callback connection is being
+// established. release() transfers it to the session sender only after connect
+// succeeds, so exceptions/failures during setup cannot leak the socket.
 struct FdGuard {
     int fd{-1};
     ~FdGuard() {
@@ -640,18 +656,198 @@ struct FdGuard {
     FdGuard() = default;
     FdGuard(const FdGuard&) = delete;
     FdGuard& operator=(const FdGuard&) = delete;
+    int release() noexcept {
+        const int value = fd;
+        fd = -1;
+        return value;
+    }
 };
 
-// Send a fire-and-forget HTTP POST to the given URL with a JSON body.
-// Runs synchronously; callers should dispatch to a thread if low latency is needed.
-// Returns false on any network/parse error (silently drops the callback).
-bool http_post(const std::string& url, const std::string& json_body) {
+std::optional<std::string> valid_secret_environment_value(const char* name) {
+    const char* configured = std::getenv(name);
+    if (configured == nullptr) {
+        return std::nullopt;
+    }
+    const std::string value = trim(configured);
+    if (value.size() < 32 || value.size() > 512) {
+        return std::nullopt;
+    }
+    for (const unsigned char c : value) {
+        if (c < 0x20 || c == 0x7F) {
+            return std::nullopt;
+        }
+    }
+    return value;
+}
+
+struct PinnedBackendOrigin {
+    std::string host;
+    uint16_t port{0};
+    std::string authority;
+};
+
+bool parse_backend_internal_origin(const std::string& value, PinnedBackendOrigin& origin) {
+    // BACKEND_INTERNAL_URL is an origin, not an arbitrary base URL. Keep its
+    // accepted grammar deliberately smaller than RFC 3986 so the request
+    // sender and admission check cannot disagree about userinfo, implicit
+    // ports, alternative IP spellings, or path normalization.
+    if (value.empty() || value.size() > 256) {
+        return false;
+    }
+    for (const unsigned char c : value) {
+        if (c <= 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+    static const std::string kScheme = "http://";
+    if (value.compare(0, kScheme.size(), kScheme) != 0 ||
+        value.find_first_of("?#") != std::string::npos) {
+        return false;
+    }
+
+    const std::size_t authority_start = kScheme.size();
+    const std::size_t path_start = value.find('/', authority_start);
+    const std::string authority = path_start == std::string::npos
+                                      ? value.substr(authority_start)
+                                      : value.substr(authority_start, path_start - authority_start);
+    const std::string base_path = path_start == std::string::npos ? std::string() : value.substr(path_start);
+    if (!base_path.empty()) {
+        return false;  // no path or trailing slash: the adapter appends the route
+    }
+    if (authority.empty() || authority.find('@') != std::string::npos) {
+        return false;
+    }
+
+    const std::size_t colon = authority.find(':');
+    if (colon == std::string::npos || colon == 0 || colon + 1 >= authority.size() ||
+        authority.find(':', colon + 1) != std::string::npos) {
+        return false;
+    }
+    const std::string host = authority.substr(0, colon);
+    const std::string port_text = authority.substr(colon + 1);
+    if (port_text.size() > 5 ||
+        (port_text.size() > 1 && port_text.front() == '0') ||
+        port_text.find_first_not_of("0123456789") != std::string::npos) {
+        return false;
+    }
+    unsigned int parsed_port = 0;
+    const auto port_result = std::from_chars(
+        port_text.data(), port_text.data() + port_text.size(), parsed_port);
+    if (port_result.ec != std::errc() || port_result.ptr != port_text.data() + port_text.size() ||
+        parsed_port == 0 || parsed_port > 65535) {
+        return false;
+    }
+
+    in_addr address{};
+    if (::inet_pton(AF_INET, host.c_str(), &address) != 1) {
+        return false;
+    }
+    const std::uint32_t host_order = ntohl(address.s_addr);
+    if ((host_order & 0xff000000U) != 0x7f000000U) {
+        return false;
+    }
+    char canonical_host[INET_ADDRSTRLEN]{};
+    if (::inet_ntop(AF_INET, &address, canonical_host, sizeof(canonical_host)) == nullptr ||
+        host != canonical_host) {
+        return false;
+    }
+
+    origin.host = host;
+    origin.port = static_cast<uint16_t>(parsed_port);
+    origin.authority = host + ":" + std::to_string(parsed_port);
+    return authority == origin.authority;
+}
+
+bool load_pinned_backend_origin(PinnedBackendOrigin& origin, std::string& error) {
+    const char* configured_url = std::getenv("BACKEND_INTERNAL_URL");
+    if (configured_url == nullptr || !parse_backend_internal_origin(configured_url, origin)) {
+        error =
+            "BACKEND_INTERNAL_URL must be an exact plain http numeric loopback origin with an explicit "
+            "canonical port and no credentials, query, fragment, or base path";
+        return false;
+    }
+    const char* callback_host = std::getenv("VOICE_GATEWAY_CALLBACK_HOST");
+    if (callback_host == nullptr || origin.host != callback_host) {
+        error =
+            "VOICE_GATEWAY_CALLBACK_HOST must exactly match the BACKEND_INTERNAL_URL numeric loopback host";
+        return false;
+    }
+    return true;
+}
+
+bool safe_callback_session_id(const std::string& value) {
+    if (value.empty() || value.size() > 128) {
+        return false;
+    }
+    for (const unsigned char c : value) {
+        const bool ascii_alnum = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+                                 (c >= '0' && c <= '9');
+        const bool safe = ascii_alnum || c == '-' || c == '.' || c == '_' || c == '~';
+        if (!safe) {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The shared secret that proves an outbound callback really came from this
+// gateway. The backend's caller-audio route
+// (POST /api/v1/sip/telephony/audio/{session_id}) checks it as the
+// X-Internal-Service-Token header — see backend/app/core/security/
+// internal_auth.py (is_internal_service_request). Authentication is mandatory;
+// the production binary refuses to start without a valid token.
+//
+// Read ONCE at first use, like the other gateway env knobs. The executable's
+// startup validation rejects unset/empty/malformed values. The defensive empty
+// result here is retained for library tests and alternate embeddings:
+//   * malformed    -> a value shorter than 32 bytes, with a control character
+//                     (CR/LF would inject a header/request line), or longer
+//                     than 512 bytes is treated as unset rather than spliced in.
+// Surrounding whitespace is trimmed because the backend compares against its
+// own os.getenv(...).strip() and HTTP parsers strip OWS around header values,
+// so an untrimmed value would silently mismatch.
+const std::string& internal_service_token() {
+    static const std::string token = []() -> std::string {
+        const auto value = valid_secret_environment_value("INTERNAL_SERVICE_TOKEN");
+        return value.has_value() ? value.value() : std::string();
+    }();
+    return token;
+}
+
+// Send one HTTP POST over a session-owned persistent connection. The caller is
+// a single FIFO worker thread, so no socket lock or pipelining is needed.
+// Any protocol/network failure closes the connection; a bounded caller retry
+// then reconnects. This removes per-audio-batch TCP/TIME_WAIT churn without
+// allowing stale response bytes to corrupt the next acknowledgement.
+bool http_post(const std::string& url, const std::string& json_body, int& connection_fd) {
+    const auto discard_connection = [&connection_fd] {
+        if (connection_fd >= 0) {
+            ::close(connection_fd);
+            connection_fd = -1;
+        }
+    };
+    // This is an independent last-mile guard, not merely an assumption that
+    // /sessions/start already checked the value. Never construct a request or
+    // attach INTERNAL_SERVICE_TOKEN for any destination outside the exact
+    // BACKEND_INTERNAL_URL origin and caller-audio route.
+    if (!audio_callback_url_is_allowed(url)) {
+        discard_connection();
+        return false;
+    }
+    const std::string& token = internal_service_token();
+    if (token.empty()) {
+        discard_connection();
+        return false;
+    }
+
     // Parse URL: http://host:port/path
     if (url.size() < 8) {
+        discard_connection();
         return false;
     }
     const std::size_t scheme_end = url.find("://");
     if (scheme_end == std::string::npos) {
+        discard_connection();
         return false;
     }
     const std::size_t host_start = scheme_end + 3;
@@ -669,10 +865,12 @@ bool http_post(const std::string& url, const std::string& json_body) {
         try {
             const unsigned long parsed = std::stoul(host_port.substr(colon + 1));
             if (parsed == 0 || parsed > 65535) {
+                discard_connection();
                 return false;
             }
             port = static_cast<uint16_t>(parsed);
         } catch (...) {
+            discard_connection();
             return false;
         }
     }
@@ -681,64 +879,68 @@ bool http_post(const std::string& url, const std::string& json_body) {
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
     if (inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1) {
+        discard_connection();
         return false;
     }
 
     // Build the request BEFORE creating the socket so its allocations cannot
     // leak an open fd; everything after socket() is covered by FdGuard.
     std::ostringstream req;
-    req << "POST " << path << " HTTP/1.0\r\n"
+    req << "POST " << path << " HTTP/1.1\r\n"
         << "Host: " << host_port << "\r\n"
-        << "Content-Type: application/json\r\n"
-        << "Content-Length: " << json_body.size() << "\r\n"
-        << "Connection: close\r\n"
+        << "Content-Type: application/json\r\n";
+    // The exact-origin guard above has already run, so this credential can only
+    // be sent to the pinned backend listener.
+    req << "X-Internal-Service-Token: " << token << "\r\n";
+    req << "Content-Length: " << json_body.size() << "\r\n"
+        << "Connection: keep-alive\r\n"
         << "\r\n"
         << json_body;
     const std::string wire = req.str();
 
-    // SOCK_NONBLOCK at creation: non-blocking mode is now guaranteed, not a
-    // best-effort fcntl whose failure silently reverted connect() to a blocking
-    // call with the kernel's minutes-long TCP timeout — which would defeat the
-    // deadline and stall session teardown behind it (review #10).
-    FdGuard guard;
-    guard.fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-    if (guard.fd < 0) {
-        return false;
-    }
-    const int fd = guard.fd;
-
     // ONE absolute deadline covers the whole exchange: nonblocking connect ->
-    // full request write -> status-line read. Per-operation SO_*TIMEO would let a
+    // full request write -> complete response drain. Per-operation SO_*TIMEO would let a
     // peer that trickles one byte just under each timeout keep the call alive
     // indefinitely and block session teardown (VG-10 / finding #7).
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(500);
 
-    // Nonblocking connect, bounded by the deadline.
-    if (connect(fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
-        if (errno != EINPROGRESS) {
+    // Nonblocking connect, bounded by the deadline. Reuse the existing socket
+    // when the prior response proved it safe for another request.
+    if (connection_fd < 0) {
+        FdGuard candidate;
+        candidate.fd = socket(AF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
+        if (candidate.fd < 0) {
             return false;
         }
-        for (;;) {
-            const int wait_ms = remaining_until_ms(deadline);
-            if (wait_ms <= 0) {
+        const int candidate_fd = candidate.fd;
+        if (connect(candidate_fd, reinterpret_cast<const sockaddr*>(&addr), sizeof(addr)) != 0) {
+            if (errno != EINPROGRESS) {
                 return false;
             }
-            pollfd pfd{fd, POLLOUT, 0};
-            const int pr = poll(&pfd, 1, wait_ms);
-            if (pr < 0 && errno == EINTR) {
-                continue;
+            for (;;) {
+                const int wait_ms = remaining_until_ms(deadline);
+                if (wait_ms <= 0) {
+                    return false;
+                }
+                pollfd pfd{candidate_fd, POLLOUT, 0};
+                const int pr = poll(&pfd, 1, wait_ms);
+                if (pr < 0 && errno == EINTR) {
+                    continue;
+                }
+                if (pr <= 0) {
+                    return false;
+                }
+                break;
             }
-            if (pr <= 0) {
+            int soerr = 0;
+            socklen_t soerr_len = sizeof(soerr);
+            if (getsockopt(candidate_fd, SOL_SOCKET, SO_ERROR, &soerr, &soerr_len) != 0 || soerr != 0) {
                 return false;
             }
-            break;
         }
-        int soerr = 0;
-        socklen_t soerr_len = sizeof(soerr);
-        if (getsockopt(fd, SOL_SOCKET, SO_ERROR, &soerr, &soerr_len) != 0 || soerr != 0) {
-            return false;
-        }
+        connection_fd = candidate.release();
     }
+    const int fd = connection_fd;
 
     // Write the full request within the deadline. MSG_NOSIGNAL: a backend reset
     // must return EPIPE, not kill the gateway (VG-14).
@@ -746,6 +948,7 @@ bool http_post(const std::string& url, const std::string& json_body) {
     while (off < wire.size()) {
         const int wait_ms = remaining_until_ms(deadline);
         if (wait_ms <= 0) {
+            discard_connection();
             return false;
         }
         pollfd pfd{fd, POLLOUT, 0};
@@ -754,6 +957,7 @@ bool http_post(const std::string& url, const std::string& json_body) {
             continue;
         }
         if (pr <= 0) {
+            discard_connection();
             return false;
         }
         const ssize_t s = send(fd, wire.data() + off, wire.size() - off, MSG_NOSIGNAL);
@@ -762,19 +966,20 @@ bool http_post(const std::string& url, const std::string& json_body) {
         } else if (s < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR)) {
             continue;
         } else {
+            discard_connection();
             return false;
         }
     }
 
-    // Read up to the status line (first newline) within the deadline; do NOT
-    // wait for the body / connection close once a valid status is available.
-    // Previously the response was drained without inspection and always returned
-    // true, so a backend 500/timeout/reset looked identical to success — silent
-    // STT loss (VG-10). Non-2xx (or no parseable status) is now a failure.
+    // Read the complete response headers. Persistent reuse is safe only after
+    // the declared body has also been consumed; stopping at the status line
+    // would leave JSON bytes to be mistaken for the next response.
     std::string resp;
-    while (resp.find('\n') == std::string::npos && resp.size() < 512) {
+    std::size_t header_end = std::string::npos;
+    while (header_end == std::string::npos && resp.size() < 16 * 1024) {
         const int wait_ms = remaining_until_ms(deadline);
         if (wait_ms <= 0) {
+            discard_connection();
             return false;
         }
         pollfd pfd{fd, POLLIN, 0};
@@ -783,19 +988,27 @@ bool http_post(const std::string& url, const std::string& json_body) {
             continue;
         }
         if (pr <= 0) {
+            discard_connection();
             return false;
         }
-        char rbuf[256];
+        char rbuf[1024];
         const ssize_t r = recv(fd, rbuf, sizeof(rbuf), 0);
         if (r > 0) {
             resp.append(rbuf, static_cast<std::size_t>(r));
+            header_end = resp.find("\r\n\r\n");
         } else if (r == 0) {
-            break;  // peer closed
+            discard_connection();
+            return false;
         } else if (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) {
             continue;
         } else {
+            discard_connection();
             return false;
         }
+    }
+    if (header_end == std::string::npos) {
+        discard_connection();
+        return false;
     }
 
     // Strict status parse (review #12): require a COMPLETE status line
@@ -804,24 +1017,90 @@ bool http_post(const std::string& url, const std::string& json_body) {
     // digits status (previously undefined behavior through atoi) all fail.
     const std::size_t eol = resp.find('\n');
     if (eol == std::string::npos) {
+        discard_connection();
         return false;
     }
     if (resp.compare(0, 5, "HTTP/") != 0) {
+        discard_connection();
         return false;
     }
     const std::size_t sp = resp.find(' ');
     if (sp == std::string::npos || sp + 3 >= eol) {
+        discard_connection();
         return false;
     }
     const char* digits = resp.data() + sp + 1;
     int status = 0;
     const auto [end_ptr, ec] = std::from_chars(digits, digits + 3, status);
     if (ec != std::errc() || end_ptr != digits + 3) {
+        discard_connection();
         return false;
     }
     const char after = resp[sp + 4];  // sp+4 <= eol, so in-bounds
     if (after != ' ' && after != '\r' && after != '\n') {
+        discard_connection();
         return false;  // "200junk" or a 4th digit is not a valid status field
+    }
+
+    std::optional<std::size_t> content_length;
+    bool close_after_response = false;
+    std::istringstream headers(resp.substr(eol + 1, header_end - eol - 1));
+    std::string line;
+    while (std::getline(headers, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        const std::size_t colon = line.find(':');
+        if (colon == std::string::npos) {
+            continue;
+        }
+        const std::string name = to_lower(trim(line.substr(0, colon)));
+        const std::string value = trim(line.substr(colon + 1));
+        if (name == "content-length") {
+            std::size_t parsed_length = 0;
+            const char* begin = value.data();
+            const char* end = begin + value.size();
+            const auto [parsed_end, parsed_ec] = std::from_chars(begin, end, parsed_length);
+            if (parsed_ec != std::errc() || parsed_end != end || parsed_length > 64 * 1024 ||
+                (content_length.has_value() && content_length.value() != parsed_length)) {
+                discard_connection();
+                return false;
+            }
+            content_length = parsed_length;
+        } else if (name == "connection" && to_lower(value).find("close") != std::string::npos) {
+            close_after_response = true;
+        } else if (name == "transfer-encoding") {
+            // Chunk framing is unnecessary for the backend's bounded JSON ack.
+            // Reject it rather than risk reusing a connection at the wrong byte.
+            discard_connection();
+            return false;
+        }
+    }
+
+    if (!content_length.has_value()) {
+        // We have an unambiguous status but no reusable message boundary.
+        // Close deliberately; the successful acknowledgement still counts.
+        discard_connection();
+        return status >= 200 && status < 300;
+    }
+
+    std::size_t body_bytes = resp.size() - (header_end + 4);
+    while (body_bytes < content_length.value()) {
+        const std::size_t remaining_body = content_length.value() - body_bytes;
+        char rbuf[1024];
+        const ssize_t r = recv_within(fd, rbuf, std::min(sizeof(rbuf), remaining_body), deadline);
+        if (r <= 0) {
+            discard_connection();
+            return false;
+        }
+        body_bytes += static_cast<std::size_t>(r);
+    }
+    if (body_bytes != content_length.value()) {
+        discard_connection();
+        return false;
+    }
+    if (close_after_response) {
+        discard_connection();
     }
     return status >= 200 && status < 300;
 }
@@ -844,13 +1123,19 @@ bool http_post(const std::string& url, const std::string& json_body) {
 // tradeoff is a gap in the audio during a stall (some frames lost) instead of
 // mounting latency; for STT this keeps transcription near-real-time.
 class AudioCallbackSender {
+    struct PendingCallback {
+        std::string body;
+        uint64_t sequence{0};
+        std::chrono::steady_clock::time_point enqueued_at;
+    };
+
 public:
     // ~5s of buffering at ~50 POST/s before shedding; ~256 * a few hundred
     // bytes of JSON is tens of KB, safely bounded per session.
     static constexpr std::size_t kMaxQueue = 256;
 
-    explicit AudioCallbackSender(std::string url)
-        : url_(std::move(url)), worker_([this] { run(); }) {}
+    AudioCallbackSender(std::string url, std::shared_ptr<CallbackDeliveryState> delivery)
+        : url_(std::move(url)), delivery_(std::move(delivery)), worker_([this] { run(); }) {}
 
     ~AudioCallbackSender() {
         {
@@ -861,6 +1146,10 @@ public:
         if (worker_.joinable()) {
             worker_.join();
         }
+        if (connection_fd_ >= 0) {
+            ::close(connection_fd_);
+            connection_fd_ = -1;
+        }
     }
 
     AudioCallbackSender(const AudioCallbackSender&) = delete;
@@ -868,16 +1157,28 @@ public:
 
     // Called from the RTP receiver thread. Non-blocking: never performs
     // network I/O and never blocks the receiver loop.
-    void enqueue(std::string body) {
+    void enqueue(std::string body, const uint64_t sequence) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (stop_ || finishing_) {
                 return;
             }
             while (queue_.size() >= kMaxQueue) {
+                const uint64_t dropped_sequence = queue_.front().sequence;
                 queue_.pop_front();  // drop-oldest
+                ++overflow_drops_;
+                delivery_->drop(1);
+                if (overflow_drops_ == 1 || overflow_drops_ % 100 == 0) {
+                    std::cerr << "event=stt_callback_queue_overflow url=" << url_
+                              << " dropped_sequence=" << dropped_sequence
+                              << " overflow_drops=" << overflow_drops_ << "\n";
+                }
             }
-            queue_.push_back(std::move(body));
+            PendingCallback pending;
+            pending.body = std::move(body);
+            pending.sequence = sequence;
+            pending.enqueued_at = std::chrono::steady_clock::now();
+            queue_.push_back(std::move(pending));
         }
         cv_.notify_one();
     }
@@ -895,13 +1196,24 @@ public:
         finishing_ = true;
         cv_.notify_all();
         drained_cv_.wait_for(lock, deadline, [this] { return queue_.empty() && !posting_; });
+        // Finalize counters before registry retirement snapshots them. The
+        // remaining FIFO is dropped explicitly; only one bounded in-flight
+        // request/retry sequence may still finish before this join returns.
+        stop_ = true;
+        delivery_->drop(queue_.size());
+        queue_.clear();
+        lock.unlock();
+        cv_.notify_all();
+        if (worker_.joinable()) {
+            worker_.join();
+        }
     }
 
 private:
     void run() {
       try {
         for (;;) {
-            std::string body;
+            PendingCallback pending;
             {
                 std::unique_lock<std::mutex> lock(mutex_);
                 cv_.wait(lock, [this] { return stop_ || finishing_ || !queue_.empty(); });
@@ -916,7 +1228,7 @@ private:
                     drained_cv_.notify_all();
                     return;
                 }
-                body = std::move(queue_.front());
+                pending = std::move(queue_.front());
                 queue_.pop_front();
                 posting_ = true;
             }
@@ -932,17 +1244,40 @@ private:
             // delivery while enqueue() kept filling a never-drained queue
             // (review: sender-exception permanent silence).
             try {
-                if (http_post(url_, body)) {
+                bool delivered = false;
+                int attempts = 0;
+                constexpr int kMaxAttempts = 3;
+                constexpr auto kMaxDeliveryAge = std::chrono::milliseconds(1000);
+                while (attempts < kMaxAttempts &&
+                       std::chrono::steady_clock::now() - pending.enqueued_at < kMaxDeliveryAge) {
+                    ++attempts;
+                    if (http_post(url_, pending.body, connection_fd_)) {
+                        delivered = true;
+                        break;
+                    }
+                    if (attempts < kMaxAttempts) {
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10 * attempts));
+                    }
+                }
+                delivery_->record(delivered);
+                if (delivered) {
                     consecutive_failures_ = 0;
                 } else {
                     ++consecutive_failures_;
                     if (consecutive_failures_ == 1 || consecutive_failures_ % 100 == 0) {
                         std::cerr << "event=stt_callback_delivery_failed url=" << url_
+                                  << " sequence=" << pending.sequence
+                                  << " attempts=" << attempts
                                   << " consecutive_failures=" << consecutive_failures_ << "\n";
                     }
                 }
             } catch (...) {
+                if (connection_fd_ >= 0) {
+                    ::close(connection_fd_);
+                    connection_fd_ = -1;
+                }
                 ++consecutive_failures_;
+                delivery_->record(false);
             }
             {
                 std::lock_guard<std::mutex> lock(mutex_);
@@ -955,18 +1290,22 @@ private:
       } catch (...) {
         // Only reachable if the mutex/cv machinery itself throws — contain it so
         // it cannot reach the thread entry and std::terminate the gateway (#2).
+        delivery_->worker_failed();
       }
     }
 
     const std::string url_;
+    const std::shared_ptr<CallbackDeliveryState> delivery_;
     std::mutex mutex_;
     std::condition_variable cv_;
     std::condition_variable drained_cv_;
-    std::deque<std::string> queue_;
+    std::deque<PendingCallback> queue_;
     bool stop_{false};
     bool finishing_{false};   // finish() called: drain then exit (under mutex_)
     bool posting_{false};     // a POST is in flight outside the lock (under mutex_)
+    uint64_t overflow_drops_{0};  // guarded by mutex_
     int consecutive_failures_{0};  // worker-thread-only; no lock needed
+    int connection_fd_{-1};  // worker-thread-only; closed after join
     std::thread worker_;  // declared last: constructed after the fields run() touches
 };
 
@@ -996,24 +1335,15 @@ std::optional<std::string> extract_session_id_from_path(const std::string& path)
 }
 
 // --- Control-plane auth + callback allowlisting (VG-18) ---
-// Both are OPT-IN via environment so default behavior is unchanged (the control
-// plane is localhost-bound today). Set VOICE_GATEWAY_AUTH_TOKEN to require
-// "Authorization: Bearer <token>" on every request except GET /health; set
-// VOICE_GATEWAY_CALLBACK_HOST to restrict the audio_callback_url host. Read once.
+// The production executable requires the complete token/origin configuration
+// at startup. Library-level behavior retains optional control auth for isolated
+// tests, while callback destinations fail closed even for alternate embeddings.
 const std::string& gateway_auth_token() {
     static const std::string token = [] {
-        const char* v = std::getenv("VOICE_GATEWAY_AUTH_TOKEN");
-        return (v != nullptr) ? std::string(v) : std::string();
+        const auto value = valid_secret_environment_value("VOICE_GATEWAY_AUTH_TOKEN");
+        return value.has_value() ? value.value() : std::string();
     }();
     return token;
-}
-
-const std::string& callback_host_allowlist() {
-    static const std::string host = [] {
-        const char* v = std::getenv("VOICE_GATEWAY_CALLBACK_HOST");
-        return (v != nullptr && *v != '\0') ? std::string(v) : std::string();
-    }();
-    return host;
 }
 
 bool request_authorized(const HttpRequest& request) {
@@ -1033,41 +1363,80 @@ bool request_authorized(const HttpRequest& request) {
     if (value.compare(0, kPrefix.size(), kPrefix) != 0) {
         return false;
     }
-    return value.compare(kPrefix.size(), token.size(), token) == 0;
-}
-
-// Acceptable iff it has no control characters (blocks CRLF request-line injection
-// into the outbound POST), uses plaintext http:// (the only scheme http_post
-// actually speaks), and — when the allowlist env is set — targets that host
-// (SSRF/audio-exfiltration containment).
-bool is_allowed_callback_url(const std::string& url) {
-    // Bounded: the URL is echoed into every outbound POST request line, so an
-    // unbounded value would inflate every callback (review/batch-D byte cap).
-    if (url.size() > 512) {
-        return false;
+    unsigned char difference = 0;
+    for (std::size_t i = 0; i < token.size(); ++i) {
+        difference |= static_cast<unsigned char>(value[kPrefix.size() + i]) ^
+                      static_cast<unsigned char>(token[i]);
     }
-    for (const unsigned char c : url) {
-        if (c < 0x20 || c == 0x7F) {
-            return false;
-        }
-    }
-    static const std::string kScheme = "http://";
-    if (url.size() <= kScheme.size() || url.compare(0, kScheme.size(), kScheme) != 0) {
-        return false;
-    }
-    const std::string& allowed = callback_host_allowlist();
-    if (allowed.empty()) {
-        return true;  // host allowlist disabled (default)
-    }
-    const std::size_t host_start = kScheme.size();
-    const std::size_t host_end = url.find_first_of(":/", host_start);
-    const std::string host = (host_end == std::string::npos)
-                                 ? url.substr(host_start)
-                                 : url.substr(host_start, host_end - host_start);
-    return host == allowed;
+    return difference == 0;
 }
 
 }  // namespace
+
+bool validate_gateway_security_environment(std::string& error) {
+    const auto internal_token = valid_secret_environment_value("INTERNAL_SERVICE_TOKEN");
+    if (!internal_token.has_value()) {
+        error = "INTERNAL_SERVICE_TOKEN is missing or invalid";
+        return false;
+    }
+    const auto gateway_token = valid_secret_environment_value("VOICE_GATEWAY_AUTH_TOKEN");
+    if (!gateway_token.has_value()) {
+        error = "VOICE_GATEWAY_AUTH_TOKEN is missing or invalid";
+        return false;
+    }
+    if (internal_token.value() == gateway_token.value()) {
+        error = "INTERNAL_SERVICE_TOKEN and VOICE_GATEWAY_AUTH_TOKEN must be distinct";
+        return false;
+    }
+
+    PinnedBackendOrigin origin;
+    return load_pinned_backend_origin(origin, error);
+}
+
+bool audio_callback_url_is_allowed(
+    const std::string& url,
+    const std::string& expected_session_id) {
+    // The URL is emitted into every request line. Keep it bounded, prohibit all
+    // controls/whitespace, and reject URL features the tiny HTTP client does
+    // not intentionally implement.
+    if (url.empty() || url.size() > 512 || url.find_first_of("?#") != std::string::npos) {
+        return false;
+    }
+    for (const unsigned char c : url) {
+        if (c <= 0x20 || c == 0x7F) {
+            return false;
+        }
+    }
+
+    PinnedBackendOrigin origin;
+    std::string origin_error;
+    if (!load_pinned_backend_origin(origin, origin_error)) {
+        return false;
+    }
+
+    static const std::string kScheme = "http://";
+    if (url.compare(0, kScheme.size(), kScheme) != 0) {
+        return false;
+    }
+    const std::size_t authority_start = kScheme.size();
+    const std::size_t path_start = url.find('/', authority_start);
+    if (path_start == std::string::npos ||
+        url.substr(authority_start, path_start - authority_start) != origin.authority) {
+        return false;
+    }
+
+    static const std::string kAudioPathPrefix = "/api/v1/sip/telephony/audio/";
+    const std::string path = url.substr(path_start);
+    if (path.compare(0, kAudioPathPrefix.size(), kAudioPathPrefix) != 0) {
+        return false;
+    }
+    const std::string session_id = path.substr(kAudioPathPrefix.size());
+    if (!safe_callback_session_id(session_id)) {
+        return false;
+    }
+    return expected_session_id.empty() ||
+           (safe_callback_session_id(expected_session_id) && session_id == expected_session_id);
+}
 
 HttpServer::HttpServer(std::string host, uint16_t port, SessionRegistry& registry)
     : host_(std::move(host)), port_(port), registry_(registry) {}
@@ -1216,55 +1585,38 @@ bool HttpServer::spawn_handler(const int client_fd) {
     // rolls the insertion and count back, and the (potentially allocating)
     // best-effort 503 happens only AFTER bookkeeping is consistent, inside its
     // own try so a second exception cannot leak the fd or wedge the count.
-    HandlerSlot* raw = nullptr;
+    const char* failure = "{\"error\":\"too_many_connections\"}";
     try {
         auto slot = std::make_unique<HandlerSlot>();
         slot->fd = client_fd;
-        raw = slot.get();
-        {
-            std::lock_guard<std::mutex> lk(handlers_mutex_);
-            if (draining_ || active_handler_count_ >= kMaxActiveHandlers) {
-                raw = nullptr;  // rejected: nothing tracked yet
-            } else {
-                handlers_.push_back(std::move(slot));
-                ++active_handler_count_;
+        auto* raw = slot.get();
+        std::lock_guard<std::mutex> lk(handlers_mutex_);
+        if (!draining_ && active_handler_count_ < kMaxActiveHandlers) {
+            handlers_.push_back(std::move(slot));
+            ++active_handler_count_;
+            // Publish the joinable thread under the SAME lock as its slot.
+            // Otherwise stop() can remove/free the slot before this assignment,
+            // returning without joining the child and leaving a dangling raw.
+            try {
+                raw->thread = std::thread([this, raw] { handler_main(raw); });
+                return true;
+            } catch (...) {
+                // Construction failed: no child owns the fd. The lock excludes
+                // both stop and reaping until ownership/count are rolled back.
+                handlers_.pop_back();
+                --active_handler_count_;
+                failure = "{\"error\":\"handler_spawn_failed\"}";
             }
         }
     } catch (...) {
-        raw = nullptr;  // allocation failed: nothing tracked
+        // Allocation failed before a child was created: nothing tracked.
     }
-
-    if (raw == nullptr) {
-        try {
-            write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"too_many_connections\"}");
-        } catch (...) {
-        }
-        ::close(client_fd);
-        return false;
-    }
-
     try {
-        raw->thread = std::thread([this, raw] { handler_main(raw); });
-        return true;
+        write_response(client_fd, 503, "Service Unavailable", failure);
     } catch (...) {
-        // Thread construction failed: remove the slot, rebalance, respond, close.
-        {
-            std::lock_guard<std::mutex> lk(handlers_mutex_);
-            for (auto it = handlers_.begin(); it != handlers_.end(); ++it) {
-                if (it->get() == raw) {
-                    handlers_.erase(it);
-                    --active_handler_count_;
-                    break;
-                }
-            }
-        }
-        try {
-            write_response(client_fd, 503, "Service Unavailable", "{\"error\":\"handler_spawn_failed\"}");
-        } catch (...) {
-        }
-        ::close(client_fd);
-        return false;
     }
+    ::close(client_fd);
+    return false;
 }
 
 void HttpServer::handler_main(HandlerSlot* slot) {
@@ -1369,6 +1721,13 @@ bool HttpServer::healthy() const {
     return healthy_.load();
 }
 
+bool HttpServer::ready() const {
+    // Readiness is an admission promise, not another spelling of liveness.
+    // A listener that is draining or has exhausted its session slots remains
+    // alive for existing calls/probes but must not receive a new call.
+    return healthy_.load() && running_.load() && registry_.can_accept_session();
+}
+
 void HttpServer::handle_client(const int client_fd) {
     bool over_budget = false;
     const auto request = read_request(client_fd, over_budget);
@@ -1383,17 +1742,34 @@ void HttpServer::handle_client(const int client_fd) {
         return;
     }
 
-    // Auth gate (VG-18): everything except the liveness probe requires a valid
-    // bearer token when VOICE_GATEWAY_AUTH_TOKEN is configured; a no-op otherwise.
-    if (!(request->method == "GET" && request->path == "/health") && !request_authorized(request.value())) {
+    // Auth gate (VG-18): mutating/session-detail controls require a valid bearer
+    // token. The loopback-only aggregate health/stats probes remain read-only so
+    // deployment can prove zero active sessions without putting a secret in a
+    // process argument or generated evidence file.
+    const bool public_probe = request->method == "GET" &&
+                              (request->path == "/health" || request->path == "/ready" || request->path == "/stats");
+    if (!public_probe && !request_authorized(request.value())) {
         write_response(client_fd, 401, "Unauthorized", "{\"error\":\"unauthorized\"}");
         return;
     }
 
     if (request->method == "GET" && request->path == "/health") {
         const bool is_healthy = healthy();
-        const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") + "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") + "}";
+        const std::string body = std::string("{\"status\":\"") + (is_healthy ? "ok" : "degraded") +
+            "\",\"io_loop_healthy\":" + (is_healthy ? "true" : "false") +
+            ",\"build_sha\":\"" + escape_json(kBuildSha) +
+            "\",\"protocol_version\":2,\"tts_receipt_protocol\":1,\"codecs\":[\"pcmu\"],\"callback_protocol_versions\":[2]}";
         write_response(client_fd, is_healthy ? 200 : 503, is_healthy ? "OK" : "Service Unavailable", body);
+        return;
+    }
+
+    if (request->method == "GET" && request->path == "/ready") {
+        const bool is_ready = ready();
+        const std::string body = std::string("{\"status\":\"") + (is_ready ? "ready" : "not_ready") +
+            "\",\"ready\":" + (is_ready ? "true" : "false") +
+            ",\"build_sha\":\"" + escape_json(kBuildSha) +
+            "\",\"protocol_version\":2,\"codecs\":[\"pcmu\"]}";
+        write_response(client_fd, is_ready ? 200 : 503, is_ready ? "OK" : "Service Unavailable", body);
         return;
     }
 
@@ -1411,6 +1787,7 @@ void HttpServer::handle_client(const int client_fd) {
         SessionConfig config;
 
         const auto session_id = json_get_string(request->body, "session_id");
+        const auto config_digest = json_get_string(request->body, "config_digest");
         const auto listen_ip = json_get_string(request->body, "listen_ip");
         const auto listen_port = json_get_int(request->body, "listen_port");
         const auto remote_ip = json_get_string(request->body, "remote_ip");
@@ -1434,7 +1811,8 @@ void HttpServer::handle_client(const int client_fd) {
         const auto stt_reorder_window_frames = json_get_int(request->body, "stt_reorder_window_frames");
         const auto stt_reorder_hold_ms = json_get_int(request->body, "stt_reorder_hold_ms");
 
-        if (!session_id.has_value() || !listen_ip.has_value() || !listen_port.has_value() ||
+        if (!session_id.has_value() || !config_digest.has_value() ||
+            !listen_ip.has_value() || !listen_port.has_value() ||
             !remote_ip.has_value() || !remote_port.has_value() || !codec.has_value() || !ptime_ms.has_value()) {
             write_response(client_fd, 400, "Bad Request", "{\"error\":\"missing_required_start_fields\"}");
             return;
@@ -1447,6 +1825,7 @@ void HttpServer::handle_client(const int client_fd) {
         }
 
         config.session_id = session_id.value();
+        config.config_digest = config_digest.value();
         config.listen_ip = listen_ip.value();
         config.remote_ip = remote_ip.value();
         config.codec = codec.value();
@@ -1499,7 +1878,7 @@ void HttpServer::handle_client(const int client_fd) {
         if (audio_callback_url.has_value()) {
             // Reject control-char / non-http / off-allowlist callback URLs before
             // the gateway will POST caller audio to them (VG-18).
-            if (!is_allowed_callback_url(audio_callback_url.value())) {
+            if (!audio_callback_url_is_allowed(audio_callback_url.value(), config.session_id)) {
                 write_response(client_fd, 400, "Bad Request", "{\"error\":\"callback_url_not_allowed\"}");
                 return;
             }
@@ -1537,29 +1916,37 @@ void HttpServer::handle_client(const int client_fd) {
             struct BatchState {
                 std::vector<uint8_t> buffer;
                 int frame_count{0};
+                uint64_t next_sequence{0};
             };
             auto state = std::make_shared<BatchState>();
             // Owned solely by these closures, which live in RtpSession::
             // audio_callback_ / audio_sink_finisher_, so the sender (and its
             // worker thread) is destroyed and JOINED when the session is
             // destroyed. No detached thread outlives the session.
-            auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url);
+            config.callback_delivery = std::make_shared<CallbackDeliveryState>();
+            auto sender = std::make_shared<AudioCallbackSender>(config.audio_callback_url, config.callback_delivery);
 
             audio_cb = [cb_session_id, batch_frames, state, sender](
                            const std::string& /*sid*/, const std::vector<uint8_t>& pcmu) {
                 state->buffer.insert(state->buffer.end(), pcmu.begin(), pcmu.end());
                 state->frame_count++;
                 if (state->frame_count >= batch_frames) {
+                    const uint64_t sequence = state->next_sequence++;
+                    const int frame_count = state->frame_count;
+                    const std::size_t payload_bytes = state->buffer.size();
                     const std::string b64 = base64_encode(state->buffer);
                     std::string body =
-                        "{\"session_id\":\"" + escape_json(cb_session_id) +
+                        "{\"protocol_version\":2,\"sequence\":" + std::to_string(sequence) +
+                        ",\"frame_count\":" + std::to_string(frame_count) +
+                        ",\"ptime_ms\":20,\"payload_bytes\":" + std::to_string(payload_bytes) +
+                        ",\"session_id\":\"" + escape_json(cb_session_id) +
                         "\",\"pcmu_base64\":\"" + b64 +
                         "\",\"codec\":\"pcmu\"}";
                     state->buffer.clear();
                     state->frame_count = 0;
                     // Non-blocking hand-off; never blocks the RTP receiver thread
                     // on network I/O.
-                    sender->enqueue(std::move(body));
+                    sender->enqueue(std::move(body), sequence);
                 }
             };
 
@@ -1570,14 +1957,20 @@ void HttpServer::handle_client(const int client_fd) {
             // thread as audio_cb, so BatchState needs no extra locking.
             sink_finisher = [cb_session_id, state, sender] {
                 if (!state->buffer.empty()) {
+                    const uint64_t sequence = state->next_sequence++;
+                    const int frame_count = state->frame_count;
+                    const std::size_t payload_bytes = state->buffer.size();
                     const std::string b64 = base64_encode(state->buffer);
                     std::string body =
-                        "{\"session_id\":\"" + escape_json(cb_session_id) +
+                        "{\"protocol_version\":2,\"sequence\":" + std::to_string(sequence) +
+                        ",\"frame_count\":" + std::to_string(frame_count) +
+                        ",\"ptime_ms\":20,\"payload_bytes\":" + std::to_string(payload_bytes) +
+                        ",\"session_id\":\"" + escape_json(cb_session_id) +
                         "\",\"pcmu_base64\":\"" + b64 +
                         "\",\"codec\":\"pcmu\"}";
                     state->buffer.clear();
                     state->frame_count = 0;
-                    sender->enqueue(std::move(body));
+                    sender->enqueue(std::move(body), sequence);
                 }
                 sender->finish(std::chrono::milliseconds(500));
             };
@@ -1587,12 +1980,26 @@ void HttpServer::handle_client(const int client_fd) {
         const auto result = registry_.start_session(config, error, std::move(audio_cb), std::move(sink_finisher));
 
         if (result == StartSessionResult::Started) {
-            write_response(client_fd, 200, "OK", "{\"status\":\"started\",\"session_id\":\"" + escape_json(config.session_id) + "\"}");
+            write_response(client_fd, 200, "OK", "{\"status\":\"started\",\"protocol_version\":2,\"codec\":\"" +
+                escape_json(config.codec) + "\",\"idempotent\":false,\"session_id\":\"" +
+                escape_json(config.session_id) + "\",\"config_digest\":\"" + escape_json(config.config_digest) + "\"}");
             return;
         }
 
         if (result == StartSessionResult::AlreadyExists) {
-            write_response(client_fd, 409, "Conflict", "{\"status\":\"already_exists\",\"error\":\"" + escape_json(error) + "\"}");
+            write_response(client_fd, 200, "OK", "{\"status\":\"already_exists\",\"protocol_version\":2,\"codec\":\"" +
+                escape_json(config.codec) + "\",\"idempotent\":true,\"session_id\":\"" +
+                escape_json(config.session_id) + "\",\"config_digest\":\"" + escape_json(config.config_digest) + "\"}");
+            return;
+        }
+
+        if (result == StartSessionResult::ConfigConflict) {
+            write_response(client_fd, 409, "Conflict", "{\"status\":\"config_conflict\",\"error\":\"" + escape_json(error) + "\"}");
+            return;
+        }
+
+        if (result == StartSessionResult::CapacityExceeded) {
+            write_response(client_fd, 503, "Service Unavailable", "{\"status\":\"capacity_exceeded\",\"error\":\"" + escape_json(error) + "\"}");
             return;
         }
 
@@ -1661,7 +2068,9 @@ void HttpServer::handle_client(const int client_fd) {
             // distinguishable from malformed requests so the backend can treat
             // them as benign.
             const bool stale = (error == "utterance_interrupted" || error == "stale_or_duplicate_chunk");
-            write_response(client_fd, stale ? 409 : 400, stale ? "Conflict" : "Bad Request",
+            const bool backpressure = error == "tts_queue_full";
+            write_response(client_fd, backpressure ? 429 : (stale ? 409 : 400),
+                           backpressure ? "Too Many Requests" : (stale ? "Conflict" : "Bad Request"),
                            "{\"error\":\"" + escape_json(error) + "\"}");
             return;
         }
@@ -1674,6 +2083,30 @@ void HttpServer::handle_client(const int client_fd) {
             "{\"status\":\"queued\",\"session_id\":\"" + escape_json(session_id.value()) +
                 "\",\"queued_frames\":" + std::to_string(queued_frames) +
                 ",\"tts_queue_depth_frames\":" + std::to_string(snap.tts_queue_depth_frames) + "}");
+        return;
+    }
+
+    if (request->method == "POST" && request->path == "/v1/sessions/tts/finish") {
+        const auto session_id = json_get_string(request->body, "session_id");
+        const auto utterance_id = json_get_string(request->body, "utterance_id");
+        const auto last_seq = json_get_int(request->body, "last_chunk_seq");
+        if (!session_id || !utterance_id || utterance_id->empty() || utterance_id->size() > 64 || !last_seq || *last_seq < 0) {
+            write_response(client_fd, 400, "Bad Request", "{\"error\":\"invalid_utterance_finish\"}");
+            return;
+        }
+        const auto session = registry_.get_session(*session_id);
+        if (!session) {
+            write_response(client_fd, 404, "Not Found", "{\"error\":\"session_not_found\"}");
+            return;
+        }
+        std::string status, error;
+        std::size_t frames = 0;
+        if (!session->finish_tts_utterance(*utterance_id, *last_seq, status, frames, error)) {
+            write_response(client_fd, 409, "Conflict", "{\"error\":\"" + escape_json(error) + "\"}");
+            return;
+        }
+        write_response(client_fd, 200, "OK", "{\"receipt_protocol\":1,\"utterance_id\":\"" + escape_json(*utterance_id) +
+            "\",\"status\":\"" + status + "\",\"evidence\":\"transmitted\",\"transmitted_frames\":" + std::to_string(frames) + "}");
         return;
     }
 

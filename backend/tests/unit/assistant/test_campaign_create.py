@@ -95,6 +95,7 @@ class _ExistingCampaignsDB:
 
     def __init__(self, rows):
         self._rows = list(rows)
+        self.eq_calls: list[tuple[str, object]] = []
 
     def table(self, _name: str):
         rows = self._rows
@@ -103,22 +104,33 @@ class _ExistingCampaignsDB:
             def select(self, *_a, **_k):
                 return self
 
-            def eq(self, *_a, **_k):
+            def eq(self, field, value):
+                outer.eq_calls.append((field, value))
                 return self
 
             def execute(self):
                 return SimpleNamespace(data=rows, error=None)
 
+        outer = self
         return _Query()
 
 
-def _campaign_row(name, *, company="AI flux", persona="lead_gen", status="draft", cid="c-1"):
+def _campaign_row(
+    name,
+    *,
+    company="AI flux",
+    persona="lead_gen",
+    status="draft",
+    cid="c-1",
+    direction="outbound",
+):
     import json
 
     return {
         "id": cid,
         "name": name,
         "status": status,
+        "direction": direction,
         "script_config": json.dumps({"company_name": company, "persona_type": persona}),
     }
 
@@ -139,6 +151,19 @@ async def test_identical_duplicate_warns_but_never_blocks():
     assert result["duplicate"]["campaign_id"] == "c-1"
     assert result["warnings"]
     assert "Overwrite" in result["warnings"][0]
+    assert ("direction", "outbound") in db.eq_calls
+
+
+@pytest.mark.asyncio
+async def test_inbound_campaign_is_never_offered_as_an_overwrite_candidate():
+    db = _ExistingCampaignsDB(
+        [_campaign_row("AI estimation", cid="inbound-1", direction="inbound")]
+    )
+
+    result = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+
+    assert result.get("preview") is True
+    assert "duplicate" not in result
 
 
 @pytest.mark.asyncio
@@ -180,15 +205,21 @@ async def test_unrelated_name_produces_no_duplicate():
 class _InsertCaptureDB:
     """Captures insert/update payloads per table; every execute returns one row."""
 
-    def __init__(self):
+    def __init__(self, select_rows=None):
         self.payloads: dict[str, list] = {}
         self.updates: dict[str, list] = {}
+        self.select_rows = list(select_rows or [])
+        self.eq_calls: list[tuple[str, str, object]] = []
 
     def table(self, name: str):
         outer = self
 
         class _Query:
-            def eq(self_q, *_a, **_k):
+            def __init__(self_q, operation):
+                self_q.operation = operation
+
+            def eq(self_q, field, value):
+                outer.eq_calls.append((self_q.operation, field, value))
                 return self_q
 
             def select(self_q, *_a, **_k):
@@ -200,16 +231,15 @@ class _InsertCaptureDB:
         class _Table:
             def insert(self, payload):
                 outer.payloads.setdefault(name, []).append(payload)
-                return _Query()
+                return _Query("insert")
 
             def update(self, payload):
                 outer.updates.setdefault(name, []).append(payload)
-                return _Query()
+                return _Query("update")
 
             def select(self, *_a, **_k):
-                q = _Query()
-                # duplicate-detection SELECT: no existing campaigns
-                q.execute = lambda: SimpleNamespace(data=[], error=None)  # type: ignore[method-assign]
+                q = _Query("select")
+                q.execute = lambda: SimpleNamespace(data=outer.select_rows, error=None)  # type: ignore[method-assign]
                 return q
 
         return _Table()
@@ -242,7 +272,9 @@ async def test_confirmed_create_binds_jsonb_columns_as_json_text():
 
 @pytest.mark.asyncio
 async def test_overwrite_mode_updates_existing_campaign_instead_of_inserting():
-    db = _InsertCaptureDB()
+    db = _InsertCaptureDB(
+        select_rows=[_campaign_row("AI estimation", cid="camp-old")]
+    )
     result = await create_campaign(
         "t1",
         db,
@@ -263,6 +295,79 @@ async def test_overwrite_mode_updates_existing_campaign_instead_of_inserting():
 
     audit = db.payloads["assistant_actions"][0]
     assert _json.loads(audit["input_data"])["overwrote_campaign_id"] == "camp-old"
+    assert ("select", "id", "camp-old") in db.eq_calls
+    assert ("select", "tenant_id", "t1") in db.eq_calls
+
+
+@pytest.mark.asyncio
+async def test_overwrite_refuses_an_inbound_target_without_writing():
+    db = _InsertCaptureDB(
+        select_rows=[
+            _campaign_row("AI estimation", cid="inbound-1", direction="inbound")
+        ]
+    )
+
+    result = await create_campaign(
+        "t1",
+        db,
+        **_CORE,
+        **_LEAD_GEN_EXTRAS,
+        confirm=True,
+        overwrite_campaign_id="inbound-1",
+    )
+
+    assert result["error"] == "inbound_campaign_managed_separately"
+    assert result["campaign_ids"] == ["inbound-1"]
+    assert db.updates.get("campaigns", []) == []
+    assert db.payloads.get("assistant_actions", []) == []
+
+
+@pytest.mark.asyncio
+async def test_overwrite_rechecks_direction_after_the_preview():
+    db = _InsertCaptureDB(
+        select_rows=[_campaign_row("AI estimation", cid="campaign-1")]
+    )
+    preview = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+    assert preview["duplicate"]["campaign_id"] == "campaign-1"
+
+    db.select_rows = [
+        _campaign_row("AI estimation", cid="campaign-1", direction="inbound")
+    ]
+    result = await create_campaign(
+        "t1",
+        db,
+        **_CORE,
+        **_LEAD_GEN_EXTRAS,
+        confirm=True,
+        overwrite_campaign_id="campaign-1",
+    )
+
+    assert result["error"] == "inbound_campaign_managed_separately"
+    assert db.updates.get("campaigns", []) == []
+
+
+@pytest.mark.asyncio
+async def test_overwrite_rejects_a_target_that_no_longer_matches_the_preview():
+    db = _InsertCaptureDB(
+        select_rows=[_campaign_row("AI estimation", cid="campaign-1")]
+    )
+    preview = await create_campaign("t1", db, **_CORE, **_LEAD_GEN_EXTRAS)
+    assert preview["duplicate"]["campaign_id"] == "campaign-1"
+
+    db.select_rows = [
+        _campaign_row("Completely different campaign", cid="campaign-1")
+    ]
+    result = await create_campaign(
+        "t1",
+        db,
+        **_CORE,
+        **_LEAD_GEN_EXTRAS,
+        confirm=True,
+        overwrite_campaign_id="campaign-1",
+    )
+
+    assert result["error"] == "overwrite_target_changed"
+    assert db.updates.get("campaigns", []) == []
 
 
 @pytest.mark.asyncio

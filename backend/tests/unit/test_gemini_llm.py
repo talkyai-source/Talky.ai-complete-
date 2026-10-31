@@ -55,16 +55,18 @@ _fake_types_module = SimpleNamespace(
     ThinkingConfig=_FakeThinkingConfig,
 )
 
-# Install the stub package hierarchy. Must happen BEFORE
-# `from app.infrastructure.llm.gemini import ...` so that any lazy imports the
-# provider does at call time resolve to the stub.
+# Install the stub only for this module's tests. Collection-time stubs would
+# replace the real SDK for unrelated wire-shape tests in the same pytest run.
 _fake_genai_pkg = SimpleNamespace(
     Client=lambda **_: SimpleNamespace(),
     types=_fake_types_module,
 )
-sys.modules.setdefault("google", SimpleNamespace(genai=_fake_genai_pkg))
-sys.modules.setdefault("google.genai", _fake_genai_pkg)
-sys.modules.setdefault("google.genai.types", _fake_types_module)
+@pytest.fixture(autouse=True)
+def stub_genai_types(monkeypatch):
+    import google
+    monkeypatch.setitem(sys.modules, "google.genai", _fake_genai_pkg)
+    monkeypatch.setitem(sys.modules, "google.genai.types", _fake_types_module)
+    monkeypatch.setattr(google, "genai", _fake_genai_pkg, raising=False)
 
 
 from app.domain.models.conversation import Message, MessageRole  # noqa: E402
@@ -91,7 +93,8 @@ class _FakeStream:
 
 def _wire_mock_client(provider, chunks):
     """Attach a fake genai client that returns the given chunk sequence."""
-    create = AsyncMock(return_value=_FakeStream(chunks))
+    terminal = SimpleNamespace(text=None, candidates=[SimpleNamespace(finish_reason="STOP")])
+    create = AsyncMock(return_value=_FakeStream([*chunks, terminal]))
     provider._client = SimpleNamespace(
         aio=SimpleNamespace(
             models=SimpleNamespace(generate_content_stream=create)

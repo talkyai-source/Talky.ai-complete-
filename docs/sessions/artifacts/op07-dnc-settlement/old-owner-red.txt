@@ -1,0 +1,40 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+____ test_old_pending_outbox_cannot_release_newer_live_attempt[processing] ____
+
+status = 'processing'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["processing", "calling"])
+    async def test_old_pending_outbox_cannot_release_newer_live_attempt(status):
+        conn = SuppressionConn(settled=True)
+        conn.dialer_jobs_row.update(status=status, attempt_number=2)
+        execution = await _service(conn)._handle_call_status_pooled("call-1", CallOutcome.FAILED, "failed", 42)
+        assert execution.retry_args is None
+>       assert conn.dialer_jobs_row["status"] == status
+E       AssertionError: assert 'non_retryable' == 'processing'
+E         - processing
+E         + non_retryable
+
+tests\unit\test_dnc_settlement_truth.py:103: AssertionError
+_____ test_old_pending_outbox_cannot_release_newer_live_attempt[calling] ______
+
+status = 'calling'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("status", ["processing", "calling"])
+    async def test_old_pending_outbox_cannot_release_newer_live_attempt(status):
+        conn = SuppressionConn(settled=True)
+        conn.dialer_jobs_row.update(status=status, attempt_number=2)
+        execution = await _service(conn)._handle_call_status_pooled("call-1", CallOutcome.FAILED, "failed", 42)
+        assert execution.retry_args is None
+>       assert conn.dialer_jobs_row["status"] == status
+E       AssertionError: assert 'non_retryable' == 'calling'
+E         - calling
+E         + non_retryable
+
+tests\unit\test_dnc_settlement_truth.py:103: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_dnc_settlement_truth.py::test_old_pending_outbox_cannot_release_newer_live_attempt[processing]
+FAILED tests/unit/test_dnc_settlement_truth.py::test_old_pending_outbox_cannot_release_newer_live_attempt[calling]
+2 failed, 7 deselected in 3.60s

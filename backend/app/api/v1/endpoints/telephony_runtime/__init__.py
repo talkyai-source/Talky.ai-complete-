@@ -13,7 +13,9 @@ so existing imports (routes.py, tests) keep working unchanged.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.api.v1.dependencies import require_admin_tenant
 
 from . import (
     activate as _activate_mod,
@@ -37,7 +39,14 @@ from .schemas import (
 )
 from .versions import list_runtime_policy_versions
 
-router = APIRouter(prefix="/telephony/sip/runtime", tags=["Telephony SIP Runtime"])
+router = APIRouter(
+    prefix="/telephony/sip/runtime",
+    tags=["Telephony SIP Runtime"],
+    # Activate/rollback flip the tenant's routing policy and can run the
+    # global reload/verify commands; like the sibling telephony_sip router,
+    # tenant scoping alone is not enough - require a tenant admin.
+    dependencies=[Depends(require_admin_tenant)],
+)
 router.include_router(_preview_mod.router)
 router.include_router(_activate_mod.router)
 router.include_router(_rollback_mod.router)

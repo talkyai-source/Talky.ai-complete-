@@ -1,0 +1,1 @@
+{"scope": "isolated temporary roots; no live systemd service operation", "cases": [{"retained_definition": false, "exit_code": 1, "enabled_link_remains": true}, {"retained_definition": true, "exit_code": 0, "enabled_link_remains": false}]}

@@ -1,0 +1,30 @@
+{
+  "phase": "before",
+  "source_head": "4c91e11214fa225eef6ff49eed4357ff8c836f82",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "pytest_argv": [
+    "tests/unit/test_crm_sync_service.py",
+    "-q",
+    "-k",
+    "lost_remote_success_remains_held or expired_creating_call_recovery",
+    "--tb=short",
+    "--disable-warnings"
+  ],
+  "source_hashes_before": {
+    "backend/app/services/crm_sync_service.py": "3a23b57dcd2deab3e78e1d9e5aedb97bc897df38c81bbd07ca3b3ae9deb40bd4",
+    "backend/tests/unit/test_crm_sync_service.py": "630cc0e8f3d1aee28e2b12f3b52adc5286ead85f312125cfd32b3fbb0d29f042",
+    "backend/tests/unit/test_ag06_crm_evidence.py": "d0b1e35a8cc63d75a604fcf89b620d572a98dc035c7558f0efccaade27b710db",
+    "backend/tests/unit/test_crm_sync_hooks.py": "b1fdccd586cedb23cb2c8291e52181d6fb3eb24ed1345a0e6d7c81c930ef0bec"
+  },
+  "source_hashes_after": {
+    "backend/app/services/crm_sync_service.py": "3a23b57dcd2deab3e78e1d9e5aedb97bc897df38c81bbd07ca3b3ae9deb40bd4",
+    "backend/tests/unit/test_crm_sync_service.py": "630cc0e8f3d1aee28e2b12f3b52adc5286ead85f312125cfd32b3fbb0d29f042",
+    "backend/tests/unit/test_ag06_crm_evidence.py": "d0b1e35a8cc63d75a604fcf89b620d572a98dc035c7558f0efccaade27b710db",
+    "backend/tests/unit/test_crm_sync_hooks.py": "b1fdccd586cedb23cb2c8291e52181d6fb3eb24ed1345a0e6d7c81c930ef0bec"
+  },
+  "source_unchanged": true,
+  "exit_code": 1,
+  "network_attempts": 4,
+  "limits": "Actual CRM service with synthetic resolver, persistence and provider seams; no PostgreSQL, HTTP provider, browser or deployment acceptance."
+}

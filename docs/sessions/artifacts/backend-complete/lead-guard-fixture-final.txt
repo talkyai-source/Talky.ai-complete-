@@ -1,0 +1,23 @@
+..............................                                           [100%]
+============================== warnings summary ===============================
+tests/unit/test_lead_do_not_call_suppression.py::test_start_campaign_never_enqueues_a_flagged_lead_and_counts_only_dialable
+tests/unit/test_lead_do_not_call_suppression.py::test_start_campaign_never_enqueues_a_flagged_lead_and_counts_only_dialable
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\campaign_service.py:931: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_lead_do_not_call_suppression.py::test_start_campaign_never_enqueues_a_flagged_lead_and_counts_only_dialable
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\campaign_service.py:1157: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat()
+
+tests/unit/test_lead_do_not_call_suppression.py::test_start_campaign_never_enqueues_a_flagged_lead_and_counts_only_dialable
+tests/unit/test_lead_do_not_call_suppression.py::test_start_campaign_never_enqueues_a_flagged_lead_and_counts_only_dialable
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\campaign_service.py:1082: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "updated_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_lead_do_not_call_suppression.py: 2 warnings
+tests/unit/test_op01_metering_unavailable.py: 8 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+30 passed, 15 warnings in 8.65s

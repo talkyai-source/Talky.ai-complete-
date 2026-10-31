@@ -48,7 +48,6 @@ def _make_session() -> CallSession:
             company_name="Talky.ai",
             rules=ConversationRule(),
             flow=ConversationFlow(),
-            response_max_sentences=2,
         ),
     )
     session.barge_in_event = asyncio.Event()

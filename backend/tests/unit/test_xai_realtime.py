@@ -1,5 +1,5 @@
 """Tests for the xAI Grok Voice realtime provider adapter
-(app/infrastructure/realtime/xai_realtime.py).
+(app/realtime/xai.py).
 
 Covers the documented protocol differences from OpenAI Realtime and proves
 the adapter is a safe drop-in for RealtimeBridge:
@@ -29,8 +29,8 @@ import json
 
 import pytest
 
-from app.infrastructure.realtime.openai_realtime import RealtimeEvent
-from app.infrastructure.realtime.xai_realtime import (
+from app.realtime.openai import RealtimeEvent
+from app.realtime.xai import (
     XAIRealtimeSession,
     XAI_DEFAULT_MODEL,
 )
@@ -63,7 +63,7 @@ def test_url_prefers_agent_id_when_set():
 
 def test_turn_detection_defaults_to_server_vad_085():
     s = XAIRealtimeSession(api_key="xai-test")._build_session_update()["session"]
-    assert s["audio"]["input"]["turn_detection"] == {
+    assert s["turn_detection"] == {
         "type": "server_vad", "threshold": 0.85,
     }
 
@@ -73,18 +73,12 @@ def test_turn_detection_explicit_override_passes_through():
     s = XAIRealtimeSession(
         api_key="xai-test", settings={"turn_detection": override},
     )._build_session_update()["session"]
-    assert s["audio"]["input"]["turn_detection"] == override
+    assert s["turn_detection"] == override
 
 
-def test_turn_detection_bare_eagerness_string_still_normalised():
-    # Inherited normalisation (semantic_vad shorthand) still applies when the
-    # operator explicitly asks for it, even though it isn't our new default.
-    s = XAIRealtimeSession(
-        api_key="xai-test", settings={"turn_detection": "high"},
-    )._build_session_update()["session"]
-    assert s["audio"]["input"]["turn_detection"] == {
-        "type": "semantic_vad", "eagerness": "high",
-    }
+def test_xai_rejects_openai_semantic_vad_before_connecting():
+    with pytest.raises(ValueError, match="server_vad"):
+        XAIRealtimeSession(api_key="xai-test", settings={"turn_detection": "high"})._build_session_update()
 
 
 # ---------------------------------------------------------------------------
@@ -93,14 +87,14 @@ def test_turn_detection_bare_eagerness_string_still_normalised():
 
 def test_voice_omitted_when_unset():
     s = XAIRealtimeSession(api_key="xai-test")._build_session_update()["session"]
-    assert "voice" not in s["audio"]["output"]
+    assert "voice" not in s
 
 
 def test_voice_included_when_explicitly_set():
     s = XAIRealtimeSession(
         api_key="xai-test", voice="some-xai-voice",
     )._build_session_update()["session"]
-    assert s["audio"]["output"]["voice"] == "some-xai-voice"
+    assert s["voice"] == "some-xai-voice"
 
 
 def test_audio_format_still_mulaw_8k_both_directions():
@@ -235,12 +229,15 @@ async def test_audio_delta_still_decodes_to_bytes_via_inherited_path():
     sess._offer_event = lambda ev: events.append(ev) if ev else None
 
     # response.created establishes the active epoch (inherited logic).
-    await sess._handle_server_event({"type": "response.created"})
+    await sess._handle_server_event({"type": "response.created", "response": {"id": "r1"}})
     await sess._handle_server_event({
-        "type": "response.output_audio.delta", "delta": b64,
+        "type": "response.output_audio.delta", "delta": b64, "response_id": "r1", "item_id": "i1",
     })
 
-    audio_events = [e for e in events if e.kind == "audio"]
+    assert not events
+    await sess._handle_server_event({"type": "response.output_audio_transcript.done", "response_id": "r1", "item_id": "i1", "transcript": "Hello"})
+    await sess._handle_server_event({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
+    audio_events = [e for e in events if e.kind == "response_candidate"]
     assert len(audio_events) == 1
     assert audio_events[0].audio == mulaw
 
@@ -251,13 +248,16 @@ async def test_function_call_flow_inherited_unchanged():
     events = []
     sess._offer_event = lambda ev: events.append(ev) if ev else None
 
+    await sess._handle_server_event({"type": "response.created", "response": {"id": "r1"}})
     await sess._handle_server_event({
-        "type": "response.function_call_arguments.done",
+        "type": "response.function_call_arguments.done", "response_id": "r1",
         "call_id": "call-1",
         "name": "knowledge_lookup",
         "arguments": json.dumps({"query": "hours"}),
     })
 
+    assert not events
+    await sess._handle_server_event({"type": "response.done", "response": {"id": "r1", "status": "completed"}})
     fc_events = [e for e in events if e.kind == "function_call"]
     assert len(fc_events) == 1
     fc = fc_events[0].function_call
@@ -294,7 +294,7 @@ async def test_barge_in_flushes_local_queue_without_ws_buffer_clear():
     sess._offer_event = lambda ev: events.append(ev) if ev else None
 
     # Queue up some model audio for a response, then barge in.
-    await sess._handle_server_event({"type": "response.created"})
+    await sess._handle_server_event({"type": "response.created", "response": {"id": "r1"}})
     await sess._handle_server_event({
         "type": "response.output_audio.delta",
         "delta": base64.b64encode(bytes(160)).decode("ascii"),

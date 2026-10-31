@@ -7,9 +7,11 @@ HTTP 403. This keeps the telephony service package transport-agnostic,
 matching config.py / modes/ / lifecycle.py.
 
 Before any guard/originate work, an outbound call must prove the
-``caller_id`` is registered AND verified under the dialing tenant. In
-production we also require a STIR/SHAKEN attestation token on the DID row
-(test-only numbers cannot dial real carriers).
+``caller_id`` is registered AND verified under the dialing tenant.
+STIR/SHAKEN signing belongs to the originating carrier for each call: a
+stored string on a DID is not proof of a valid signature for this call's
+destination and issuance time (RFC 8225). Do not use that legacy field to
+block verified numbers or prefer a different country's caller-ID.
 
 Ramp-in knob — ``CALLER_ID_ENFORCEMENT_MODE = enforce | log | off``:
   * ``enforce`` (default in prod): violation → caller should return 403.
@@ -73,7 +75,10 @@ async def check_caller_id_ownership(
     is itself fail-closed: any DB error yields "not verified" rather than
     a 500, so origination gets a clean denial.)
     """
-    require_attestation = environment == "production"
+    # This is an ownership check, not a SIP Identity verification service.
+    # Keep the legacy response field for clients, without claiming that a
+    # nonempty database string proves per-call carrier attestation.
+    require_attestation = False
     enforcement_mode = resolve_enforcement_mode(environment)
 
     if enforcement_mode == "off":

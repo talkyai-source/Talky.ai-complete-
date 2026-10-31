@@ -114,12 +114,18 @@ async def http_exception_handler(
 async def validation_exception_handler(
     request: Request, exc: RequestValidationError
 ) -> JSONResponse:
+    # Keep the field diagnostics consumed by clients, never rejected inputs or
+    # validator context (which can contain secrets and non-JSON exceptions).
+    details = [
+        {key: error[key] for key in ("type", "loc", "msg")}
+        for error in exc.errors()
+    ]
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
         content=_envelope(
             code="validation_error",
             message="Request payload failed validation",
-            details=exc.errors(),
+            details=details,
         ),
     )
 
@@ -162,16 +168,25 @@ async def db_pool_timeout_exception_handler(
 async def unhandled_exception_handler(
     request: Request, exc: Exception
 ) -> JSONResponse:
+    # The configured inner server-error boundary renders while CORS and the
+    # request context are still active, then Starlette re-raises for reporting.
+    # Its outer safety boundary sees the same exception after response start.
+    # Reuse the request-local response so that repeat does not log/render twice.
+    cached = getattr(request.state, "_talky_unhandled_error", None)
+    if cached is not None and cached[0] is exc:
+        return cached[1]
     # Never leak internal error details to clients. Operators get the full
     # traceback in logs (tagged with request_id) and Sentry.
     logger.exception("Unhandled exception in request handler")
-    return JSONResponse(
+    response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         content=_envelope(
             code="internal_error",
             message="An unexpected error occurred. Reference the request_id when reporting.",
         ),
     )
+    request.state._talky_unhandled_error = (exc, response)
+    return response
 
 
 def _retry_after_seconds(exc: RateLimitExceeded) -> int:

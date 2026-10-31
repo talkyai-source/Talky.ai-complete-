@@ -1,0 +1,16 @@
+Failed to update email action status: RuntimeError
+email receipt persistence failed action=f9ed23f2-f6a4-4bf3-9f03-528a8cbdc565
+Failed to update email action status: RuntimeError
+email receipt persistence failed action=ecedd2d1-d468-4936-9749-fecfe6dd669d
+Failed to update email action status: DivisionByZeroError
+Failed to update email action status: DivisionByZeroError
+Failed to update email action status: DivisionByZeroError
+email receipt persistence failed action=123aada8-3d5e-452d-8203-e75cd58f35f5
+{
+  "cases_passed": 15,
+  "passed": true,
+  "public_unchanged": true,
+  "source_unchanged": true,
+  "schema_removed": true,
+  "role_removed": true
+}

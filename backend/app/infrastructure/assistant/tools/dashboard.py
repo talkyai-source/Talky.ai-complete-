@@ -6,22 +6,25 @@ from typing import Optional, Dict, Any
 from datetime import date
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.campaigns import campaign_names
 
 logger = logging.getLogger(__name__)
 
 
 class GetDashboardStatsInput(BaseModel):
     """Input for get_dashboard_stats tool"""
-    date: Optional[str] = Field(None, description="Date in YYYY-MM-DD format, defaults to today")
+    date_str: Optional[str] = Field(None, description="Date in YYYY-MM-DD format, defaults to today")
+    campaign_id: Optional[str] = Field(None, description="Only this campaign's calls")
 
 
 async def get_dashboard_stats(
     tenant_id: str,
     db_client: Client,
-    date_str: Optional[str] = None
+    date_str: Optional[str] = None,
+    campaign_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Get dashboard statistics for the tenant.
+    Get dashboard statistics for the tenant, or for one of its campaigns.
 
     Returns:
         - Total calls today
@@ -29,16 +32,26 @@ async def get_dashboard_stats(
         - Calls failed
         - Success rate
         - Active campaigns
+        - scope: "campaign" (with campaign_id/campaign_name) or "all_campaigns"
     """
     try:
         # Default to today
         target_date = date_str or date.today().isoformat()
 
+        campaign_name = None
+        if campaign_id:
+            campaign_name = campaign_names(tenant_id, db_client, [campaign_id]).get(str(campaign_id))
+            if campaign_name is None:
+                return {"error": "campaign not found"}
+
         # Get calls for the day
-        calls_response = db_client.table("calls").select(
+        calls_query = db_client.table("calls").select(
             "id, status, outcome, goal_achieved",
             count="exact"
-        ).eq("tenant_id", tenant_id).gte(
+        ).eq("tenant_id", tenant_id)
+        if campaign_id:
+            calls_query = calls_query.eq("campaign_id", campaign_id)
+        calls_response = calls_query.gte(
             "created_at", f"{target_date}T00:00:00"
         ).lte(
             "created_at", f"{target_date}T23:59:59"
@@ -59,8 +72,9 @@ async def get_dashboard_stats(
 
         success_rate = (completed / total_calls * 100) if total_calls > 0 else 0
 
-        return {
+        stats = {
             "date": target_date,
+            "scope": "campaign" if campaign_id else "all_campaigns",
             "total_calls": total_calls,
             "completed": completed,
             "failed": failed,
@@ -68,6 +82,10 @@ async def get_dashboard_stats(
             "success_rate": round(success_rate, 1),
             "active_campaigns": active_campaigns
         }
+        if campaign_id:
+            stats["campaign_id"] = str(campaign_id)
+            stats["campaign_name"] = campaign_name
+        return stats
     except Exception as e:
         logger.error(f"Error getting dashboard stats: {e}")
         return {"error": str(e)}

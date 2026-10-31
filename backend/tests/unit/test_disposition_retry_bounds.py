@@ -72,6 +72,14 @@ RETRYABLE_CAPS = [
 class _FakeConn:
     def __init__(self, calls_row: dict, leads_row: dict, dialer_jobs_row: dict) -> None:
         self.calls_row = calls_row
+        self.calls_row.setdefault("tenant_id", "20000000-0000-4000-8000-000000000017")
+        self.calls_row.setdefault("phone_number", "+15555550107")
+        self.calls_row.setdefault("outcome", None)
+        self.calls_row.setdefault("ended_at", None)
+        self.calls_row.setdefault("duration_seconds", None)
+        self.calls_row.setdefault("terminal_settled_at", None)
+        self.calls_row.setdefault("terminal_retry_payload", None)
+        self.calls_row.setdefault("terminal_retry_enqueued_at", None)
         self.leads_row = leads_row
         self.dialer_jobs_row = dialer_jobs_row
         self.campaigns_row = {"calls_completed": 0, "calls_failed": 0}
@@ -98,8 +106,11 @@ class _FakeConn:
                 self.calls_row["outcome"] = args[1]
             return
         if "UPDATE leads" in q:
-            lead_id, lead_status, last_call_result, call_attempts = args
+            # (lead_id, status, last_call_result, attempts, tenant_id, keep_dnc)
+            lead_id, lead_status, last_call_result, call_attempts, *scope = args
             if self.leads_row["id"] == lead_id:
+                if scope and scope[1] and self.leads_row.get("status") == "dnc":
+                    lead_status = "dnc"
                 self.leads_row["status"] = lead_status
                 self.leads_row["last_call_result"] = last_call_result
                 self.leads_row["call_attempts"] = call_attempts
@@ -111,6 +122,26 @@ class _FakeConn:
 
     async def fetchrow(self, query: str, *args: Any):
         q = " ".join(query.split())
+        if q.startswith("UPDATE calls"):
+            if self.calls_row["id"] != args[0]:
+                return None
+            if "terminal_settled_at = COALESCE" in q:
+                self.calls_row["terminal_settled_at"] = "NOW"
+                self.calls_row["terminal_retry_payload"] = args[1]
+                self.calls_row["terminal_retry_enqueued_at"] = None
+                return dict(self.calls_row)
+            if "status = 'completed'" in q:
+                self.calls_row["status"] = "completed"
+                self.calls_row["outcome"] = args[1]
+                if args[2] is not None:
+                    self.calls_row["duration_seconds"] = args[2]
+                self.calls_row["ended_at"] = self.calls_row["ended_at"] or "NOW"
+                return dict(self.calls_row)
+            self.calls_row["outcome"] = self.calls_row["outcome"] or args[1]
+            if self.calls_row["duration_seconds"] is None and args[2] is not None:
+                self.calls_row["duration_seconds"] = args[2]
+            self.calls_row["ended_at"] = self.calls_row["ended_at"] or "NOW"
+            return dict(self.calls_row)
         if "FROM calls WHERE id" in q:
             return dict(self.calls_row) if self.calls_row["id"] == args[0] else None
         if q.startswith("SELECT * FROM dialer_jobs WHERE id"):
@@ -120,18 +151,29 @@ class _FakeConn:
 
     async def fetchval(self, query: str, *args: Any):
         q = " ".join(query.split())
+        if "FROM dnc_entries" in q:
+            return False
+        if "SELECT id FROM leads" in q:
+            return self.leads_row["id"] if self.leads_row["id"] == args[0] else None
         if "SELECT call_attempts FROM leads" in q:
             return self.leads_row.get("call_attempts", 0)
         if q.startswith("UPDATE dialer_jobs") and "RETURNING id" in q:
-            job_id, status_val, outcome_val, reason = args
+            # (job_id, status, outcome, reason, in_flight, tenant_id,
+            #  pre_flight_statuses, call_dialer_attempt_number)
+            job_id, status_val, outcome_val, reason, allowed_statuses, *_scope = args
             row = self.dialer_jobs_row
-            if row["id"] != job_id or row.get("status") != "processing":
+            if (
+                row["id"] != job_id
+                or row.get("status") not in set(allowed_statuses)
+            ):
                 return None  # idempotency guard
             row["status"] = status_val
             row["last_outcome"] = outcome_val
             row["failure_reason"] = reason
-            if "attempt_number" in q:
+            if "attempt_number = GREATEST" in q:
                 # Mirrors: attempt_number = GREATEST(COALESCE(x, 1), 1) + 1
+                # (matched on the SET expression: the shared WHERE guard also
+                # mentions attempt_number, for the pre-flight attempt check.)
                 row["attempt_number"] = max(row.get("attempt_number") or 1, 1) + 1
             if "completed_at" in q:
                 row["completed_at"] = "NOW"
@@ -233,6 +275,11 @@ async def _dial_until_exhausted(
     while dials < limit:
         # The dialer worker re-arms the row for each attempt.
         conn.calls_row["status"] = "initiated"
+        conn.calls_row["outcome"] = None
+        conn.calls_row["ended_at"] = None
+        conn.calls_row["terminal_settled_at"] = None
+        conn.calls_row["terminal_retry_payload"] = None
+        conn.calls_row["terminal_retry_enqueued_at"] = None
         conn.dialer_jobs_row["status"] = "processing"
         dials += 1
 
@@ -291,7 +338,6 @@ async def test_terminal_dispositions_are_never_redialled():
         CallOutcome.GOAL_ACHIEVED,
         CallOutcome.GOAL_NOT_ACHIEVED,
         CallOutcome.SPAM,
-        CallOutcome.INVALID,
         CallOutcome.DISCONNECTED,
         CallOutcome.UNAVAILABLE,
     ):
@@ -299,6 +345,17 @@ async def test_terminal_dispositions_are_never_redialled():
         dials = await _dial_until_exhausted(conn, service, outcome)
         assert dials == 1, f"{outcome.value} must never be redialled"
         assert queue.scheduled == []
+
+
+@pytest.mark.asyncio
+async def test_carrier_invalid_is_confirmed_once_then_never_redialled():
+    # A first INVALID (Q.850 1/22/28) gets one confirming dial a day later,
+    # because a misconfigured line returns it for every number; the second
+    # INVALID is final (review 2026-10-20).
+    conn, queue, service = _make_case()
+    dials = await _dial_until_exhausted(conn, service, CallOutcome.INVALID)
+    assert dials == 2
+    assert len(queue.scheduled) == 1
 
 
 # ──────────────────────────────────────────────────────────────────
@@ -425,7 +482,9 @@ async def test_duplicate_teardown_does_not_advance_the_counter():
     _, _, retry_args = await service._handle_call_status_pooled(
         "call-1", CallOutcome.BUSY, "busy", duration=0,
     )
-    assert retry_args is None
+    # DB settlement is already once-only, but its unacknowledged Redis outbox
+    # intentionally replays the same payload until schedule_retry_once commits.
+    assert retry_args is not None
     assert conn.dialer_jobs_row["attempt_number"] == 2
 
 

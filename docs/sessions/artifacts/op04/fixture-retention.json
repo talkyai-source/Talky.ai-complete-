@@ -1,0 +1,13 @@
+{
+  "database": "disposable loopback cp04_acceptance_test",
+  "removed_test_roles": [
+    "op04_24fb0207ff504a19b15510df5bfe9453",
+    "op04_6a698eb960be455abd88d9aa0fcc1d98",
+    "op04_710a8d4d92304e7380d63e1b5808a4ab",
+    "op04_ccdc222da9794ed98af1cf56af82b506",
+    "op04_d763554e75474e7c9bddf345cdc9e9d4",
+    "op04_f4df7d69c7a34689aa2d285c817e0cf3"
+  ],
+  "preflight": "All six exact OP04 UUID roles had no owned objects, login, superuser or BYPASSRLS; only grants revoked before role removal.",
+  "retained": "Synthetic tenant-policy audit rows and referenced synthetic tenants remain; no immutable trigger disabled or audit row deleted."
+}

@@ -2,10 +2,13 @@
 
 import type React from "react";
 import { useState, useCallback, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
 import { useAuth } from "@/lib/auth-context";
+import { ASKAI_SIGNIN_FLAG } from "@/components/auth/askai-signin-notice";
+import { ASKAI_CALL_ENDED_FLAG } from "@/components/ui/call-ended-notice";
 
 function parseConfiguredApiUrl(): URL | null {
     try {
@@ -42,14 +45,36 @@ const MIC_WORKLET_PATH = "/worklets/pcm16-capture-processor.js";
 
 const BAR_COUNT = 14;
 
-const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number }> = ({ isActive, audioLevel }) => {
+// Call-bar heights, mirrored EXACTLY by .askAiCallBar in globals.css
+// (103px two-row below 640px, 64px one-row at 640px and above). The
+// orb↔bar swap thresholds are navbarTop + these, so the swap happens the
+// moment the hero's bottom edge clears the bar's own bottom edge.
+const BAR_HEIGHT_TWO_ROW = 103;
+const BAR_HEIGHT_ONE_ROW = 64;
+// The one-row form's media query — the same sm breakpoint globals.css
+// splits .askAiCallBar on. Below it the bar is the phone form, sized by
+// CSS alone (88% / 14px); at and above it the bar takes the navbar's
+// measured width and radius inline.
+const BAR_ONE_ROW_QUERY = "(min-width: 640px)";
+// Pre-measurement fallback for the navbar's top offset: the same
+// clamp(1rem, 2.5vw, 1.25rem) that .home-navbar-fixed uses in globals.css
+// (16px on phones, 2.5vw, 20px from 800px), so the call bar sits where the
+// navbar is from first paint. Only reached when the navbar cannot be read.
+function navTopFallbackPx(): number {
+    return Math.min(20, Math.max(16, window.innerWidth * 0.025));
+}
+// Gap between the show and hide thresholds so scroll jitter exactly on
+// the boundary can never make the swap oscillate.
+const BAR_SWAP_HYSTERESIS_PX = 24;
+
+const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number; bars?: number }> = ({ isActive, audioLevel, bars = BAR_COUNT }) => {
     const barsRef = useRef<(HTMLDivElement | null)[]>([]);
     const rafRef = useRef(0);
 
     useEffect(() => {
         if (!isActive) return;
         const tick = (t: number) => {
-            for (let i = 0; i < BAR_COUNT; i++) {
+            for (let i = 0; i < bars; i++) {
                 const el = barsRef.current[i];
                 if (!el) continue;
                 const h = Math.max(4, 6 + audioLevel * 14 + Math.sin(t / 90 + i * 0.65) * (3 + audioLevel * 6));
@@ -60,13 +85,13 @@ const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number }> = ({ 
         };
         rafRef.current = requestAnimationFrame(tick);
         return () => cancelAnimationFrame(rafRef.current);
-    }, [isActive, audioLevel]);
+    }, [isActive, audioLevel, bars]);
 
     if (!isActive) return null;
 
     return (
         <div className="flex items-center justify-center gap-[3px] h-6">
-            {[...Array(BAR_COUNT)].map((_, i) => (
+            {[...Array(bars)].map((_, i) => (
                 <div
                     key={i}
                     ref={(el) => { barsRef.current[i] = el; }}
@@ -100,6 +125,38 @@ export function VoiceAgentPopup() {
     const [aiState, setAiState] = useState<AIState>("idle");
     const [audioLevel, setAudioLevel] = useState(0);
     const [error, setError] = useState<string | null>(null);
+    // Call timer, plain state — never a ref read during render (React
+    // Compiler constraint). Reset in startSession (an event handler) and
+    // frozen, not cleared, when the call ends so the sticky error bar can
+    // keep showing the final duration.
+    const [callSeconds, setCallSeconds] = useState(0);
+    // True once the hero's bottom edge has scrolled above the call bar's
+    // bottom edge — the orb↔bar swap signal, set by the two
+    // IntersectionObservers below (no scroll listener).
+    const [pastHero, setPastHero] = useState(false);
+    // Mirror for event handlers (handleMessage / failConnection) that must
+    // know, at error time, whether the bar was the visible UI.
+    const pastHeroRef = useRef(false);
+    // Keeps the bar mounted, carrying the error message, after a call dies
+    // while the bar is on screen — the in-hero error panel is off-screen at
+    // that point and would never be seen. Cleared on dismiss.
+    const [barSticky, setBarSticky] = useState(false);
+    // The navbar's measured geometry. The bar copies its top offset at
+    // every size, and its width and radius only in the one-row form (640px
+    // and above), so there it occupies the navbar's area on every device by
+    // construction instead of duplicating the navbar's CSS. Below 640px the
+    // phone form is sized by .askAiCallBar alone (88% / 14px) and nothing
+    // but `top` is set inline. Horizontal placement is never copied:
+    // .askAiCallBar centres itself with the same left:0/right:0/
+    // margin-inline:auto rule the navbar uses, so the two gaps are solved
+    // by the browser and can never drift. Null until the first measurement
+    // — the CSS fallbacks in .askAiCallBar apply then.
+    const [navGeom, setNavGeom] = useState<{ top: number; width: number; radius: string } | null>(null);
+    // Whether the one-row form applies (BAR_ONE_ROW_QUERY). Kept in state
+    // so the render can decide whether to emit the inline width/radius;
+    // refreshed by the same resize path that rebuilds the swap thresholds.
+    const [oneRowBar, setOneRowBar] = useState(false);
+    const wrapperRef = useRef<HTMLDivElement | null>(null);
 
     const wsRef = useRef<WebSocket | null>(null);
     const connectingRef = useRef<boolean>(false);
@@ -111,6 +168,7 @@ export function VoiceAgentPopup() {
     const nextPlaybackTimeRef = useRef<number>(0);
     const ttsSampleRateRef = useRef<number>(24000);
     const awaitingPlaybackCompleteRef = useRef<boolean>(false);
+    const playbackUtteranceRef = useRef<string | undefined>(undefined);
     const dropIncomingAudioRef = useRef<boolean>(false);
     // Generation counter: incremented on every barge-in/reset. Async audio
     // handlers capture this value before awaiting arrayBuffer() and discard
@@ -118,11 +176,10 @@ export function VoiceAgentPopup() {
     // being queued after resetAudioPlayer clears the pipeline.
     const audioGenerationRef = useRef<number>(0);
 
-    // Tessa intro greeting — pre-fetched on mount so it plays instantly on button press.
+    // Tessa intro greeting — fetched on the first interaction with the button.
     const tessaIntroF32Ref = useRef<Float32Array | null>(null);
-    const tessaIntroFetchedRef = useRef<boolean>(false);
     // Stable reference to the in-flight prefetch promise so startSession() can
-    // await completion when the user clicks before the mount-time fetch finishes.
+    // await completion when the user clicks before the first-interaction fetch finishes.
     const tessaIntroPromiseRef = useRef<Promise<void> | null>(null);
 
     // Jitter buffer: collect audio chunks before starting playback to absorb
@@ -142,6 +199,124 @@ export function VoiceAgentPopup() {
     const isMountedRef = useRef<boolean>(true);
 
     const isActive = aiState !== "idle";
+
+    // Latest `isActive` for the unmount cleanup, which must know whether a
+    // call was live when navigation tore this component down. Same pattern
+    // as startMicrophoneRef below.
+    const isActiveRef = useRef(false);
+    useEffect(() => {
+        isActiveRef.current = isActive;
+    }, [isActive]);
+
+    // Call timer: ticks while the session is active. The count is reset in
+    // startSession, not here, so the sticky error bar keeps the final value.
+    useEffect(() => {
+        if (!isActive) return;
+        const id = setInterval(() => setCallSeconds((s) => s + 1), 1000);
+        return () => clearInterval(id);
+    }, [isActive]);
+
+    // Measure the navbar the call bar mirrors. The navbar is absolutely
+    // positioned at the document top and stays in the DOM at every scroll
+    // position, so its width is readable whenever the bar needs it. Its
+    // left edge is deliberately not read — see navGeom above.
+    const measureNav = useCallback(() => {
+        const nav = document.querySelector('nav[aria-label="Primary"]');
+        if (!nav) return;
+        const cs = getComputedStyle(nav);
+        const rect = nav.getBoundingClientRect();
+        setNavGeom((prev) => {
+            const next = {
+                top: Number.parseFloat(cs.top) || navTopFallbackPx(),
+                width: rect.width,
+                radius: cs.borderRadius || "9999px",
+            };
+            return prev &&
+                prev.top === next.top &&
+                prev.width === next.width &&
+                prev.radius === next.radius
+                ? prev
+                : next;
+        });
+    }, []);
+
+    // The orb↔bar swap. Rule: the bar shows the moment the hero's bottom
+    // edge rises above the bar's own bottom edge (navbar top offset + bar
+    // height) and reverts once it comes back down past a 24px hysteresis
+    // band, so the boundary can never oscillate. IntersectionObservers fire
+    // on crossings only — no scroll listener. Thresholds are rebuilt on
+    // resize because the navbar offset (8/10px) and the bar height
+    // (103/64px) follow their own width breakpoints.
+    //
+    // The navbar's geometry is re-measured by a ResizeObserver on the
+    // navbar element itself, not by the resize listener: its box also
+    // changes without any window resize — when the web font swaps in and
+    // when a hover/pointer media query flips (DevTools device-type switch)
+    // — and the observer fires on every one of those, plus once on observe.
+    useEffect(() => {
+        const hero = wrapperRef.current?.closest(".heroSectionRoot");
+        if (!hero) return;
+
+        let showObserver: IntersectionObserver | null = null;
+        let hideObserver: IntersectionObserver | null = null;
+
+        const setup = () => {
+            showObserver?.disconnect();
+            hideObserver?.disconnect();
+            const nav = document.querySelector('nav[aria-label="Primary"]');
+            const navTop = nav ? Number.parseFloat(getComputedStyle(nav).top) || navTopFallbackPx() : navTopFallbackPx();
+            const oneRow = window.matchMedia(BAR_ONE_ROW_QUERY).matches;
+            setOneRowBar(oneRow);
+            const barHeight = oneRow ? BAR_HEIGHT_ONE_ROW : BAR_HEIGHT_TWO_ROW;
+            const showEdge = navTop + barHeight;
+            const hideEdge = showEdge + BAR_SWAP_HYSTERESIS_PX;
+            // With the viewport clipped at the top by `edge`, the hero
+            // intersects it exactly while heroRect.bottom > edge.
+            showObserver = new IntersectionObserver(
+                ([entry]) => {
+                    if (!entry.isIntersecting) {
+                        pastHeroRef.current = true;
+                        setPastHero(true);
+                    }
+                },
+                { rootMargin: `-${showEdge}px 0px 0px 0px`, threshold: 0 },
+            );
+            hideObserver = new IntersectionObserver(
+                ([entry]) => {
+                    if (entry.isIntersecting) {
+                        pastHeroRef.current = false;
+                        setPastHero(false);
+                    }
+                },
+                { rootMargin: `-${hideEdge}px 0px 0px 0px`, threshold: 0 },
+            );
+            showObserver.observe(hero);
+            hideObserver.observe(hero);
+        };
+
+        setup();
+        measureNav();
+        const nav = document.querySelector('nav[aria-label="Primary"]');
+        let navObserver: ResizeObserver | null = null;
+        if (nav && typeof ResizeObserver !== "undefined") {
+            navObserver = new ResizeObserver(() => measureNav());
+            navObserver.observe(nav);
+        }
+        const onResize = () => setup();
+        window.addEventListener("resize", onResize);
+        return () => {
+            showObserver?.disconnect();
+            hideObserver?.disconnect();
+            navObserver?.disconnect();
+            window.removeEventListener("resize", onResize);
+        };
+    }, [measureNav]);
+
+    // Clears the sticky error bar (and the error itself).
+    const dismissBarError = useCallback(() => {
+        setBarSticky(false);
+        setError(null);
+    }, []);
 
     // Initialize browser-native streaming playback using the device's
     // preferred output sample rate.
@@ -194,17 +369,17 @@ export function VoiceAgentPopup() {
     // Queue PCM16 audio for sample-accurate playback with jitter buffering.
     // Collects chunks into a buffer before starting playback to absorb network
     // variance and prevent stutter from irregular chunk arrival timing.
-    const queueAudioChunk = useCallback((buffer: ArrayBuffer, sampleRate: number = 24000) => {
+    const queueAudioChunk = useCallback((buffer: ArrayBuffer, sampleRate: number = 24000, flush = false) => {
         if (!isMountedRef.current) return;
 
         const ctx = audioContextRef.current;
         if (!ctx) return;
 
         const pcm16 = new Int16Array(buffer);
-        if (pcm16.length === 0) return;
+        if (pcm16.length === 0 && !flush) return;
 
         // Add to jitter buffer
-        jitterBufferRef.current.push(buffer);
+        if (buffer.byteLength) jitterBufferRef.current.push(buffer);
 
         // Calculate total buffered duration
         const totalSamples = jitterBufferRef.current.reduce(
@@ -215,7 +390,7 @@ export function VoiceAgentPopup() {
 
         // Only start playback once we have enough buffered audio
         if (!playbackStartedRef.current) {
-            if (bufferedMs < JITTER_BUFFER_TARGET_MS) {
+            if (bufferedMs < JITTER_BUFFER_TARGET_MS && !flush) {
                 return; // Still buffering
             }
             playbackStartedRef.current = true;
@@ -247,7 +422,10 @@ export function VoiceAgentPopup() {
                 nextPlaybackTimeRef.current || 0,
             );
 
+            const generation = audioGenerationRef.current;
+            const utterance = playbackUtteranceRef.current;
             source.onended = () => {
+                if (generation !== audioGenerationRef.current || utterance !== playbackUtteranceRef.current) return;
                 playbackSourcesRef.current.delete(source);
                 if (
                     awaitingPlaybackCompleteRef.current &&
@@ -255,7 +433,7 @@ export function VoiceAgentPopup() {
                     wsRef.current?.readyState === WebSocket.OPEN
                 ) {
                     awaitingPlaybackCompleteRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: utterance }));
                 }
             };
 
@@ -268,6 +446,7 @@ export function VoiceAgentPopup() {
     // Stop queued playback immediately on barge-in without closing the context.
     const resetAudioPlayer = useCallback(() => {
         awaitingPlaybackCompleteRef.current = false;
+        playbackUtteranceRef.current = undefined;
         // Advance generation so in-flight async handlers discard stale audio
         audioGenerationRef.current += 1;
         playbackSourcesRef.current.forEach((source) => {
@@ -306,14 +485,13 @@ export function VoiceAgentPopup() {
         audioInitPromiseRef.current = null;
     }, []);
 
-    // Fetch Tessa's intro audio from the preview API on mount so it's ready
-    // to play the instant the user presses the button — no synthesis delay.
+    // Fetch Tessa's intro audio from the preview API so it is ready to play
+    // the instant the session starts — no synthesis delay.
     const prefetchTessaIntro = useCallback((): Promise<void> => {
         // Already done.
         if (tessaIntroF32Ref.current) return Promise.resolve();
         // Already in flight — return the same promise so callers can await it.
         if (tessaIntroPromiseRef.current) return tessaIntroPromiseRef.current;
-        tessaIntroFetchedRef.current = true;
 
         const promise = (async () => {
             try {
@@ -328,10 +506,10 @@ export function VoiceAgentPopup() {
                         text: "Hi, you've reached the Talk-Lee receptionist team — how can I help you today?",
                     }),
                 });
-                if (!res.ok) { tessaIntroFetchedRef.current = false; tessaIntroPromiseRef.current = null; return; }
+                if (!res.ok) { tessaIntroPromiseRef.current = null; return; }
                 const data = await res.json() as { audio_base64?: string };
                 const b64 = data.audio_base64;
-                if (!b64) { tessaIntroFetchedRef.current = false; tessaIntroPromiseRef.current = null; return; }
+                if (!b64) { tessaIntroPromiseRef.current = null; return; }
                 // Decode base64 → raw bytes → Float32Array (f32le PCM at 24 kHz)
                 const binary = atob(b64);
                 const bytes = new Uint8Array(binary.length);
@@ -340,7 +518,6 @@ export function VoiceAgentPopup() {
                 console.log('[TessaIntro] Pre-fetched intro audio:', tessaIntroF32Ref.current.length, 'samples');
             } catch (e) {
                 console.warn('[TessaIntro] Prefetch failed — intro will be skipped:', e);
-                tessaIntroFetchedRef.current = false;
                 tessaIntroPromiseRef.current = null;
             }
         })();
@@ -517,6 +694,16 @@ export function VoiceAgentPopup() {
         setAudioLevel(0);
     }, []);
 
+    // Latest `startMicrophone`, published for handleMessage below. Declared
+    // (and kept in sync) BEFORE the hook that captures it: writing to a ref
+    // that an earlier hook already closed over counts as mutating a hook
+    // argument under the React Compiler, which is what the immutability rule
+    // was reporting here.
+    const startMicrophoneRef = useRef<(() => void) | null>(null);
+    useEffect(() => {
+        startMicrophoneRef.current = () => { void startMicrophone(); };
+    }, [startMicrophone]);
+
     const handleMessage = useCallback(async (event: MessageEvent) => {
         const payload = event.data;
 
@@ -593,14 +780,21 @@ export function VoiceAgentPopup() {
             case "turn_complete":
                 setAiState("listening");
                 break;
+            case "playback_start":
+                resetAudioPlayer();
+                playbackUtteranceRef.current = typeof data.utterance_id === "string" ? data.utterance_id : undefined;
+                dropIncomingAudioRef.current = false;
+                break;
             case "tts_audio_complete":
+                if (data.utterance_id !== playbackUtteranceRef.current) break;
+                queueAudioChunk(new ArrayBuffer(0), ttsSampleRateRef.current, true);
                 awaitingPlaybackCompleteRef.current = true;
                 if (
                     playbackSourcesRef.current.size === 0 &&
                     wsRef.current?.readyState === WebSocket.OPEN
                 ) {
                     awaitingPlaybackCompleteRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: playbackUtteranceRef.current }));
                 }
                 break;
             case "barge_in":
@@ -612,6 +806,9 @@ export function VoiceAgentPopup() {
                 break;
             case "error":
                 setError(typeof data.message === "string" ? data.message : "Unknown voice error");
+                // If the bar is the visible UI, keep it mounted to carry this
+                // message — the in-hero panel is off-screen at this point.
+                if (pastHeroRef.current) setBarSticky(true);
                 // Leave the "speaking" state immediately so the UI isn't stuck.
                 // The backend also closes the socket on error → onclose runs the
                 // full teardown (endSession) while preserving this message.
@@ -623,12 +820,6 @@ export function VoiceAgentPopup() {
                 break;
         }
     }, [initializeAudioPlayer, queueAudioChunk, resetAudioPlayer]);
-
-    // Store startMicrophone in ref for use in handleMessage
-    const startMicrophoneRef = useRef<(() => void) | null>(null);
-    useEffect(() => {
-        startMicrophoneRef.current = () => { void startMicrophone(); };
-    }, [startMicrophone]);
 
     const endSession = useCallback(() => {
         connectingRef.current = false;
@@ -648,6 +839,7 @@ export function VoiceAgentPopup() {
 
     const startSession = useCallback(async () => {
         setError(null);
+        setCallSeconds(0);
         setAiState("connecting");
         connectingRef.current = true;
 
@@ -706,15 +898,15 @@ export function VoiceAgentPopup() {
             // Non-fatal — handleMessage will retry on the first chunk
         }
 
-        // Wait briefly for the mount-time prefetch so the user always hears the
-        // intro on the first click. Disk-cache hit is ~100ms; cap at 2.5s so a
-        // slow network never blocks the session beyond the existing intro
-        // playback. If the prefetch hadn't started yet (component just mounted),
-        // calling prefetchTessaIntro() returns the same in-flight promise.
+        // Wait for the intro fetch (started on hover/focus/press, or right here
+        // if the click was the first interaction) so the user always hears the
+        // intro on the first click. Uncached, the request takes ~2s, so the cap
+        // is 6s; it only bounds a stalled network. If the fetch is already in
+        // flight, calling prefetchTessaIntro() returns the same promise.
         try {
             await Promise.race([
                 prefetchTessaIntro(),
-                new Promise((resolve) => setTimeout(resolve, 2500)),
+                new Promise((resolve) => setTimeout(resolve, 6000)),
             ]);
         } catch { /* Non-fatal — intro will be skipped */ }
 
@@ -751,6 +943,9 @@ export function VoiceAgentPopup() {
             cleanupAudioPlayer();
             setAudioLevel(0);
             setError(message);
+            // Connection failures can also land while the user has scrolled
+            // past the hero — surface them in the bar, same as call errors.
+            if (pastHeroRef.current) setBarSticky(true);
             setAiState("idle");
             if (redirectToLogin) {
                 router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
@@ -846,6 +1041,11 @@ export function VoiceAgentPopup() {
 
     const handleMainButtonClick = useCallback(() => {
         if (!isAuthed) {
+            // Signed-out: redirect immediately, no message here. The sign-in
+            // notice renders on the auth pages, keyed off this session flag.
+            try {
+                sessionStorage.setItem(ASKAI_SIGNIN_FLAG, "1");
+            } catch { /* storage blocked (private mode) — redirect still works */ }
             router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
             return;
         }
@@ -856,10 +1056,14 @@ export function VoiceAgentPopup() {
         }
     }, [isAuthed, isActive, startSession, endSession, router, pathname]);
 
-    // Pre-fetch Tessa's intro audio so it's ready the moment the button is pressed.
-    useEffect(() => {
+    // Start fetching Tessa's intro on the user's first interaction with the
+    // button (hover, focus or press) instead of on page load, so visitors who
+    // never touch it do not trigger a speech-synthesis call. Signed-out users
+    // are redirected to login on click, so they never need the intro.
+    const warmTessaIntro = useCallback(() => {
+        if (!isAuthed) return;
         void prefetchTessaIntro();
-    }, [prefetchTessaIntro]);
+    }, [isAuthed, prefetchTessaIntro]);
 
     // Pre-warm microphone stream on mount if permission is already granted.
     // getUserMedia() takes 100-500ms when called for the first time on button
@@ -892,28 +1096,59 @@ export function VoiceAgentPopup() {
         isMountedRef.current = true;
         return () => {
             isMountedRef.current = false;
+            // Route navigation is the only thing that unmounts this
+            // component (homepage-only mount). If a call was live, flag it
+            // so the destination page's CallEndedNotice tells the user.
+            if (isActiveRef.current) {
+                try {
+                    sessionStorage.setItem(ASKAI_CALL_ENDED_FLAG, "1");
+                } catch { /* storage blocked — the call still ends below */ }
+            }
             endSession();
         };
     }, [endSession]);
 
     const getStatusText = () => {
         switch (aiState) {
-            case "connecting": return "Connecting...";
-            case "listening": return "Listening...";
-            case "processing": return "Thinking...";
-            case "speaking": return "Speaking...";
             default: return "Click to talk";
         }
     };
 
+    const barVisible = (isActive && pastHero) || barSticky;
+    const timerText = `${String(Math.floor(callSeconds / 60)).padStart(2, "0")}:${String(callSeconds % 60).padStart(2, "0")}`;
+    const barStateWord = barSticky && !isActive
+        ? "Error"
+        : aiState === "listening"
+            ? "Listening"
+            : aiState === "processing"
+                ? "Thinking"
+                : aiState === "speaking"
+                    ? "Speaking"
+                    : "Connecting";
+
     return (
-        <div className="pointer-events-auto fixed bottom-5 left-2 sm:bottom-6 sm:left-3 z-50 flex items-center gap-2">
+        <>
+        {/* absolute, not fixed: anchors to the hero section (relative) and
+            scrolls away with it — ordinary hero content on every device.
+            While the pinned call bar is the visible UI, the orb fades and
+            scales out here; the swap is render-output only, so the call
+            (refs above) is never touched. */}
+        <div
+            ref={wrapperRef}
+            className={`absolute bottom-5 left-2 sm:bottom-6 sm:left-3 z-50 flex items-center gap-2 transition-[opacity,transform] duration-200 ${
+                isActive && pastHero ? "pointer-events-none opacity-0 scale-90" : "pointer-events-auto opacity-100 scale-100"
+            }`}
+        >
             <div className="relative">
                 <button
                     onClick={handleMainButtonClick}
+                    onPointerEnter={warmTessaIntro}
+                    onPointerDown={warmTessaIntro}
+                    onFocus={warmTessaIntro}
+                    aria-label="Ask AI"
                     className={`relative rounded-full transition-[background-color,border-color,box-shadow,transform] duration-500 ease-out cursor-pointer group ${isActive ? "overflow-visible" : "overflow-hidden"} focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background ${!isActive
-                        ? "stats-card inline-flex items-center justify-center h-10 w-10 px-0 bg-cyan-50/70 border border-cyan-200/80 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] backdrop-blur-sm transition-[background-color,border-color,box-shadow,transform,width,padding] hover:scale-105 md:justify-start md:gap-2 md:px-3 md:w-[150px] dark:bg-cyan-950/60 dark:border-cyan-200/35 dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.55),0_0_0_1px_rgba(34,211,238,0.16),0_0_24px_rgba(34,211,238,0.14)]"
-                        : "flex items-center justify-center w-20 h-20 lg:w-40 lg:h-40 bg-background/70 border-2 border-indigo-400/40 backdrop-blur-md transition-[width,height]"
+                        ? "stats-card inline-flex items-center justify-center h-11 w-[72px] px-0 bg-cyan-50/70 border border-cyan-200/80 shadow-[0_25px_50px_-12px_rgba(0,0,0,0.15)] backdrop-blur-sm transition-[background-color,border-color,box-shadow,transform,width,padding] hover:scale-105 md:justify-start md:gap-2 md:px-3 md:w-[150px] dark:bg-cyan-950/60 dark:border-cyan-200/35 dark:shadow-[0_25px_50px_-12px_rgba(0,0,0,0.55),0_0_0_1px_rgba(34,211,238,0.16),0_0_24px_rgba(34,211,238,0.14)]"
+                        : "flex items-center justify-center w-20 h-20 bg-background/70 border-2 border-indigo-400/40 backdrop-blur-md transition-[width,height]"
                         }`}
                     style={{
                         boxShadow: isActive
@@ -931,7 +1166,8 @@ export function VoiceAgentPopup() {
 
                     {!isActive ? (
                         <div className="relative z-10 flex items-center gap-2">
-                            <span className="relative inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)]">
+                            <span className="md:hidden text-sm font-semibold leading-none text-primary dark:text-white">ASK AI</span>
+                            <span className="relative hidden md:inline-flex h-7 w-7 items-center justify-center rounded-lg bg-cyan-500 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.35)]">
                                 <MessageCircle className="h-4 w-4 text-white" />
                                 <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-white/90" />
                             </span>
@@ -941,8 +1177,12 @@ export function VoiceAgentPopup() {
                             </div>
                         </div>
                     ) : (
-                        <div className="relative z-10 flex flex-col items-center justify-center gap-2">
-                            {/* Voice-reactive orb — scales + glows with audioLevel */}
+                        <div className="relative z-10 flex flex-col items-center justify-center">
+                            {/* Voice-reactive orb — scales + glows with audioLevel.
+                                Sole in-flow child of this column, so the button's own
+                                flex centring puts the cluster (glow, core, wave bars)
+                                exactly on the button's centre — the same centre the
+                                ping rings (-inset-2 on the button) already share. */}
                             <div className="relative flex items-center justify-center">
                                 <div
                                     className="absolute rounded-full bg-gradient-to-br from-indigo-400/50 to-purple-500/40 blur-md transition-transform duration-100"
@@ -965,37 +1205,44 @@ export function VoiceAgentPopup() {
                                     <AudioVisualizer isActive={true} audioLevel={audioLevel} />
                                 </div>
                             </div>
+                        </div>
+                    )}
 
-                            {/* State badge — Listening / Thinking / Speaking */}
-                            <div
-                                className={`px-2.5 py-0.5 rounded-full text-[10px] lg:text-xs font-medium tracking-wide leading-none ${
-                                    aiState === "listening"
-                                        ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/30"
-                                        : aiState === "processing"
-                                            ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
-                                            : aiState === "speaking"
-                                                ? "bg-indigo-500/25 text-indigo-100 border border-indigo-400/40"
-                                                : "bg-white/10 text-white/80 border border-white/20"
-                                }`}
-                            >
-                                {aiState === "connecting"
-                                    ? "Connecting…"
-                                    : aiState === "listening"
-                                        ? "Listening"
-                                        : aiState === "processing"
-                                            ? "Thinking"
-                                            : aiState === "speaking"
-                                                ? "Speaking"
-                                                : "Idle"}
-                            </div>
+                    {/* State badge — Listening / Thinking / Speaking. Absolutely
+                        positioned at the button's bottom centre, outside the orb
+                        column, so it no longer pushes the orb cluster above the
+                        button's centre. */}
+                    {isActive && (
+                        <div
+                            className={`absolute left-1/2 bottom-1.5 z-10 -translate-x-1/2 whitespace-nowrap px-2.5 py-0.5 rounded-full text-[10px] font-medium tracking-wide leading-none ${
+                                aiState === "listening"
+                                    ? "bg-emerald-500/20 text-emerald-200 border border-emerald-400/30"
+                                    : aiState === "processing"
+                                        ? "bg-amber-500/20 text-amber-200 border border-amber-400/30"
+                                        : aiState === "speaking"
+                                            ? "bg-indigo-500/25 text-indigo-100 border border-indigo-400/40"
+                                            : "bg-white/10 text-white/80 border border-white/20"
+                            }`}
+                        >
+                            {aiState === "connecting"
+                                ? "Connecting…"
+                                : aiState === "listening"
+                                    ? "Listening"
+                                    : aiState === "processing"
+                                        ? "Thinking"
+                                        : aiState === "speaking"
+                                            ? "Speaking"
+                                            : "Idle"}
                         </div>
                     )}
                 </button>
             </div>
-            {error && (
+            {/* In-hero error panel — only while the bar is not carrying the
+                error (barSticky); anchored above the button as before. */}
+            {error && !barSticky && (
                 <div
                     role="alert"
-                    className="absolute -top-2 right-12 -translate-y-full max-w-[260px] rounded-lg bg-red-600/95 text-white text-xs px-3 py-2 shadow-lg shadow-red-500/30 leading-snug"
+                    className="absolute -top-2 left-0 -translate-y-full w-max max-w-[min(260px,calc(100vw-24px))] rounded-lg bg-red-600/95 text-white text-xs px-3 py-2 shadow-lg shadow-red-500/30 leading-snug"
                 >
                     <div className="flex items-start gap-2">
                         <span className="flex-1">{error}</span>
@@ -1003,7 +1250,7 @@ export function VoiceAgentPopup() {
                             type="button"
                             onClick={(e) => { e.stopPropagation(); setError(null); }}
                             aria-label="Dismiss"
-                            className="opacity-80 hover:opacity-100 -mt-0.5"
+                            className="-m-2.5 p-2.5 opacity-80 hover:opacity-100"
                         >
                             ×
                         </button>
@@ -1011,5 +1258,51 @@ export function VoiceAgentPopup() {
                 </div>
             )}
         </div>
+        {/* Active-call bar: pinned to the top of the viewport while the
+            call is live and the hero has scrolled away (plus the sticky
+            error state). Its top offset follows the navbar at every size;
+            its width and radius follow the navbar only in the one-row form
+            — the phone form is sized by CSS alone. Portaled into the
+            homepage's <main id="home"> (document.body as the fallback for
+            any other host) purely for z-order: rendered inside the hero's
+            z-10 container it would be painted over by every sibling section
+            below. Its typeface no longer depends on the target — the root
+            layout (layout.tsx) puts `--font-manrope` on <body>, so
+            .askAiCallBar's `font-family: var(--font-manrope, inherit)`
+            resolves to Manrope under either parent. Rendered by this same
+            component instance, so swapping to and from it can never touch
+            the call. */}
+        {typeof document !== "undefined" && (isActive || barSticky) &&
+            createPortal(
+                <div
+                    className={`askAiCallBar${barVisible ? " askAiCallBarVisible" : ""}`}
+                    role="status"
+                    style={{
+                        top: navGeom?.top,
+                        width: oneRowBar ? navGeom?.width : undefined,
+                        borderRadius: oneRowBar ? navGeom?.radius : undefined,
+                    }}
+                >
+                    <div className="askAiCallBarRow">
+                        <AudioVisualizer isActive={isActive} audioLevel={audioLevel} bars={5} />
+                        <span className="askAiCallBarState">{barStateWord}</span>
+                        <span className={`askAiCallBarLine${error ? " askAiCallBarErrorText" : ""}`}>
+                            {error ?? "Talk-Lee is listening"}
+                        </span>
+                        <span className="askAiCallBarTimer">{timerText}</span>
+                    </div>
+                    {isActive ? (
+                        <button type="button" className="askAiCallBarEnd" onClick={endSession}>
+                            End Call
+                        </button>
+                    ) : (
+                        <button type="button" className="askAiCallBarEnd" onClick={dismissBarError}>
+                            Dismiss
+                        </button>
+                    )}
+                </div>,
+                document.getElementById("home") ?? document.body,
+            )}
+        </>
     );
 }

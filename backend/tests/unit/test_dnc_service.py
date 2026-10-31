@@ -23,6 +23,9 @@ from app.domain.services.dnc_service import (
     normalize_e164,
 )
 
+TENANT_1 = "00000000-0000-0000-0000-000000000001"
+TENANT_2 = "00000000-0000-0000-0000-000000000002"
+
 
 # ──────────────────────────────────────────────────────────────────────────
 # Normalisation
@@ -65,11 +68,15 @@ class _FakeConn:
     async def __aexit__(self, *_):
         return False
 
+    def transaction(self):
+        return self
+
     async def fetchrow(self, sql: str, *args):
         sql_norm = " ".join(sql.split())
 
         if "INSERT INTO dnc_entries" in sql_norm and "DO NOTHING" in sql_norm:
-            tenant_id, number, source, reason, added_by, expires_at = args
+            tenant_id, number, source, reason = args[:4]
+            added_by, expires_at = args[4:] if len(args) == 6 else (None, None)
             key = (tenant_id, number, source)
             if key in self.store["by_tuple"]:
                 return None
@@ -84,15 +91,27 @@ class _FakeConn:
             return row
 
         if sql_norm.startswith("UPDATE dnc_entries"):
-            tenant_id, number, source, reason, expires_at = args
+            tenant_id, number, source, reason = args[:4]
+            expires_at = args[4] if len(args) == 5 else None
             key = (tenant_id, number, source)
             existing = self.store["by_tuple"].get(key)
             if existing is None:
                 return None
+            previous_expiry = existing["expires_at"]
+            if (len(args) == 4 and source != "caller_opt_out" and previous_expiry is not None
+                    and previous_expiry <= datetime.now(previous_expiry.tzinfo)):
+                return None
             if reason is not None:
                 existing["reason"] = reason
-            if expires_at is not None:
-                existing["expires_at"] = expires_at
+            if len(args) == 5:
+                # add(): the request's expiry applies (None = permanent) and a
+                # permanent entry is never weakened (mirrors the SQL CASE).
+                if source == "caller_opt_out" or expires_at is None or previous_expiry is None:
+                    existing["expires_at"] = None
+                else:
+                    existing["expires_at"] = max(previous_expiry, expires_at)
+            elif source == "caller_opt_out":
+                existing["expires_at"] = None
             return existing
 
         if "SELECT 1 FROM dnc_entries" in sql_norm:
@@ -121,6 +140,8 @@ class _FakeConn:
 
     async def execute(self, sql: str, *args):
         sql_norm = " ".join(sql.split())
+        if sql_norm.startswith("SET LOCAL"):
+            return "SET"
         if sql_norm.startswith("INSERT INTO dnc_entries"):
             tenant_id, number, source, reason = args
             key = (tenant_id, number, source)
@@ -164,22 +185,22 @@ class _FakePool:
 async def test_add_returns_entry_with_normalised_number():
     svc = DNCService(_FakePool())
     entry = await svc.add(
-        tenant_id="t1",
+        tenant_id=TENANT_1,
         e164="+1 415-555-1234",
         source=SOURCE_MANUAL_ADMIN,
     )
     assert entry.normalized_number == "+14155551234"
     assert entry.source == SOURCE_MANUAL_ADMIN
-    assert entry.tenant_id == "t1"
+    assert entry.tenant_id == TENANT_1
 
 
 @pytest.mark.asyncio
 async def test_add_is_idempotent():
     pool = _FakePool()
     svc = DNCService(pool)
-    first = await svc.add(tenant_id="t1", e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
+    first = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
     second = await svc.add(
-        tenant_id="t1", e164="+14155551234",
+        tenant_id=TENANT_1, e164="+14155551234",
         source=SOURCE_MANUAL_ADMIN, reason="updated",
     )
     assert first.id == second.id
@@ -191,14 +212,14 @@ async def test_add_is_idempotent():
 async def test_add_rejects_empty_number():
     svc = DNCService(_FakePool())
     with pytest.raises(ValueError, match="valid phone number"):
-        await svc.add(tenant_id="t1", e164="", source=SOURCE_MANUAL_ADMIN)
+        await svc.add(tenant_id=TENANT_1, e164="", source=SOURCE_MANUAL_ADMIN)
 
 
 @pytest.mark.asyncio
 async def test_add_caller_opt_out_sets_source_and_call_id():
     svc = DNCService(_FakePool())
     entry = await svc.add_caller_opt_out(
-        tenant_id="t1", e164="+14155551234", call_id="call-abc-123",
+        tenant_id=TENANT_1, e164="+14155551234", call_id="call-abc-123",
     )
     assert entry.source == SOURCE_CALLER_OPT_OUT
     assert "call-abc-123" in (entry.reason or "")
@@ -208,7 +229,7 @@ async def test_add_caller_opt_out_sets_source_and_call_id():
 async def test_bulk_import_splits_accepted_and_invalid():
     svc = DNCService(_FakePool())
     result = await svc.bulk_import(
-        tenant_id="t1",
+        tenant_id=TENANT_1,
         numbers=[
             "+14155551234",
             "+1 415 555 1235",
@@ -227,40 +248,40 @@ async def test_is_on_dnc_matches_tenant_and_global():
     pool = _FakePool()
     svc = DNCService(pool)
     # Tenant-scoped entry
-    await svc.add(tenant_id="t1", e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
     # Global entry (tenant_id=None) — FTC-style
     await svc.add(tenant_id=None, e164="+19995551234", source="ftc_national")
 
     # Tenant sees its own entry
-    assert await svc.is_on_dnc(tenant_id="t1", e164="+1 415 555 1234") is True
+    assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="+1 415 555 1234") is True
     # Tenant sees the global entry
-    assert await svc.is_on_dnc(tenant_id="t1", e164="+1 999 555 1234") is True
+    assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="+1 999 555 1234") is True
     # Clean number not on the list
-    assert await svc.is_on_dnc(tenant_id="t1", e164="+14155559999") is False
+    assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="+14155559999") is False
     # Normalisation applied to the query side too
-    assert await svc.is_on_dnc(tenant_id="t1", e164="1-415-555-1234") is True
+    assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="1-415-555-1234") is True
 
 
 @pytest.mark.asyncio
 async def test_is_on_dnc_empty_number_returns_false():
     svc = DNCService(_FakePool())
-    assert await svc.is_on_dnc(tenant_id="t1", e164="") is False
+    assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="") is False
 
 
 @pytest.mark.asyncio
 async def test_remove_only_affects_own_tenant():
     pool = _FakePool()
     svc = DNCService(pool)
-    mine = await svc.add(tenant_id="t1", e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
-    other = await svc.add(tenant_id="t2", e164="+14155551235", source=SOURCE_MANUAL_ADMIN)
+    mine = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
+    other = await svc.add(tenant_id=TENANT_2, e164="+14155551235", source=SOURCE_MANUAL_ADMIN)
 
     # Can't delete the other tenant's entry.
-    removed = await svc.remove(tenant_id="t1", entry_id=other.id)
+    removed = await svc.remove(tenant_id=TENANT_1, entry_id=other.id)
     assert removed is False
     assert other.id in pool.store["by_id"]
 
     # Can delete your own.
-    removed = await svc.remove(tenant_id="t1", entry_id=mine.id)
+    removed = await svc.remove(tenant_id=TENANT_1, entry_id=mine.id)
     assert removed is True
     assert mine.id not in pool.store["by_id"]
 
@@ -269,12 +290,107 @@ async def test_remove_only_affects_own_tenant():
 async def test_list_for_tenant_excludes_global_by_default():
     pool = _FakePool()
     svc = DNCService(pool)
-    await svc.add(tenant_id="t1", e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
     await svc.add(tenant_id=None, e164="+19995551234", source="ftc_national")
 
-    own = await svc.list_for_tenant("t1")
+    own = await svc.list_for_tenant(TENANT_1)
     assert len(own) == 1
-    assert own[0].tenant_id == "t1"
+    assert own[0].tenant_id == TENANT_1
 
-    with_global = await svc.list_for_tenant("t1", include_global=True)
+    with_global = await svc.list_for_tenant(TENANT_1, include_global=True)
     assert len(with_global) == 2
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Canonical form + strict E.164 gate on the write path
+# ──────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize(
+    "raw,expected",
+    [
+        ("4155551234", "+14155551234"),      # bare 10-digit US -> +1
+        ("(415) 555-1234", "+14155551234"),
+        ("415-555-1234", "+14155551234"),
+        ("415.555.1234", "+14155551234"),
+    ],
+)
+def test_normalize_e164_bare_us_ten_digits_gets_country_code(raw: str, expected: str):
+    """The DNC stored form must be what CallGuard looks the row up with."""
+    assert normalize_e164(raw) == expected
+
+
+@pytest.mark.parametrize(
+    "junk",
+    ["+", "abc", "phone", "   ", "-", "()", "0", "00", "1234", "12345"],
+)
+@pytest.mark.asyncio
+async def test_add_rejects_non_e164(junk: str):
+    """Truthy junk like '+' or '+00' must never land on the DNC list."""
+    svc = DNCService(_FakePool())
+    with pytest.raises(ValueError, match="E.164"):
+        await svc.add(tenant_id=TENANT_1, e164=junk, source=SOURCE_MANUAL_ADMIN)
+
+
+@pytest.mark.asyncio
+async def test_bulk_import_counts_non_e164_as_invalid():
+    svc = DNCService(_FakePool())
+    result = await svc.bulk_import(
+        tenant_id=TENANT_1,
+        numbers=["+14155551234", "+", "abc", "0", "4155551235"],
+        source="bulk_import",
+    )
+    assert result["invalid_count"] == 3
+    assert set(result["invalid"]) == {"+", "abc", "0"}
+    assert sorted(result["accepted"]) == ["+14155551234", "+14155551235"]
+
+
+@pytest.mark.asyncio
+async def test_dnc_row_written_matches_call_guard_lookup_key():
+    """End-to-end: what add() stores is what the guard's query would find."""
+    from app.domain.services.call_guard import CallGuard
+
+    pool = _FakePool()
+    svc = DNCService(pool)
+    entry = await svc.add(
+        tenant_id=TENANT_1, e164="(415) 555-1234", source=SOURCE_MANUAL_ADMIN,
+    )
+    guard_key = CallGuard._normalize_phone_number(None, "4155551234")
+    assert entry.normalized_number == guard_key
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Re-adding (2026-10-10 bug hunt, outbound-telephony-dialer-8)
+# ──────────────────────────────────────────────────────────────────────────
+# Proven on Postgres 16 with the production dnc_entries schema: the old
+# refresh kept an expired date (POST /dnc said 201, the number stayed
+# dialable) and let a dated re-add make a permanent suppression temporary.
+
+async def test_re_adding_an_expired_entry_makes_it_permanent_again():
+    from datetime import timedelta, timezone
+    pool = _FakePool()
+    svc = DNCService(pool)
+    past = datetime.now(timezone.utc) - timedelta(days=1)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=past)
+    again = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual")
+    assert again.expires_at is None
+
+
+async def test_a_dated_re_add_never_weakens_a_permanent_entry():
+    from datetime import timedelta, timezone
+    pool = _FakePool()
+    svc = DNCService(pool)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual")
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+    again = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=later)
+    assert again.expires_at is None
+
+
+async def test_a_dated_re_add_keeps_the_later_of_two_dates():
+    from datetime import timedelta, timezone
+    pool = _FakePool()
+    svc = DNCService(pool)
+    soon = datetime.now(timezone.utc) + timedelta(days=5)
+    later = datetime.now(timezone.utc) + timedelta(days=30)
+    await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=later)
+    again = await svc.add(tenant_id=TENANT_1, e164="+14155551234", source="manual", expires_at=soon)
+    assert again.expires_at == later

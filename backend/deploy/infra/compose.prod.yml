@@ -1,0 +1,122 @@
+# Production data services for Talky: Postgres + Redis, and nothing else.
+#
+# Source of truth: backend/deploy/infra/compose.prod.yml (this file).
+# Installed copy:  /opt/talky-infra/compose.prod.yml, OUTSIDE the app checkout,
+#                  so a deploy's `git checkout` can never change the database.
+# Apply:
+#   docker compose -p talky-infra --env-file /opt/talky/.env \
+#       -f /opt/talky-infra/compose.prod.yml up -d
+#
+# Until 2026-10-07 production ran these containers from the repo-root
+# docker-compose.yml, a development file that also defines a `backend` service
+# (one `docker compose up -d` would have started a second backend on :8000,
+# and `down` would have stopped the production database). The running Postgres
+# container had already drifted from it.
+#
+# Container names and data volumes are unchanged, so every script that runs
+# `docker exec talky-postgres-1 ...` keeps working and no data moves. The fixed
+# container names also make the dev file collide instead of silently creating
+# a second database if anyone runs it on the server.
+name: talky-infra
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
+services:
+  postgres:
+    # The exact image running since 2026-05-08 (PostgreSQL 15.17, Alpine).
+    # Moving to the Debian image changes libc collation and needs a REINDEX,
+    # so it is a separate, planned change, never a side effect of this file.
+    image: postgres@sha256:09e4f20b14ddb3dfe3a0c825b206032aaf8f28300ba2070c0b60fc1c10c6abc7
+    container_name: talky-postgres-1
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set in the env file}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in the env file}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in the env file}
+      POSTGRES_INITDB_ARGS: "--data-checksums"   # only used on an empty volume
+    # Tuned for this host: 2 vCPU / 3.8 GB shared with Redis, Asterisk, the
+    # voice gateway and the Python services; database ~0.6 GB (2026-10-07).
+    # Flags, not ALTER SYSTEM: the app role is not a superuser.
+    command:
+      - postgres
+      - -c
+      - shared_buffers=512MB                   # was 128MB (default); cache hit 97.9%
+      - -c
+      - effective_cache_size=1536MB            # was 4GB, more than the host has
+      - -c
+      - work_mem=8MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - random_page_cost=1.1                   # SSD, was 4 (spinning disk)
+      - -c
+      - wal_compression=on
+      - -c
+      - idle_in_transaction_session_timeout=300s   # a stuck transaction no longer holds locks forever
+      - -c
+      - log_min_duration_statement=500         # slow-query log (ms)
+      - -c
+      - log_lock_waits=on
+    shm_size: 256m                             # Docker default 64m is too small for parallel query
+    mem_limit: 1536m
+    stop_grace_period: 60s                     # clean shutdown, never SIGKILL after 10 s
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:5432:5432"                  # never reachable from outside the host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  redis:
+    # The exact image running since 2026-05-08.
+    image: redis@sha256:9de71018be8413f419688ac34e19dbac432d1c6d9593d2ded99a82eebefeb18f
+    container_name: talky-redis-1
+    restart: unless-stopped
+    logging: *logging
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in the env file}
+    # Redis holds the dialer queue, sessions and call coordination: it must
+    # never drop keys to make room. Was `allkeys-lru` with no memory cap (a
+    # no-op until someone set a cap, then silent loss of queued jobs). Now a
+    # cap with `noeviction`: a full Redis refuses writes loudly instead.
+    command:
+      - redis-server
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+      - --requirepass
+      - ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in the env file}
+    mem_limit: 384m
+    volumes:
+      - redis_data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]       # authenticates via REDISCLI_AUTH
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+volumes:
+  # The existing production volumes, adopted as-is: nothing is copied or moved.
+  postgres_data:
+    external: true
+    name: talky_postgres_data
+  redis_data:
+    external: true
+    name: talky_redis_data

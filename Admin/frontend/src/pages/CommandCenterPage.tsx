@@ -7,7 +7,7 @@ import { Incidents } from '../components/Incidents';
 import { TopTenantsList } from '../components/TopTenantsList';
 import { TopTenantsPanel } from '../components/TopTenantsPanel';
 import { QuotaUsage } from '../components/QuotaUsage';
-import { Footer } from '../components/Footer';
+import { SupportMetricsCard } from '../components/SupportMetricsCard';
 
 export function CommandCenterPage() {
     return (
@@ -31,11 +31,11 @@ export function CommandCenterPage() {
                             <SystemHealth />
                             <TopTenantsPanel />
                             <QuotaUsage />
+                            <SupportMetricsCard />
                         </div>
                     </div>
                 </div>
 
-                <Footer />
             </main>
         </div>
     );

@@ -27,6 +27,11 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
+from app.infrastructure.assistant.tools.campaign_direction import (
+    inbound_campaign_refusal,
+    outbound_campaign_refusal,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -168,7 +173,7 @@ async def apply_campaign_voice(
         for cid in campaign_ids:
             resp = (
                 db_client.table("campaigns")
-                .select("id,name,tts_provider,voice_id")
+                .select("id,name,direction,tts_provider,voice_id")
                 .eq("id", cid)
                 .eq("tenant_id", tenant_id)
                 .execute()
@@ -177,6 +182,9 @@ async def apply_campaign_voice(
                 return {"error": f"Campaign '{cid}' not found for this tenant."}
 
             row = resp.data[0]
+            refusal = outbound_campaign_refusal([row])
+            if refusal:
+                return refusal
             # Show voice NAMES in the diff (the card reads "Rachel (id…)" →
             # "Sarah (id…)" instead of two opaque ids). The before voice may
             # belong to a different provider — then the raw id is shown.
@@ -208,16 +216,56 @@ async def apply_campaign_voice(
 
         # Apply — mirror campaigns.py apply_tts_config behaviour
         updated: List[str] = []
+        direction_conflicts: List[str] = []
+        failed: List[str] = []
         for cid in campaign_ids:
             try:
-                db_client.table("campaigns").update(
-                    {"tts_provider": tts_provider, "voice_id": voice_id}
-                ).eq("id", cid).eq("tenant_id", tenant_id).execute()
-                updated.append(cid)
+                response = (
+                    db_client.table("campaigns")
+                    .update({"tts_provider": tts_provider, "voice_id": voice_id})
+                    .eq("id", cid)
+                    .eq("tenant_id", tenant_id)
+                    .eq("direction", "outbound")
+                    .execute()
+                )
+                if getattr(response, "error", None):
+                    logger.warning(
+                        "apply_campaign_voice write failed campaign=%s: %s",
+                        cid,
+                        response.error,
+                    )
+                    failed.append(cid)
+                elif response.data:
+                    updated.append(cid)
+                else:
+                    direction_conflicts.append(cid)
             except Exception as exc:
                 logger.warning(
                     "apply_campaign_voice failed for campaign=%s: %s", cid, exc
                 )
+                failed.append(cid)
+
+        if direction_conflicts:
+            refusal = inbound_campaign_refusal(direction_conflicts)
+            refusal.update(
+                {
+                    "applied": False,
+                    "updated_campaign_ids": updated,
+                    "partial": bool(updated),
+                }
+            )
+            if failed:
+                refusal["failed_campaign_ids"] = failed
+            return refusal
+
+        if failed:
+            return {
+                "applied": False,
+                "error": "campaign_voice_update_failed",
+                "failed_campaign_ids": failed,
+                "updated_campaign_ids": updated,
+                "partial": bool(updated),
+            }
 
         return {
             "applied": True,

@@ -583,9 +583,15 @@ class TestAnswerEmitsUsableToken:
         monkeypatch.setenv("API_BASE_URL", "https://voice.example.com")
         token = tb._mint_ws_token(to_number=TENANT_DID, call_sid="CA1")
         twiml = tb._twiml_stream_response("CA1", "+15551112222", TENANT_DID, token)
-        assert f"?token={token}" in twiml
-        assert 'name="token"' in twiml
-        claims = tb._verify_ws_token(token)
+        from xml.etree import ElementTree
+        stream = ElementTree.fromstring(twiml).find("./Connect/Stream")
+        assert stream is not None
+        # Twilio requires custom parameters in the start event; Stream URLs
+        # do not support query strings. Verify the exact transmitted token.
+        assert stream.attrib["url"] == "wss://voice.example.com/api/v1/twilio/media-stream"
+        parameters = {item.attrib["name"]: item.attrib["value"] for item in stream.findall("Parameter")}
+        assert parameters["token"] == token
+        claims = tb._verify_ws_token(parameters["token"])
         assert claims is not None and claims["to"] == TENANT_DID
 
     def test_twiml_without_token_omits_the_parameter(self, monkeypatch):

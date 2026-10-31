@@ -1,0 +1,29 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+___ test_actual_projection_denial_does_not_let_reaper_release_queued_owner ____
+tests\integration\test_op05_pre_attempt_holds.py:176: in test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+    assert await reap_stuck_jobs(conn) == 0
+E   assert 1 == 0
+------------------------------ Captured log call ------------------------------
+ERROR    app.workers.dialer_worker:dialer_worker.py:2734 Failed to update job status: permission denied for table dialer_jobs
+WARNING  app.workers.dialer_worker:dialer_worker.py:2500 dialer_redefer_projection_failed job=dac689d4-fed3-4bdd-9a88-7c74f4b943b9 attempt=1 error_type=InsufficientPrivilegeError
+WARNING  app.domain.services.dialer.stuck_job_reaper:stuck_job_reaper.py:223 reaper: marked 1 stuck dialer job(s) failed (in-flight > 120s)
+_______________ test_weekend_hold_remains_owned_after_48_hours ________________
+tests\integration\test_op05_pre_attempt_holds.py:192: in test_weekend_hold_remains_owned_after_48_hours
+    assert await reap_orphaned_scheduled_jobs(conn) == 0
+E   assert 1 == 0
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.stuck_job_reaper:stuck_job_reaper.py:157 reaper: cleared 1 orphaned retry_scheduled job(s) older than 172800s � each was holding its lead's active-job slot, making that lead permanently un-callable. lead_ids=['dddf39c2-8bea-48bd-8d25-3c0923ab11bd']
+============================== warnings summary ===============================
+tests/integration/test_op05_pre_attempt_holds.py::test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+tests/integration/test_op05_pre_attempt_holds.py::test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+tests/integration/test_op05_pre_attempt_holds.py::test_weekend_hold_remains_owned_after_48_hours
+tests/integration/test_op05_pre_attempt_holds.py::test_weekend_hold_remains_owned_after_48_hours
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_actual_projection_denial_does_not_let_reaper_release_queued_owner
+FAILED tests/integration/test_op05_pre_attempt_holds.py::test_weekend_hold_remains_owned_after_48_hours
+2 failed, 5 deselected, 4 warnings in 7.17s

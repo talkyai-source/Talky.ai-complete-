@@ -7,6 +7,8 @@ Endpoints:
 """
 from __future__ import annotations
 
+from app.domain.services.voice_eligibility import VoiceEligibilityError, require_elevenlabs_voice_eligible
+
 import asyncio
 import base64
 import logging
@@ -16,11 +18,16 @@ from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from app.api.v1.dependencies import get_current_user
+from app.api.v1.dependencies import get_current_user, get_db_client
+from app.core.security.api_security import rate_limit_dependency
+from app.core.security.rbac import Permission, require_permission
 
 from app.domain.models.ai_config import (
     CEREBRAS_MODELS,
     GEMINI_MODELS,
+    GROQ_MODELS,
+    OPENAI_MODELS,
+    DEEPSEEK_MODELS,
     LLMTestRequest,
     LLMTestResponse,
     TTSTestRequest,
@@ -29,6 +36,7 @@ from app.domain.models.ai_config import (
 from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.llm.gemini import GeminiLLMProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
+from app.infrastructure.llm.openai import OpenAILLMProvider
 from app.infrastructure.tts.cartesia import CartesiaTTSProvider
 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
@@ -49,7 +57,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["AI Options"])
 
 
-@router.post("/test/llm", response_model=LLMTestResponse)
+@router.post(
+    "/test/llm",
+    response_model=LLMTestResponse,
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_user)):
     """
     Test LLM with a message and measure latency.
@@ -70,18 +82,26 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
     # if/else silently sent anything unrecognised to Groq, which turned a
     # typo'd model name into a confusing Groq 404 instead of a clear error.
     _PROVIDER_BY_MODEL_ID: list[tuple[str, set[str], str]] = [
+        ("openai", {m.id for m in OPENAI_MODELS}, "OPENAI_API_KEY"),
+        ("groq", {m.id for m in GROQ_MODELS}, "GROQ_API_KEY"),
         ("gemini", {m.id for m in GEMINI_MODELS}, "GEMINI_API_KEY"),
         ("cerebras", {m.id for m in CEREBRAS_MODELS}, "CEREBRAS_API_KEY"),
+        ("deepseek", {m.id for m in DEEPSEEK_MODELS}, "DEEPSEEK_API_KEY"),
     ]
 
-    provider_name = "groq"
-    env_var = "GROQ_API_KEY"
+    provider_name = None
+    env_var = None
     for candidate, model_ids, candidate_env in _PROVIDER_BY_MODEL_ID:
         if request.model in model_ids:
             provider_name, env_var = candidate, candidate_env
             break
 
-    api_key = os.getenv(env_var)
+    if provider_name is None:
+        raise HTTPException(status_code=400, detail="Unknown LLM model")
+    from app.domain.services.credential_resolver import get_credential_resolver
+    api_key = await get_credential_resolver().resolve(
+        provider_name, tenant_id=getattr(current_user, "tenant_id", None), env_var=env_var,
+    )
     if not api_key:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -91,12 +111,18 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
             ),
         )
 
+    llm = None
     try:
-        if provider_name == "gemini":
+        if provider_name == "openai":
+            llm = OpenAILLMProvider()
+        elif provider_name == "gemini":
             llm = GeminiLLMProvider()
         elif provider_name == "cerebras":
             from app.infrastructure.llm.cerebras import CerebrasLLMProvider
             llm = CerebrasLLMProvider()
+        elif provider_name == "deepseek":
+            from app.infrastructure.llm.deepseek import DeepSeekLLMProvider
+            llm = DeepSeekLLMProvider()
         else:
             llm = GroqLLMProvider()
         await llm.initialize({
@@ -128,8 +154,6 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
 
         end_time = time.time()
 
-        await llm.cleanup()
-
         first_token_ms = ((first_token_time or end_time) - start_time) * 1000
         total_latency_ms = (end_time - start_time) * 1000
 
@@ -146,10 +170,17 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"LLM test failed: {str(e)}"
         )
+    finally:
+        if llm is not None:
+            await llm.cleanup()
 
 
-@router.post("/test/tts", response_model=TTSTestResponse)
-async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_user)):
+@router.post(
+    "/test/tts",
+    response_model=TTSTestResponse,
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
+async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_user), db_client=Depends(get_db_client)):
     """
     Test TTS with text and measure latency.
 
@@ -220,6 +251,10 @@ async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_use
             output_is_linear16 = True
             model_name = "aura-2"
         elif elevenlabs_voice is not None:
+            try:
+                await require_elevenlabs_voice_eligible(db_client.pool, getattr(current_user, "tenant_id", None), voice_id, voices=[elevenlabs_voice])
+            except VoiceEligibilityError as exc:
+                raise HTTPException(exc.status_code, str(exc)) from exc
             if not os.getenv("ELEVENLABS_API_KEY"):
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,

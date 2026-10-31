@@ -1,0 +1,15 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+________ test_failed_mfa_attempt_commits_before_unauthorized_response _________
+tests\integration\test_cp08_credential_transactions.py:109: in test_failed_mfa_attempt_commits_before_unauthorized_response
+    assert row['attempts']==1 and row['used'] is False
+E   assert (0 == 1)
+============================== warnings summary ===============================
+..\..\..\backend\.venv\Lib\site-packages\_pytest\config\__init__.py:1204
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\_pytest\config\__init__.py:1204: PytestAssertRewriteWarning: Module already imported so cannot be rewritten: anyio
+    self._mark_plugins_for_rewrite(hook)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_credential_transactions.py::test_failed_mfa_attempt_commits_before_unauthorized_response
+1 failed, 7 deselected, 1 warning in 4.60s

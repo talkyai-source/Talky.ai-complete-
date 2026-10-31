@@ -1,0 +1,9 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+________ test_mfa_setup_cannot_downgrade_concurrently_confirmed_factor ________
+tests\integration\test_cp08_credential_transactions.py:374: in test_mfa_setup_cannot_downgrade_concurrently_confirmed_factor
+    assert result == 409
+E   AssertionError: assert 'downgraded' == 409
+=========================== short test summary info ===========================
+FAILED tests/integration/test_cp08_credential_transactions.py::test_mfa_setup_cannot_downgrade_concurrently_confirmed_factor
+1 failed, 17 deselected in 3.54s

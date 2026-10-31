@@ -1,0 +1,71 @@
+........................................................................ [ 26%]
+........................................................................ [ 53%]
+........................................................................ [ 80%]
+......................................................                   [100%]
+============================== warnings summary ===============================
+tests/unit/test_op03_audio_ownership.py: 13 warnings
+tests/unit/test_realtime_lifecycle_repairs.py: 2 warnings
+tests/unit/test_browser_media_gateway_ws_d.py: 7 warnings
+tests/unit/test_tts_playback_waits_for_real_playback.py: 1 warning
+tests/unit/test_twilio_bridge.py: 4 warnings
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op03_audio_ownership.py: 11 warnings
+tests/unit/test_browser_media_gateway_ws_d.py: 9 warnings
+tests/unit/test_tts_playback_waits_for_real_playback.py: 3 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:798: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_op03_audio_ownership.py: 8 warnings
+tests/unit/test_browser_media_gateway_ws_d.py: 5 warnings
+tests/unit/test_tts_playback_waits_for_real_playback.py: 3 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:805: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+tests/unit/test_op03_audio_ownership.py::test_browser_stop_wakes_waiter_without_playout_proof[hangup]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:658: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    duration_seconds = (datetime.utcnow() - session.created_at).total_seconds()
+
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-TwilioMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[False-TwilioMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\twilio_media_gateway.py:97: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_op03_audio_ownership.py::test_dropped_audio_cannot_be_promoted_by_matching_playback_ack[True-TwilioMediaGateway]
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\twilio_media_gateway.py:103: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    session.last_send_latency_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+tests/unit/test_browser_media_gateway_ws_d.py::TestBrowserMediaGatewayWSD::test_invalid_audio_is_rejected
+tests/unit/test_browser_media_gateway_ws_d.py::TestBrowserMediaGatewayWSD::test_input_queue_backpressure_drops_oldest
+tests/unit/test_browser_media_gateway_ws_d.py::TestBrowserMediaGatewayWSD::test_send_timeout_increments_metrics
+tests/unit/test_browser_media_gateway_ws_d.py::TestBrowserMediaGatewayWSD::test_session_metrics_include_contract
+tests/unit/test_browser_media_gateway_ws_d.py::TestBrowserMediaGatewayWSD::test_output_buffer_preserves_audio_when_over_threshold
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\infrastructure\telephony\browser_media_gateway.py:719: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    duration_seconds = (datetime.utcnow() - session.created_at).total_seconds()
+
+tests/unit/test_stt_watchdog_echo_guard.py: 10 warnings
+tests/unit/test_audio_ingest_terminal_stt_failure.py: 8 warnings
+tests/unit/test_turn_streamer_tts_delivery_error_transcript_gap.py: 4 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_audio_ingest_terminal_stt_failure.py::TestStartPipelinePropagatesTerminalFailure::test_start_pipeline_reraises_terminal_stt_error
+tests/unit/test_audio_ingest_terminal_stt_failure.py::TestStartPipelinePropagatesTerminalFailure::test_start_pipeline_swallows_non_terminal_pipeline_errors
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\domain\services\voice_pipeline_service.py:460: RuntimeWarning: coroutine 'AsyncMockMixin._execute_mock_call' was never awaited
+    set_barge_in(call_id, self._barge_in_events[call_id])
+  Enable tracemalloc to get traceback where the object was allocated.
+  See https://docs.pytest.org/en/stable/how-to/capture-warnings.html#resource-warnings for more info.
+
+tests/unit/test_audio_ingest_terminal_stt_failure.py::TestStartPipelinePropagatesTerminalFailure::test_start_pipeline_reraises_terminal_stt_error
+tests/unit/test_audio_ingest_terminal_stt_failure.py::TestStartPipelinePropagatesTerminalFailure::test_start_pipeline_swallows_non_terminal_pipeline_errors
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op03-20261005\backend\app\domain\services\voice_pipeline_service.py:467: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    extra={"call_id": call_id, "timestamp": datetime.utcnow().isoformat()},
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+270 passed, 107 warnings in 8.90s

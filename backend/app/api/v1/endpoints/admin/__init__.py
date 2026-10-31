@@ -6,12 +6,18 @@ from fastapi import APIRouter
 
 from .base import router as base_router
 from .tenants import router as tenants_router
+from .partners import router as partners_router
 from .users import router as users_router
+from .user_operations import router as user_operations_router
 from .calls import router as calls_router
 from .actions import router as actions_router
 from .connectors import router as connectors_router
 from .usage import router as usage_router
 from .health import router as health_router
+from .media import router as media_router
+from .inbound import router as inbound_router
+from .billing_packages import router as billing_packages_router
+from app.api.v1.endpoints.contact_enquiries import admin_router as contact_enquiries_router
 
 # Create main admin router
 router = APIRouter(prefix="/admin", tags=["admin"])
@@ -19,9 +25,15 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 # Include all sub-routers (they don't have prefix since parent has /admin)
 router.include_router(base_router)
 router.include_router(tenants_router)
+router.include_router(partners_router)
+router.include_router(user_operations_router)
 router.include_router(users_router)
 router.include_router(calls_router)
 router.include_router(actions_router)
 router.include_router(connectors_router)
 router.include_router(usage_router)
 router.include_router(health_router)
+router.include_router(media_router)
+router.include_router(inbound_router)
+router.include_router(billing_packages_router)
+router.include_router(contact_enquiries_router)

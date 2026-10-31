@@ -1,0 +1,37 @@
+{
+  "lead_gen_slots": {
+    "chars": 12087,
+    "words": 1931,
+    "sha256": "b35ce4e6a2102165ed4f3bb78720f07a6436cd3332c1eb6e41f2767169343212"
+  },
+  "lead_gen_knowledge": {
+    "chars": 11237,
+    "words": 1790,
+    "sha256": "80f54c095a7411124fba4ce0d2efe940f4424aba0357fa37ff57f7239cbc813a"
+  },
+  "customer_support_slots": {
+    "chars": 15141,
+    "words": 2467,
+    "sha256": "14a741887a2a8efb78a2e3ab49006d49a5d43adc7073da84ca4a992b4744ffd3"
+  },
+  "customer_support_knowledge": {
+    "chars": 7988,
+    "words": 1264,
+    "sha256": "1b86172efd3169e5481427943ef434f8ae9991d6484a75e19181071550099127"
+  },
+  "receptionist_slots": {
+    "chars": 15335,
+    "words": 2427,
+    "sha256": "e643cad47ac5b126400faf164b615fd74ddc93ffe073ab2b433b863b51a5b7ba"
+  },
+  "receptionist_knowledge": {
+    "chars": 7918,
+    "words": 1254,
+    "sha256": "1f4b0ee5a407d399dceabde145ac817af3bd8e4b15714b9967279e334f74e338"
+  },
+  "realtime": {
+    "chars": 6346,
+    "words": 970,
+    "sha256": "bfd66a35317f49652c1435dfdd24ca96a88d4877254453c6d1dce65e6901f792"
+  }
+}

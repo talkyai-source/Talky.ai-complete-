@@ -21,8 +21,63 @@ from app.services.scripts.knowledge.md_tree import ParsedNode
 
 logger = logging.getLogger(__name__)
 
-_ENRICH_MODEL = os.getenv("KNOWLEDGE_ENRICH_MODEL", "llama-3.1-8b-instant")
-_BATCH_SIZE = int(os.getenv("KNOWLEDGE_ENRICH_BATCH", "25"))
+def _default_enrich_model() -> str:
+    """The Groq model to enrich with, taken from the canonical model menu.
+
+    This was hardcoded to ``llama-3.1-8b-instant``. That id started returning
+    404 on this account around 2026-08-17 and the voice path was moved off it
+    the same day, but the enricher was missed. Every upload since then had its
+    summaries, spoken answers, keywords and example questions silently dropped:
+    enrichment is fail-soft, so each batch logged a warning and the nodes were
+    published bare. Observed again on 2026-09-22.
+
+    Reading the menu means a model the product retires cannot leave this
+    pointing at something that no longer exists. Falls back to the id the
+    product runs today only if the menu cannot be read at all.
+    """
+    try:
+        from app.domain.models.ai_config import GROQ_MODELS
+
+        for entry in GROQ_MODELS:
+            model_id = str(getattr(entry, "id", "") or "").strip()
+            if model_id:
+                return model_id
+    except Exception:  # pragma: no cover - defensive
+        pass
+    return "openai/gpt-oss-20b"
+
+
+_ENRICH_MODEL = os.getenv("KNOWLEDGE_ENRICH_MODEL", "").strip() or _default_enrich_model()
+# Nodes per request. Was 25. A batch that large asks the model for roughly
+# 25 x (summary + spoken answer + up to 12 keywords + up to 5 questions) inside
+# ONE json_object response, and gpt-oss-20b returns structurally invalid JSON
+# at that size -- the whole batch is then lost, because enrichment is fail-soft
+# and a parse failure drops every node in it. Smaller requests are far more
+# reliable and cost the same in total tokens (observed 2026-09-22).
+_BATCH_SIZE = int(os.getenv("KNOWLEDGE_ENRICH_BATCH", "8"))
+# Output budget per node: a summary, a spoken answer, keywords and example
+# questions. Was a flat 2048 for the whole request regardless of batch size, so
+# a full batch was truncated mid-array and, again, lost entirely.
+_TOKENS_PER_NODE = int(os.getenv("KNOWLEDGE_ENRICH_TOKENS_PER_NODE", "200"))
+_TOKENS_FLOOR = 1024
+_TOKENS_CEILING = 8192
+# A heading with no body under it -- a parent in the tree, or a one-line source
+# line -- has nothing to summarise. Sending it anyway spends a request, returns
+# nothing usable, and on a strict json_object endpoint often fails outright,
+# which then looks in the log exactly like a real enrichment failure. On a
+# 27-section document that was 7 wasted calls and 7 misleading warnings.
+_MIN_CONTENT_CHARS = int(os.getenv("KNOWLEDGE_ENRICH_MIN_CONTENT_CHARS", "40"))
+
+
+def _worth_enriching(node) -> bool:
+    """True if the node has enough body for a summary to mean anything."""
+    return len((getattr(node, "content", "") or "").strip()) >= _MIN_CONTENT_CHARS
+
+
+def _max_tokens_for(batch_size: int) -> int:
+    """Output budget scaled to how many nodes the request must describe."""
+    wanted = 256 + _TOKENS_PER_NODE * max(1, int(batch_size))
+    return max(_TOKENS_FLOOR, min(_TOKENS_CEILING, wanted))
 # Chars of node content sent to the enricher. This was 600, which truncated
 # every node to just the TOP of the section, so keywords/voice_answer NEVER
 # saw any fact below ~600 chars — the enrichment silently summarised only the
@@ -58,6 +113,37 @@ def _empty(n: int) -> List[NodeEnrichment]:
     return [NodeEnrichment() for _ in range(n)]
 
 
+def _decode_enrichments(content: str, expected_indices: set[int]) -> dict[int, NodeEnrichment]:
+    """Validate a whole response before attaching metadata to requested nodes."""
+    data = json.loads(content or "{}")
+    if not isinstance(data, dict) or not isinstance(data.get("nodes", []), list):
+        raise ValueError("Invalid enrichment response shape")
+    decoded: dict[int, NodeEnrichment] = {}
+    for item in data.get("nodes", []):
+        if not isinstance(item, dict):
+            raise ValueError("Invalid enrichment item")
+        index = item.get("i")
+        if type(index) is not int or index not in expected_indices or index in decoded:
+            raise ValueError("Ambiguous or unrequested enrichment index")
+        fields = {}
+        for key, limit in (("summary", 300), ("voice_answer", 400)):
+            value = item.get(key)
+            if value is None:
+                value = ""
+            if not isinstance(value, str):
+                raise ValueError("Invalid enrichment text")
+            fields[key] = value[:limit]
+        for key, limit, count in (("keywords", 40, 12), ("example_questions", 160, 5)):
+            values = item.get(key)
+            if values is None:
+                values = []
+            if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+                raise ValueError("Invalid enrichment list")
+            fields[key] = [value[:limit] for value in values[:count]]
+        decoded[index] = NodeEnrichment(**fields)
+    return decoded
+
+
 async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
     """Return one NodeEnrichment per node (same order). Never raises."""
     if not nodes:
@@ -76,11 +162,25 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
         return out
     client = AsyncGroq(api_key=keys[0])
 
-    for start in range(0, len(nodes), _BATCH_SIZE):
-        batch = nodes[start:start + _BATCH_SIZE]
+    # Index the nodes worth sending, keeping their ORIGINAL positions so each
+    # enrichment still lands on the right node. Headings with no body keep the
+    # empty enrichment they were initialised with.
+    candidates = [(i, n) for i, n in enumerate(nodes) if _worth_enriching(n)]
+    skipped = len(nodes) - len(candidates)
+    if skipped:
+        logger.info(
+            "knowledge enrich: %d of %d section(s) have no body to summarise — "
+            "skipped, not failed", skipped, len(nodes),
+        )
+    if not candidates:
+        return out
+
+    for start in range(0, len(candidates), _BATCH_SIZE):
+        chunk = candidates[start:start + _BATCH_SIZE]
+        batch = [n for _, n in chunk]
         payload = [
-            {"i": start + j, "heading": n.heading, "content": n.content[:_CONTENT_CLIP]}
-            for j, n in enumerate(batch)
+            {"i": i, "heading": n.heading, "content": n.content[:_CONTENT_CLIP]}
+            for i, n in chunk
         ]
         try:
             resp = await client.chat.completions.create(
@@ -91,23 +191,40 @@ async def enrich_nodes(nodes: List[ParsedNode]) -> List[NodeEnrichment]:
                 ],
                 response_format={"type": "json_object"},
                 temperature=0.2,
-                max_tokens=2048,
+                max_tokens=_max_tokens_for(len(batch)),
             )
-            data = json.loads(resp.choices[0].message.content or "{}")
-            for item in data.get("nodes", []):
-                i = item.get("i")
-                if not isinstance(i, int) or not (0 <= i < len(out)):
-                    continue
-                out[i] = NodeEnrichment(
-                    summary=str(item.get("summary", "") or "")[:300],
-                    voice_answer=str(item.get("voice_answer", "") or "")[:400],
-                    keywords=[str(k)[:40] for k in (item.get("keywords") or [])][:12],
-                    example_questions=[str(q)[:160] for q in (item.get("example_questions") or [])][:5],
-                )
+            decoded = _decode_enrichments(resp.choices[0].message.content, {i for i, _ in chunk})
+            for i, enrichment in decoded.items():
+                out[i] = enrichment
         except Exception as exc:
             logger.warning(
-                "knowledge enrich batch [%d:%d] failed (%s) — leaving those nodes unenriched",
-                start, start + len(batch), exc,
+                "knowledge enrich batch [%d:%d] failed (%s) — retrying one node "
+                "at a time so a single bad response does not lose the batch",
+                start, start + len(chunk), exc,
             )
-            # leave this batch as empty enrichments; continue with the rest
+            # A batch failure is usually ONE malformed section dragging the
+            # whole response down. Retrying singly recovers the rest instead of
+            # discarding every node in the batch.
+            for node_index, node in chunk:
+                single = [{
+                    "i": node_index,
+                    "heading": node.heading,
+                    "content": node.content[:_CONTENT_CLIP],
+                }]
+                try:
+                    resp = await client.chat.completions.create(
+                        model=_ENRICH_MODEL,
+                        messages=[
+                            {"role": "system", "content": _SYSTEM},
+                            {"role": "user", "content": json.dumps({"sections": single})},
+                        ],
+                        response_format={"type": "json_object"},
+                        temperature=0.2,
+                        max_tokens=_max_tokens_for(1),
+                    )
+                    decoded = _decode_enrichments(resp.choices[0].message.content, {node_index})
+                except Exception:
+                    continue
+                for i, enrichment in decoded.items():
+                    out[i] = enrichment
     return out

@@ -1,0 +1,47 @@
+{
+  "execution_base": "7c4baa91333a84d4f1c3c8f9330c01a247ff0c3d",
+  "source_commit_after_unchanged_test_commit": "e81f525f6c476e74e22b6a41901e1d50c5c184dc",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "argv": [
+    "../tmp/mail-voice-integration.py"
+  ],
+  "pytest_argv_inside_runner": [
+    "tests/unit/test_crm_sync_service.py",
+    "tests/unit/test_ag06_crm_evidence.py",
+    "tests/unit/test_crm_sync_hooks.py",
+    "tests/unit/test_admin_crm_inspection.py",
+    "tests/unit/test_reviewed_selector_identity_types.py",
+    "tests/unit/test_reviewed_account_identity.py",
+    "tests/unit/test_inbox_original_account.py",
+    "tests/unit/test_inbox_authorization_health.py",
+    "tests/unit/test_admin_gmail_inspection.py",
+    "tests/unit/test_voice_email_receipt_proof.py",
+    "tests/unit/test_voice_email_inspection_handoff.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings"
+  ],
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  },
+  "archived_runner": "runner.py",
+  "handoff_lint": {
+    "argv": [
+      "-m",
+      "ruff",
+      "check",
+      "--select",
+      "F",
+      "--extend-ignore",
+      "F401,F841",
+      "backend/tests/unit/test_voice_email_inspection_handoff.py"
+    ],
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004",
+    "exit_code": 0
+  }
+}

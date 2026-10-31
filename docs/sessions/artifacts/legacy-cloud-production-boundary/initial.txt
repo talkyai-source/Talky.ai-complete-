@@ -1,0 +1,375 @@
+FFFFFFFFFFFFFFFFFFFFFFFF......FFFFFF......                               [100%]
+================================== FAILURES ===================================
+_ test_production_cannot_enable_ownerless_cloud_bridge[true-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[true-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[true- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[true- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[true-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[true-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[1-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[1-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[1- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[1- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[1-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[1-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[yes-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[yes-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[yes- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[yes- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[yes-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[yes-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[on-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[on-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[on- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[on- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[on-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEB94900>()
+E    +    where <function _bridge_enabled at 0x000002CBAEB94900> = <module 'app.api.v1.endpoints.twilio_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\twilio_bridge.py'>._bridge_enabled
+_ test_production_cannot_enable_ownerless_cloud_bridge[on-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:23: in test_production_cannot_enable_ownerless_cloud_bridge
+    assert not bridge._bridge_enabled()
+E   AssertionError: assert not True
+E    +  where True = <function _bridge_enabled at 0x000002CBAEC76520>()
+E    +    where <function _bridge_enabled at 0x000002CBAEC76520> = <module 'app.api.v1.endpoints.vonage_bridge' from 'C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\legacy-cloud-production-boundary-20261005\\backend\\app\\api\\v1\\endpoints\\vonage_bridge.py'>._bridge_enabled
+_ test_mounted_production_http_routes_are_unavailable_before_auth_or_effects[app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:48: in test_mounted_production_http_routes_are_unavailable_before_auth_or_effects
+    response = client.post(f"/api/v1/{prefix.lower()}/{route}", json={})
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:555: in post
+    return super().post(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1144: in post
+    return self.request(
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:454: in request
+    return super().request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:356: in handle_request
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:353: in handle_request
+    portal.call(self.app, scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\anyio\from_thread.py:338: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\concurrent\futures\_base.py:456: in result
+    return self.__get_result()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+..\..\..\backend\.venv\Lib\site-packages\anyio\from_thread.py:263: in _call_func
+    retval = await retval_or_awaitable
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1753: in handle
+    await self.original_router.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2738: in handle
+    await included_router._handle_selected(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1773: in _handle_selected
+    await original_route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1264: in handle
+    await app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:690: in app
+    raw_response = await run_endpoint_function(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:344: in run_endpoint_function
+    return await dependant.call(**values)
+app\api\v1\endpoints\twilio_bridge.py:345: in twilio_answer
+    if not verify_twilio_signature(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: Production must not reach provider verification
+_ test_mounted_production_http_routes_are_unavailable_before_auth_or_effects[app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:48: in test_mounted_production_http_routes_are_unavailable_before_auth_or_effects
+    response = client.post(f"/api/v1/{prefix.lower()}/{route}", json={})
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:555: in post
+    return super().post(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1144: in post
+    return self.request(
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:454: in request
+    return super().request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:825: in request
+    return self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:914: in send
+    response = self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:942: in _send_handling_auth
+    response = self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:979: in _send_handling_redirects
+    response = self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1014: in _send_single_request
+    response = transport.handle_request(request)
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:356: in handle_request
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\testclient.py:353: in handle_request
+    portal.call(self.app, scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\anyio\from_thread.py:338: in call
+    return cast(T_Retval, self.start_task_soon(func, *args).result())
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\concurrent\futures\_base.py:456: in result
+    return self.__get_result()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\concurrent\futures\_base.py:401: in __get_result
+    raise self._exception
+..\..\..\backend\.venv\Lib\site-packages\anyio\from_thread.py:263: in _call_func
+    retval = await retval_or_awaitable
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1753: in handle
+    await self.original_router.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2738: in handle
+    await included_router._handle_selected(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1773: in _handle_selected
+    await original_route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1264: in handle
+    await app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:690: in app
+    raw_response = await run_endpoint_function(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:344: in run_endpoint_function
+    return await dependant.call(**values)
+app\api\v1\endpoints\vonage_bridge.py:312: in vonage_answer
+    if not verify_vonage_signature(authorization=request.headers.get("Authorization")):
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: Production must not reach provider verification
+_ test_mounted_production_websocket_rejects_even_valid_local_token[app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream] _
+tests\unit\test_legacy_cloud_production_boundary.py:68: in test_mounted_production_websocket_rejects_even_valid_local_token
+    with pytest.raises(WebSocketDisconnect) as exc:
+E   Failed: DID NOT RAISE <class 'starlette.websockets.WebSocketDisconnect'>
+_ test_mounted_production_websocket_rejects_even_valid_local_token[app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call] _
+tests\unit\test_legacy_cloud_production_boundary.py:68: in test_mounted_production_websocket_rejects_even_valid_local_token
+    with pytest.raises(WebSocketDisconnect) as exc:
+E   Failed: DID NOT RAISE <class 'starlette.websockets.WebSocketDisconnect'>
+------------------------------ Captured log call ------------------------------
+ERROR    app.api.v1.endpoints.vonage_bridge:vonage_bridge.py:498 Vonage WS audio error for synthetic-ca: Production must not reach session factory
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\legacy-cloud-production-boundary-20261005\backend\app\api\v1\endpoints\vonage_bridge.py", line 473, in vonage_ws_audio
+    orchestrator = _get_orchestrator()
+                   ^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py", line 1139, in __call__
+    return self._mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py", line 1143, in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py", line 1198, in _execute_mock_call
+    raise effect
+AssertionError: Production must not reach session factory
+____ test_production_startup_names_the_unqualified_enabled_bridge[TWILIO] _____
+tests\unit\test_legacy_cloud_production_boundary.py:86: in test_production_startup_names_the_unqualified_enabled_bridge
+    with pytest.raises(prod_gate.ProductionGateError, match=prefix + "_BRIDGE_ENABLED"):
+E   Failed: DID NOT RAISE <class 'app.core.prod_gate.ProductionGateError'>
+____ test_production_startup_names_the_unqualified_enabled_bridge[VONAGE] _____
+tests\unit\test_legacy_cloud_production_boundary.py:86: in test_production_startup_names_the_unqualified_enabled_bridge
+    with pytest.raises(prod_gate.ProductionGateError, match=prefix + "_BRIDGE_ENABLED"):
+E   Failed: DID NOT RAISE <class 'app.core.prod_gate.ProductionGateError'>
+============================== warnings summary ===============================
+..\..\..\backend\.venv\Lib\site-packages\fastapi\testclient.py:1
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[true-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[true-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[true- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[true- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[true-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[true-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[1-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[1-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[1- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[1- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[1-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[1-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[yes-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[yes-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[yes- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[yes- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[yes-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[yes-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[on-production-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[on-production-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[on- Production -app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[on- Production -app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[on-PRODUCTION-app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_cannot_enable_ownerless_cloud_bridge[on-PRODUCTION-app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_mounted_production_http_routes_are_unavailable_before_auth_or_effects[app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_mounted_production_http_routes_are_unavailable_before_auth_or_effects[app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_mounted_production_websocket_rejects_even_valid_local_token[app.api.v1.endpoints.twilio_bridge-TWILIO-/twilio/media-stream]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_mounted_production_websocket_rejects_even_valid_local_token[app.api.v1.endpoints.vonage_bridge-VONAGE-/vonage/ws-audio/synthetic-call]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_startup_names_the_unqualified_enabled_bridge[TWILIO]
+FAILED tests/unit/test_legacy_cloud_production_boundary.py::test_production_startup_names_the_unqualified_enabled_bridge[VONAGE]
+30 failed, 12 passed, 1 warning in 3.48s

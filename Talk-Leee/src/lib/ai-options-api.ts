@@ -1,6 +1,7 @@
+import type { CampaignVoiceSettingsValue, RealtimeTurnDetection } from "@/components/realtime/types";
 import { z } from "zod";
 import { sharedHttpClient } from "@/lib/api";
-import { apiBaseUrl } from "@/lib/env";
+import { AssemblyAISettingsSchema, type AssemblyAISettings } from "@/lib/assemblyai-settings";
 
 export interface ModelInfo {
     id: string;
@@ -11,6 +12,8 @@ export interface ModelInfo {
     context_window?: number;
     is_preview?: boolean;
     provider?: string;
+    available?: boolean;
+    unavailable_reason?: string | null;
 }
 
 export interface VoiceInfo {
@@ -45,7 +48,7 @@ export interface ProviderListResponse {
     stt: {
         providers: string[];
         models: ModelInfo[];
-        /** Selectable speech engines (Flux vs Nova-3 turn-taking). */
+        /** Selectable speech engines, including AssemblyAI Universal-3.6 Pro. */
         engines?: ModelInfo[];
     };
     tts: {
@@ -55,6 +58,8 @@ export interface ProviderListResponse {
     /** Phase 2 — gpt-realtime-2 (speech-to-speech) pipeline catalog. Absent
      *  when the backend hasn't shipped it yet; callers fall back locally. */
     realtime?: {
+        available?: boolean;
+        unavailable_reason?: string | null;
         model: string;
         voices: RealtimeVoiceInfo[];
         turn_detection: string[];
@@ -81,9 +86,10 @@ export interface AIProviderConfig {
     llm_max_tokens: number;
     stt_provider: string;
     stt_model: string;
-    /** Speech engine: "deepgram_flux" (default) or "deepgram_nova". */
+    /** Speech engine: deepgram_flux, deepgram_nova or assemblyai. */
     stt_engine: string;
     stt_language: string;
+    assemblyai_settings?: AssemblyAISettings | null;
     tts_provider: string;
     tts_model: string;
     tts_voice_id: string;
@@ -96,7 +102,7 @@ export interface AIProviderConfig {
     pipeline_mode?: "cascaded" | "realtime";
     realtime_model?: string;
     realtime_voice?: string;
-    realtime_settings?: { turn_detection?: string; noise_reduction?: string } | null;
+    realtime_settings?: { provider?: string; transcription_model?: string; turn_detection?: RealtimeTurnDetection; noise_reduction?: string; reasoning_effort?: string; speed?: number; max_output_tokens?: number; prompt?: CampaignVoiceSettingsValue["realtime_prompt"] } | null;
 }
 
 export interface LLMTestRequest {
@@ -166,6 +172,8 @@ const RawModelSchema = z
         is_preview: z.boolean().optional(),
         isPreview: z.boolean().optional(),
         provider: z.string().optional(),
+        available: z.boolean().optional(),
+        unavailable_reason: z.string().nullish(),
     })
     .passthrough();
 
@@ -207,6 +215,8 @@ const RawRealtimeVoiceSchema = z
 
 const RawRealtimeBucketSchema = z
     .object({
+        available: z.boolean().optional(),
+        unavailable_reason: z.string().nullable().optional(),
         model: z.string(),
         voices: z.array(RawRealtimeVoiceSchema).optional(),
         turn_detection: z.array(z.string()).optional(),
@@ -222,6 +232,14 @@ const RawProviderListSchema = z
         realtime: RawRealtimeBucketSchema.optional(),
     })
     .passthrough();
+
+const VoiceTuningSchema = z.object({
+    stt_eot_threshold: z.number().optional(),
+    stt_eager_eot_threshold: z.number().nullable().optional(),
+    stt_eot_timeout_ms: z.number().optional(),
+    turn_0_min_confidence: z.number().optional(),
+    turn_0_min_alpha_chars: z.number().optional(),
+});
 
 const RawConfigSchema = z
     .object({
@@ -241,6 +259,8 @@ const RawConfigSchema = z
         sttEngine: z.string().optional(),
         stt_language: z.string().optional(),
         sttLanguage: z.string().optional(),
+        assemblyai_settings: AssemblyAISettingsSchema.nullish(),
+        assemblyaiSettings: AssemblyAISettingsSchema.nullish(),
         tts_provider: z.string().optional(),
         ttsProvider: z.string().optional(),
         tts_model: z.string().optional(),
@@ -249,6 +269,8 @@ const RawConfigSchema = z
         ttsVoiceId: z.string().optional(),
         tts_sample_rate: z.number().optional(),
         ttsSampleRate: z.number().optional(),
+        voice_tuning: VoiceTuningSchema.nullish(),
+        voiceTuning: VoiceTuningSchema.nullish(),
         pipeline_mode: z.enum(["cascaded", "realtime"]).optional(),
         pipelineMode: z.enum(["cascaded", "realtime"]).optional(),
         realtime_model: z.string().optional(),
@@ -256,10 +278,14 @@ const RawConfigSchema = z
         realtime_voice: z.string().optional(),
         realtimeVoice: z.string().optional(),
         realtime_settings: z
-            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional() })
+            .object({ provider: z.string().optional(), transcription_model: z.string().optional(), turn_detection: z.union([z.string(), z.object({ type: z.enum(["semantic_vad", "server_vad"]), eagerness: z.enum(["low", "medium", "high", "auto"]).optional(), threshold: z.number().optional(), prefix_padding_ms: z.number().optional(), silence_duration_ms: z.number().optional() })]).optional(), noise_reduction: z.string().optional(),
+                reasoning_effort: z.string().optional(), speed: z.number().optional(), max_output_tokens: z.number().optional(),
+                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() }).passthrough()
             .nullish(),
         realtimeSettings: z
-            .object({ turn_detection: z.string().optional(), noise_reduction: z.string().optional() })
+            .object({ provider: z.string().optional(), transcription_model: z.string().optional(), turn_detection: z.union([z.string(), z.object({ type: z.enum(["semantic_vad", "server_vad"]), eagerness: z.enum(["low", "medium", "high", "auto"]).optional(), threshold: z.number().optional(), prefix_padding_ms: z.number().optional(), silence_duration_ms: z.number().optional() })]).optional(), noise_reduction: z.string().optional(),
+                reasoning_effort: z.string().optional(), speed: z.number().optional(), max_output_tokens: z.number().optional(),
+                prompt: z.object({ persona: z.enum(["assistant", "sales", "support", "receptionist"]).optional(), goal: z.string(), instructions: z.string(), opening_greeting: z.string() }).optional() }).passthrough()
             .nullish(),
     })
     .passthrough();
@@ -336,6 +362,8 @@ function normalizeModel(model: z.infer<typeof RawModelSchema>): ModelInfo {
         context_window: model.context_window ?? model.contextWindow ?? undefined,
         is_preview: model.is_preview ?? model.isPreview,
         provider: model.provider,
+        available: model.available,
+        unavailable_reason: model.unavailable_reason,
     };
 }
 
@@ -371,6 +399,8 @@ function normalizeProviderList(raw: z.infer<typeof RawProviderListSchema>): Prov
         tts: { providers: raw.tts.providers, models: raw.tts.models.map(normalizeModel) },
         realtime: raw.realtime
             ? {
+                  available: raw.realtime.available ?? false,
+                  unavailable_reason: raw.realtime.unavailable_reason,
                   model: raw.realtime.model,
                   voices: (raw.realtime.voices ?? []).map(normalizeRealtimeVoice),
                   turn_detection: raw.realtime.turn_detection ?? [],
@@ -415,10 +445,12 @@ function normalizeConfig(raw: z.infer<typeof RawConfigSchema>): AIProviderConfig
         // New optional field — older saved configs lack it; default to Flux.
         stt_engine: pickNonEmptyString(raw.stt_engine, raw.sttEngine) ?? "deepgram_flux",
         stt_language: requireNonEmptyString("stt_language", raw.stt_language, raw.sttLanguage),
+        assemblyai_settings: raw.assemblyai_settings !== undefined ? raw.assemblyai_settings : raw.assemblyaiSettings,
         tts_provider: requireNonEmptyString("tts_provider", raw.tts_provider, raw.ttsProvider),
         tts_model: requireNonEmptyString("tts_model", raw.tts_model, raw.ttsModel),
         tts_voice_id: requireNonEmptyString("tts_voice_id", raw.tts_voice_id, raw.ttsVoiceId),
         tts_sample_rate: requireFiniteNumber("tts_sample_rate", raw.tts_sample_rate, raw.ttsSampleRate),
+        voice_tuning: raw.voice_tuning !== undefined ? raw.voice_tuning : raw.voiceTuning,
         // Phase 2 — optional; missing means "cascaded" (today's behavior).
         pipeline_mode: raw.pipeline_mode ?? raw.pipelineMode,
         realtime_model: pickNonEmptyString(raw.realtime_model, raw.realtimeModel),

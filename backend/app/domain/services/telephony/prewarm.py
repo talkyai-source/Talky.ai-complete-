@@ -54,6 +54,19 @@ class PrewarmResult:
     failure_reason: Optional[str]
 
 
+CALLEE_FIRST_MIN_EOT_TIMEOUT_MS = 1000
+
+
+def callee_first_eot_timeout(tuned_ms) -> int:
+    """At least 1000 ms when the callee speaks first, never below the tenant's
+    own tuning (standard TT-3: one source of truth for turn timing)."""
+    try:
+        tuned = int(tuned_ms)
+    except (TypeError, ValueError):
+        tuned = 0
+    return max(tuned, CALLEE_FIRST_MIN_EOT_TIMEOUT_MS)
+
+
 def _resolve_first_speaker(first_speaker: Optional[str]) -> str:
     """Per-call first-speaker choice (explicit value > env default).
 
@@ -237,75 +250,6 @@ async def _attach_llm_opener(
         )
 
 
-def _start_opening_ladder_generation(pre_warm_session, effective_first_speaker: str) -> None:
-    """Fire-and-forget: generate this call's LLM opening ladder in the
-    background, during the ring/warmup window.
-
-    NEVER AWAITED — this is the whole point. The opening "Hello?" ladder is
-    read by audio_ingest.py's silence monitor only once the callee has
-    already gone silent after pickup; an LLM round-trip at that moment is
-    exactly what the task forbids. Firing it here instead (before the strict
-    warmup gate even starts, so it gets the most wall-clock time possible
-    before the phone is answered) means a slow or failing provider costs the
-    call NOTHING: the strict gate below doesn't wait on this task, origination
-    proceeds on schedule either way, and turn_director.choose_silence_phrase
-    simply reads whatever landed on ``call_session._opening_ladder`` by the
-    time a nudge actually fires — the static ladder if this task is still
-    running, errored, or was never started.
-
-    Gated to caller-first ("user" first-speaker) calls only: the opening
-    ladder is only ever consulted when ``_is_caller_first`` is True in
-    audio_ingest.py (see turn_director.OPENING_PHRASES' docstring) — an
-    agent-first call would never read this, so generating it would just be a
-    wasted LLM call.
-    """
-    call_session = getattr(pre_warm_session, "call_session", None)
-    if call_session is None or effective_first_speaker != "user":
-        return
-    try:
-        from app.domain.services.telephony.opening_ladder import (
-            generate_opening_ladder,
-            opening_ladder_enabled,
-        )
-
-        # Cheapest possible check first: flag off costs one env read and
-        # starts no task at all.
-        if not opening_ladder_enabled():
-            return
-
-        llm_provider = getattr(pre_warm_session, "llm_provider", None)
-        if llm_provider is None:
-            return
-
-        call_id = getattr(pre_warm_session, "call_id", None)
-
-        async def _run() -> None:
-            try:
-                ladder = await generate_opening_ladder(
-                    llm_provider=llm_provider, call_id=call_id,
-                )
-            except asyncio.CancelledError:
-                raise
-            except Exception as run_exc:  # noqa: BLE001 - never surface
-                logger.debug(
-                    "opening_ladder_background_failed call=%s err=%r",
-                    str(call_id or "-")[:12], run_exc,
-                )
-                return
-            if ladder:
-                # Stashed exactly like _presynth_greeting_audio /
-                # _presynth_greeting_text below — a plain attribute the
-                # answer-path / nudge-path reads with getattr(..., None).
-                call_session._opening_ladder = ladder
-
-        asyncio.create_task(_run())
-    except Exception as exc:  # noqa: BLE001 - starting the task must never fail a call
-        logger.debug(
-            "opening_ladder_start_failed call=%s err=%r",
-            str(getattr(pre_warm_session, "call_id", "-"))[:12], exc,
-        )
-
-
 async def prepare_prewarmed_session(
     *,
     first_speaker: Optional[str],
@@ -315,27 +259,41 @@ async def prepare_prewarmed_session(
     lead_first_name: Optional[str] = None,
     lead_last_name: Optional[str] = None,
     lead_company: Optional[str] = None,
+    lead_context: Optional[dict] = None,
+    campaign_row: Optional[dict] = None,
 ) -> PrewarmResult:
     """Build + fully warm a VoiceSession before the SIP call is originated.
 
     Returns a :class:`PrewarmResult`. On any warmup failure the session is
     cleaned up and ``session`` is None with ``failure_reason`` set.
+
+    ``campaign_row`` is the tenant-scoped, outbound-only snapshot validated by
+    the origination boundary.  Accepting it here avoids a second unscoped
+    campaign lookup between authorization and prompt construction.  The
+    fallback remains for non-bridge callers that have no campaign snapshot.
     """
     effective_first_speaker = _resolve_first_speaker(first_speaker)
-    campaign_row = await _lookup_campaign_row(campaign_id)
+    if campaign_row is None:
+        campaign_row = await _lookup_campaign_row(campaign_id)
 
     pre_warm_session = None
     warmup_failure_reason: Optional[str] = None
     try:
         orchestrator = _get_orchestrator()
-        # Derive the call direction from per-call first_speaker so the
-        # session config picks the correct base prompt up front. With
-        # this in place, the runtime select_inbound_base_prompt() call
-        # below becomes idempotent (the inbound sentinel is already in
-        # the prompt for INBOUND calls); we keep that runtime call as
-        # defense-in-depth for persona-composed prompts.
-        from app.domain.services.voice_orchestrator import Direction
-        call_direction = Direction.from_first_speaker(effective_first_speaker)
+        # This is the dialer: the platform originated the call, so it is
+        # OUTBOUND regardless of who speaks first. first_speaker becomes the
+        # opening mode, which selects the callee-first prompt block at compose
+        # time (the runtime select_inbound_base_prompt() below is then an
+        # idempotent no-op kept as defence in depth). Until 2026-09-02 this
+        # derived Direction.INBOUND from first_speaker="user", which switched
+        # off AMD/voicemail detection and, after 2026-08-30, discarded the
+        # recording of every callee-first outbound call.
+        from app.domain.services.voice_orchestrator import (
+            Direction,
+            opening_mode_from_first_speaker,
+        )
+        call_direction = Direction.OUTBOUND
+        opening_mode = opening_mode_from_first_speaker(effective_first_speaker)
 
         # Resolve per-tenant voice tuning asynchronously (T4-C3): the
         # production path consults the DB-backed override on
@@ -353,6 +311,7 @@ async def prepare_prewarmed_session(
             )
         voice_tuning = await get_voice_tuning_resolver().for_tenant_async(
             str(_campaign_tenant_id) if _campaign_tenant_id else None,
+            require_available=bool(_campaign_tenant_id),
         )
 
         # Resolve the tenant's persisted AI provider config (model / provider /
@@ -365,6 +324,7 @@ async def prepare_prewarmed_session(
         )
         ai_config = await get_tenant_ai_config_resolver().for_tenant_async(
             str(_campaign_tenant_id) if _campaign_tenant_id else None,
+            require_available=bool(_campaign_tenant_id),
         )
 
         config = _build_telephony_session_config(
@@ -372,11 +332,13 @@ async def prepare_prewarmed_session(
             campaign=campaign_row,
             agent_name=agent_name,
             direction=call_direction,
+            opening_mode=opening_mode,
             voice_tuning_override=voice_tuning,
             ai_config_override=ai_config,
             lead_first_name=lead_first_name,
             lead_last_name=lead_last_name,
             lead_company=lead_company,
+            lead_context=lead_context,
         )
         # User-first only: relax the Flux end-of-turn timeout from 500ms
         # to 1000ms. The 500ms default is aggressive and was the cause of
@@ -390,7 +352,13 @@ async def prepare_prewarmed_session(
         # tighter 500ms because that mode's first turn is the agent's
         # greeting and the callee's reply is short and back-and-forth.
         if effective_first_speaker == "user":
-            config.stt_eot_timeout_ms = 1000
+            config.stt_eot_timeout_ms = callee_first_eot_timeout(getattr(config, "stt_eot_timeout_ms", None))
+        # Prepare before creation: native instructions are sent during connect.
+        from app.services.scripts.knowledge.session_inject import apply_campaign_knowledge
+        await apply_campaign_knowledge(
+            config, campaign_row,
+            pool=getattr(getattr(container, "db_client", None), "pool", None),
+        )
         pre_warm_session = await orchestrator.create_voice_session(config)
         pre_warm_session._first_speaker = effective_first_speaker
         # Mirror onto call_session so downstream code (latency telemetry,
@@ -403,9 +371,21 @@ async def prepare_prewarmed_session(
             # caller-speaks-first mode.
             select_inbound_base_prompt(pre_warm_session)
             logger.info(
-                "stt_eot_timeout_user_first_relaxed call_id=%s timeout_ms=1000",
-                pre_warm_session.call_id[:12],
+                "stt_eot_timeout_user_first_relaxed call_id=%s timeout_ms=%s",
+                pre_warm_session.call_id[:12], getattr(config, "stt_eot_timeout_ms", None),
             )
+        # One line per call with the policy values actually in force, so a
+        # guard wired to a constant or missing input shows up in the logs.
+        # Diagnostics only: it must never be able to fail call setup.
+        from app.domain.services.voice_pipeline.figure_grounding import figure_grounding_mode
+        logger.info(
+            "voice_policy_wiring call_id=%s first_speaker=%s eot=%s eager=%s timeout_ms=%s "
+            "figure_grounding=%s policy_overrides=%s",
+            str(getattr(pre_warm_session, "call_id", "?"))[:12], effective_first_speaker,
+            getattr(config, "stt_eot_threshold", None), getattr(config, "stt_eager_eot_threshold", None),
+            getattr(config, "stt_eot_timeout_ms", None),
+            figure_grounding_mode(), bool(os.getenv("PROMPT_POLICY_DIR", "").strip()),
+        )
         if agent_name:
             pre_warm_session._agent_name = agent_name
 
@@ -432,30 +412,8 @@ async def prepare_prewarmed_session(
                 failure_reason=None,
             )
 
-        # LLM-authored opening ladder (flag-gated, DEFAULT OFF). Fired here,
-        # BEFORE the strict warmup gate below, so the background task gets the
-        # most possible time to land before the callee picks up — but it is
-        # never awaited, so a slow provider costs this call nothing. See
-        # _start_opening_ladder_generation's docstring for the full fail-soft
-        # story.
-        _start_opening_ladder_generation(pre_warm_session, effective_first_speaker)
 
-        # ── Campaign knowledge (vectorless RAG, P2) ─────────────────────
-        # Flag-gated + fail-soft: for inline/map_retrieve campaigns this bakes
-        # the (compacted) knowledge tree into the session's system prompt now,
-        # while we're async with a DB pool in hand, so every turn has it for
-        # free. retrieve-mode campaigns get nothing here and are served per
-        # turn in turn_streamer. A failure leaves the persona prompt untouched.
-        try:
-            from app.services.scripts.knowledge.session_inject import (
-                apply_campaign_knowledge,
-            )
-            _kb_pool = getattr(getattr(container, "db_client", None), "pool", None)
-            await apply_campaign_knowledge(
-                pre_warm_session.call_session, campaign_row, pool=_kb_pool,
-            )
-        except Exception as _kb_exc:
-            logger.debug("campaign_knowledge_inject_skipped: %s", _kb_exc)
+        # The model-selected catalog was pinned before session creation above.
 
         # ───────────────────────────────────────────────────────────────
         # Strict warmup gate — racer-in-starting-blocks model.
@@ -572,6 +530,16 @@ async def prepare_prewarmed_session(
         # so this synth is fast even on the very first call of the process.
         await prepare_pre_originate_greeting(pre_warm_session, effective_first_speaker)
 
+    except asyncio.CancelledError:
+        # The endpoint has not received this session yet. If another warmup
+        # is cancelled after STT opened, only this scope can return its socket
+        # and provider permit; the endpoint's later cleanup cannot see it.
+        if pre_warm_session is not None:
+            try:
+                await asyncio.shield(_get_orchestrator().end_session(pre_warm_session))
+            except Exception as cleanup_exc:
+                logger.error("pre_originate_cancel_cleanup_failed: %s", cleanup_exc)
+        raise
     except Exception as warm_exc:
         warmup_failure_reason = repr(warm_exc)
         logger.error(

@@ -233,6 +233,8 @@ class TestRecordingService:
         mock_supabase.storage.from_.return_value = mock_bucket
         
         service = RecordingService(mock_supabase)
+        # Storage-wrapper mechanics; admission negatives use the actual OP07 gate.
+        service._retention_allowed = AsyncMock(return_value=True)
         
         buffer = RecordingBuffer(call_id="test")
         buffer.add_chunk(b'\x00' * 1000)

@@ -124,6 +124,10 @@ export function SuspensionStateProvider({ children }: { children: React.ReactNod
 
     useEffect(() => {
         if (!user) {
+            // Clears any optimistic override left over from a previous
+            // session once the user logs out / auth clears — override must
+            // not survive across accounts.
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- clears the stale optimistic override when the authenticated user goes away
             setOverride(null);
         }
     }, [user]);
@@ -132,6 +136,12 @@ export function SuspensionStateProvider({ children }: { children: React.ReactNod
         if (!override) return;
         if (mergeSuspensionState(serverState, override).suspended === serverState.suspended) {
             if (override.targetType === "partner" && serverState.partnerId === override.targetId && serverState.partnerStatus === override.status) {
+                // Server state (arrived via the poll/visibility refresh)
+                // now agrees with the optimistic override, so the override
+                // is no longer needed — this reconciles against data that
+                // only shows up asynchronously, not something derivable at
+                // render time.
+                // eslint-disable-next-line react-hooks/set-state-in-effect -- drops the optimistic override once server-refreshed state confirms it
                 setOverride(null);
                 return;
             }

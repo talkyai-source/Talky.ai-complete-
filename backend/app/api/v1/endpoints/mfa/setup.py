@@ -4,10 +4,12 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.credential_issuance import lock_authenticated_credential_change
 from app.core.security.recovery import (
     format_recovery_code,
     generate_recovery_codes,
@@ -20,7 +22,7 @@ from app.core.security.totp import (
     generate_qr_code_data_uri,
     generate_totp_secret,
     get_provisioning_uri,
-    verify_totp_code,
+    verify_totp_step,
 )
 
 from .schemas import (
@@ -36,6 +38,7 @@ router = APIRouter(tags=["mfa"])
 
 @router.post("/setup", response_model=MFASetupResponse)
 async def setup_mfa(
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> MFASetupResponse:
@@ -53,7 +56,8 @@ async def setup_mfa(
 
     OWASP: A new setup overwrites any existing pending (unconfirmed) secret.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await lock_authenticated_credential_change(conn, request, current_user)
         # P3.3 — refuse to silently downgrade an account that already has
         # confirmed MFA. The previous UPSERT would reset enabled=TRUE rows
         # back to FALSE, leaving the account briefly without 2FA AND
@@ -79,7 +83,7 @@ async def setup_mfa(
         qr_data_uri = generate_qr_code_data_uri(provisioning_uri)
 
         # Upsert any existing (unconfirmed) MFA record with a fresh secret.
-        await conn.execute(
+        stored = await conn.execute(
             """
             INSERT INTO user_mfa
                    (user_id, totp_secret_enc, enabled, verified_at,
@@ -92,10 +96,16 @@ async def setup_mfa(
                 verified_at     = NULL,
                 updated_at      = NOW(),
                 last_used_at    = NULL
+            WHERE user_mfa.enabled = FALSE
             """,
             current_user.id,
             encrypted_secret,
         )
+        if stored != "INSERT 0 1":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="MFA is already enabled. Disable it before starting setup again.",
+            )
 
         # Also mark user_profiles.mfa_enabled = FALSE (pending confirmation)
         await conn.execute(
@@ -119,6 +129,7 @@ async def setup_mfa(
 
 @router.post("/confirm", response_model=MFAConfirmResponse)
 async def confirm_mfa(
+    request: Request,
     body: MFAConfirmRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -136,13 +147,14 @@ async def confirm_mfa(
 
     OWASP: Recovery codes must be provided at setup time.
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await lock_authenticated_credential_change(conn, request, current_user)
         # Load the pending MFA record
         row = await conn.fetchrow(
             """
             SELECT id, totp_secret_enc, enabled, last_used_at
             FROM   user_mfa
-            WHERE  user_id = $1
+            WHERE  user_id = $1 FOR UPDATE
             """,
             current_user.id,
         )
@@ -169,13 +181,13 @@ async def confirm_mfa(
             )
 
         last_used_at = row["last_used_at"]
-        code_valid = verify_totp_code(
+        matched_step = verify_totp_step(
             raw_secret,
             body.code,
             last_used_at=last_used_at,
         )
 
-        if not code_valid:
+        if matched_step is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid TOTP code. Check your authenticator app and try again.",
@@ -190,11 +202,12 @@ async def confirm_mfa(
                SET enabled      = TRUE,
                    verified_at  = $1,
                    updated_at   = $1,
-                   last_used_at = $1
+                   last_used_at = $3
              WHERE user_id      = $2
             """,
             now,
             current_user.id,
+            matched_step,
         )
 
         # Sync the denormalized flag

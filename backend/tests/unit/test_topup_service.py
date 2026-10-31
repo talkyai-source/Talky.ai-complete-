@@ -1,0 +1,619 @@
+"""Minute top-ups: the rules that decide whether money turns into minutes.
+
+goals.md §9 asks for a top-up flow. The part worth testing is not that a row can
+be inserted — it is the set of decisions around the insert, because each one has
+a failure mode that costs somebody real money:
+
+  * a redelivered webhook must not credit twice,
+  * an unpaid or abandoned checkout must not credit at all,
+  * a top-up must not be mistaken for a subscription checkout,
+  * an unlimited tenant must not be silently converted to a capped one,
+  * a refund must not push an allocation negative (which reads as unlimited).
+
+WHAT THIS FILE CAN AND CANNOT PROVE
+------------------------------------
+The fake connection below runs the service's REAL control flow — every branch
+decision in ``credit_paid_order`` executes against it. What it cannot prove is
+the behaviour PostgreSQL enforces: the UNIQUE index on ``provider_event_id``,
+the row-level security policies, and the transaction boundary. Those are proven
+against a real database by ``scripts/verify_topup_ledger.py``; the assertions
+here that reference SQL text are marked as structural, and they exist because a
+guard that quietly stops being present in the statement is exactly how the trust
+rule in lead capture turned decorative.
+"""
+
+from __future__ import annotations
+
+import inspect
+
+import pytest
+
+from app.domain.services.topup_service import (
+    MAX_OPEN_ORDERS,
+    TopupError,
+    TopupService,
+    _rows_affected,
+)
+
+
+# ── a connection that behaves the way Postgres does on the paths we branch on ──
+
+
+class FakeConn:
+    """Enough of asyncpg to run the service's real branching.
+
+    ``seen_events`` models the UNIQUE index: a second insert of the same event
+    id returns no row, which is what ``ON CONFLICT DO NOTHING ... RETURNING``
+    does.
+    """
+
+    def __init__(self, store):
+        self.store = store
+        self.sql: list[str] = []
+
+    class _Txn:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+    def transaction(self):
+        return self._Txn()
+
+    async def execute(self, sql, *args):
+        self.sql.append(sql)
+        if "UPDATE tenants" in sql and "minutes_allocated + $2" in sql:
+            self.store["allocated"] += args[1]
+            return "UPDATE 1"
+        if "UPDATE tenants" in sql and "GREATEST(0" in sql:
+            if self.store["allocated"] > 0:
+                self.store["allocated"] = max(0, self.store["allocated"] - args[1])
+            return "UPDATE 1"
+        if "UPDATE tenant_call_limits" in sql:
+            # The row the call guard actually enforces. Both statements are
+            # written to touch it ONLY when a ceiling is already configured
+            # (> 0), so a top-up never invents a cap for a tenant who has none.
+            if (self.store.get("enforced") or 0) <= 0:
+                return "UPDATE 0"
+            if "GREATEST(" in sql:
+                self.store["enforced"] = max(1, self.store["enforced"] - args[1])
+            else:
+                self.store["enforced"] += args[1]
+            return "UPDATE 1"
+        if "UPDATE topup_orders" in sql and "status='paid'" in sql:
+            self.store["order"]["status"] = "paid"
+            return "UPDATE 1"
+        if "UPDATE topup_orders" in sql and "SET status=$2" in sql:
+            self.store["order"]["status"] = args[1]
+            return "UPDATE 1"
+        if "UPDATE topup_orders" in sql and "provider_session_id = $2" in sql:
+            if self.store.get("order") is None:
+                return "UPDATE 0"
+            self.store["order"]["provider_session_id"] = args[1]
+            return "UPDATE 1"
+        return "UPDATE 0"
+
+    async def fetchrow(self, sql, *args):
+        if "AS plan_minutes" in sql:
+            # The unlimited check: zero allocated AND a zero-minute subscription plan.
+            return {"minutes_allocated": self.store["allocated"],
+                    "plan_minutes": self.store.get("plan_minutes"), "billing_model": None}
+        self.sql.append(sql)
+        if "FROM topup_packages" in sql:
+            return self.store.get("package")
+        if "FROM topup_orders" in sql:
+            return self.store.get("order")
+        if "INSERT INTO billing_ledger" in sql:
+            # The credit path hardcodes kind='topup' in the statement and so
+            # binds one fewer parameter than the reversal path. Getting this
+            # offset wrong is how a fake ends up dedup'ing on the note text.
+            if "'topup'" in sql:
+                kind, delta, event_id = "topup", args[2], args[5]
+            else:
+                kind, delta, event_id = args[2], args[3], args[6]
+            if event_id in self.store["seen_events"]:
+                return None  # the UNIQUE index refuses it
+            self.store["seen_events"].add(event_id)
+            self.store["ledger"].append({"kind": kind, "minutes_delta": delta})
+            return {"id": len(self.store["ledger"])}
+        if "INSERT INTO topup_orders" in sql:
+            return {
+                "id": "order-1",
+                "package_code": args[2],
+                "minutes": args[3],
+                "price_cents": args[4],
+                "currency": args[5],
+                "status": "pending",
+            }
+        return None
+
+    async def fetchval(self, sql, *args):
+        self.sql.append(sql)
+        if "EXISTS" in sql and "billing_ledger" in sql:
+            if "'refund'" in sql:
+                return any(row["kind"] in {"refund", "dispute"} for row in self.store["ledger"])
+            return any(row["kind"] == "topup" for row in self.store["ledger"])
+        if "FROM tenant_call_limits" in sql:
+            return self.store.get("enforced", 0)
+        if "minutes_allocated" in sql:
+            return self.store["allocated"]
+        if "count(*)" in sql:
+            return self.store.get("open_orders", 0)
+        if "SUM(minutes_delta)" in sql:
+            return sum(e["minutes_delta"] for e in self.store["ledger"])
+        return None
+
+    async def fetch(self, sql, *args):
+        self.sql.append(sql)
+        return []
+
+
+class FakePool:
+    def __init__(self, store):
+        self.conn = FakeConn(store)
+
+    def acquire(self, **kwargs):
+        conn = self.conn
+
+        class _CM:
+            async def __aenter__(self):
+                return conn
+
+            async def __aexit__(self, *a):
+                return False
+
+        return _CM()
+
+
+def make_store(*, allocated=1000, order=None, package=None, enforced=0, plan_minutes=None):
+    return {
+        "allocated": allocated,
+        "plan_minutes": plan_minutes,
+        # `tenant_call_limits.monthly_minutes_allocated` — a DIFFERENT column in
+        # a DIFFERENT table from `tenants.minutes_allocated`, and the one the
+        # call guard blocks on. 0 = no ceiling configured (the guard passes).
+        "enforced": enforced,
+        "order": order,
+        "package": package,
+        "seen_events": set(),
+        "ledger": [],
+    }
+
+
+def granted(store):
+    """What the meter grants: the plan's minutes plus the bought balance.
+
+    Since 2026-10-27 bought minutes live only in the ledger; a credit or a
+    reversal never writes tenants.minutes_allocated.
+    """
+    return store["allocated"] + sum(e["minutes_delta"] for e in store["ledger"])
+
+
+def paid_order(status="pending", minutes=250):
+    return {
+        "id": "order-1",
+        "tenant_id": "11111111-1111-1111-1111-111111111111",
+        "minutes": minutes,
+        "price_cents": 2500,
+        "currency": "GBP",
+        "status": status,
+    }
+
+
+TENANT = "11111111-1111-1111-1111-111111111111"
+
+
+# ── the redelivery problem ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_the_same_event_credits_once_no_matter_how_often_it_arrives():
+    """THE INVARIANT THIS FEATURE EXISTS TO HOLD.
+
+    Stripe redelivers a webhook whose response was slow. Delivering it three
+    times must add 250 minutes, not 750.
+    """
+    store = make_store(allocated=1000, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    first = await svc.credit_paid_order(session_id="cs_1", event_id="evt_1")
+    assert first is True
+    assert granted(store) == 1250
+
+    # Redelivery 2 and 3. The order is 'paid' now, so it short-circuits before
+    # the ledger — but the ledger would refuse it anyway (next test).
+    for _ in range(2):
+        assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_1") is False
+    assert granted(store) == 1250, "a redelivered webhook added minutes again"
+
+
+@pytest.mark.asyncio
+async def test_the_ledger_refuses_a_repeat_event_even_if_the_order_looks_unpaid():
+    """The order-status check is a fast path, not the guard.
+
+    Two deliveries processed concurrently both read status='pending' before
+    either writes. Only the uniqueness constraint separates them, so the credit
+    must depend on the ledger insert returning a row — not on the status read.
+    """
+    store = make_store(allocated=1000, order=paid_order())
+    store["seen_events"].add("evt_dup")  # a concurrent delivery got there first
+    svc = TopupService(FakePool(store))
+
+    credited = await svc.credit_paid_order(session_id="cs_1", event_id="evt_dup")
+
+    assert credited is False
+    assert granted(store) == 1000, (
+        "minutes were added despite the ledger refusing the entry — the credit "
+        "is not actually gated on the uniqueness constraint"
+    )
+
+
+def test_the_ledger_insert_is_conditional_on_the_constraint():
+    """Structural: the ON CONFLICT clause is what makes the guard atomic.
+
+    Rewriting this as a SELECT-then-INSERT would still pass the behavioural
+    tests above and still double-credit under a real race.
+    """
+    src = inspect.getsource(TopupService.credit_paid_order)
+    assert "ON CONFLICT (provider_event_id) DO NOTHING" in src
+    assert "RETURNING id" in src, (
+        "the insert must report whether it actually wrote, or the conflict is "
+        "indistinguishable from success"
+    )
+
+
+# ── paying is not the same as starting to pay ───────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_payment_for_an_order_we_never_created_credits_nothing():
+    store = make_store(allocated=1000, order=None)
+    svc = TopupService(FakePool(store))
+
+    assert await svc.credit_paid_order(session_id="cs_ghost", event_id="e") is False
+    assert granted(store) == 1000
+
+
+@pytest.mark.asyncio
+async def test_an_abandoned_checkout_records_no_ledger_entry():
+    """Nothing happened financially, so nothing is recorded. A cancelled order
+    that left a ledger row would show up in reconciliation as money we took."""
+    store = make_store(order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    await svc.mark_failed(session_id="cs_1", status="cancelled")
+
+    assert store["ledger"] == []
+    assert store["order"]["status"] == "cancelled"
+
+
+@pytest.mark.asyncio
+async def test_mark_failed_refuses_a_status_that_is_not_a_failure():
+    svc = TopupService(FakePool(make_store()))
+    with pytest.raises(TopupError):
+        await svc.mark_failed(session_id="cs_1", status="paid")
+
+
+# ── the unlimited sentinel ──────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_topping_up_an_unlimited_tenant_does_not_give_them_a_limit():
+    """``minutes_allocated <= 0`` means unlimited everywhere else in the system
+    (``minutes_quota``). Adding 250 to 0 would cap an uncapped account — the
+    customer pays and comes away with less than they had."""
+    store = make_store(allocated=0, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    await svc.credit_paid_order(session_id="cs_1", event_id="evt_1")
+
+    assert store["allocated"] == 0, "an unlimited tenant was given a 250-minute cap"
+    assert len(store["ledger"]) == 1, "the money must still be recorded"
+    # The meter ignores the ledger for the unlimited sentinel (plan of 0).
+
+
+# ── reversals ───────────────────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_refund_is_a_new_negative_row_not_an_edit():
+    store = make_store(allocated=1250, order=paid_order(status="paid"))
+    svc = TopupService(FakePool(store))
+
+    assert await svc.reverse(event_id="evt_r", kind="refund", payment_id="pi_1") is True
+
+    assert len(store["ledger"]) == 1
+    assert store["ledger"][0]["minutes_delta"] == -250
+    assert granted(store) == 1000
+
+
+@pytest.mark.asyncio
+async def test_a_chargeback_is_applied_even_when_the_minutes_were_spent():
+    """A tenant who already SPENT the minutes then charges back. The reversal
+    used to be refused here (to keep the allocation off the unlimited
+    sentinel), leaving the customer refunded AND credited. It is now a ledger
+    row only: the plan's minutes are untouched, so no sentinel can be reached,
+    and the spent minutes come off the next allowance."""
+    store = make_store(allocated=100, order=paid_order(status="paid"))
+    svc = TopupService(FakePool(store))
+
+    assert await svc.reverse(event_id="evt_d", kind="dispute", payment_id="pi_1") is True
+    assert store["allocated"] == 100
+    assert store["ledger"] == [{"kind": "dispute", "minutes_delta": -250}]
+    assert store["order"]["status"] == "disputed"
+
+
+@pytest.mark.asyncio
+async def test_reversing_an_unpaid_order_does_nothing():
+    store = make_store(allocated=1000, order=paid_order(status="pending"))
+    svc = TopupService(FakePool(store))
+
+    assert await svc.reverse(event_id="e", kind="refund", payment_id="pi_1") is False
+    assert granted(store) == 1000
+    assert store["ledger"] == []
+
+
+@pytest.mark.asyncio
+async def test_reverse_needs_something_to_match_on():
+    svc = TopupService(FakePool(make_store()))
+    with pytest.raises(TopupError):
+        await svc.reverse(event_id="e", kind="refund")
+
+
+@pytest.mark.asyncio
+async def test_reverse_refuses_a_kind_that_is_not_a_reversal():
+    svc = TopupService(FakePool(make_store()))
+    with pytest.raises(TopupError):
+        await svc.reverse(event_id="e", kind="topup", payment_id="pi_1")
+
+
+def test_credits_and_reversals_never_write_the_plan_allocation():
+    """Structural: bought minutes live only in the ledger, so neither path can
+    floor, cap or zero tenants.minutes_allocated (the unlimited sentinel). The
+    only tenant column a credit may set is plan_id: the first pay-as-you-go
+    bundle moves an account without a plan to the prepaid plan (2026-10-31)."""
+    import re
+
+    for method in (TopupService.credit_paid_order, TopupService.reverse):
+        source = inspect.getsource(method)
+        assert set(re.findall(r"UPDATE tenants SET (\w+)", source)) <= {"plan_id"}
+
+
+# ── what the client is allowed to name ──────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_package_is_refused_before_any_order_exists():
+    store = make_store(package=None)
+    svc = TopupService(FakePool(store))
+    with pytest.raises(TopupError):
+        await svc.create_order(tenant_id=TENANT, user_id=None, package_code="free_lol")
+
+
+@pytest.mark.asyncio
+async def test_price_and_minutes_come_from_the_package_not_the_caller():
+    """THE HOLE THIS CLOSES: an endpoint that accepts `minutes` and `price`
+    from the browser sells 10,000 minutes for a penny."""
+    store = make_store(
+        package={
+            "code": "mins_250",
+            "name": "250 minutes",
+            "minutes": 250,
+            "price_cents": 2500,
+            "currency": "GBP",
+        }
+    )
+    svc = TopupService(FakePool(store))
+
+    order = await svc.create_order(
+        tenant_id=TENANT,
+        user_id=None,
+        package_code="mins_250",
+    )
+
+    assert order["minutes"] == 250
+    assert order["price_cents"] == 2500
+    sig = inspect.signature(TopupService.create_order).parameters
+    assert (
+        "minutes" not in sig and "price_cents" not in sig
+    ), "create_order must not accept an amount from its caller"
+
+
+@pytest.mark.asyncio
+async def test_a_flood_of_unfinished_checkouts_is_refused():
+    store = make_store(
+        package={
+            "code": "mins_250",
+            "name": "250 minutes",
+            "minutes": 250,
+            "price_cents": 2500,
+            "currency": "GBP",
+        }
+    )
+    store["open_orders"] = MAX_OPEN_ORDERS
+    svc = TopupService(FakePool(store))
+
+    with pytest.raises(TopupError):
+        await svc.create_order(tenant_id=TENANT, user_id=None, package_code="mins_250")
+
+
+# ── the silent-zero-row trap ────────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_a_lost_session_link_raises_instead_of_passing_quietly():
+    """A zero-row UPDATE is a SUCCESS in PostgreSQL. If the link between order
+    and checkout session is lost, the payment can never be matched — and this
+    codebase has already lost call transcripts to exactly that shape."""
+    store = make_store(order=None)  # nothing to update
+    svc = TopupService(FakePool(store))
+
+    with pytest.raises(TopupError):
+        await svc.attach_session("order-1", "cs_1")
+
+
+def test_rows_affected_reads_the_asyncpg_tag():
+    assert _rows_affected("UPDATE 0") == 0
+    assert _rows_affected("UPDATE 3") == 3
+    assert _rows_affected("nonsense") == -1
+
+
+def test_every_write_path_uses_the_rls_aware_connection():
+    """Structural. ``topup_orders`` and ``billing_ledger`` carry FORCE RLS, so a
+    bare ``pool.acquire()`` sees no rows and every UPDATE silently touches
+    nothing. Only the read-only catalogue (which is not tenant-scoped) may use
+    a plain acquire."""
+    for name in (
+        "create_order",
+        "attach_session",
+        "credit_paid_order",
+        "mark_failed",
+        "reverse",
+        "history",
+        "ledger",
+        "purchased_total",
+    ):
+        src = inspect.getsource(getattr(TopupService, name))
+        assert (
+            "acquire_with_tenant" in src or "_mutation_connection" in src
+        ), f"{name} acquires a connection without setting the RLS context"
+
+
+def test_the_catalogue_read_is_the_only_plain_acquire():
+    assert "acquire_with_tenant" not in inspect.getsource(TopupService.packages)
+
+
+# ── the sign convention ─────────────────────────────────────────────────────
+
+
+def test_trust_that_a_topup_is_positive_and_a_reversal_is_negative():
+    credit = inspect.getsource(TopupService.credit_paid_order)
+    reverse = inspect.getsource(TopupService.reverse)
+    assert '-order["minutes"]' in reverse or "-order['minutes']" in reverse
+    assert "'topup'" in credit
+
+
+# ── the ceiling that is actually enforced ───────────────────────────────────
+#
+# `tenants.minutes_allocated` is what the dialer gate reads. `call_guard`'s
+# minutes check reads `tenant_call_limits.monthly_minutes_allocated` — a
+# different column in a different table, with nothing syncing the two. A
+# tenant with an admin-set ceiling could top up 500 minutes, see the balance
+# rise everywhere, and still be blocked at origination by the old ceiling.
+
+
+@pytest.mark.asyncio
+async def test_a_credit_raises_the_ceiling_the_call_guard_enforces():
+    store = make_store(allocated=1000, enforced=1000, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_1") is True
+
+    assert granted(store) == 1250
+    assert store["enforced"] == 1250, (
+        "the customer paid for 250 minutes and the guard that actually blocks "
+        "origination still enforces the old ceiling"
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_credit_does_not_invent_a_ceiling_where_none_is_configured():
+    """0 means 'no quota configured' and the guard passes. Writing 250 there
+    would CREATE a cap for a tenant who had none — the top-up would leave them
+    worse off, the same trap as the unlimited sentinel above."""
+    store = make_store(allocated=1000, enforced=0, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    await svc.credit_paid_order(session_id="cs_1", event_id="evt_1")
+
+    assert store["enforced"] == 0
+    assert granted(store) == 1250
+
+
+@pytest.mark.asyncio
+async def test_a_reversal_lowers_the_enforced_ceiling_too():
+    """Otherwise a refund hands back the money and leaves the raised ceiling —
+    free minutes, and the two tables drift apart again."""
+    store = make_store(allocated=1250, enforced=1250, order=paid_order(status="paid"))
+    svc = TopupService(FakePool(store))
+
+    await svc.reverse(event_id="evt_r", kind="refund", payment_id="pi_1")
+
+    assert granted(store) == 1000
+    assert store["enforced"] == 1000
+
+
+def test_the_ceiling_moves_inside_the_credit_transaction():
+    """Structural: a second connection would let the process die between the
+    credit and the ceiling, leaving minutes bought that cannot be dialled."""
+    src = inspect.getsource(TopupService.credit_paid_order)
+    assert "tenant_call_limits" in src
+    assert (
+        src.count("_mutation_connection") == 1
+    ), "the enforced ceiling is updated outside the credit's transaction"
+
+
+@pytest.mark.asyncio
+async def test_a_duplicate_event_does_not_raise_the_ceiling_either():
+    store = make_store(allocated=1000, enforced=1000, order=paid_order())
+    store["seen_events"].add("evt_dup")
+    svc = TopupService(FakePool(store))
+
+    await svc.credit_paid_order(session_id="cs_1", event_id="evt_dup")
+
+    assert store["enforced"] == 1000
+    assert granted(store) == 1000
+
+
+# ── two Stripe events, one delayed payment ──────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_completed_and_async_succeeded_credit_one_session_once():
+    """A delayed payment (Bacs/SEPA/Klarna) produces
+    ``checkout.session.completed`` and then ``async_payment_succeeded`` — two
+    DIFFERENT event ids for one payment, so the ledger's uniqueness guard does
+    not separate them. The order's paid state has to."""
+    store = make_store(allocated=1000, order=paid_order())
+    svc = TopupService(FakePool(store))
+
+    assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_completed") is True
+    assert await svc.credit_paid_order(session_id="cs_1", event_id="evt_async") is False
+
+    assert granted(store) == 1250, "one payment credited twice"
+    assert len(store["ledger"]) == 1
+
+
+@pytest.mark.asyncio
+async def test_late_distinct_success_cannot_recredit_a_refunded_order():
+    store = make_store(allocated=1000, order=paid_order())
+    service = TopupService(FakePool(store))
+    await service.credit_paid_order(session_id="cs_fixture", event_id="evt_credit")
+    await service.reverse(event_id="evt_refund", payment_id="pi_fixture")
+    assert await service.credit_paid_order(session_id="cs_fixture", event_id="evt_late") is False
+    assert granted(store) == 1000
+    assert [row["minutes_delta"] for row in store["ledger"]] == [250, -250]
+
+
+@pytest.mark.asyncio
+async def test_existing_positive_ledger_prevents_recredit_when_order_status_is_stale():
+    store = make_store(allocated=1000, order=paid_order())
+    store["ledger"].append({"kind": "topup", "minutes_delta": 250})
+    assert (
+        await TopupService(FakePool(store)).credit_paid_order(
+            session_id="cs_fixture", event_id="evt_new"
+        )
+        is False
+    )
+    assert granted(store) == 1250 and len(store["ledger"]) == 1, "no second credit"
+
+
+@pytest.mark.asyncio
+async def test_reversal_cannot_turn_finite_allowance_into_unlimited():
+    store = make_store(allocated=50, enforced=50, order=paid_order(status="paid"))
+    assert await TopupService(FakePool(store)).reverse(event_id="evt_refund", payment_id="pi_fixture") is True
+    assert store["allocated"] == 50, "the plan's minutes are untouched"
+    assert store["enforced"] == 1, "the legacy ceiling stays finite"
+    assert store["ledger"] == [{"kind": "refund", "minutes_delta": -250}]
+    assert store["order"]["status"] == "refunded"

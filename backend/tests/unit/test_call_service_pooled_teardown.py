@@ -20,6 +20,7 @@ double campaign-counter bump, and no double-scheduled retry.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Optional
 from unittest.mock import AsyncMock
 
@@ -50,19 +51,43 @@ class _FakeConn:
         dialer_jobs_row: Optional[dict] = None,
     ) -> None:
         self.calls_row = calls_row
+        if self.calls_row is not None:
+            self.calls_row.setdefault("tenant_id", "20000000-0000-4000-8000-000000000017")
+            self.calls_row.setdefault("phone_number", "+15555550107")
+            self.calls_row.setdefault("outcome", None)
+            self.calls_row.setdefault("ended_at", None)
+            self.calls_row.setdefault("duration_seconds", None)
+            self.calls_row.setdefault("terminal_settled_at", None)
+            self.calls_row.setdefault("terminal_retry_payload", None)
+            self.calls_row.setdefault("terminal_retry_enqueued_at", None)
         self.leads_row = leads_row
         self.dialer_jobs_row = dialer_jobs_row
         self.campaigns_row = {"calls_completed": 0, "calls_failed": 0}
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
+        self._tx_lock = asyncio.Lock()
+        self._tx_owner = None
+        self._tx_depth = 0
 
     def transaction(self):
         outer = self
 
         class _Tx:
+            # asyncpg nests transaction() on one connection as a SAVEPOINT;
+            # only the outermost block takes the lock other tasks queue on.
             async def __aenter__(self):
+                me = asyncio.current_task()
+                if outer._tx_owner is me:
+                    outer._tx_depth += 1
+                else:
+                    await outer._tx_lock.acquire()
+                    outer._tx_owner, outer._tx_depth = me, 1
                 return outer
 
             async def __aexit__(self, *a):
+                outer._tx_depth -= 1
+                if outer._tx_depth == 0:
+                    outer._tx_owner = None
+                    outer._tx_lock.release()
                 return None
 
         return _Tx()
@@ -86,8 +111,18 @@ class _FakeConn:
             return
 
         if "UPDATE leads" in q:
-            lead_id, lead_status, last_call_result, call_attempts = args
+            # Settlement shape: (lead_id, status, last_call_result, attempts,
+            # tenant_id, keep_dnc). Mirrors the SQL CASE: 'deleted' is always
+            # kept; 'dnc' is kept when ``keep_dnc`` (non-retryable outcome) or
+            # the lead carries the do_not_call flag.
+            lead_id, lead_status, last_call_result, call_attempts, *scope = args
             if self.leads_row and self.leads_row["id"] == lead_id:
+                current = self.leads_row.get("status")
+                if current == "deleted" or (
+                    current == "dnc"
+                    and ((scope and scope[1]) or self.leads_row.get("do_not_call"))
+                ):
+                    lead_status = current
                 self.leads_row["status"] = lead_status
                 self.leads_row["last_call_result"] = last_call_result
                 self.leads_row["call_attempts"] = call_attempts
@@ -104,6 +139,31 @@ class _FakeConn:
     async def fetchrow(self, query: str, *args: Any):
         q = " ".join(query.split())
         self.executed.append((q, args))
+
+        if q.startswith("UPDATE calls"):
+            if not self.calls_row or self.calls_row["id"] != args[0]:
+                return None
+            if "terminal_retry_enqueued_at = COALESCE" in q:
+                self.calls_row["terminal_retry_enqueued_at"] = "NOW"
+                return dict(self.calls_row)
+            if "terminal_settled_at = COALESCE" in q:
+                self.calls_row["terminal_settled_at"] = "NOW"
+                self.calls_row["terminal_retry_payload"] = args[1]
+                self.calls_row["terminal_retry_enqueued_at"] = None
+                return dict(self.calls_row)
+            if "status = 'completed'" in q:
+                self.calls_row["status"] = "completed"
+                self.calls_row["outcome"] = args[1]
+                if args[2] is not None:
+                    self.calls_row["duration_seconds"] = args[2]
+                self.calls_row["ended_at"] = self.calls_row["ended_at"] or "NOW"
+                return dict(self.calls_row)
+            # Existing terminal: fill missing facts only.
+            self.calls_row["outcome"] = self.calls_row["outcome"] or args[1]
+            if self.calls_row["duration_seconds"] is None and args[2] is not None:
+                self.calls_row["duration_seconds"] = args[2]
+            self.calls_row["ended_at"] = self.calls_row["ended_at"] or "NOW"
+            return dict(self.calls_row)
 
         if "FROM calls WHERE id" in q:
             call_uuid = args[0]
@@ -123,6 +183,19 @@ class _FakeConn:
         q = " ".join(query.split())
         self.executed.append((q, args))
 
+        if "FROM dnc_entries" in q:
+            return False
+
+        if "last_call_result = 'caller_opt_out'" in q and "FROM leads" in q:
+            # Non-E.164 destination: the lead projection is the only opt-out record.
+            row = self.leads_row
+            if row and row["id"] == args[0]:
+                return row.get("status") == "dnc" and row.get("last_call_result") == "caller_opt_out"
+            return None
+
+        if "SELECT id FROM leads" in q:
+            return self.leads_row["id"] if self.leads_row and self.leads_row["id"] == args[0] else None
+
         if "SELECT call_attempts FROM leads" in q:
             lead_id = args[0]
             if self.leads_row and self.leads_row["id"] == lead_id:
@@ -130,9 +203,26 @@ class _FakeConn:
             return None
 
         if q.startswith("UPDATE dialer_jobs") and "RETURNING id" in q:
-            job_id, status_val, outcome_val, reason = args
+            # (job_id, status, outcome, reason, in_flight, tenant_id,
+            #  pre_flight_statuses, call_dialer_attempt_number)
+            job_id, status_val, outcome_val, reason, allowed_statuses, *scope = args
             row = self.dialer_jobs_row
-            if row and row["id"] == job_id and row.get("status") == "processing":
+            allowed = set(allowed_statuses)
+            if row and scope:
+                _tenant, pre_flight, call_attempt = scope
+                job_attempt = row.get("attempt_number")
+                if (
+                    row.get("status") in set(pre_flight)
+                    and call_attempt is not None
+                    and job_attempt is not None
+                    and int(call_attempt) == int(job_attempt)
+                ):
+                    allowed |= set(pre_flight)
+            if (
+                row
+                and row["id"] == job_id
+                and row.get("status") in allowed
+            ):
                 row["status"] = status_val
                 row["last_outcome"] = outcome_val
                 row["failure_reason"] = reason
@@ -195,7 +285,8 @@ def _rls_bypass_context():
 
 
 @pytest.mark.asyncio
-async def test_pooled_teardown_finalizes_lead_and_job_on_happy_path():
+@pytest.mark.parametrize("job_status", ["processing", "calling"])
+async def test_pooled_teardown_finalizes_lead_and_job_on_happy_path(job_status):
     conn = _FakeConn(
         calls_row={
             "id": "call-1", "lead_id": "lead-1", "campaign_id": "camp-1",
@@ -205,7 +296,7 @@ async def test_pooled_teardown_finalizes_lead_and_job_on_happy_path():
             "id": "lead-1", "call_attempts": 2, "status": "calling",
         },
         dialer_jobs_row={
-            "id": "job-1", "status": "processing", "attempt_number": 1,
+            "id": "job-1", "status": job_status, "attempt_number": 1,
             "tenant_id": "tenant-1", "priority": 5, "phone_number": "+15550001111",
         },
     )
@@ -338,10 +429,16 @@ async def test_pooled_teardown_idempotent_does_not_double_schedule_retry():
     _, _, retry_args_2 = await service._handle_call_status_pooled(
         "call-4", CallOutcome.BUSY, "busy", duration=0,
     )
-    assert retry_args_2 is None, (
-        "a duplicate teardown must NOT produce a second retry_args tuple — "
-        "the caller would schedule a second, duplicate retry job"
+    assert retry_args_2 is not None
+    assert retry_args_2[0] == retry_args_1[0]
+    assert retry_args_2[2:] == retry_args_1[2:]
+    assert retry_args_2[1]["priority"] == retry_args_1[1]["priority"], (
+        "until Redis dispatch is acknowledged, the durable outbox must replay "
+        "the same retry instruction; schedule_retry_once makes that replay "
+        "idempotent"
     )
+    assert conn.leads_row["call_attempts"] == 1
+    assert conn.campaigns_row["calls_completed"] == 0
 
 
 @pytest.mark.asyncio
@@ -352,7 +449,8 @@ async def test_pooled_teardown_call_not_found_returns_none_triple():
     result = await service._handle_call_status_pooled(
         "missing-call", CallOutcome.ANSWERED, "answered", duration=0,
     )
-    assert result == (None, None, None)
+    assert tuple(result) == (None, None, None)
+    assert result.result.durable is False
 
 
 @pytest.mark.asyncio
@@ -378,3 +476,198 @@ async def test_pooled_teardown_skips_job_completion_for_non_dialer_call():
     assert retry_args is None
     assert conn.leads_row["call_attempts"] == 1
     assert conn.campaigns_row["calls_completed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_endpoint_terminal_then_concurrent_callbacks_settle_side_effects_once():
+    """The endpoint owns terminal truth; one callback owns settlement effects."""
+
+    conn = _FakeConn(
+        calls_row={
+            "id": "call-endpoint",
+            "lead_id": "lead-endpoint",
+            "campaign_id": "camp-1",
+            "dialer_job_id": "job-endpoint",
+            "status": "ended",
+            "outcome": "cancelled",
+            "ended_at": "ENDPOINT_TIME",
+            "duration_seconds": 7,
+        },
+        leads_row={
+            "id": "lead-endpoint", "call_attempts": 0, "status": "calling",
+        },
+        dialer_jobs_row={
+            "id": "job-endpoint",
+            "status": "processing",
+            "attempt_number": 1,
+            "tenant_id": "tenant-1",
+            "priority": 5,
+            "phone_number": "+15550009999",
+        },
+    )
+    service = _service(conn)
+
+    first, second = await asyncio.gather(
+        service._handle_call_status_pooled(
+            "call-endpoint", CallOutcome.NO_ANSWER, "no_answer", duration=30,
+        ),
+        service._handle_call_status_pooled(
+            "call-endpoint", CallOutcome.ANSWERED, "answered", duration=31,
+        ),
+    )
+
+    assert sorted([first.result.applied, second.result.applied]) == [False, True]
+    assert first.result.durable and second.result.durable
+    assert conn.calls_row["status"] == "ended"
+    assert conn.calls_row["outcome"] == "cancelled"
+    assert conn.calls_row["duration_seconds"] == 7
+    assert conn.calls_row["ended_at"] == "ENDPOINT_TIME"
+    assert conn.leads_row["call_attempts"] == 1
+    assert conn.campaigns_row["calls_completed"] == 1
+    assert conn.campaigns_row["calls_failed"] == 0
+    assert conn.dialer_jobs_row["status"] == "failed"
+
+
+@pytest.mark.asyncio
+async def test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job():
+    conn = _FakeConn(
+        calls_row={
+            "id": "call-retry",
+            "lead_id": "lead-retry",
+            "campaign_id": "camp-1",
+            "dialer_job_id": "job-retry",
+            "status": "initiated",
+        },
+        leads_row={"id": "lead-retry", "call_attempts": 0, "status": "calling"},
+        dialer_jobs_row={
+            "id": "job-retry",
+            "status": "processing",
+            "attempt_number": 1,
+            "tenant_id": "tenant-1",
+            "priority": 5,
+            "phone_number": "+15550008888",
+        },
+    )
+
+    class FailOnceQueue:
+        def __init__(self):
+            self.attempts = 0
+            self.keys: set[str] = set()
+            self.confirmed: list[str] = []
+
+        async def get_live_attempt_number(self, _job_id):
+            return None
+
+        async def schedule_retry_once(
+            self, _job, *, delay_seconds, idempotency_key,
+        ):
+            assert delay_seconds == 5 * 60
+            self.attempts += 1
+            if self.attempts == 1:
+                return False
+            self.keys.add(idempotency_key)
+            return True
+
+        async def confirm_retry_once(self, idempotency_key):
+            self.confirmed.append(idempotency_key)
+            return True
+
+    queue = FailOnceQueue()
+    service = CallService(
+        db_client=AsyncMock(),
+        queue_service=queue,
+        call_repo=AsyncMock(),
+        lead_repo=AsyncMock(),
+        db_pool=_FakePool(conn),
+    )
+
+    failed = await service.handle_call_status(
+        "call-retry", CallOutcome.BUSY, duration=0,
+    )
+    assert failed.durable is False
+    assert failed.error == "retry_enqueue_failed"
+    assert conn.calls_row["terminal_retry_payload"] is not None
+    assert conn.calls_row["terminal_retry_enqueued_at"] is None
+
+    recovered = await service.handle_call_status(
+        "call-retry", CallOutcome.BUSY, duration=0,
+    )
+    assert recovered.durable is True
+    assert recovered.applied is False
+    assert conn.calls_row["terminal_retry_enqueued_at"] == "NOW"
+    assert queue.attempts == 2
+    assert len(queue.keys) == 1
+    assert queue.confirmed == list(queue.keys)
+
+    replay = await service.handle_call_status(
+        "call-retry", CallOutcome.NO_ANSWER, duration=99,
+    )
+    assert replay.durable is True
+    assert replay.applied is False
+    assert queue.attempts == 2
+    assert conn.leads_row["call_attempts"] == 1
+
+
+@pytest.mark.asyncio
+async def test_no_pool_compatibility_path_fails_closed_without_writes():
+    service = CallService(
+        db_client=object(),
+        call_repo=object(),
+        lead_repo=object(),
+    )
+
+    result = await service.handle_call_status(
+        "call-without-pool",
+        CallOutcome.ANSWERED,
+        duration=12,
+    )
+
+    assert result.found is False
+    assert result.applied is False
+    assert result.durable is False
+    assert result.error == "atomic_pool_required"
+
+
+@pytest.mark.asyncio
+async def test_pre_cutover_terminal_marker_fills_facts_without_replaying_effects():
+    conn = _FakeConn(
+        calls_row={
+            "id": "legacy-terminal",
+            "lead_id": "legacy-lead",
+            "campaign_id": "legacy-campaign",
+            "dialer_job_id": "legacy-job",
+            "status": "ended",
+            "outcome": None,
+            "ended_at": None,
+            "terminal_settled_at": "MIGRATION_CUTOVER",
+        },
+        leads_row={
+            "id": "legacy-lead",
+            "call_attempts": 8,
+            "status": "called",
+        },
+        dialer_jobs_row={
+            "id": "legacy-job",
+            "status": "completed",
+            "attempt_number": 1,
+            "tenant_id": "tenant-1",
+            "priority": 5,
+            "phone_number": "+15550009999",
+        },
+    )
+
+    result = await _service(conn)._handle_call_status_pooled(
+        "legacy-terminal",
+        CallOutcome.ANSWERED,
+        "answered",
+        duration=22,
+    )
+
+    assert result.result.applied is False
+    assert result.result.durable is True
+    assert conn.calls_row["status"] == "ended"
+    assert conn.calls_row["outcome"] == "answered"
+    assert conn.calls_row["ended_at"] == "NOW"
+    assert conn.leads_row["call_attempts"] == 8
+    assert conn.dialer_jobs_row["status"] == "completed"
+    assert conn.campaigns_row == {"calls_completed": 0, "calls_failed": 0}

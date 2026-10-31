@@ -1,0 +1,85 @@
+{
+  "candidate_revision": "a4517678b91d1a6745606756313a8c9d93326bae",
+  "base_revision": "33360ddf42c1089e78f9ee9918ba0d770f4347c7",
+  "before_probe_revision": "a42f270046a21121b60e108fce3926b39b31c5a4",
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "working_directory": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\tenant-config-admission-20261005\\backend",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH_order": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ]
+  },
+  "source_files_sha256_lf": {
+    "backend/app/domain/services/telephony/prewarm.py": "2a57195dc271f0e77ccc2dcbeaaa4b0e50a6a130b9c1259e528954122eae7a8f",
+    "backend/app/domain/services/tenant_ai_config_resolver.py": "9a728d67943e8fa0704ec7c385639ec59d24313ed9f3130f2da37ee3e36b5c4f",
+    "backend/app/domain/services/voice_tuning.py": "de0a7ff737d849f68bd93ff77d1720bee30adf68e64c8346eac20562c86b70e2",
+    "backend/tests/unit/test_opening_mode_not_direction.py": "923bd11eb802ba9a6719709bb14c64b5fc32e4bd87c66c8e91fb04a35c9568b2",
+    "backend/tests/unit/test_tenant_ai_config_isolation.py": "1e0ddcf69ac1507247567284fb630e40efafa8beb6f890e4a09a05bf026edf24",
+    "backend/tests/unit/test_tenant_profile_admission.py": "c461debcd58bb7481fe48b3ee800c447be204bb400f041fa4374d2685172d0a7"
+  },
+  "checks": [
+    {
+      "command": "python -m pytest backend/tests/unit/test_tenant_profile_admission.py -q --tb=short",
+      "cwd": "repository root",
+      "stage": "before flags; initial22cases",
+      "failed": 8,
+      "passed": 14,
+      "output": "before-tests.txt"
+    },
+    {
+      "command": "python -m pytest tests/unit/test_tenant_profile_admission.py -q --tb=short",
+      "stage": "after fix and endpoint fixture repair",
+      "passed": 26,
+      "failed": 0,
+      "skipped": 0,
+      "output": "after-focused-tests.txt"
+    },
+    {
+      "command": "python -m pytest tests/unit/test_tenant_profile_admission.py tests/unit/test_tenant_ai_config_isolation.py tests/unit/test_voice_tuning.py tests/unit/test_voice_tuning_db.py tests/unit/test_twilio_bridge.py tests/unit/test_telephony_session_config.py tests/unit/test_opening_mode_not_direction.py tests/unit/test_outbound_campaign_boundaries.py tests/unit/test_op02_lifecycle_ownership.py tests/unit/test_llm_opener.py -q --tb=short",
+      "passed": 308,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 11,
+      "exit_code": 0,
+      "output": "final-tests.txt"
+    },
+    {
+      "command": "python -m ruff check --select F --ignore F401,F841 backend/app/domain/services/telephony/prewarm.py backend/app/domain/services/tenant_ai_config_resolver.py backend/app/domain/services/voice_tuning.py backend/tests/unit/test_opening_mode_not_direction.py backend/tests/unit/test_tenant_ai_config_isolation.py backend/tests/unit/test_tenant_profile_admission.py",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "output": "lint.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "probe": {
+    "command": "python tmp/tenant_config_probe.py",
+    "cwd": "repository root",
+    "setup": "Copy artifacts/tenant-config-admission/probe.py unchanged to the worktree tmp/tenant_config_probe.py so its repository-relative import resolves. Same script body before and after.",
+    "sha256": "ec763b0d07779c7a3d1bebf9c8ef84d02301b7b2b4be3f81816287fd2cc4155f",
+    "before": "before-probe.json",
+    "after": "after-probe.json",
+    "network": "socket.connect, connect_ex and DNS blocked inside active event loop",
+    "ports": "Only lookup, route, provider factory/warmup and optional knowledge ports are synthetic. Actual resolvers, prewarm and builders execute."
+  },
+  "intermediate_fixture_logs": [
+    "before-endpoint-tests.txt",
+    "network-fixture-teardown.txt",
+    "broader-old-signature-fixture.txt"
+  ],
+  "strict_lint_baseline_debt": "lint-existing-unused-import.txt: pre-existing unused os in voice_tuning.py; no new unused imports",
+  "review": {
+    "agent": "llm_audit",
+    "mode": "read-only, no independent test execution",
+    "result": "No material defect found in bounded three-flag/docs/test delta."
+  },
+  "limits": [
+    "No live provider, database, telephone or external action.",
+    "Successful no-row and truly tenantless defaults unchanged.",
+    "Unresolved-DID legacy fallback and missing-warmup lifecycle branch remain separate, unmodified boundaries."
+  ]
+}

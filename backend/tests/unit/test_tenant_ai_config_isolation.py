@@ -231,6 +231,11 @@ class TestFallbackToDefault:
 
 
 class TestBridgeProviderDerivation:
+    @pytest.fixture(autouse=True)
+    def available_tenant_tuning(self, monkeypatch):
+        from app.domain.services.voice_tuning import VoiceTuning, VoiceTuningResolver
+        monkeypatch.setattr(VoiceTuningResolver, "for_tenant_async", AsyncMock(return_value=VoiceTuning()))
+
     @pytest.mark.asyncio
     async def test_twilio_derives_gemini_provider_not_hardcoded_groq(self):
         from app.api.v1.endpoints import twilio_bridge
@@ -284,4 +289,4 @@ class TestBridgeProviderDerivation:
             resolver.for_tenant_async = AsyncMock(return_value=_cfg())
             tenant_id, config = await resolve_ai_config_for_did(None)
         assert tenant_id is None
-        resolver.for_tenant_async.assert_awaited_once_with(None)
+        resolver.for_tenant_async.assert_awaited_once_with(None, require_available=False)

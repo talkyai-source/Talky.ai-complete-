@@ -1,0 +1,23 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\model-contact-recording-20261007",
+  "setup_each_run": "$env:PYTHONUTF8='1'\n$env:PYTHONDONTWRITEBYTECODE='1'\n$env:ENVIRONMENT='test'\n$env:DATABASE_URL='postgresql://test:test@127.0.0.1:1/unavailable_test'\n$env:PYTHONPATH='C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/model-contact-recording-20261007/backend'",
+  "executed": [
+    {
+      "phase": "echo-baseline",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B 'docs/sessions/artifacts/model-contact-recording/echo_runner.py' echo-baseline *> 'docs/sessions/artifacts/model-contact-recording/echo-baseline.txt'"
+    },
+    {
+      "phase": "echo-final",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B 'docs/sessions/artifacts/model-contact-recording/echo_runner.py' echo-final *> 'docs/sessions/artifacts/model-contact-recording/echo-final.txt'"
+    },
+    {
+      "phase": "echo-verified",
+      "shell": "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -B 'docs/sessions/artifacts/model-contact-recording/echo_verified_runner.py' echo-verified *> 'docs/sessions/artifacts/model-contact-recording/echo-verified.txt'"
+    }
+  ],
+  "verification": [
+    "& 'C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe' -m ruff check --select F --extend-ignore F401,F841 backend/app/domain/services/transcript_service.py backend/app/domain/services/voice_pipeline/turn_runner.py backend/tests/unit/test_model_contact_recording.py backend/tests/unit/test_ag05_transcript_evidence.py",
+    "git diff --check"
+  ],
+  "limitations": "Existing venv; synthetic ports only; no external requests. Preserve prior artifact files."
+}

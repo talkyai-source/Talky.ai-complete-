@@ -17,7 +17,8 @@ export type AuthMe = {
     name?: string;
     business_name?: string;
     role: AuthRole;
-    minutes_remaining?: number;
+    minutes_remaining?: number | null;
+    minutes_state?: "known" | "unlimited" | "unavailable";
     partner_id?: string;
     tenant_id?: string;
 };

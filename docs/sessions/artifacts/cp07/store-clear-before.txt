@@ -1,0 +1,46 @@
+✖ clear reaches another tab when privacy is off and history/settings writes are browser no-ops (41.7444ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6823.1568
+
+✖ failing tests:
+
+test at src\lib\notifications.test.ts:2:12109
+✖ clear reaches another tab when privacy is off and history/settings writes are browser no-ops (41.7444ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     createdAt: 1791142976234,
+  +     id: '883201c2-dea4-46bc-8970-9046f0d94c56',
+  +     priority: 'normal',
+  +     title: 'Live private two',
+  +     type: 'success'
+  +   },
+  +   {
+  +     createdAt: 1791142976231,
+  +     id: '6996d351-5acb-44a6-b6d9-88ce08173bcc',
+  +     priority: 'low',
+  +     title: 'Live private one',
+  +     type: 'info'
+  +   }
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\notifications.test.ts:216:12)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { id: '883201c2-dea4-46bc-8970-9046f0d94c56', type: 'success', priority: 'normal', title: 'Live private two', createdAt: 1791142976234 }, { id: '6996d351-5acb-44a6-b6d9-88ce08173bcc', type: 'info', priority: 'low', title: 'Live private one', createdAt: 1791142976231 } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

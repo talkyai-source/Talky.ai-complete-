@@ -1,0 +1,17 @@
+{
+  "backend/app/services/scripts/knowledge/enricher.py": "69e8d52176cf68d1c6abe070c784036800f1d773ef53157b5abc4b2a1a01d6a2",
+  "backend/tests/unit/test_knowledge_enrichment_routing.py": "d24d482c6b239f3b92b190faa7b1c2dc0e4c6b3460be7be48ccc0d6c7155c885",
+  "backend/app/services/scripts/knowledge/ingest_service.py": "2d3513596964f86143c47f22fc610e4a4179e0f317001604ae2259828fb80d4d",
+  "backend/app/services/scripts/knowledge/md_tree.py": "c3159604736546cf272aad57d3f883610d592db022cb20796fea9cff567f33ea",
+  "backend/app/services/scripts/knowledge/retrieval.py": "093b8af85cfdba64f74cdc2adb08649de53c6e54c1cb0cd1e558eff525afc263",
+  "backend/app/services/scripts/knowledge/passages.py": "8699cad49bf646564725871b3712aa2667950a8e27166e4a655be2521d22f003",
+  "backend/app/domain/services/voice_pipeline/kb_budget.py": "372f1055e836c87e112047850d9149b0211acf6185544acb4753012d7bba8230",
+  "backend/tests/fixtures/knowledge/ag02_gold.json": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+  "backend/scripts/evaluate_ag02_knowledge.py": "e548f443f1c22dcff9ed38c0002d4fa65d620cfdcb330c4489fb858e04fb839a",
+  "backend/tests/unit/test_knowledge_enricher_model.py": "f2aa8ef9934346dec45267e687144ae9eb9df6b3a3e1337797f574b3e9ffcdd1",
+  "backend/tests/unit/test_knowledge_ingest_staging.py": "f789a74ff750efde760ace77ef19efda1a19fd92a4125f98432500c8d6bfd5fc",
+  "backend/tests/unit/test_reenrich_campaign_knowledge_script.py": "a1093a30b75aef69831bbdb5b7e1831fae264c083bfb650faf4146ef36ac1749",
+  "backend/tests/unit/test_knowledge_relevance.py": "18882d82e59b6de40d8da1dc4e15ea95cf8ac67439af9e36aa01a610cdee67cd",
+  "backend/tests/unit/test_knowledge_budget.py": "93aeea959e465429472a069fe6e602dd6ef96a1d7fd80758934f7ad9210f9204",
+  "backend/tests/unit/test_ag02_gold_matrix.py": "dff9c1a006dfbcdb2c5e81679b895410ba2a2690fb265e1cb4a55ef088d496d1"
+}

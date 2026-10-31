@@ -18,25 +18,80 @@ The only per-call knob is first-speaker (``?first_speaker=agent|user``), the
 same choice a real Start offers: agent-first greets immediately (realtime:
 greet_on_start; cascaded: streamed greeting), caller-first waits for the user.
 
-No ``calls`` row is created and ``event_logging_enabled`` stays False, so a test
-session is NOT billed against plan minutes.
+A test session DOES get a ``calls`` row, flagged ``is_test`` (Alembic 0017), so
+that everything hanging off a call — recording, transcript, prompt version,
+feedback voice note, conversation review — can actually be exercised from the
+test button. Nothing bills it: every query that counts money, dial capacity or
+abuse says ``AND NOT is_test`` explicitly, and ``billable_calls`` excludes it.
+
+The row's id is deliberately ``voice_session.call_id``; see ``_record_test_call``
+for why anything else silently loses the transcript.
 """
 
 import json
 import asyncio
 import logging
+import time
+import uuid
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+
+from app.core.security.rbac import (
+    Permission,
+    check_permission,
+    get_effective_permissions,
+)
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["Campaign Test"])
 
+
+class CampaignTestDirectionConflict(RuntimeError):
+    """The campaign became non-outbound before test-call persistence."""
+
+
+class CampaignTestUnavailable(RuntimeError):
+    """The durable test-call boundary could not be proven."""
+
+
 # Small concurrency cap so a stuck test tab can't pin an unbounded number of
 # realtime/TTS provider sockets. RFC 6455 close 1013 = "Try Again Later".
 _MAX_CONCURRENT_TEST = 8
+_AUTH_RECHECK_SECONDS = 15.0
+_AUTH_TIMEOUT_SECONDS = 5.0
+_CLEANUP_TIMEOUT_SECONDS = 10.0
 _test_semaphore: Optional[asyncio.Semaphore] = None
+# One tenant must not be able to hold every global slot.
+_MAX_CONCURRENT_TEST_PER_TENANT = 2
+_tenant_semaphores: dict[str, asyncio.Semaphore] = {}
+
+
+def _get_tenant_semaphore(tenant_id: str) -> asyncio.Semaphore:
+    sem = _tenant_semaphores.get(tenant_id)
+    if sem is None:
+        sem = _tenant_semaphores[tenant_id] = asyncio.Semaphore(_MAX_CONCURRENT_TEST_PER_TENANT)
+    return sem
+
+
+async def _tenant_test_refusal(pool, tenant_id) -> Optional[str]:
+    """Why this tenant may not spend provider capacity on a test, or None.
+
+    Test sessions are not billed, but they use the same paid STT/LLM/TTS
+    providers, so a suspended or cancelled account must not keep running them.
+    Reuses the call guard's own account checks (fail closed on error).
+    """
+    from app.domain.services.call_guard import CallGuard
+
+    guard = CallGuard(db_pool=pool, redis_client=None)
+    for result in (
+        await guard._check_tenant_active(str(tenant_id)),
+        await guard._check_subscription_uncached(str(tenant_id)),
+    ):
+        if not result.passed:
+            return result.reason or "tenant_not_allowed"
+    return None
 
 
 def _get_semaphore() -> asyncio.Semaphore:
@@ -68,12 +123,31 @@ async def _resolve_ws_token(websocket: WebSocket) -> Optional[str]:
     """
     cookie_token = _read_cookie_token(websocket)
     if cookie_token:
+        logger.info("campaign_test_ws auth surface=cookie")
         return cookie_token
+
+    # WHICH SURFACE FAILED, NOT JUST THAT ONE DID (2026-08-23)
+    #
+    # "no auth frame within 5s" was the only signal this function emitted, and
+    # it conflates two very different failures: the talky_at cookie never
+    # arrived, or it arrived and was rejected. Three separate incidents (MFA
+    # login not issuing talky_at, passkey login not issuing it, and the 15-min
+    # expiry) all surfaced as that one line, and each took a log-dive to tell
+    # apart. Cookie NAMES only — never a value, these are credentials.
+    logger.info(
+        "campaign_test_ws no talky_at on handshake; cookies_present=%s origin=%r "
+        "— falling back to first-frame bearer",
+        sorted(websocket.cookies.keys()) or "NONE",
+        websocket.headers.get("origin"),
+    )
 
     try:
         first_frame = await asyncio.wait_for(websocket.receive_json(), timeout=5.0)
     except asyncio.TimeoutError:
-        logger.info("campaign_test_ws: no auth frame within 5s")
+        logger.info(
+            "campaign_test_ws: no auth frame within 5s — neither cookie nor "
+            "bearer frame; the client had no credential to offer"
+        )
         return None
     except WebSocketDisconnect:
         return None
@@ -86,6 +160,7 @@ async def _resolve_ws_token(websocket: WebSocket) -> Optional[str]:
     token = first_frame.get("token")
     if not isinstance(token, str) or not token.strip():
         return None
+    logger.info("campaign_test_ws auth surface=bearer_frame")
     return token
 
 
@@ -100,6 +175,354 @@ def _is_origin_allowed(websocket: WebSocket) -> bool:
     return origin in get_settings().allowed_origins
 
 
+async def _session_is_active(db_pool, user_id: str, session_id: str, tenant_id=None) -> bool:
+    """Use REST's revocable session lookup, bound to the signed user."""
+    from app.core.db_utils import acquire_with_tenant
+    from app.core.security.principal import PrincipalUnavailable, load_session_principal
+
+    try:
+        uuid.UUID(user_id)
+        uuid.UUID(session_id)
+    except (ValueError, TypeError, AttributeError):
+        return False
+    async with acquire_with_tenant(db_pool, None, user_id=user_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
+        try:
+            await load_session_principal(conn, {"sub": user_id, "sid": session_id, "tenant_id": tenant_id})
+        except PrincipalUnavailable:
+            return False
+        return True
+
+
+async def _check_login_session(websocket, pool, user_id, session_id, tenant_id=None) -> bool:
+    try:
+        active = bool(session_id) and await asyncio.wait_for(
+            _session_is_active(pool, user_id, session_id, tenant_id), timeout=_AUTH_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        logger.warning("campaign_test_session_check_failed", exc_info=True)
+        await websocket.send_json({"type": "error", "code": "authorization_unavailable",
+                                   "message": "Authorization is temporarily unavailable. Please retry."})
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return False
+    if not active:
+        # Before 2026-09-08 this was the only refusal path with NO log line, so
+        # a fortnight of "sometimes the test agent says my session expired" had
+        # to be diagnosed from the absence of a "start" line. Name the reason.
+        logger.warning(
+            "campaign_test_ws auth refused: %s user=%s",
+            "token carries no sid (minted by a refresh before 0045 bound the family to its session)"
+            if not session_id else "login session revoked or expired",
+            user_id,
+        )
+        await websocket.send_json({"type": "error", "code": "auth_required",
+                                   "message": "Your session has expired. Reload the page and sign in again."})
+        await websocket.close(code=1008, reason="Inactive login session")
+    return active
+
+
+async def _has_test_membership(pool, user_id, tenant_id) -> bool:
+    """Direct grants do not revive suspended membership; global admins are explicit."""
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(pool, None, user_id=user_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
+        return bool(await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 FROM tenant_users
+                WHERE user_id = $1 AND tenant_id = $2 AND status = 'active'
+            ) OR EXISTS (
+                SELECT 1 FROM tenant_users tu JOIN roles r ON r.id = tu.role_id
+                WHERE tu.user_id = $1 AND tu.status = 'active'
+                  AND r.name = 'platform_admin' AND r.tenant_scoped = FALSE
+            )
+        """, user_id, tenant_id))
+
+
+async def _check_campaign_permission(websocket, pool, user_id, tenant_id) -> bool:
+    try:
+        async with asyncio.timeout(_AUTH_TIMEOUT_SECONDS):
+            member = await _has_test_membership(pool, user_id, tenant_id)
+            permissions = await get_effective_permissions(pool, user_id, tenant_id) if member else set()
+    except Exception:
+        logger.warning("campaign_test_permission_check_failed", exc_info=True)
+        await websocket.send_json({"type": "error", "code": "authorization_unavailable",
+                                   "message": "Authorization is temporarily unavailable. Please retry."})
+        await websocket.close(code=1011, reason="Authorization unavailable")
+        return False
+    if not check_permission(permissions, Permission.CAMPAIGNS_UPDATE):
+        await websocket.send_json({"type": "error", "code": "permission_denied",
+                                   "required": Permission.CAMPAIGNS_UPDATE.value,
+                                   "message": "You do not have permission to test this campaign."})
+        await websocket.close(code=1008, reason="Permission denied")
+        return False
+    return True
+
+
+async def _watch_login_session(websocket, pool, user_id, session_id, tenant_id):
+    while True:
+        await asyncio.sleep(_AUTH_RECHECK_SECONDS)
+        if not await _check_login_session(websocket, pool, user_id, session_id, tenant_id):
+            return
+        if not await _check_campaign_permission(websocket, pool, user_id, tenant_id):
+            return
+
+
+async def _resolve_user_tenant(db_pool, user_id: str) -> Optional[str]:
+    """Resolve a signed JWT subject before the WS has a tenant context.
+
+    The compatibility ``.table()`` adapter is tenant-scoped.  A WebSocket has
+    not passed through TenantMiddleware, so using that adapter for this
+    bootstrap query installs the nil tenant and hides the user's own profile.
+    Use the trusted pooled path that REST authentication uses, with an explicit
+    subject predicate and user audit context; the caller installs the returned
+    tenant context immediately afterwards.
+
+    ``None`` means the signed subject has no tenant-backed profile.  Database
+    failures deliberately propagate so the endpoint can distinguish an auth
+    miss from a temporary backend failure.
+    """
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(db_pool, None, user_id=user_id) as conn:
+        row = await conn.fetchrow(
+            "SELECT tenant_id FROM user_profiles WHERE id = $1",
+            user_id,
+        )
+    tenant_id = row.get("tenant_id") if row else None
+    return str(tenant_id) if tenant_id else None
+
+
+async def _fetch_campaign_row(db_pool, tenant_id: str, campaign_id: str):
+    """Fetch one campaign row as a dict, scoped to ``tenant_id`` (IDOR guard).
+
+    Returns ``None`` only on a miss or malformed campaign ID. Infrastructure
+    failures remain distinguishable from tenant-scoped ownership misses.
+
+    2026-08-27: this used to be imported from
+    ``app.domain.services.telephony.lifecycle``, but the inbound refactor moved
+    that path onto a pinned admission snapshot and deleted the helper, leaving
+    this endpoint importing a symbol that no longer exists (ImportError on every
+    connection). The query is reproduced here, where its only caller lives.
+    """
+    if db_pool is None:
+        raise CampaignTestUnavailable("Campaign database unavailable")
+    try:
+        uuid.UUID(campaign_id)
+    except (ValueError, TypeError, AttributeError):
+        return None
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(db_pool, tenant_id, timeout=_AUTH_TIMEOUT_SECONDS) as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM campaigns WHERE id = $1 AND tenant_id = $2",
+                campaign_id, tenant_id,
+            )
+        return dict(row) if row else None
+    except Exception as exc:  # noqa: BLE001 — see docstring
+        logger.warning(
+            "campaign_test_campaign_fetch_failed tenant=%s campaign=%s err=%s",
+            str(tenant_id)[:8], str(campaign_id)[:8], exc,
+        )
+        raise CampaignTestUnavailable("Campaign lookup failed") from exc
+
+
+async def _record_test_call(
+    container, tenant_id, campaign_id, voice_session, config
+) -> str:
+    """Write a flagged ``calls`` row for a campaign test session.
+
+    Why a row at all: recordings, transcripts, the prompt version on the call,
+    feedback voice notes and conversation reviews all reference ``calls(id)``.
+    Without one, none of them can be exercised from the test button, which
+    defeats the purpose of having a test button.
+
+    Why it is safe: ``is_test`` is TRUE, and every query that counts money,
+    dial capacity or abuse excludes it explicitly (Alembic 0017 lists them).
+    A test session is billed nothing, consumes no dial slot, burns no lead
+    attempt and cannot trip abuse detection.
+
+    The campaign row lock and insert share the tenant-aware transaction opened
+    by ``acquire_with_tenant``. This serializes against outbound-to-inbound
+    conversion: a test must never continue when its durable row was refused.
+    """
+    pool = getattr(container, "db_pool", None)
+    if pool is None:
+        raise CampaignTestUnavailable("campaign-test database pool is unavailable")
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        # THE ROW ID MUST BE THE VOICE-SESSION ID (2026-08-23)
+        #
+        # Minting a fresh uuid4 here is what stopped transcripts appearing.
+        # turn_ender flushes each turn with
+        # `UPDATE calls ... WHERE id = <target>`, and for a browser session
+        # `_resolve_transcript_target_call_id` deliberately returns None (this
+        # session is not in the telephony map), so the target falls back to
+        # `session.call_id`. Against an unrelated random row id that matched
+        # ZERO rows, every turn, with no error raised — precisely the defect
+        # call_transcript_persister.py was written to fix for outbound calls,
+        # reintroduced here from the other direction.
+        call_uuid = str(getattr(voice_session, "call_id", "") or uuid.uuid4())
+        talklee_id = getattr(voice_session, "talklee_call_id", None) or call_uuid
+        call_uuid_value = uuid.UUID(call_uuid)
+        tenant_uuid = uuid.UUID(str(tenant_id))
+        campaign_uuid = uuid.UUID(str(campaign_id))
+        async with acquire_with_tenant(pool, str(tenant_id)) as conn:
+            campaign = await conn.fetchrow(
+                """
+                SELECT direction
+                  FROM campaigns
+                 WHERE id = $1
+                   AND tenant_id = $2
+                   FOR SHARE
+                """,
+                campaign_uuid,
+                tenant_uuid,
+            )
+            if campaign is None:
+                raise CampaignTestUnavailable(
+                    "campaign disappeared before test-call persistence"
+                )
+            direction = str(campaign.get("direction", "")).strip().lower()
+            if direction != "outbound":
+                raise CampaignTestDirectionConflict(
+                    "campaign is no longer outbound"
+                )
+            await conn.execute(
+                """
+                INSERT INTO calls (
+                    id, tenant_id, campaign_id, phone_number, status, direction,
+                    talklee_call_id, is_test,
+                    prompt_template, prompt_version, prompt_hash, created_at
+                ) VALUES ($1,$2,$3,$4,'in_progress','outbound',$5,TRUE,$6,$7,$8,NOW())
+                """,
+                call_uuid_value,
+                tenant_uuid,
+                campaign_uuid,
+                "browser-test",
+                str(talklee_id),
+                getattr(config, "prompt_template", None),
+                getattr(config, "prompt_version", None),
+                getattr(config, "prompt_hash", None),
+            )
+        logger.info(
+            "campaign_test_call_recorded call=%s campaign=%s prompt=%s — flagged "
+            "is_test, excluded from billing, concurrency and abuse",
+            call_uuid[:8], str(campaign_id)[:8],
+            getattr(config, "prompt_version", None),
+        )
+        return call_uuid
+    except CampaignTestDirectionConflict:
+        logger.info(
+            "campaign_test_call_direction_conflict campaign=%s",
+            str(campaign_id)[:8],
+        )
+        raise
+    except CampaignTestUnavailable:
+        raise
+    except Exception as exc:  # noqa: BLE001 — normalize DB uncertainty below
+        if getattr(exc, "constraint_name", None) in {
+            "calls_outbound_campaign_guard",
+            "calls_test_outbound_campaign_guard",
+        }:
+            logger.info(
+                "campaign_test_call_direction_constraint campaign=%s",
+                str(campaign_id)[:8],
+            )
+            raise CampaignTestDirectionConflict(
+                "campaign is no longer outbound"
+            ) from exc
+        logger.warning("campaign_test_call_record_failed campaign=%s",
+                       str(campaign_id)[:8], exc_info=True)
+        raise CampaignTestUnavailable(
+            "test-call persistence could not be confirmed"
+        ) from exc
+
+
+async def _finalise_test_call(container, tenant_id, call_id, started_at) -> None:
+    """Close the test row out so it looks like a finished call in the UI.
+
+    Duration is recorded because the call detail page shows it — it is NOT
+    billed, because minutes_quota sums only rows where NOT is_test.
+    """
+    if not call_id:
+        return
+    pool = getattr(container, "db_pool", None)
+    if pool is None:
+        return
+    try:
+        from app.core.db_utils import acquire_with_tenant
+
+        seconds = max(0, int(time.time() - started_at))
+        async with acquire_with_tenant(pool, str(tenant_id)) as conn:
+            await conn.execute(
+                """UPDATE calls
+                      SET status = 'completed',
+                          duration_seconds = $2,
+                          ended_at = NOW()
+                    WHERE id = $1""",
+                uuid.UUID(str(call_id)), seconds,
+            )
+        logger.info("campaign_test_call_finalised call=%s seconds=%s (not billed)",
+                    str(call_id)[:8], seconds)
+    except Exception:  # noqa: BLE001
+        logger.warning("campaign_test_call_finalise_failed call=%s",
+                       str(call_id)[:8], exc_info=True)
+
+
+async def _persist_test_transcript(voice_session, tenant_id, call_id, container) -> None:
+    """Write the test session's transcript to ``calls`` + ``transcripts``.
+
+    A phone call gets this from lifecycle's teardown. A browser test session
+    calls ``orchestrator.end_session()`` directly and never passes through that
+    path, so nothing was ever written and the call detail page showed an empty
+    transcript no matter how long you talked.
+
+    ``save_call_transcript_on_hangup`` returns early unless ``_dialer_call_id``
+    is set. That binding normally comes from ``bind_telephony_call``'s
+    ``external_call_uuid`` lookup, which has no meaning for a browser session —
+    there is no PBX channel. Setting it explicitly is how you aim the persist at
+    a row you already know the id of.
+
+    This writes the ``transcripts`` row specifically: ``GET
+    /calls/{id}/transcript`` reads that table FIRST and only falls back to
+    ``calls.transcript``, so without it the richer view (turns, word counts)
+    stays empty even once the incremental flush starts landing.
+
+    Never raises — a missing transcript must not break teardown.
+    """
+    try:
+        from app.services.scripts.call_transcript_persister import (
+            save_call_transcript_on_hangup,
+        )
+
+        pipeline = getattr(voice_session, "pipeline", None)
+        transcript_service = getattr(pipeline, "transcript_service", None)
+        if transcript_service is None:
+            # Realtime sessions have no cascaded pipeline; the bridge stashes
+            # its TranscriptService on the session itself.
+            transcript_service = getattr(voice_session, "transcript_service", None)
+        if transcript_service is None:
+            logger.info(
+                "campaign_test_transcript_skipped call=%s — no transcript service",
+                str(call_id)[:8],
+            )
+            return
+
+        voice_session._dialer_call_id = str(call_id)
+        voice_session._dialer_tenant_id = str(tenant_id)
+        await save_call_transcript_on_hangup(
+            voice_session=voice_session,
+            transcript_service=transcript_service,
+            db_pool=container.db_pool if container.is_initialized else None,
+        )
+        logger.info("campaign_test_transcript_persisted call=%s", str(call_id)[:8])
+    except Exception:  # noqa: BLE001 — see docstring
+        logger.warning(
+            "campaign_test_transcript_failed call=%s", str(call_id)[:8], exc_info=True
+        )
+
+
 @router.websocket("/ws/campaign-test/{campaign_id}")
 async def campaign_test_websocket(
     websocket: WebSocket,
@@ -107,6 +530,15 @@ async def campaign_test_websocket(
     first_speaker: str = Query(
         "agent",
         description="'agent' (agent greets first) or 'user' (caller speaks first)",
+    ),
+    allow_barge_in: bool = Query(
+        False,
+        description=(
+            "Keep barge-in on for this browser session. OFF by default: without "
+            "a carrier's echo cancellation the microphone hears the agent's own "
+            "speech and cuts it off mid-sentence every turn. Turn this on only "
+            "when wearing headphones."
+        ),
     ),
 ):
     """Browser WebSocket that runs the real agent for ``campaign_id``.
@@ -132,7 +564,16 @@ async def campaign_test_websocket(
     # ── Auth: resolve token → user → tenant ─────────────────────────────
     resolved_token = await _resolve_ws_token(websocket)
     if not resolved_token:
-        await websocket.send_json({"type": "error", "message": "Authentication required."})
+        # ``code`` is what the client retries on. It cannot use the 1008 close
+        # code: this frame is sent BEFORE the close, so the browser's onmessage
+        # fires first and the socket is already "accepted" by the time onclose
+        # runs. Matching on the message TEXT would break the moment anyone
+        # rewords it, so the contract is this stable slug.
+        await websocket.send_json({
+            "type": "error",
+            "code": "auth_required",
+            "message": "Your session has expired. Reload the page and sign in again.",
+        })
         await websocket.close(code=1008, reason="Missing auth")
         return
 
@@ -142,7 +583,13 @@ async def campaign_test_websocket(
         payload = decode_and_validate_token(resolved_token)
     except JWTValidationError as jwt_err:
         logger.info("campaign_test_ws: token verification failed: %s", jwt_err.detail)
-        await websocket.send_json({"type": "error", "message": "Invalid or expired token."})
+        # Same slug: a token that arrived but is expired is the same problem
+        # from the user's side, and the same refresh-and-retry fixes it.
+        await websocket.send_json({
+            "type": "error",
+            "code": "auth_required",
+            "message": "Your session has expired. Reload the page and sign in again.",
+        })
         await websocket.close(code=1008, reason="Invalid token")
         return
 
@@ -154,22 +601,27 @@ async def campaign_test_websocket(
 
     from app.api.v1.dependencies import get_db_client
 
-    db_client = get_db_client()
     try:
-        profile = db_client.table("user_profiles").select(
-            "tenant_id"
-        ).eq("id", user_id).single().execute()
-        tenant_id = (
-            str(profile.data.get("tenant_id"))
-            if profile.data and profile.data.get("tenant_id")
-            else None
-        )
-    except Exception as profile_err:  # noqa: BLE001
-        logger.error("campaign_test_ws: profile lookup failed: %s", profile_err)
-        tenant_id = None
+        db_client = get_db_client()
+        if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid"), payload.get("tenant_id")):
+            return
+        tenant_id = await _resolve_user_tenant(db_client.pool, user_id)
+    except Exception:  # noqa: BLE001 — return a stable, non-sensitive WS error
+        logger.error("campaign_test_ws: profile lookup failed", exc_info=True)
+        await websocket.send_json({
+            "type": "error",
+            "code": "profile_lookup_failed",
+            "message": "Unable to load your user profile. Please try again.",
+        })
+        await websocket.close(code=1011, reason="Profile lookup failed")
+        return
 
     if not tenant_id:
-        await websocket.send_json({"type": "error", "message": "User profile not found."})
+        await websocket.send_json({
+            "type": "error",
+            "code": "profile_not_found",
+            "message": "User profile not found.",
+        })
         await websocket.close(code=1008, reason="No tenant")
         return
 
@@ -180,7 +632,6 @@ async def campaign_test_websocket(
 
     # ── Fetch the campaign row, scoped to this tenant (IDOR guard) ───────
     from app.core.container import get_container
-    from app.domain.services.telephony.lifecycle import _fetch_campaign_row
 
     container = get_container()
     if not container.is_initialized:
@@ -188,53 +639,173 @@ async def campaign_test_websocket(
         await websocket.close(code=1011, reason="Container not initialized")
         return
 
-    campaign_row = await _fetch_campaign_row(container.db_pool, tenant_id, campaign_id)
+    if not await _check_campaign_permission(websocket, container.db_pool, user_id, tenant_id):
+        return
+
+    refusal = await _tenant_test_refusal(container.db_pool, tenant_id)
+    if refusal is not None:
+        logger.info("campaign_test_ws refused tenant=%s reason=%s", str(tenant_id)[:8], refusal)
+        await websocket.send_json({"type": "error", "code": "tenant_not_allowed",
+                                   "message": "Test calls are unavailable for this account."})
+        await websocket.close(code=1008, reason="Tenant not allowed")
+        return
+    tenant_sem = _get_tenant_semaphore(str(tenant_id))
+    if tenant_sem.locked():
+        await websocket.send_json({"type": "error", "code": "tenant_test_limit",
+                                   "message": "Too many test sessions are already running for your account."})
+        await websocket.close(code=1013)
+        return
+
+    try:
+        campaign_row = await asyncio.wait_for(
+            _fetch_campaign_row(container.db_pool, tenant_id, campaign_id), timeout=_AUTH_TIMEOUT_SECONDS,
+        )
+    except (CampaignTestUnavailable, TimeoutError):
+        await websocket.send_json({"type": "error", "code": "campaign_lookup_failed",
+                                   "message": "Unable to load this campaign. Please retry."})
+        await websocket.close(code=1011, reason="Campaign lookup unavailable")
+        return
     if campaign_row is None:
         await websocket.send_json({"type": "error", "message": "Campaign not found."})
         await websocket.close(code=1008, reason="Campaign not found")
         return
+    if str(campaign_row.get("direction", "outbound")).strip().lower() != "outbound":
+        await websocket.send_json(
+            {
+                "type": "error",
+                "code": "inbound_campaign_managed_separately",
+                "message": (
+                    "Inbound campaigns must be tested through the inbound "
+                    "campaign lifecycle."
+                ),
+                "campaign_ids": [str(campaign_id)],
+            }
+        )
+        await websocket.close(code=1008, reason="Inbound campaign")
+        return
 
-    # ── First-speaker → Direction (chosen BEFORE create_voice_session so the
-    #    realtime bridge is built with the correct greet_on_start) ─────────
-    from app.domain.services.voice_orchestrator import Direction
+    # ── Direction and opening mode are two facts. This tests an OUTBOUND
+    #    campaign, full stop; first_speaker only decides who opens. Chosen
+    #    BEFORE create_voice_session so the realtime bridge is built with the
+    #    correct greet_on_start. ────────────────────────────────────────────
+    from app.domain.services.voice_orchestrator import (
+        Direction,
+        opening_mode_from_first_speaker,
+    )
     from app.domain.services.telephony_session_config import (
         build_telephony_session_config,
     )
+    from app.domain.services.campaign_prompt_service import CampaignPromptValidationError
     from app.domain.services.tenant_ai_config_resolver import (
         get_tenant_ai_config_resolver,
+        TenantAIConfigUnavailable,
     )
     from app.domain.services.voice_tuning import get_voice_tuning_resolver
 
     fs = "user" if (first_speaker or "").strip().lower() == "user" else "agent"
-    direction = Direction.from_first_speaker(fs)
+    direction = Direction.OUTBOUND
+    opening_mode = opening_mode_from_first_speaker(fs)
 
     logger.info(
-        "campaign_test_ws start campaign=%s tenant=%s first_speaker=%s",
-        str(campaign_id)[:8], str(tenant_id)[:8], fs,
+        "campaign_test_ws start campaign=%s tenant=%s direction=%s opening_mode=%s "
+        "first_speaker=%s allow_barge_in=%s",
+        str(campaign_id)[:8], str(tenant_id)[:8], direction.value, opening_mode,
+        fs, allow_barge_in,
     )
 
     voice_session = None
     receiver_task: Optional[asyncio.Task] = None
+    auth_task: Optional[asyncio.Task] = None
+    test_call_id = None
+    test_started_at = time.time()
 
-    async with sem:
+    async with sem, tenant_sem:
         try:
             # Resolve the tenant's LIVE AI Options exactly like a phone call.
             # These resolvers are cache-bypassed, so an AI-Options edit takes
             # effect on the next connection (requirement: test agent reacts to
             # AI Options).
-            ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(tenant_id)
-            vt = await get_voice_tuning_resolver().for_tenant_async(tenant_id)
+            try:
+                async with asyncio.timeout(_AUTH_TIMEOUT_SECONDS):
+                    ai_cfg = await get_tenant_ai_config_resolver().for_tenant_async(tenant_id, require_available=True)
+                    vt = await get_voice_tuning_resolver().for_tenant_async(tenant_id, require_available=True)
+            except (TenantAIConfigUnavailable, TimeoutError):
+                logger.warning("campaign_test_ai_config_unavailable tenant=%s", tenant_id, exc_info=True)
+                await websocket.send_json({"type": "error", "code": "ai_config_unavailable",
+                                           "message": "Unable to load your AI settings. Please retry."})
+                await websocket.close(code=1011, reason="AI configuration unavailable")
+                return
 
             config = build_telephony_session_config(
                 gateway_type="browser",
                 campaign=campaign_row,
                 direction=direction,
+                opening_mode=opening_mode,
                 ai_config_override=ai_cfg,
                 voice_tuning_override=vt,
+                allow_browser_barge_in=allow_barge_in,
             )
+            # Same end-of-turn floor as a caller-first phone call (TT-3,
+            # telephony/prewarm.py). At 500 ms test call 6b9cd4c4 cut "Who is
+            # this?" / "Hello? Can you listen?" into separate turns.
+            if fs == "user":
+                from app.domain.services.telephony.prewarm import callee_first_eot_timeout
+                config.stt_eot_timeout_ms = callee_first_eot_timeout(getattr(config, "stt_eot_timeout_ms", None))
 
             orchestrator = container.voice_orchestrator
+            from app.services.scripts.knowledge.session_inject import apply_campaign_knowledge
+            await apply_campaign_knowledge(config, campaign_row, pool=container.db_pool)
+            # Configuration resolution awaited I/O. Recheck the original
+            # login/tenant and current grants immediately before provider use.
+            if not await _check_login_session(websocket, db_client.pool, user_id, payload.get("sid"), tenant_id):
+                return
+            if not await _check_campaign_permission(websocket, container.db_pool, user_id, tenant_id):
+                return
             voice_session = await orchestrator.create_voice_session(config)
+
+            # ── Give the test call a real row (Alembic 0017) ──────────────
+            # Without one, nothing that hangs off a call could be tested from
+            # here: recordings, transcripts, the prompt version on the row,
+            # feedback voice notes and conversation reviews all reference
+            # calls(id). The row is flagged is_test, and every query that
+            # counts money, dial capacity or abuse excludes it explicitly —
+            # minutes_quota, billing, dialer concurrency, the per-lead daily
+            # cap, all five abuse checks and telephony observability.
+            #
+            # Created AFTER the session exists. A final locked direction check
+            # prevents a conversion race from leaving an outbound browser
+            # session running without an accepted outbound test-call row.
+            try:
+                test_call_id = await _record_test_call(
+                    container, tenant_id, campaign_id, voice_session, config
+                )
+            except CampaignTestDirectionConflict:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "inbound_campaign_managed_separately",
+                        "message": (
+                            "Inbound campaigns must be tested through the inbound "
+                            "campaign lifecycle."
+                        ),
+                        "campaign_ids": [str(campaign_id)],
+                    }
+                )
+                await websocket.close(code=1008, reason="Inbound campaign")
+                return
+            except CampaignTestUnavailable:
+                await websocket.send_json(
+                    {
+                        "type": "error",
+                        "code": "campaign_test_unavailable",
+                        "message": (
+                            "Campaign testing is temporarily unavailable. "
+                            "Please try again."
+                        ),
+                    }
+                )
+                await websocket.close(code=1011, reason="Campaign test unavailable")
+                return
 
             # Per-call first-speaker on the session (phone path sets both).
             # Also opt this test call into the natural silence handling so it
@@ -248,6 +819,24 @@ async def campaign_test_websocket(
                 if _cs is not None:
                     _cs._first_speaker = fs
                     _cs._enable_silence_monitor = True
+                    # test-agent-mute-only-on-greeting (2026-09-23):
+                    # tts_playback.synthesize_and_send reads this off the
+                    # CallSession (the object it actually receives) to mute
+                    # STT for every agent utterance, not just the greeting.
+                    # Real phone calls never set this, so it defaults False
+                    # there — telephony keeps mute_during_tts False by design.
+                    _cs._mute_during_tts = bool(config.mute_during_tts)
+                    # The test call's own row and the fact that it is a test:
+                    # contact capture then knows at once never to write lead
+                    # data, and tells the model the detail is recorded as it
+                    # would be on a real call (contact_recording,
+                    # "saved_test_call"). Before this, the binding was only set
+                    # at teardown, so every in-call save looked like a failure.
+                    if test_call_id:
+                        _cs._dialer_call_id = str(test_call_id)
+                        _cs._dialer_tenant_id = str(tenant_id)
+                        _cs._dialer_campaign_id = str(campaign_id)
+                        _cs._lead_capture_is_test = True
             except Exception:  # noqa: BLE001
                 pass
 
@@ -255,9 +844,11 @@ async def campaign_test_websocket(
             gateway = voice_session.media_gateway
             is_realtime = getattr(voice_session, "realtime_bridge", None) is not None
 
-            # Caller-first cascaded: re-frame the prompt as an inbound receiver.
-            # (direction=INBOUND already composes inbound, so this is an
-            # idempotent no-op belt-and-braces — matches the phone path.)
+            # Callee-first cascaded: make sure the callee-speaks-first directive
+            # leads the prompt. opening_mode="callee_first" already composed it,
+            # so this is an idempotent no-op belt-and-braces — matches the
+            # phone path. It is NOT inbound framing: the directive itself says
+            # "OUTBOUND CALL — CALLEE SPEAKS FIRST".
             if not is_realtime and fs == "user":
                 try:
                     from app.domain.services.telephony.modes.caller_first import (
@@ -267,6 +858,34 @@ async def campaign_test_websocket(
                     select_inbound_base_prompt(voice_session)
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("campaign_test_ws inbound prompt swap failed: %s", exc)
+
+            # Knowledge was pinned before either provider runtime connected.
+            logger.info(
+                "campaign_test_knowledge_applied campaign=%s mode=%s",
+                str(campaign_id)[:8],
+                getattr(getattr(voice_session, "call_session", None), "knowledge_mode", None),
+            )
+
+            # ── Warm the model's prompt cache, as a phone call's prewarm does.
+            #    This endpoint skips prewarm, so every test's first turn ran
+            #    on a cold cache: 2026-10-01 GPT-6 Luna needed 8.5 s cold and
+            #    0.7-1.3 s warm, and the first turn failed over to the backup.
+            #    Background and fail-soft: a warm-up must never stop a test.
+            if not is_realtime and getattr(voice_session, "llm_provider", None) is not None:
+                async def _warm_test_llm():
+                    try:
+                        from app.domain.services.telephony.modes.agent_first import (
+                            warm_llm_stream,
+                        )
+
+                        await warm_llm_stream(voice_session)
+                    except Exception as _warm_exc:  # noqa: BLE001
+                        logger.info(
+                            "campaign_test_llm_warm_failed call=%s err=%s",
+                            str(call_id)[:8], _warm_exc,
+                        )
+
+                asyncio.create_task(_warm_test_llm())
 
             # Rates come off the gateway AFTER create — realtime forces 8 kHz.
             out_rate = getattr(gateway, "_sample_rate", config.gateway_sample_rate)
@@ -316,7 +935,7 @@ async def campaign_test_websocket(
                         if data.get("type") == "playback_complete":
                             mark = getattr(gateway, "mark_playback_complete", None)
                             if callable(mark):
-                                mark(call_id)
+                                mark(call_id, data.get("utterance_id"))
                             continue
                         # {"type":"auth"} frames (sent by cookie-mode clients that
                         # also send a bearer frame) are ignored here.
@@ -354,7 +973,18 @@ async def campaign_test_websocket(
                     )
                     from app.domain.models.conversation import Message, MessageRole
 
-                    greeting = _build_outbound_greeting(voice_session)
+                    # The CallSession, exactly as the phone path does
+                    # (lifecycle.py). The VoiceSession wrapper carries no
+                    # agent_config, persona_type or call_reason, so the Test
+                    # agent resolved its opener from different inputs than a
+                    # live call -- the one thing it exists not to do -- and
+                    # logged company_name_fallback on every test call (every
+                    # such warning in the 30 days to 2026-09-23 came from
+                    # here). Today's outbound openers are bare hellos, so the
+                    # difference was not audible; the inputs must still match.
+                    greeting = _build_outbound_greeting(
+                        getattr(voice_session, "call_session", None) or voice_session
+                    )
                     await orchestrator.send_greeting(voice_session, greeting, websocket)
                     # Seed history so the LLM doesn't re-greet on the first turn.
                     try:
@@ -363,10 +993,70 @@ async def campaign_test_websocket(
                         )
                     except Exception:  # noqa: BLE001
                         pass
+                    # BUG (greeting-and-disclosure-not-persisted, 2026-09-23):
+                    # the append above only feeds the LLM's own in-memory
+                    # context. transcript_json (and the summary/UI transcript)
+                    # is filled exclusively by TranscriptService.accumulate_turn
+                    # — nothing on this path ever called it, so a Test-agent
+                    # call's opener was spoken (verified live on adf41aa1) but
+                    # never appeared in the saved transcript. Accumulate it
+                    # too, same as a live call's first assistant turn.
+                    try:
+                        _pipeline = getattr(voice_session, "pipeline", None)
+                        _transcript_service = getattr(_pipeline, "transcript_service", None)
+                        if _transcript_service is not None:
+                            _transcript_service.accumulate_turn(
+                                call_id=voice_session.call_id,
+                                role="assistant",
+                                content=greeting,
+                                talklee_call_id=getattr(voice_session, "talklee_call_id", None),
+                                turn_index=0,
+                                event_type="assistant_response",
+                                is_final=True,
+                                include_in_plaintext=True,
+                            )
+                    except Exception:  # noqa: BLE001
+                        pass
                 # caller-first: send nothing; the pipeline reacts to the first turn.
 
-            await receiver_task
+            auth_task = asyncio.create_task(_watch_login_session(
+                websocket, container.db_pool, user_id, payload.get("sid"), tenant_id,
+            ))
+            waiters = {receiver_task, auth_task}
+            realtime_task = voice_session.pipeline_task if is_realtime else None
+            if realtime_task is not None:
+                waiters.add(realtime_task)
+            done, _ = await asyncio.wait(waiters, return_when=asyncio.FIRST_COMPLETED)
+            if realtime_task is not None and realtime_task in done:
+                # The realtime connection stopped while the browser was still
+                # connected. Say so and end the test, instead of leaving the
+                # tester speaking into a line nobody is listening to
+                # (980a2caa, 0457b4b9: 30-60 s of dropped audio after it ended).
+                reason = None
+                if not realtime_task.cancelled() and realtime_task.exception():
+                    reason = str(realtime_task.exception())
+                logger.warning(
+                    "campaign_test_realtime_ended call=%s reason=%s",
+                    call_id[:8], reason or "ended",
+                )
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "code": "realtime_ended",
+                        "message": "The realtime voice stopped"
+                        + (f": {reason}" if reason else "."),
+                    })
+                    await websocket.close(code=1011, reason="realtime ended")
+                except Exception:  # noqa: BLE001 - the socket may already be gone
+                    pass
+            for task in done:
+                if task is not realtime_task:
+                    await task
 
+        except CampaignPromptValidationError as exc:
+            await websocket.send_json({"type": "error", "code": "campaign_prompt_invalid",
+                                       "message": str(exc)})
+            await websocket.close(code=1008, reason="Invalid campaign prompt")
         except WebSocketDisconnect:
             logger.info("campaign_test_ws disconnected campaign=%s", str(campaign_id)[:8])
         except Exception as e:  # noqa: BLE001
@@ -377,12 +1067,83 @@ async def campaign_test_websocket(
             except Exception:  # noqa: BLE001
                 pass
         finally:
+            if auth_task:
+                auth_task.cancel()
+                try:
+                    await auth_task
+                except asyncio.CancelledError:
+                    pass
+                except Exception:
+                    logger.warning("campaign_test_auth_task_cleanup_failed", exc_info=True)
             if receiver_task and not receiver_task.done():
                 receiver_task.cancel()
                 try:
                     await receiver_task
                 except asyncio.CancelledError:
                     pass
-            if voice_session:
-                await container.voice_orchestrator.end_session(voice_session)
+                except Exception:
+                    logger.warning("campaign_test_receiver_cleanup_failed", exc_info=True)
+            # BEFORE teardown, like the phone path: end_session cancels the
+            # pipeline, and the transcript buffer lives on that pipeline's
+            # transcript_service. Persist first or there is nothing left to read.
+            # Each obligation runs even if another fails or is cancelled.
+            # Nested finally preserves caller cancellation after cleanup.
+            try:
+                if voice_session and test_call_id:
+                    # BUG (adf41aa1, hangup-vs-inflight-reply, 2026-09-23): the
+                    # tester's "Hi" got a reply that finished generating 10ms
+                    # AFTER end_call, but _persist_test_transcript below used
+                    # to run before anything cancelled/awaited that in-flight
+                    # turn, so the persist read the buffer 2ms too early and
+                    # raced a task that could otherwise still be writing to
+                    # it. end_session() further down does cancel the turn,
+                    # but only AFTER persist — too late for that race.
+                    # Cancel (and await settling of) it here first, with the
+                    # session's own call_id (what _pending_llm_tasks is keyed
+                    # by — see lifecycle.py's teardown for the same id rule).
+                    #
+                    # SCOPE / KNOWN GAP (review 2026-09-24 — NOT fixed, needs
+                    # a file outside this fix's fence): this ordering change
+                    # closes the RACE, but it cannot by itself bring back
+                    # adf41aa1's specific lost reply, because a genuinely
+                    # CANCELLED turn's spoken partial is committed only to
+                    # session.conversation_history (the LLM's own context —
+                    # turn_runner.py's `except asyncio.CancelledError` branch,
+                    # ~line 690-697) and never reaches
+                    # transcript_service.accumulate_turn. So no ordering of
+                    # cancel-vs-persist can recover it into transcript_json;
+                    # that needs a change inside turn_runner.py, which the
+                    # brief marks read-only for this fix. See
+                    # tests/unit/test_turn_runner_cancelled_reply_missing_
+                    # from_transcript.py for the reproduction.
+                    try:
+                        _pipeline = getattr(voice_session, "pipeline", None)
+                        if _pipeline is not None:
+                            await asyncio.wait_for(
+                                _pipeline.cancel_active_turn(voice_session.call_id),
+                                timeout=_CLEANUP_TIMEOUT_SECONDS,
+                            )
+                    except Exception:
+                        logger.warning("campaign_test_pre_persist_cancel_failed", exc_info=True)
+                    try:
+                        await asyncio.wait_for(_persist_test_transcript(
+                            voice_session, tenant_id, test_call_id, container,
+                        ), timeout=_CLEANUP_TIMEOUT_SECONDS)
+                    except Exception:
+                        logger.warning("campaign_test_transcript_cleanup_failed", exc_info=True)
+            finally:
+                try:
+                    if voice_session:
+                        try:
+                            await asyncio.wait_for(container.voice_orchestrator.end_session(voice_session),
+                                                   timeout=_CLEANUP_TIMEOUT_SECONDS)
+                        except Exception:
+                            logger.warning("campaign_test_session_cleanup_failed", exc_info=True)
+                finally:
+                    try:
+                        await asyncio.wait_for(_finalise_test_call(
+                            container, tenant_id, test_call_id, test_started_at,
+                        ), timeout=_CLEANUP_TIMEOUT_SECONDS)
+                    except Exception:
+                        logger.warning("campaign_test_row_finalization_failed", exc_info=True)
             logger.info("campaign_test_ws session ended campaign=%s", str(campaign_id)[:8])

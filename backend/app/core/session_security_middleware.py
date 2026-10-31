@@ -33,6 +33,7 @@ from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
+from app.core.api_security_middleware import resolve_client_ip
 from app.core.config import get_settings
 from app.core.container import get_db_pool_from_container
 from app.core.security.device_fingerprint import generate_device_fingerprint
@@ -103,10 +104,31 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
         ip_address = self._get_client_ip(request)
         fingerprint = generate_device_fingerprint(request)
 
-        # Validate session with binding
+        # Validate session with binding.
+        #
+        # This runs BEFORE any tenant is known, and validate_session joins
+        # user_profiles, which is under forced RLS since 0038. A raw
+        # pool.acquire() carries no app.bypass_rls, so from 2026-08-30 the join
+        # returned no row for EVERY live session: the cookie was silently
+        # rejected and deleted on the first request after login (0 validations
+        # in 72 h, last_active_at never moved). Use the bypass path that REST's
+        # _resolve_cookie_session already uses — the lookup is bounded by the
+        # token hash, not by tenant.
+        # The connection is released BEFORE the request runs. acquire_with_tenant
+        # wraps the lookup in a transaction; an idle-timeout revoke inside it is
+        # an uncommitted UPDATE on the session row. Until 2026-09-10 call_next ran
+        # INSIDE that block, so the endpoint's own validate_session (get_current_user)
+        # tried to revoke the same row, waited on the row lock, hit the asyncpg
+        # statement timeout and the request died with a 500 — losing the
+        # cookie-clearing header, so the browser retried with the dead cookie
+        # every poll (8 identical 500s in one prod day). Validate, close, then act.
+        session: dict | None = None
+        validated = False
         try:
+            from app.core.db_utils import acquire_with_tenant
+
             pool = get_db_pool_from_container()
-            async with pool.acquire() as conn:
+            async with acquire_with_tenant(pool, None) as conn:
                 session = await validate_session(
                     conn,
                     session_cookie,
@@ -114,38 +136,54 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
                     current_fingerprint=fingerprint,
                     strict_binding=SESSION_STRICT_BINDING,
                 )
-
-                if session is None:
-                    # Session invalid - clear cookie to prevent loops
-                    response = await call_next(request)
-                    response.delete_cookie(
-                        key=SESSION_COOKIE_NAME,
-                        httponly=True,
-                        secure=_session_cookie_secure(),
-                        samesite="strict",
-                        path="/",
-                    )
-                    return response
-
-                # Check for suspicious activity
-                if session.get("is_suspicious"):
-                    await self._handle_suspicious_session(
-                        request, session, ip_address, fingerprint
-                    )
-
-                # Check if verification required
-                if session.get("requires_verification"):
-                    return self._require_verification_response()
-
-                # Store session info in request state for endpoints
-                request.state.session_id = session.get("id")
-                request.state.session_user_id = session.get("user_id")
-                request.state.session_is_suspicious = session.get("is_suspicious")
-                request.state.session_device_name = session.get("device_name")
-
+            validated = True
         except Exception as e:
             # Log but don't block on middleware errors
-            logger.error(f"Session security middleware error: {e}")
+            logger.error("Session security middleware error: %r", e)
+
+        if validated and session is None:
+            # Session invalid - clear cookie to prevent loops. Say so:
+            # this path had no log line, which is how a dead cookie went
+            # unnoticed for nine days.
+            logger.info(
+                "session cookie rejected (unknown, revoked, expired or idle) — clearing it path=%s",
+                request.url.path,
+            )
+            response = await call_next(request)
+            if response.status_code in {401, 403, 409} or request.headers.get("X-Talky-Expected-User") is not None:
+                # A late rejected request must not erase a newer browser login.
+                return response
+            response.delete_cookie(
+                key=SESSION_COOKIE_NAME,
+                httponly=True,
+                secure=_session_cookie_secure(),
+                samesite="strict",
+                path="/",
+            )
+            return response
+
+        if validated and session is not None:
+            # Report the moment a session BECOMES suspicious, not every request
+            # it stays that way. The flag is sticky, so this used to fire on
+            # every call a flagged session made: 2,994 warnings in the week to
+            # 2026-09-23, one session alone 1,197, all from two legitimate
+            # users on one IP. A real hijack would have been one line among
+            # thousands. The state itself is unchanged and still exposed on
+            # request.state below.
+            if session.get("became_suspicious"):
+                await self._handle_suspicious_session(
+                    request, session, ip_address, fingerprint
+                )
+
+            # Check if verification required
+            if session.get("requires_verification"):
+                return self._require_verification_response()
+
+            # Store session info in request state for endpoints
+            request.state.session_id = session.get("id")
+            request.state.session_user_id = session.get("user_id")
+            request.state.session_is_suspicious = session.get("is_suspicious")
+            request.state.session_device_name = session.get("device_name")
 
         return await call_next(request)
 
@@ -167,11 +205,7 @@ class SessionSecurityMiddleware(BaseHTTPMiddleware):
         Respects X-Forwarded-For when behind a trusted reverse proxy.
         Falls back to the direct connection IP.
         """
-        forwarded_for = request.headers.get("X-Forwarded-For")
-        if forwarded_for:
-            # X-Forwarded-For: client, proxy1, proxy2 — take the leftmost
-            return forwarded_for.split(",")[0].strip()
-        return request.client.host if request.client else "unknown"
+        return resolve_client_ip(request)
 
     async def _handle_suspicious_session(
         self,

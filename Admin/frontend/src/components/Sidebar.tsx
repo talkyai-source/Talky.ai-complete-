@@ -3,35 +3,27 @@ import {
     LayoutDashboard,
     Building2,
     Phone,
+    PhoneIncoming,
     FileText,
     Link2,
     DollarSign,
     AlertTriangle,
     Activity,
     Users,
+    Inbox,
+    LifeBuoy,
 } from 'lucide-react';
+import { useAuth } from '../lib/auth';
+import { ADMIN_ROUTES, canAccessAdminRoute } from '../lib/admin-routes';
 
-interface NavItem {
-    id: string;
-    label: string;
-    icon: React.ReactNode;
-    path: string;
-}
-
-const navItems: NavItem[] = [
-    { id: 'command-center', label: 'Command Center', icon: <LayoutDashboard />, path: '/' },
-    { id: 'tenants', label: 'Tenants', icon: <Building2 />, path: '/tenants' },
-    { id: 'users', label: 'Users & Roles', icon: <Users />, path: '/users' },
-    { id: 'calls', label: 'Calls', icon: <Phone />, path: '/calls' },
-    { id: 'actions', label: 'Actions', icon: <FileText />, path: '/actions' },
-    { id: 'connectors', label: 'Connectors', icon: <Link2 />, path: '/connectors' },
-    { id: 'usage-cost', label: 'Usage & Cost', icon: <DollarSign />, path: '/usage-cost' },
-    { id: 'incidents', label: 'Incidents', icon: <AlertTriangle />, path: '/incidents' },
-    { id: 'system-health', label: 'System Health', icon: <Activity />, path: '/system-health' },
-];
+const icons = { 'command-center': <LayoutDashboard />, tenants: <Building2 />, enquiries: <Inbox />,
+    users: <Users />, calls: <Phone />, inbound: <PhoneIncoming />, actions: <FileText />,
+    connectors: <Link2 />, 'usage-cost': <DollarSign />, incidents: <AlertTriangle />, 'system-health': <Activity />,
+    support: <LifeBuoy /> };
 
 export function Sidebar() {
     const location = useLocation();
+    const { user } = useAuth();
 
     const isActive = (path: string) => {
         if (path === '/') {
@@ -50,13 +42,13 @@ export function Sidebar() {
             </div>
 
             <nav className="sidebar-nav">
-                {navItems.map((item) => (
+                {ADMIN_ROUTES.filter((item) => canAccessAdminRoute(item.path, user?.role)).map((item) => (
                     <Link
                         key={item.id}
                         to={item.path}
                         className={`sidebar-nav-item ${isActive(item.path) ? 'active' : ''}`}
                     >
-                        {item.icon}
+                        {icons[item.id]}
                         <span>{item.label}</span>
                     </Link>
                 ))}

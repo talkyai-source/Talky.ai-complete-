@@ -1,0 +1,58 @@
+F.FFF.                                                                   [100%]
+================================== FAILURES ===================================
+_ test_ringing_status_await_cannot_recreate_terminal_or_replace_selected_owner[terminal] _
+tests\unit\test_selected_warmup_lifecycle.py:314: in test_ringing_status_await_cannot_recreate_terminal_or_replace_selected_owner
+    answered.orchestrator.create_voice_session.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+ERROR    app.domain.services.telephony.lifecycle:lifecycle.py:2319 Ringing warmup failed for call: 'types.SimpleNamespace' object has no attribute 'tts_provider'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\app\domain\services\telephony\lifecycle.py", line 2214, in _on_ringing
+    _tts_connect = getattr(voice_session.tts_provider, "connect_for_call", None)
+                           ^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'types.SimpleNamespace' object has no attribute 'tts_provider'
+_ test_ringing_factory_await_cannot_publish_after_ownership_changes[terminal] _
+tests\unit\test_selected_warmup_lifecycle.py:336: in test_ringing_factory_await_cannot_publish_after_ownership_changes
+    answered.end.assert_awaited_once_with(created)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+ERROR    app.domain.services.telephony.lifecycle:lifecycle.py:2319 Ringing warmup failed for call: 'dict' object has no attribute 'add'
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\app\domain\services\telephony\lifecycle.py", line 2208, in _on_ringing
+    voice_session = await orchestrator.create_voice_session(config)
+                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py", line 2302, in _execute_mock_call
+    result = await effect(*args, **kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\tests\unit\test_selected_warmup_lifecycle.py", line 325, in create
+    answered.adapter._end_dispatched.add("call")
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: 'dict' object has no attribute 'add'
+_ test_ringing_factory_await_cannot_publish_after_ownership_changes[selected_session] _
+tests\unit\test_selected_warmup_lifecycle.py:336: in test_ringing_factory_await_cannot_publish_after_ownership_changes
+    answered.end.assert_awaited_once_with(created)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_ringing_factory_await_cannot_publish_after_ownership_changes[lost_reservation] _
+tests\unit\test_selected_warmup_lifecycle.py:336: in test_ringing_factory_await_cannot_publish_after_ownership_changes
+    answered.end.assert_awaited_once_with(created)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+=========================== short test summary info ===========================
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_ringing_status_await_cannot_recreate_terminal_or_replace_selected_owner[terminal]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_ringing_factory_await_cannot_publish_after_ownership_changes[terminal]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_ringing_factory_await_cannot_publish_after_ownership_changes[selected_session]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_ringing_factory_await_cannot_publish_after_ownership_changes[lost_reservation]
+4 failed, 2 passed, 20 deselected in 5.61s

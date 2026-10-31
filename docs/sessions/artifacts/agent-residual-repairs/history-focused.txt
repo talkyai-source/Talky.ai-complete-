@@ -1,0 +1,4 @@
+........................................................................ [ 69%]
+................................                                         [100%]
+104 passed, 30 warnings in 7.47s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 45, 'prohibited': 0}

@@ -10,13 +10,14 @@ Tests verify:
 from __future__ import annotations
 
 import json
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from app.domain.services.call_summary.store import generate_and_store
+from app.domain.services.call_summary.business_details import transcript_revision
 from app.domain.services.call_summary.summarizer import SUMMARY_UNAVAILABLE_HEADLINE
 
 # ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ _CALL_ID = "00000000-0000-0000-0000-000000000002"
 
 _EXISTING_SUMMARY = {
     "headline": "Already summarized",
+    "business_details": [],
     "outcome": "qualified",
     "what_happened": "Quick intro call",
     "key_points": [],
@@ -41,6 +43,7 @@ _EXISTING_SUMMARY = {
 
 _FAKE_SUMMARY = {
     "headline": "Fresh summary",
+    "business_details": [],
     "outcome": "qualified",
     "what_happened": "Discussed the product features.",
     "key_points": ["interested in API"],
@@ -70,8 +73,41 @@ _FAILED_SUMMARY = {
 
 def _make_conn(row):
     """Return a minimal async-compatible connection fake."""
+    if row and row.get("summary_json"):
+        row.setdefault("summary_transcript_hash", transcript_revision(row))
     conn = MagicMock()
     conn.fetchrow = AsyncMock(return_value=row)
+    conn.execute = AsyncMock(return_value=None)
+    return conn
+
+
+# A call with a real conversation: 4 caller turns, 90 s (2026-09-07 gate).
+_SUBSTANCE_OK = {
+    "duration_seconds": 90,
+    "transcript_json": [
+        {"role": "assistant", "content": "Hi, this is Sarah from Dojo."},
+        {"role": "user", "content": "Yes, who is this?"},
+        {"role": "assistant", "content": "We help restaurants with payments."},
+        {"role": "user", "content": "We take cards already, what are your rates?"},
+        {"role": "assistant", "content": "It depends on volume, can I send details?"},
+        {"role": "user", "content": "Sure, send them to me."},
+        {"role": "user", "content": "And call me back Tuesday."},
+    ],
+}
+# The complaint that prompted the gate: a 25 s call where the caller said one thing.
+_SUBSTANCE_THIN = {
+    "duration_seconds": 25,
+    "transcript_json": [
+        {"role": "assistant", "content": "Hi, this is Sarah from Dojo."},
+        {"role": "user", "content": "Hello?"},
+    ],
+}
+
+
+def _make_lead_conn(lead_row, substance=_SUBSTANCE_OK):
+    """mark_lead_from_summary reads the call (substance gate) then UPDATEs the lead."""
+    conn = MagicMock()
+    conn.fetchrow = AsyncMock(side_effect=[substance, lead_row])
     conn.execute = AsyncMock(return_value=None)
     return conn
 
@@ -82,12 +118,13 @@ async def _fake_acquire(conn):
     yield conn
 
 
+@contextmanager
 def _patch_acquire(conn):
-    """Return a patch context for acquire_with_tenant that yields *conn*."""
-    return patch(
-        "app.domain.services.call_summary.store.acquire_with_tenant",
-        side_effect=lambda pool, tenant_id: _fake_acquire(conn),
-    )
+    factory = lambda pool, tenant_id: _fake_acquire(conn)
+    with patch("app.domain.services.call_summary.store.acquire_with_tenant", side_effect=factory), patch(
+        "app.core.db_utils.acquire_with_tenant", side_effect=factory,
+    ):
+        yield
 
 
 # ---------------------------------------------------------------------------
@@ -114,7 +151,7 @@ class TestGenerateAndStore:
         mock_summarize.assert_not_called()
         # Idempotent: the summary row is NOT re-written. (Lead-marking self-heal
         # may run a leads UPDATE — assert only that no summary write happened.)
-        assert not any("UPDATE calls" in c.args[0] for c in conn.execute.await_args_list)
+        assert not any("SET summary_json" in c.args[0] for c in conn.execute.await_args_list)
 
     async def test_idempotent_str_summary_json(self):
         """summary_json already set as JSON string (no codec) → parse + return."""
@@ -133,7 +170,7 @@ class TestGenerateAndStore:
 
         assert result == _EXISTING_SUMMARY
         mock_summarize.assert_not_called()
-        assert not any("UPDATE calls" in c.args[0] for c in conn.execute.await_args_list)
+        assert not any("SET summary_json" in c.args[0] for c in conn.execute.await_args_list)
 
     async def test_force_re_summarizes_even_if_summary_exists(self):
         """force=True → summarizer called + UPDATE issued even when summary_json set."""
@@ -172,7 +209,18 @@ class TestGenerateAndStore:
                 result = await generate_and_store(None, _TENANT_ID, _CALL_ID)
 
         assert result == _FAKE_SUMMARY
-        mock_summarize.assert_awaited_once_with("Agent: Hello there!\nCaller: Hi, I'm interested.")
+        # Current invariant (2026-09-24, issue "summary states unconfirmed data
+        # as fact"): generate_and_store also hands the summarizer this call's
+        # ground truth — which contacts were actually confirmed and which
+        # actions actually executed — not just the transcript text. Both come
+        # back empty here since pool=None makes the confirmed-contact lookup
+        # fail closed (logged, not raised) and this fake row has no
+        # action_results.
+        mock_summarize.assert_awaited_once_with(
+            "Agent: Hello there!\nCaller: Hi, I'm interested.",
+            confirmed_contacts={},
+            executed_actions=[],
+        )
         # The summary UPDATE is one of the execute calls (lead-marking may add a
         # second UPDATE leads). Find the summary write specifically.
         summary_call = next(
@@ -205,7 +253,10 @@ class TestGenerateAndStore:
 
         assert result == _FAILED_SUMMARY      # caller still gets a dict to show
         mock_summarize.assert_awaited_once()  # it DID attempt summarization
-        conn.execute.assert_not_called()      # but NO UPDATE was issued
+        # Keep the summary retryable while exposing failed detail processing.
+        assert conn.execute.call_count == 1
+        assert "lead_details_status = 'failed'" in conn.execute.call_args.args[0]
+        assert "summary_json" not in conn.execute.call_args.args[0]
 
     async def test_empty_transcript_returns_none(self):
         """transcript is empty string → return None, no summarizer call."""
@@ -319,7 +370,7 @@ class TestLeadMarking:
         from app.domain.services.call_summary.store import mark_lead_from_summary
         # The UPDATE now RETURNs the lead's identity so a real-time alert can be
         # raised with the name + number.
-        conn = _make_conn({
+        conn = _make_lead_conn({
             "lead_id": "L1",
             "first_name": "Jane",
             "last_name": "Doe",
@@ -327,7 +378,7 @@ class TestLeadMarking:
             "campaign_id": "C1",
         })
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is True
         sql = conn.fetchrow.await_args.args[0]
         assert "UPDATE leads" in sql and "is_lead" in sql and "RETURNING" in sql
@@ -342,18 +393,59 @@ class TestLeadMarking:
     async def test_mark_lead_no_alert_when_nothing_flagged(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
         # fetchrow -> None (lead already flagged / no matching row): no alert.
-        conn = _make_conn(None)
+        conn = _make_lead_conn(None)
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is False
         conn.execute.assert_not_called()
+
+    async def test_thin_conversation_is_never_a_lead(self):
+        """The 2026-09-07 complaint: 'qualified lead' after barely talking."""
+        from app.domain.services.call_summary.store import mark_lead_from_summary
+        conn = _make_lead_conn({"lead_id": "L1"}, substance=_SUBSTANCE_THIN)
+        with _patch_acquire(conn):
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
+        assert flagged is False
+        assert conn.fetchrow.await_count == 1          # never reached the UPDATE
+        conn.execute.assert_not_called()               # no alert emitted
+
+    async def test_summary_must_support_the_lead_label(self):
+        from app.domain.services.call_summary.store import _summary_supports_lead
+        ok, _ = _summary_supports_lead(_FAKE_SUMMARY)
+        assert ok
+        # Model said "qualified" in the outcome but its own status disagrees.
+        bad, why = _summary_supports_lead({**_FAKE_SUMMARY, "qualification_status": "unknown"})
+        assert not bad and "qualification_status=unknown" in why
+        # No commitment, action item or next step → nothing to follow up on.
+        empty, why = _summary_supports_lead({"outcome": "callback", "commitments": [], "action_items": [], "next_step": "none"})
+        assert not empty and why == "no_commitment_action_or_next_step"
+
+    def test_caller_turns_count_only_substantive_caller_lines(self):
+        from app.domain.services.call_summary.store import _caller_turns
+        assert _caller_turns(_SUBSTANCE_OK["transcript_json"]) == 4
+        assert _caller_turns(_SUBSTANCE_THIN["transcript_json"]) == 0   # "Hello?" is one word
+        assert _caller_turns(None) == 0 and _caller_turns("not json") == 0
+
+    def test_caller_turns_ignore_stt_interims(self):
+        """Prod call c63cdaff stored 253 'user' rows for a 212 s call: every
+        Deepgram interim of one sentence is its own row with is_final=False.
+        Counting them made a one-sentence caller look like a conversation."""
+        from app.domain.services.call_summary.store import _caller_turns
+        growing = "I just wanna see how you know"
+        turns = [
+            {"role": "user", "content": " ".join(growing.split()[: i + 1]), "is_final": False}
+            for i in range(1, len(growing.split()))
+        ] + [{"role": "user", "content": growing, "is_final": True},
+             {"role": "assistant", "content": "Sure — what would help most?", "is_final": True}]
+        assert _caller_turns(turns) == 1
 
     async def test_mark_lead_skips_when_not_a_lead(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
         conn = _make_conn(None)
         with _patch_acquire(conn):
             flagged = await mark_lead_from_summary(
-                None, _TENANT_ID, _CALL_ID, {"outcome": "no_interest", "next_step": ""}
+                None, _TENANT_ID, _CALL_ID, {"outcome": "no_interest", "next_step": ""},
+                revision="synthetic-revision", snapshot=["", [], None]
             )
         assert flagged is False
         conn.execute.assert_not_called()  # no DB write for non-leads
@@ -363,14 +455,14 @@ class TestLeadMarking:
         conn = _make_conn(None)
         conn.fetchrow = AsyncMock(side_effect=RuntimeError("db down"))
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is False  # swallowed, best-effort
 
     async def test_alert_emit_failure_never_breaks_qualification(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
         # Qualify succeeds but the stream_events INSERT blows up — the lead must
         # STILL be flagged (alerting is best-effort by design).
-        conn = _make_conn({
+        conn = _make_lead_conn({
             "lead_id": "L1",
             "first_name": "Jane",
             "last_name": "Doe",
@@ -379,5 +471,5 @@ class TestLeadMarking:
         })
         conn.execute = AsyncMock(side_effect=RuntimeError("insert failed"))
         with _patch_acquire(conn):
-            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY)
+            flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is True

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "status": "awaiting_operating_inputs_and_acceptance",
+  "deadline": "2026-10-30",
+  "release": {"source_sha": null, "reviewer": null, "frontend_mode": null},
+  "application_server": {"provider": null, "host_reference": null, "os_version": "Ubuntu 24.04 amd64", "access_reference": null},
+  "database": {"host_reference": null, "independent_hosting_verified": false, "server_version": null, "extensions": {}, "runtime_role_audit_receipt": null, "schema_heads": []},
+  "backups": {"storage_reference": null, "encryption_key_reference": null, "retention_days": null, "pitr_supported": null, "pitr_enabled": null, "off_host_checksum_receipt": null, "restore_receipt": null},
+  "recovery": {"maximum_data_loss_minutes": null, "maximum_recovery_minutes": null, "measured_data_loss_minutes": null, "measured_full_recovery_minutes": null, "recording_and_key_recovery_evidence": null},
+  "operations": {"owner": null, "maintenance_window": null, "alert_receiver_reference": null, "alert_delivery_evidence": null, "capacity_monitoring_reference": null, "certificate_renewal_owner": null},
+  "configuration": {"dns_inventory_reference": null, "service_inventory_reference": null, "secret_store_reference": null, "rotation_procedure_reference": null, "stripe_setup_reference": null, "google_oauth_reference": null, "asterisk_reference": null},
+  "acceptance": {"independent_engineer": null, "clean_install_receipt": null, "reboot_health_evidence": null, "controlled_call_evidence": null, "migration_and_update_evidence": null, "rollback_evidence": null, "stripe_evidence": null, "admin_evidence": null},
+  "walkthroughs": {"installation_video": null, "update_video": null, "backup_restore_video": null},
+  "notes": "Use references only. Never store passwords, private keys, customer records or connection strings containing credentials in this handover."
+}

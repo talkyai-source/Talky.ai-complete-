@@ -1219,7 +1219,6 @@ python -m pytest tests/ -v --cov=app --cov-report=html
 | `test_conversation_engine.py` | State machine transitions |
 | `test_sms_service.py` | SMS template rendering |
 | `test_assistant_agent_service.py` | Multi-step workflows |
-| `test_post_call_analyzer.py` | Intent detection patterns |
 | `test_quota_service.py` | Rate limiting logic |
 | `test_audit_service.py` | Audit log creation |
 | `test_replay_protection_service.py` | Idempotency validation |

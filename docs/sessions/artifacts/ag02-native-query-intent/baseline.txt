@@ -1,0 +1,14 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+____ test_knowledge_tool_and_prompt_require_evidence_not_model_confidence _____
+tests\unit\test_realtime_quality_pass.py:478: in test_knowledge_tool_and_prompt_require_evidence_not_model_confidence
+    assert constraint in text and constraint in query["description"]
+E   AssertionError: assert ('named products' in 'WHO YOU ARE\nYou are Alex, a friendly voice assistant for the company. Your goal on this call: have a helpful, natura...next_action=unknown\nconfirmed_contacts=none\nlast_tool_result=unknown\nsales_stage=opening\nEND LIVE STRUCTURED STATE')
+_ test_all_offered_native_voices_and_hidden_xai_have_sanitized_wire_evidence __
+tests\unit\test_realtime_profile_contract.py:363: in test_all_offered_native_voices_and_hidden_xai_have_sanitized_wire_evidence
+    assert constraint in wire["instructions"] and constraint in query["description"]
+E   AssertionError: assert ('named products' in 'WHO YOU ARE\nYou are Alex, a friendly voice assistant for Synthetic. Your goal on this call: Help the caller using ve...follow-up for review; recording a request does not arrange or guarantee follow-up and does not create a handoff route.')
+=========================== short test summary info ===========================
+FAILED tests/unit/test_realtime_quality_pass.py::test_knowledge_tool_and_prompt_require_evidence_not_model_confidence
+FAILED tests/unit/test_realtime_profile_contract.py::test_all_offered_native_voices_and_hidden_xai_have_sanitized_wire_evidence
+2 failed, 3 warnings in 4.63s

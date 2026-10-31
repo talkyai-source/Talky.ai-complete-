@@ -16,6 +16,7 @@ stay protected.
 LOCAL ONLY — not committed.
 """
 import asyncio
+import logging
 
 import pytest
 
@@ -50,6 +51,9 @@ class _FakeFluxWS:
         if self._frames:
             return self._frames.pop(0)
         self._all_sent.set()
+        # A graceful server close follows the sender's input EOF/CloseStream.
+        # Closing before that is now correctly an unexpected stream failure.
+        await asyncio.sleep(0)
         raise StopAsyncIteration
 
     async def send(self, *_a, **_k):
@@ -59,18 +63,23 @@ class _FakeFluxWS:
         return None
 
 
-async def _drive_flux(frames):
+async def _drive_flux(frames, *, min_interrupt_words=None):
     """Run stream_transcribe against a pre-connected fake WS and collect chunks."""
     import json
+    from unittest.mock import AsyncMock, patch
 
     provider = DeepgramFluxSTTProvider()
     provider._api_key = "test-key"  # skip the initialize() guard
+    if min_interrupt_words is not None:
+        provider._min_interrupt_words = min_interrupt_words
     call_id = "call-conf-test"
 
     all_sent = asyncio.Event()
-    provider._pre_connections[call_id] = _FakeFluxWS(
-        [json.dumps(f) for f in frames], all_sent
-    )
+    with patch(
+        "app.infrastructure.stt.deepgram_flux.websockets.connect",
+        AsyncMock(return_value=_FakeFluxWS([json.dumps(f) for f in frames], all_sent)),
+    ):
+        await provider.pre_connect(call_id)
 
     async def audio_stream():
         # Keep send_audio alive (parked) until every frame is delivered, so it
@@ -88,6 +97,26 @@ async def _drive_flux(frames):
 
     await asyncio.wait_for(_consume(), timeout=5.0)
     return collected
+
+
+@pytest.mark.asyncio
+async def test_flux_start_of_turn_logs_shape_not_sensitive_partial(caplog):
+    caplog.set_level(
+        logging.INFO,
+        logger="app.infrastructure.stt.deepgram_flux",
+    )
+    # Spoken contact forms are not reliably recognised by generic PII regexes;
+    # the provider itself must never pass transcript content to logging.
+    secret = "private-person-at-example-dot-com"
+
+    await _drive_flux(
+        [{"type": "TurnInfo", "event": "StartOfTurn", "transcript": secret}],
+        min_interrupt_words=2,
+    )
+
+    assert secret not in caplog.text
+    assert "private-person" not in caplog.text
+    assert "short words=1 threshold=2" in caplog.text
 
 
 @pytest.mark.asyncio

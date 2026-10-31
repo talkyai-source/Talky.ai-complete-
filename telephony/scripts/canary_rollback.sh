@@ -5,6 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TELEPHONY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$TELEPHONY_ROOT/deploy/docker/docker-compose.telephony.yml"
 DISPATCHER_FILE="$TELEPHONY_ROOT/opensips/conf/dispatcher.list"
+LOCK_SCRIPT="$SCRIPT_DIR/canary_lock.sh"
 
 MODE="${1:-full}"
 ENV_FILE="${2:-$TELEPHONY_ROOT/deploy/docker/.env.telephony}"
@@ -18,6 +19,11 @@ if [[ ! -f "$ENV_FILE" ]]; then
   echo "[ERROR] Missing env file: $ENV_FILE"
   exit 1
 fi
+
+# Serialize the entire durable/runtime rollback with activation and freeze.
+source "$LOCK_SCRIPT"
+acquire_canary_state_lock "$ENV_FILE"
+trap release_canary_state_lock EXIT
 
 if [[ ! -f "$DISPATCHER_FILE" ]]; then
   echo "[ERROR] Missing dispatcher file: $DISPATCHER_FILE"
@@ -45,16 +51,19 @@ fi
 
 runtime_rollback() {
   echo "[INFO] Runtime rollback: disabling canary destination state in dispatcher"
-  "${compose_cmd[@]}" up -d opensips >/dev/null
+  if ! "${compose_cmd[@]}" ps --status running --services | grep -qx opensips; then
+    echo "[ERROR] OpenSIPS is not running; runtime-only rollback cannot be verified"
+    return 1
+  fi
   if ! "${compose_cmd[@]}" exec -T opensips sh -lc "opensips-cli -x mi ds_list >/dev/null 2>&1"; then
-    echo "[WARN] Dispatcher MI commands are unavailable in active runtime; skipping ds_set_state rollback step"
-    return 0
+    echo "[ERROR] Dispatcher MI commands are unavailable; runtime-only rollback failed"
+    return 1
   fi
   if ! "${compose_cmd[@]}" exec -T opensips sh -lc "opensips-cli -x mi ds_set_state i 2 '$canary_uri' >/dev/null"; then
     echo "[WARN] opensips-cli path failed, attempting opensipsctl fifo fallback"
     "${compose_cmd[@]}" exec -T opensips sh -lc "opensipsctl fifo ds_set_state i 2 '$canary_uri' >/dev/null" || {
-      echo "[WARN] Runtime dispatcher state transition unavailable; continuing with durable rollback controls"
-      return 0
+      echo "[ERROR] Runtime dispatcher state transition unavailable"
+      return 1
     }
   fi
   echo "[OK] Runtime rollback command applied for set=2 uri=$canary_uri"
@@ -64,7 +73,12 @@ durable_rollback() {
   echo "[INFO] Durable rollback: forcing canary percent to 0 and disabling canary"
   set_kv "OPENSIPS_CANARY_ENABLED" "0" "$ENV_FILE"
   set_kv "OPENSIPS_CANARY_PERCENT" "0" "$ENV_FILE"
-  set_kv "OPENSIPS_CANARY_FREEZE" "0" "$ENV_FILE"
+  # Rollback is both disabled and frozen so an unrelated follow-up command
+  # cannot accidentally re-enable inbound traffic.
+  set_kv "OPENSIPS_CANARY_FREEZE" "1" "$ENV_FILE"
+  # Stop the old process before recreation. If the new config cannot start,
+  # ingress remains closed instead of continuing with stale active settings.
+  "${compose_cmd[@]}" stop opensips >/dev/null
   "${compose_cmd[@]}" up -d opensips >/dev/null
   sleep 2
   "${compose_cmd[@]}" exec -T opensips opensips -C -f /etc/opensips/opensips.cfg >/dev/null
@@ -73,13 +87,19 @@ durable_rollback() {
 
 case "$MODE" in
   runtime)
-    runtime_rollback
+    echo "[WARN] Runtime-only rollback is unsafe with dispatcher health probing; enforcing durable freeze first"
+    durable_rollback
+    if ! runtime_rollback; then
+      echo "[WARN] Runtime dispatcher state could not be changed, but durable ingress gate is disabled and frozen"
+    fi
     ;;
   durable)
     durable_rollback
     ;;
   full)
-    runtime_rollback
     durable_rollback
+    if ! runtime_rollback; then
+      echo "[WARN] Runtime dispatcher state could not be changed, but durable ingress gate is disabled and frozen"
+    fi
     ;;
 esac

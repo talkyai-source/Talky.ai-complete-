@@ -23,6 +23,25 @@ test("Theme Implementation Verification", async (t) => {
         assert.match(contents, /transition: background-color 300ms ease-in-out/, "Should have 300ms background transition");
     });
 
+    await t.test("public mobile drawer uses the homepage card gradient in both themes", () => {
+        const contents = readFileSync(path.join(srcDir, "app", "globals.css"), "utf8");
+        const rootGradient = contents.match(/:root \{[\s\S]*?--home-card-gradient:\s*([^;]+);/)?.[1].trim();
+        assert.ok(rootGradient, "Should define --home-card-gradient in :root");
+
+        const panelRule = (theme: "light" | "dark") => {
+            const selector = `.home-navbar-menu-open[data-theme="${theme}"] details[open] > .home-mobile-panel {`;
+            const start = contents.indexOf(selector);
+            assert.notEqual(start, -1, `Should contain the open-state ${theme} drawer panel rule`);
+            return contents.slice(start, contents.indexOf("}", start));
+        };
+
+        // The navbar always carries `.dark`, so var() resolves to the dark gradient there:
+        // the light drawer must hold the :root literal, verbatim.
+        const lightImage = panelRule("light").match(/background-image:\s*([^;]+);/)?.[1].trim();
+        assert.equal(lightImage, rootGradient, "Light drawer gradient must equal the :root --home-card-gradient literal");
+        assert.match(panelRule("dark"), /background-image:\s*var\(--home-card-gradient\);/, "Dark drawer must reference --home-card-gradient");
+    });
+
     await t.test("theme-provider.tsx implements localStorage and context", () => {
         const providerPath = path.join(srcDir, "components", "providers", "theme-provider.tsx");
         assert.ok(existsSync(providerPath), "theme-provider.tsx should exist");

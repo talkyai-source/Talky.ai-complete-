@@ -1,9 +1,11 @@
 "use client";
 
+import { minutesSummaryPresentation } from "@/lib/minutes-allowance";
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
 import { dashboardApi, DashboardSummary, Campaign } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
 import { Clock, Megaphone, ArrowUpRight, Activity, AlertTriangle, PhoneCall, TrendingUp, Bot } from "lucide-react";
 import Link from "next/link";
@@ -25,6 +27,7 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
+import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
 
 function Counter({ value }: { value: number }) {
@@ -77,6 +80,14 @@ function statusVariantLowerBetter(value: number, thresholds: { green: number; ye
     if (value <= thresholds.green) return "green" as const;
     if (value <= thresholds.yellow) return "yellow" as const;
     return "red" as const;
+}
+
+function currentUtcMonthRange(now = new Date()): { from: string; to: string } {
+    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    return {
+        from: from.toISOString().slice(0, 10),
+        to: now.toISOString().slice(0, 10),
+    };
 }
 
 function KpiCard({
@@ -206,7 +217,14 @@ function useLiveBuckets() {
 
         const fetchOnce = async () => {
             try {
-                const resp = await extendedApi.getCallAnalytics();
+                const month = currentUtcMonthRange();
+                const resp = await extendedApi.getCallAnalytics(
+                    month.from,
+                    month.to,
+                    "day",
+                    "outbound",
+                    false,
+                );
                 if (cancelled) return;
                 const buckets = seriesToBuckets(resp?.series ?? []);
                 setState({
@@ -729,6 +747,7 @@ export default function DashboardPage() {
         const snap = (ms: number) => Math.round(ms / stepMs) * stepMs;
         const end = snap(sim.lastUpdatedMs);
         const start = snap(end - liveRangeHours * 60 * 60 * 1000);
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- seeds custom range bounds once, from the live clock, the first time custom mode is entered
         setCustomEndMs(end);
         setCustomStartMs(start);
     }, [callRangeMode, customEndMs, customStartMs, liveRangeHours, sim.lastUpdatedMs]);
@@ -865,7 +884,6 @@ export default function DashboardPage() {
 
         const now = activeRange.endMs;
         const windowStart = activeRange.startMs;
-        const rangeMs = Math.max(1, now - windowStart);
 
         // Only real user-placed notes mark the chart now. The old hardcoded
         // "Campaign A/B start/end", "Deploy", and "Maintenance" markers were
@@ -980,26 +998,21 @@ export default function DashboardPage() {
         summary,
     ]);
 
-    useEffect(() => {
-        loadData();
-    }, []);
-
     async function loadData() {
         try {
             setLoading(true);
-            // Last 7 days for the hourly heatmap (real time-of-day distribution).
-            const hourFrom = new Date(Date.now() - 6 * 24 * 60 * 60 * 1000)
-                .toISOString().slice(0, 10);
+            setError("");
+            const month = currentUtcMonthRange();
             const [summaryData, campaignsData, analytics, hourly, byCampaign] = await Promise.all([
                 dashboardApi.getDashboardSummary(),
                 dashboardApi.listCampaigns(),
-                extendedApi.getCallAnalytics(),
-                extendedApi.getCallAnalytics(hourFrom, undefined, "hour"),
-                extendedApi.getCallAnalyticsByCampaign(undefined, undefined, "day"),
+                extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false),
+                extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false),
+                extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false),
             ]);
             setSummary(summaryData);
             setLiveSummary(summaryData);
-            setCampaigns(campaignsData.campaigns ?? []);
+            setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
             setSeries(analytics.series ?? []);
             setHourSeries(hourly.series ?? []);
             setCampaignSeries(byCampaign.campaigns ?? []);
@@ -1009,6 +1022,14 @@ export default function DashboardPage() {
             setLoading(false);
         }
     }
+
+    useEffect(() => {
+        // Initial REST fetch on mount; loadData() flips the loading flag
+        // synchronously so the shell shows a spinner before the response
+        // arrives — not state derivable during render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; loadData sets loading/error/series as it resolves
+        loadData();
+    }, []);
 
     // liveSummary and liveBars are now driven exclusively by the WebSocket
     // stream (when connected) and the initial REST fetch. The previous
@@ -1046,9 +1067,10 @@ export default function DashboardPage() {
                 isNum(obj.total_calls) &&
                 isNum(obj.answered_calls) &&
                 isNum(obj.failed_calls) &&
-                isNum(obj.minutes_used) &&
-                isNum(obj.minutes_remaining) &&
-                isNum(obj.minutes_included) &&
+                (obj.minutes_used === null || isNum(obj.minutes_used)) &&
+                (obj.minutes_remaining === null || isNum(obj.minutes_remaining)) &&
+                (obj.minutes_included === null || isNum(obj.minutes_included)) &&
+                ["known", "unlimited", "unavailable"].includes(String(obj.minutes_state)) &&
                 isNum(obj.active_campaigns)
             );
         };
@@ -1268,16 +1290,9 @@ export default function DashboardPage() {
     const successRateFontClass = successRate >= 100 ? "text-base" : "text-lg";
 
     const minutesTooltip = useHoverTooltip();
-    const minutesUsedRaw = effectiveSummary?.minutes_used ?? 0;
-    const minutesRemaining = effectiveSummary?.minutes_remaining ?? 0;
-    const minutesTotal = effectiveSummary?.minutes_included ?? 5000;
-    
-    // Cap used at total to ensure it never exceeds the plan limit in the UI
-    const minutesUsed = Math.min(minutesUsedRaw, minutesTotal);
-
-    const minutesUsedPct = minutesTotal > 0 ? Math.round((minutesUsed / minutesTotal) * 100) : 0;
-    const minutesUsedText = minutesUsed.toLocaleString();
-    const minutesRemainingText = minutesRemaining.toLocaleString();
+    const minutesPresentation = minutesSummaryPresentation(effectiveSummary);
+    const minutesUsedText = minutesPresentation.usedText;
+    const minutesRemainingText = minutesPresentation.remainingText;
     const minutesTooltipContent = (
         <div className="space-y-2">
             <div className="text-sm font-black text-gray-900">Minutes usage</div>
@@ -1285,18 +1300,18 @@ export default function DashboardPage() {
                 <div className="flex items-center justify-between gap-6">
                     <span className="text-emerald-700 font-bold">Used minutes</span>
                     <span className="tabular-nums font-black text-gray-900">
-                        {minutesUsed.toLocaleString()}{" "}
-                        <span className="text-gray-600 font-semibold">({minutesUsedPct}%)</span>
+                        {minutesUsedText}{" "}
+                        <span className="text-gray-600 font-semibold">{minutesPresentation.percentText}</span>
                     </span>
                 </div>
                 <div className="flex items-center justify-between gap-6">
                     <span className="text-gray-700 font-bold">Remaining minutes</span>
                     <span className="tabular-nums font-black text-gray-900">
-                        {minutesRemaining.toLocaleString()}
+                        {minutesRemainingText}
                     </span>
                 </div>
             </div>
-            <div className="text-xs font-semibold text-gray-600">Total: {minutesTotal.toLocaleString()} min</div>
+            <div className="text-xs font-semibold text-gray-600">Total: {minutesPresentation.totalText}</div>
         </div>
     );
 
@@ -1375,6 +1390,7 @@ export default function DashboardPage() {
     const [campaignEnabled, setCampaignEnabled] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- preserves existing per-campaign toggle state while adding/removing keys as the campaign list changes
         setCampaignEnabled((prev) => {
             const next: Record<string, boolean> = { ...prev };
             for (const c of campaignLineSeries.campaigns) {
@@ -1432,15 +1448,20 @@ export default function DashboardPage() {
         .reverse();
 
     return (
-        <DashboardLayout title="Dashboard" description="Overview of your voice campaigns">
+        <DashboardLayout title="Dashboard" description="Outbound campaign performance and shared voice usage">
+            <FirstCallSetup />
             <CallIssuesBanner />
             {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200" />
+                <div className="flex items-center justify-center h-64" role="status" aria-live="polite">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200" aria-hidden="true" />
+                    <span className="sr-only">Loading dashboard</span>
                 </div>
             ) : error ? (
-                <div className="content-card border-red-500/30 text-red-600 dark:text-red-400 font-bold">
-                    {error}
+                <div className="content-card border-red-500/30 text-red-600 dark:text-red-400">
+                    <p role="alert">{error}</p>
+                    <button type="button" onClick={() => void loadData()} className="mt-3 rounded-lg border border-current px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
+                        Retry dashboard
+                    </button>
                 </div>
             ) : (
                 <div className="space-y-8">
@@ -1473,7 +1494,7 @@ export default function DashboardPage() {
                             <div className="flex items-center justify-between gap-3 mb-4">
                                 <div className="min-w-0">
                                     <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Live Line Chart</h3>
-                                    <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Call volume over time</p>
+                                    <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Real outbound call volume over time</p>
                                 </div>
                                 <div className="flex items-center gap-2 text-xs font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-full animate-pulse">
                                     <Activity className="w-4 h-4" />
@@ -1623,7 +1644,7 @@ export default function DashboardPage() {
                                 className="group rounded-2xl p-4 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                                 tabIndex={0}
                                 role="img"
-                                aria-label={`Minutes usage: used ${minutesUsed} of ${minutesTotal} minutes, remaining ${minutesRemaining} minutes`}
+                                aria-label={`Minutes usage: used ${minutesUsedText}, total ${minutesPresentation.totalText}, remaining ${minutesRemainingText}`}
                                 whileHover={{ scale: 1.01 }}
                                 transition={{ duration: 0.25, ease: "easeInOut" }}
                                 onMouseEnter={(e) => minutesTooltip.show(e.clientX, e.clientY, minutesTooltipContent)}
@@ -1651,8 +1672,7 @@ export default function DashboardPage() {
                                             <div className="text-[11px] font-bold uppercase tracking-wide text-gray-600 dark:text-muted-foreground">Minutes used</div>
                                             <div className="mt-2 flex items-center justify-center gap-2 text-sm font-semibold text-gray-700 dark:text-muted-foreground">
                                                 <Clock className="w-4 h-4 text-gray-600 dark:text-muted-foreground" aria-hidden />
-                                                <span className="tabular-nums font-black text-gray-900 dark:text-foreground">{minutesUsedPct}%</span>
-                                                <span>used</span>
+                                                <span className="tabular-nums font-black text-gray-900 dark:text-foreground">{minutesPresentation.percentText}</span>
                                             </div>
                                         </div>
 
@@ -1660,7 +1680,7 @@ export default function DashboardPage() {
                                             <div className="relative w-full h-3 rounded-full overflow-hidden bg-gray-200 shadow-inner">
                                                 <motion.div
                                                     initial={{ width: 0 }}
-                                                    animate={{ width: `${minutesTotal > 0 ? (minutesUsed / minutesTotal) * 100 : 0}%` }}
+                                                    animate={{ width: `${minutesPresentation.barPercent}%` }}
                                                     transition={{ duration: 0.6, ease: "easeInOut" }}
                                                     className="absolute left-0 top-0 h-full rounded-full"
                                                 >
@@ -1707,7 +1727,7 @@ export default function DashboardPage() {
                                             </div>
                                         </div>
                                         <div className="mt-4 text-center text-[11px] font-bold uppercase tracking-wide text-gray-700 dark:text-muted-foreground">
-                                            Total = <span className="tabular-nums">{minutesTotal.toLocaleString()} min</span>
+                                            Total = <span className="tabular-nums">{minutesPresentation.totalText}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -1929,7 +1949,7 @@ export default function DashboardPage() {
                         className="rounded-2xl border border-border bg-background/70 backdrop-blur-sm p-6 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out dark:hover:bg-background dark:hover:shadow-md"
                     >
                         <div className="flex items-center justify-between mb-4">
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Recent Campaigns</h3>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Recent Outbound Campaigns</h3>
                             <Link
                                 href="/campaigns"
                                 className="text-sm font-semibold text-gray-700 dark:text-muted-foreground transition-colors duration-300 ease-in-out dark:hover:text-foreground"

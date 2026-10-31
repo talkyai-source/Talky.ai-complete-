@@ -1,0 +1,23 @@
+F.                                                                       [100%]
+================================== FAILURES ===================================
+__ test_campaign_start_lookup_failure_preserves_temporary_unavailable_status __
+
+    @pytest.mark.asyncio
+    async def test_campaign_start_lookup_failure_preserves_temporary_unavailable_status():
+        from app.domain.services.campaign_service import CampaignError
+        db, queue = starts._DB(), starts._Queue([True])
+        db.tables["campaigns"][0].update(id=calls.CAMPAIGN_ID, tenant_id=calls.TENANT_ID)
+        db.pool = Pool(Conn(fail=True))
+        with pytest.raises(CampaignError) as caught:
+            await CampaignService(db, queue_service=queue).start_campaign(calls.CAMPAIGN_ID, tenant_id=calls.TENANT_ID)
+>       assert caught.value.status_code == 503
+E       AssertionError: assert 500 == 503
+E        +  where 500 = CampaignError('Failed to start campaign: The saved telephony selection could not be verified. Retry when configuration is available.').status_code
+E        +    where CampaignError('Failed to start campaign: The saved telephony selection could not be verified. Retry when configuration is available.') = <ExceptionInfo CampaignError('Failed to start campaign: The saved telephony selection could not be verified. Retry when configuration is available.') tblen=2>.value
+
+tests\unit\test_cloud_telephony_availability.py:394: AssertionError
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.campaign_service:campaign_service.py:540 Error starting campaign 33333333-[redacted digits=12 ..33]-[redacted digits=12 ..33]: The saved telephony selection could not be verified. Retry when configuration is available.
+=========================== short test summary info ===========================
+FAILED tests/unit/test_cloud_telephony_availability.py::test_campaign_start_lookup_failure_preserves_temporary_unavailable_status
+1 failed, 1 passed, 35 deselected in 4.54s

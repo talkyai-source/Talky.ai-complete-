@@ -1,68 +1,29 @@
-import { useEffect, useState } from 'react';
-import { Building2, Mail } from 'lucide-react';
+import { Building2 } from 'lucide-react';
 import { api, type TenantListItem } from '../lib/api';
+import { useAdminRead } from '../lib/use-admin-read';
+
+const load = () => api.getTenants(undefined, undefined, 5, 0, false, 'minutes_used');
+const valid = (rows: TenantListItem[]) => Array.isArray(rows) && rows.every(row =>
+    row && typeof row.id === 'string' && typeof row.business_name === 'string'
+    && typeof row.minutes_used === 'number' && Number.isFinite(row.minutes_used) && row.minutes_used >= 0);
 
 export function TopTenantsList() {
-    const [tenants, setTenants] = useState<TenantListItem[]>([]);
-    const [loading, setLoading] = useState(true);
-
-    useEffect(() => {
-        let cancelled = false;
-        const fetchOnce = async () => {
-            try {
-                const res = await api.getTenants();
-                if (cancelled) return;
-                const items = res.data ?? [];
-                // Sort by minutes_used desc; cap at top 5 for the widget.
-                items.sort((a, b) => (b.minutes_used ?? 0) - (a.minutes_used ?? 0));
-                setTenants(items.slice(0, 5));
-            } catch {
-                if (!cancelled) setTenants([]);
-            } finally {
-                if (!cancelled) setLoading(false);
-            }
-        };
-        void fetchOnce();
-    }, []);
-
-    return (
-        <div className="card">
-            <div className="card-header">
-                <h3 className="card-title">Top Tenants</h3>
-                <button className="btn btn-more">More +</button>
-            </div>
-            <div className="card-body">
-                {loading && tenants.length === 0 && (
-                    <div className="tenant-item">
-                        <span className="tenant-calls">Loading…</span>
-                    </div>
-                )}
-                {!loading && tenants.length === 0 && (
-                    <div className="tenant-item">
-                        <span className="tenant-calls">No tenants yet.</span>
-                    </div>
-                )}
-                {tenants.map((tenant) => (
-                    <div className="tenant-item" key={tenant.id}>
-                        <div className="tenant-left">
-                            <div className="tenant-icon">
-                                <Building2 />
-                            </div>
-                            <div className="tenant-info">
-                                <span className="tenant-name">{tenant.business_name || '—'}</span>
-                                <span className="tenant-calls">
-                                    {(tenant.minutes_used ?? 0).toLocaleString()} min
-                                    {tenant.user_count ? ` · ${tenant.user_count} users` : ''}
-                                </span>
-                            </div>
-                        </div>
-                        <button className="btn btn-alert">
-                            <Mail size={12} />
-                            Alert
-                        </button>
-                    </div>
-                ))}
-            </div>
+    const { data: tenants, loading, error, refresh } = useAdminRead(load, 60000, valid);
+    return <div className="card">
+        <div className="card-header"><h3 className="card-title">Top Tenants</h3>
+            <a className="btn btn-more" href="/tenants">View tenants</a></div>
+        <div className="card-body">
+            <p>Highest recorded minutes across non-archived tenants.</p>
+            {loading && <p>Loading tenants…</p>}
+            {error && <p role="alert">Tenant usage unavailable: {error}{tenants ? ' Showing the last retrieved ranking; it may be stale.' : ''}
+                <button onClick={() => void refresh()}>Retry tenants</button></p>}
+            {tenants?.length === 0 && !error && <p>No tenants yet.</p>}
+            {tenants?.map(tenant => <div className="tenant-item" key={tenant.id}>
+                <div className="tenant-left"><div className="tenant-icon"><Building2 /></div>
+                    <div className="tenant-info"><span className="tenant-name">{tenant.business_name || 'Unnamed tenant'}</span>
+                        <span className="tenant-calls">{tenant.minutes_used.toLocaleString()} min</span>
+                    </div></div>
+            </div>)}
         </div>
-    );
+    </div>;
 }

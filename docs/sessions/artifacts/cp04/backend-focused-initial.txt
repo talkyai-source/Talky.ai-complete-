@@ -1,0 +1,57 @@
+........................................................................ [  4%]
+........................................................................ [  8%]
+........................................................................ [ 13%]
+........................................................................ [ 17%]
+........................................................................ [ 21%]
+........................................................................ [ 26%]
+........................................................................ [ 30%]
+........................................................................ [ 35%]
+........................................................................ [ 39%]
+........................................................................ [ 43%]
+........................................................................ [ 48%]
+........................................................................ [ 52%]
+........................................................................ [ 57%]
+........................................................................ [ 61%]
+....F................................................................... [ 65%]
+........................................................................ [ 70%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+........................................................................ [ 83%]
+........................................................................ [ 87%]
+........................................................................ [ 92%]
+........................................................................ [ 96%]
+.......................s.................................                [100%]
+================================== FAILURES ===================================
+________________ test_rls_table_guard_matches_schema_inventory ________________
+tests\unit\test_rls_set_local_invariant.py:311: in test_rls_table_guard_matches_schema_inventory
+    assert set(_RLS_TABLES) == discovered, (
+E   AssertionError: RLS table guard drifted from the schema inventory. missing=['billing_refund_snapshots'], stale=[]
+E   assert {'abuse_detec...rations', ...} == {'abuse_detec...rations', ...}
+E     Extra items in the right set:
+E     'billing_refund_snapshots'
+E     Use -v to get more diff
+============================== warnings summary ===============================
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra0]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra1]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra2]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra3]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra4]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:59: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    response = await handler(conn, exc)  # type: ignore[arg-type]
+
+tests/unit/test_subscription_status_vocabulary.py::test_the_archive_verb_writes_the_same_value_the_guard_blocks_on
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_endpoint_auth_audit.py::test_every_db_route_requires_auth
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:147: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
+
+tests/unit/test_endpoint_auth_audit.py::test_every_db_route_requires_auth
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:684: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    min_severity: str = Query("high", regex="^(medium|high|critical)$"),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_rls_set_local_invariant.py::test_rls_table_guard_matches_schema_inventory
+1 failed, 1639 passed, 1 skipped, 8 warnings in 120.79s (0:02:00)

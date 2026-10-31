@@ -12,9 +12,10 @@
 
 import { Check, X, CheckCircle2, XCircle, AlertTriangle, RefreshCw } from "lucide-react";
 import { DiffView, type DiffChange } from "./diff-view";
+import { ActionReceiptSchema, type ActionReceipt } from "@/lib/models";
 
 export type ProposalCampaign = { campaign_id: string; name?: string; changes: DiffChange[] };
-export type ProposalStatus = "pending" | "applied" | "rejected" | "error";
+export type ProposalStatus = "pending" | "submitting" | "applied" | "rejected" | "error" | "unknown" | "running" | "scheduled" | "cancelled";
 
 export interface ProposalDuplicate {
     campaign_id: string;
@@ -34,6 +35,31 @@ export interface ProposalData {
     duplicate?: ProposalDuplicate;
     status: ProposalStatus;
     error?: string;
+    actionId?: string;
+    actionStatus?: string;
+    confirmationAllowed?: boolean;
+    receipt?: ActionReceipt;
+}
+
+/** Both dashboard modes consume the same durable result contract. */
+export function withProposalResult(proposal: ProposalData, frame: Record<string, unknown>): ProposalData {
+    const actionStatus = typeof frame.status === "string" ? frame.status : undefined;
+    const error = typeof frame.error === "string" ? frame.error : undefined;
+    const receipt = ActionReceiptSchema.safeParse(frame.receipt);
+    let status: ProposalStatus;
+    if (actionStatus === "unknown" || actionStatus === "unavailable") status = "unknown";
+    else if (actionStatus === "running" || actionStatus === "in_progress" || actionStatus === "pending") status = "running";
+    else if (actionStatus === "scheduled") status = "scheduled";
+    else if (actionStatus === "cancelled") status = "cancelled";
+    else if (actionStatus === "failed") status = "error";
+    else if (actionStatus === "completed" && frame.confirmation_allowed !== true) status = "unknown";
+    else if (frame.applied === true) status = "applied";
+    else status = error ? "error" : "rejected";
+    return { ...proposal, status, error, actionStatus,
+        actionId: typeof frame.action_id === "string" ? frame.action_id : proposal.actionId,
+        confirmationAllowed: frame.confirmation_allowed === true,
+        receipt: receipt.success ? receipt.data : proposal.receipt,
+    };
 }
 
 const TOOL_TITLES: Record<string, string> = {
@@ -56,13 +82,15 @@ export function EditProposalCard({
     onApply,
     onReject,
     onOverwrite,
+    onCheck,
 }: {
     proposal: ProposalData;
     onApply: (id: string) => void;
     onReject: (id: string) => void;
     onOverwrite?: (id: string) => void;
+    onCheck?: (id: string) => void;
 }) {
-    const { proposalId, tool, warnings, changes, campaigns, duplicate, status, error } = proposal;
+    const { proposalId, tool, warnings, changes, campaigns, duplicate, status, error, actionId, receipt } = proposal;
     const title = TOOL_TITLES[tool] ?? "Proposed change";
     const actions = TOOL_ACTIONS[tool] ?? DEFAULT_ACTIONS;
     const pending = status === "pending";
@@ -70,6 +98,10 @@ export function EditProposalCard({
         pending && onOverwrite && tool === "create_campaign" && duplicate?.campaign_id,
     );
     const applyLabel = showOverwrite ? "Create anyway" : actions.apply;
+    const appliedLabel = tool === "send_email"
+        ? (proposal.confirmationAllowed === true ? "Accepted by email provider" : "Completion recorded")
+        : ["schedule_callback", "request_callback"].includes(tool)
+            ? (receipt?.provider_status === "queued" ? "Queued for calling" : "Callback request recorded") : actions.applied;
 
     return (
         <div className="rounded-xl border border-cyan-500/30 bg-cyan-500/5 p-3 text-sm">
@@ -77,7 +109,7 @@ export function EditProposalCard({
                 <span className="font-semibold text-foreground">{title}</span>
                 {status === "applied" && (
                     <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                        <CheckCircle2 className="h-3.5 w-3.5" />{actions.applied}
+                        <CheckCircle2 className="h-3.5 w-3.5" />{appliedLabel}
                     </span>
                 )}
                 {status === "rejected" && (
@@ -88,6 +120,12 @@ export function EditProposalCard({
                 {status === "error" && (
                     <span className="inline-flex items-center gap-1 text-xs font-semibold text-red-600 dark:text-red-400">
                         <AlertTriangle className="h-3.5 w-3.5" />Failed
+                    </span>
+                )}
+                {(["submitting", "running", "scheduled", "unknown", "cancelled"] as ProposalStatus[]).includes(status) && (
+                    <span className="text-xs font-semibold text-muted-foreground">
+                        {status === "submitting" ? "Awaiting result" : status === "running" ? "In progress"
+                            : status === "scheduled" ? "Scheduled" : status === "cancelled" ? "Cancelled" : "Outcome unknown"}
                     </span>
                 )}
             </div>
@@ -116,9 +154,19 @@ export function EditProposalCard({
                 </ul>
             )}
 
-            {status === "error" && error && (
+            {(status === "error" || status === "unknown") && error && (
                 <p className="mt-2 text-xs text-red-600 dark:text-red-400">{error}</p>
             )}
+            {(status === "unknown" || status === "submitting" || status === "running") && (
+                <p className="mt-2 text-xs text-muted-foreground">Check the saved action record before sending again. <a className="underline" href="/assistant/actions">View actions</a></p>
+            )}
+            {onCheck && ["unknown", "submitting", "running", "scheduled"].includes(status) && (
+                <button type="button" onClick={() => onCheck(proposalId)} className="mt-2 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold">Check status</button>
+            )}
+            {actionId && <p className="mt-2 break-all text-xs text-muted-foreground">Action reference: {actionId}</p>}
+            {receipt && Object.entries(receipt).filter(([key]) => ["provider", "external_account_id", "message_id", "external_event_id", "meeting_id", "reminder_id", "plan_id", "job_id", "child_action_id", "provider_status"].includes(key)).map(([key, value]) => (
+                <p key={key} className="break-all text-xs text-muted-foreground">{key.replaceAll("_", " ")}: {value}</p>
+            ))}
 
             {showOverwrite && (
                 <div className="mt-2 flex gap-1.5 rounded-lg border border-amber-500/40 bg-amber-500/10 px-2.5 py-2 text-xs text-amber-800 dark:text-amber-300">

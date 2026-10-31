@@ -123,6 +123,7 @@ class TestStreaming:
         call = dispatch.await_args
         assert call.args[0] == "get_campaigns"
         assert call.args[4] == {"status": "active"}
+        assert call.kwargs == {"actor_user_id": "u1"}
         # the text answer is streamed and finalized
         assert "".join(e["delta"] for e in events if e["type"] == "token") == "You have 2 campaigns."
         assert [e for e in events if e["type"] == "final"][-1]["content"] == "You have 2 campaigns."
@@ -163,7 +164,12 @@ class TestStreaming:
 
         assert events[0] == {"type": "tool_start", "name": "read_emails"}
         dispatch.assert_awaited_once_with(
-            "read_emails", "t1", None, None, {"max_results": 5, "query": "in:inbox"}
+            "read_emails",
+            "t1",
+            None,
+            None,
+            {"max_results": 5, "query": "in:inbox"},
+            actor_user_id="u1",
         )
         assert events[-1] == {
             "type": "final",

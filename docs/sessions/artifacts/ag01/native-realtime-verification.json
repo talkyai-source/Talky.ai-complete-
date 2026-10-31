@@ -1,0 +1,76 @@
+{
+  "source_base_revision": "7c0ffac7",
+  "includes_uncommitted_ag01_changes": true,
+  "source_status": "owned files frozen; final integrated revision belongs to parent manifest",
+  "python_version": "3.12.12",
+  "ruff_version": "0.6.9",
+  "cwd": "backend",
+  "external_provider_calls": 0,
+  "deployment": false,
+  "regression": {
+    "passed": 348,
+    "warnings": 327,
+    "log": "realtime-regression.txt",
+    "exit_code": 0,
+    "files": [
+      "tests/unit/test_realtime_audio_format.py",
+      "tests/unit/test_realtime_end_call_ownership.py",
+      "tests/unit/test_realtime_fallback.py",
+      "tests/unit/test_realtime_identity_voice.py",
+      "tests/unit/test_realtime_inbound_opening.py",
+      "tests/unit/test_realtime_independent.py",
+      "tests/unit/test_realtime_lifecycle_repairs.py",
+      "tests/unit/test_realtime_profile_contract.py",
+      "tests/unit/test_realtime_quality_pass.py",
+      "tests/unit/test_realtime_session_type_0930.py",
+      "tests/unit/test_xai_realtime.py",
+      "tests/unit/test_voice_preview_realtime.py",
+      "tests/unit/test_campaign_test_ws.py",
+      "tests/unit/test_telephony_session_config.py",
+      "tests/unit/test_call_experience_end_scope.py"
+    ],
+    "command": "python -m pytest tests/unit/test_realtime_audio_format.py tests/unit/test_realtime_end_call_ownership.py tests/unit/test_realtime_fallback.py tests/unit/test_realtime_identity_voice.py tests/unit/test_realtime_inbound_opening.py tests/unit/test_realtime_independent.py tests/unit/test_realtime_lifecycle_repairs.py tests/unit/test_realtime_profile_contract.py tests/unit/test_realtime_quality_pass.py tests/unit/test_realtime_session_type_0930.py tests/unit/test_xai_realtime.py tests/unit/test_voice_preview_realtime.py tests/unit/test_campaign_test_ws.py tests/unit/test_telephony_session_config.py tests/unit/test_call_experience_end_scope.py -q --tb=short"
+  },
+  "focused": {
+    "command": "python -m pytest tests/unit/test_realtime_profile_contract.py -q --tb=short",
+    "passed": 50,
+    "exit_code": 0,
+    "log": "realtime-focused.txt"
+  },
+  "lint": {
+    "limitation": "Local Ruff 0.6.9; final CI-version gate remains parent-owned",
+    "command": "python -m ruff check --select F --ignore F401,F841 app/realtime/profile.py app/realtime/openai.py app/realtime/config.py app/realtime/runtime.py app/realtime/prompt_config.py app/realtime/campaign_config.py app/api/v1/endpoints/campaign_voice_config.py tests/unit/test_realtime_profile_contract.py tests/unit/test_realtime_quality_pass.py tests/unit/test_realtime_lifecycle_repairs.py tests/unit/test_realtime_independent.py tests/unit/test_realtime_identity_voice.py",
+    "exit_code": 0,
+    "log": "realtime-ruff.txt"
+  },
+  "evidence_export": {
+    "offered_openai_voices": 8,
+    "storage": "actual SQL serialization through fake transport, not database/RLS proof",
+    "profiles": 10,
+    "env": "AG01_NATIVE_PROFILE_OUTPUT=../docs/sessions/artifacts/ag01/native-realtime-profiles.json",
+    "hidden_xai_choices": 2,
+    "acknowledgement": "synthetic websocket"
+  },
+  "owned_files": [
+    "app/realtime/profile.py",
+    "app/realtime/openai.py",
+    "app/realtime/config.py",
+    "app/realtime/runtime.py",
+    "app/realtime/prompt_config.py",
+    "app/realtime/campaign_config.py",
+    "app/api/v1/endpoints/campaign_voice_config.py",
+    "tests/unit/test_realtime_profile_contract.py",
+    "tests/unit/test_realtime_quality_pass.py",
+    "tests/unit/test_realtime_lifecycle_repairs.py",
+    "tests/unit/test_realtime_independent.py",
+    "tests/unit/test_realtime_identity_voice.py"
+  ],
+  "limitations": [
+    "No live provider/account/model availability proof",
+    "No customer calls, latency/quality acceptance, or deployment",
+    "Legacy unsupported OpenAI voices and inherited xAI OpenAI voices require explicit reselection",
+    "Knowledge snapshot unversioned in assembly fixture",
+    "xAI pinned 1.0 availability unverified; no model migration",
+    "Initial red reproduction logs intentionally remain as before evidence"
+  ]
+}

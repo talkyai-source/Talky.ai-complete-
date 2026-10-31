@@ -3,8 +3,8 @@
 Builds a stereo WAV (caller left channel / agent right channel) from the
 media gateway's per-direction PCM buffers, resolves the canonical
 ``calls`` row by ``external_call_uuid``, inserts the ``recording_s3``
-metadata row, and uploads to S3 if configured. Falls back to disk-only
-save when the DB context is unavailable.
+metadata row, and uploads to S3 or configured local storage. Missing tenant,
+call binding or policy evidence suppresses retention.
 """
 from __future__ import annotations
 
@@ -13,6 +13,52 @@ import logging
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+def _is_true_inbound_session(voice_session) -> bool:
+    """Identify a carrier inbound session without trusting one optional field."""
+
+    if bool(getattr(voice_session, "_inbound_admission", None)):
+        return True
+    direction = getattr(voice_session, "_call_direction", None)
+    if direction is None:
+        config = getattr(voice_session, "config", None)
+        direction = getattr(config, "direction", None) if config is not None else None
+    direction = getattr(direction, "value", direction)
+    return str(direction or "").strip().lower() == "inbound"
+
+
+def _discard_recording(voice_session) -> None:
+    """Close retention and destroy both live buffers synchronously."""
+
+    gateway = getattr(voice_session, "media_gateway", None)
+    if gateway is None:
+        return
+    call_id = str(getattr(voice_session, "call_id", "") or "")
+    set_gate = getattr(gateway, "set_recording_enabled", None)
+    if callable(set_gate):
+        set_gate(call_id, False)
+    else:
+        clear = getattr(gateway, "clear_recording_buffer", None)
+        if callable(clear):
+            clear(call_id)
+    voice_session._recording_allowed = False
+
+
+async def _inbound_recording_persist_allowed(voice_session, db_pool) -> bool:
+    """Fail closed against the live emergency switch at persistence time."""
+
+    if not _is_true_inbound_session(voice_session):
+        return True
+    if getattr(voice_session, "_recording_allowed", False) is not True:
+        return False
+    if db_pool is None:
+        return False
+    from app.domain.services.telephony.modes.caller_first import (
+        _live_inbound_recording_enabled,
+    )
+
+    return await _live_inbound_recording_enabled(db_pool)
 
 
 def _session_tenant_uuid(voice_session) -> UUID | None:
@@ -29,8 +75,7 @@ def _session_tenant_uuid(voice_session) -> UUID | None:
     3. ``voice_session.call_session.tenant_id`` — the live CallSession.
 
     Returns ``None`` when no tenant is known or the value isn't a valid UUID
-    (e.g. the ``"default"`` sentinel), in which case the caller leaves the
-    lookup unscoped rather than risk breaking a legitimate resolution.
+    (e.g. the ``"default"`` sentinel), in which case retention is refused.
     """
     candidates = [getattr(voice_session, "_dialer_tenant_id", None)]
     cfg = getattr(voice_session, "config", None)
@@ -68,6 +113,21 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
 
     gateway = voice_session.media_gateway
     if not gateway:
+        return
+
+    container = get_container()
+    db_pool = (
+        getattr(container, "db_pool", None)
+        if getattr(container, "is_initialized", False)
+        else None
+    )
+    if not await _inbound_recording_persist_allowed(voice_session, db_pool):
+        _discard_recording(voice_session)
+        logger.info(
+            "Inbound recording discarded before persistence: live retention "
+            "permission is absent call=%s",
+            call_id[:12],
+        )
         return
 
     caller_chunks = gateway.get_recording_buffer(voice_session.call_id)
@@ -169,7 +229,6 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
     buf._wav_bytes_override = wav_bytes  # pre-mixed WAV, skip re-encoding
     buf.total_bytes = len(wav_bytes)
 
-    container = get_container()
     if not container.is_initialized:
         logger.warning("Cannot save recording: container not initialized")
         return
@@ -199,18 +258,17 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
         # and no ordering could therefore resolve THIS recording onto another
         # tenant's historical call row and persist the audio under the wrong
         # tenant. Scope the lookup to the tenant this live session actually
-        # belongs to (authoritative source: `_dialer_tenant_id`, stamped at
-        # answer-time binding; falls back to the session config / call-session
-        # tenant). When none is known — rare dev/standalone calls that never
-        # bound to a dialer row — the predicate is permissive (unchanged
-        # behaviour, and there is no session tenant to cross). ORDER BY
-        # created_at DESC deterministically picks the freshest matching row.
+        # belongs to. An unbound session cannot retain a recording.
         expected_tenant = _session_tenant_uuid(voice_session)
+        if expected_tenant is None:
+            _discard_recording(voice_session)
+            logger.warning("recording_tenant_unavailable call=%s", call_id[:12])
+            return
         async with get_db() as conn:
             row = await conn.fetchrow(
                 "SELECT id, tenant_id, campaign_id FROM calls "
                 "WHERE external_call_uuid = $1 "
-                "AND ($2::uuid IS NULL OR tenant_id = $2) "
+                "AND tenant_id = $2 "
                 "ORDER BY created_at DESC LIMIT 1",
                 call_id,
                 expected_tenant,
@@ -235,45 +293,13 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
     if not internal_call_id:
         try:
             cfg = getattr(voice_session, "config", None)
-            session_tenant = (
-                getattr(cfg, "tenant_id", None) if cfg else None
-            )
-            session_campaign = (
-                getattr(cfg, "campaign_id", None) if cfg else None
-            )
-            # Fallback 1: pull tenant_id from the live CallSession.
-            if not session_tenant:
-                cs = getattr(voice_session, "call_session", None)
-                session_tenant = getattr(cs, "tenant_id", None) if cs else None
-            # Fallback 2: look up the campaign row to get its tenant_id.
-            # This is the path that handles "campaign_id was passed in URL
-            # but voice_session.config didn't get tenant resolved".
-            if (
-                not session_tenant
-                and session_campaign
-                and session_campaign != "telephony"
-            ):
-                try:
-                    async with db_client.pool.acquire() as _conn:
-                        async with _conn.transaction():
-                            await _conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                            row = await _conn.fetchrow(
-                                "SELECT tenant_id FROM campaigns WHERE id = $1",
-                                UUID(session_campaign),
-                            )
-                            if row and row["tenant_id"]:
-                                session_tenant = str(row["tenant_id"])
-                except Exception as _ten_lookup_exc:
-                    logger.debug(
-                        "campaign_tenant_lookup_failed err=%s", _ten_lookup_exc
-                    )
-            # Last resort: refuse to insert without a tenant — the row
-            # would be invisible to the UI anyway under RLS.
-            if not session_tenant:
-                raise RuntimeError(
-                    "no tenant_id available for stub calls row "
-                    "(call has no campaign and no session tenant)"
-                )
+            # A failed lookup cannot downgrade the authoritative dialer tenant
+            # to stale configuration or infer ownership from a new stub row.
+            session_tenant = str(expected_tenant)
+            configured_tenant = getattr(cfg, "tenant_id", None) if cfg else None
+            if configured_tenant and UUID(str(configured_tenant)) != expected_tenant:
+                raise RuntimeError("conflicting recording tenant context")
+            session_campaign = getattr(cfg, "campaign_id", None) if cfg else None
             voice_uuid = str(voice_session.call_id)
             # Best-effort phone number — falls back to channel name.
             phone_number = (
@@ -281,33 +307,35 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
                 or getattr(cfg, "lead_id", None)
                 or call_id
             )
-            async with db_client.pool.acquire() as conn:
-                async with conn.transaction():
-                    # Set RLS context so the INSERT is allowed under the
-                    # row-level security policy on `calls`.  Without this
-                    # the connection inherits whatever tenant the previous
-                    # request set (often the system tenant) and the
-                    # insert is rejected with InsufficientPrivilegeError.
-                    if session_tenant:
-                        await conn.execute(
-                            f"SET LOCAL app.current_tenant_id = '{UUID(session_tenant)}'"
-                        )
-                    await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                    await conn.execute(
-                        """
-                        INSERT INTO calls (
-                            id, tenant_id, campaign_id, phone_number,
-                            external_call_uuid, status, created_at, updated_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-                        ON CONFLICT (id) DO NOTHING
-                        """,
-                        UUID(voice_uuid),
-                        UUID(session_tenant) if session_tenant else None,
-                        UUID(session_campaign) if session_campaign and session_campaign != "telephony" else None,
-                        str(phone_number)[:64],
-                        call_id,
-                        "completed",
+            from app.core.db_utils import acquire_with_tenant
+
+            async with acquire_with_tenant(db_client.pool, session_tenant) as conn:
+                campaign_uuid = (
+                    UUID(str(session_campaign))
+                    if session_campaign and session_campaign != "telephony" else None
+                )
+                if campaign_uuid is not None:
+                    campaign = await conn.fetchrow(
+                        "SELECT id FROM campaigns WHERE id = $1 AND tenant_id = $2",
+                        campaign_uuid, expected_tenant,
                     )
+                    if not campaign:
+                        raise RuntimeError("recording campaign ownership unavailable")
+                await conn.execute(
+                    """
+                    INSERT INTO calls (
+                        id, tenant_id, campaign_id, phone_number,
+                        external_call_uuid, status, created_at, updated_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
+                    ON CONFLICT (id) DO NOTHING
+                    """,
+                    UUID(voice_uuid),
+                    expected_tenant,
+                    campaign_uuid,
+                    str(phone_number)[:64],
+                    call_id,
+                    "completed",
+                )
             internal_call_id = voice_uuid
             tenant_id = session_tenant or "default"
             campaign_id = session_campaign or "unknown"
@@ -318,29 +346,26 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
                 str(tenant_id)[:8],
                 str(campaign_id)[:8] if campaign_id else "none",
             )
-        except Exception as stub_err:
+        except Exception:
             logger.warning(
-                "stub_calls_row_insert_failed call=%s err=%s — "
-                "falling back to disk-only save",
-                call_id[:12], stub_err,
+                "stub_calls_row_insert_failed call=%s — recording discarded",
+                call_id[:12],
             )
-            # Disk-only fallback path (no DB row, won't show in UI but
-            # WAV is recoverable from ./recordings/<voice_uuid>.wav).
-            try:
-                storage_path = await recording_svc._save_local(
-                    call_id=str(voice_session.call_id),
-                    buffer=buf,
-                    tenant_id=str(tenant_id) if tenant_id and tenant_id != "default" else "unknown",
-                    campaign_id=str(campaign_id) if campaign_id and campaign_id != "unknown" else "unknown",
-                )
-                if storage_path:
-                    logger.info(f"WAV saved to disk: {storage_path}")
-            except Exception as save_err:
-                logger.warning(f"WAV save to disk failed: {save_err}")
-            gateway.clear_recording_buffer(voice_session.call_id)
+            _discard_recording(voice_session)
             return
 
     # --- Full save: file + DB record + call update ----------------------
+    # A call can end between cluster heartbeats. Re-read immediately before
+    # the first irreversible storage operation so an emergency switch flipped
+    # during mixing/metadata resolution still wins.
+    if not await _inbound_recording_persist_allowed(voice_session, db_pool):
+        _discard_recording(voice_session)
+        logger.info(
+            "Inbound recording discarded at final persistence gate call=%s",
+            call_id[:12],
+        )
+        return
+
     recording_id = await recording_svc.save_and_link(
         call_id=internal_call_id,
         buffer=buf,

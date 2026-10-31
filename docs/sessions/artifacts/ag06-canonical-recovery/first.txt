@@ -1,0 +1,11 @@
+.........F                                                               [100%]
+================================== FAILURES ===================================
+__ test_canonical_constraints_restrict_retention_without_worker_audit_access __
+tests\integration\test_saved_acknowledgement_canonical.py:257: in test_canonical_constraints_restrict_retention_without_worker_audit_access
+    before = deepcopy((await events(db, row))[0])
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\copy.py:151: in deepcopy
+    rv = reductor(4)
+E   TypeError: cannot pickle 'asyncpg.Record' object
+=========================== short test summary info ===========================
+FAILED tests/integration/test_saved_acknowledgement_canonical.py::test_canonical_constraints_restrict_retention_without_worker_audit_access
+1 failed, 9 passed, 1 warning in 60.18s (0:01:00)

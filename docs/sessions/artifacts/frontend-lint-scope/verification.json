@@ -1,0 +1,17 @@
+{
+  "candidate": "33360ddf",
+  "command": "npm run lint",
+  "cwd": "Talk-Leee",
+  "exit_code": 0,
+  "errors": 0,
+  "warnings": 3,
+  "node": "25.8.1",
+  "npm": "11.11.0",
+  "next": "16.3.8",
+  "eslint_config_next": "16.3.8",
+  "eslint_config_sha256_lf": "62a2953fb4fedf27a391609f26ac3a8df1c8479c2af2d3ba10b0b96127109032",
+  "existing_fix": "fec31d4b already excludes gitignored tmp probes; no current application or ESLint edit was necessary.",
+  "prior_result": "Preserved historical AG01 missing-react-plugin error; do not rewrite as passed.",
+  "output": "recheck.txt",
+  "limits": "Local full lint only; not remote CI, build or browser acceptance."
+}

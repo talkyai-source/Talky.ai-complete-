@@ -1,4 +1,5 @@
 """GET /telephony/sip/runtime/metrics/activation — windowed activation/rollback stats."""
+
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.core.db_utils import acquire_with_tenant
 
 from ._shared import _require_tenant
 from .schemas import RuntimeActivationMetricsResponse
@@ -26,7 +28,12 @@ async def get_runtime_activation_metrics(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,

@@ -1,0 +1,26 @@
+✔ confirmed B scope loads and creates normally without importing legacy A history or destination (83.8233ms)
+✔ logout clears notifications before server response and stale bootstrap cannot reactivate them (10.6833ms)
+✔ late A profile refresh cannot overwrite a newly verified B login (48.9242ms)
+✔ same verified identity refresh (silent=true) preserves notifications, settings and bound callback (13.0637ms)
+✔ same verified identity refresh (silent=false) preserves notifications, settings and bound callback (18.3057ms)
+✔ foreground refresh preserves scope and latest read (silent=true) settles loading and identity (15.4564ms)
+✔ foreground refresh preserves scope and latest read (silent=false) settles loading and identity (13.9982ms)
+✔ cross-tab non-null token change masks A immediately and verifies B before enabling notifications (14.6192ms)
+✔ unverified same-account token rotation aborts old work but restores saved history after verification (18.264ms)
+✔ cookie-only logout broadcasts an identity boundary even with no stored bearer token (30.3461ms)
+✔ cross-tab cookie logout fences an outstanding profile response without a bearer-key event (15.3098ms)
+✔ a verified user without tenant identity remains unscoped and cannot create notifications (28.7057ms)
+✔ logout then login as A creates a new generation that rejects pre-logout A work (31.1928ms)
+✔ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (16.2934ms)
+✔ blocked storage still receives cookie logout over BroadcastChannel and fences delayed profile reads (15.6512ms)
+✔ blocked-storage account change uses verified B scope and duplicate channel/storage marker verifies only once (16.6318ms)
+✔ local cookie logout and login publish secret-free BroadcastChannel markers when storage writes fail (30.2148ms)
+✔ notifications remain unscoped when neither storage nor BroadcastChannel can synchronize cookie identity (14.3383ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3100.6218

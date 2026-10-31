@@ -21,7 +21,7 @@ export default function AssistantPage() {
                         )}
                     >
                         <div className="text-sm font-semibold text-foreground">Actions</div>
-                        <div className="mt-1 text-sm text-muted-foreground">Browse and configure assistant actions.</div>
+                        <div className="mt-1 text-sm text-muted-foreground">Review saved actions and provider outcomes.</div>
                         <div className="mt-4">
                             <Link
                                 href="/assistant/actions"

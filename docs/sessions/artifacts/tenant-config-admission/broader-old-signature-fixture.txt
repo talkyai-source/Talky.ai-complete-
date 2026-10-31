@@ -1,0 +1,42 @@
+........................................................................ [ 33%]
+........................................................................ [ 66%]
+.....................F.................................................. [100%]
+================================== FAILURES ===================================
+_____________ test_prewarm_callee_first_builds_an_outbound_config _____________
+tests\unit\test_opening_mode_not_direction.py:235: in test_prewarm_callee_first_builds_an_outbound_config
+    assert captured["direction"] == Direction.OUTBOUND
+E   KeyError: 'direction'
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.prewarm:prewarm.py:605 pre_originate_warmup_failed: test_prewarm_callee_first_builds_an_outbound_config.<locals>._Resolver.for_tenant_async() got an unexpected keyword argument 'require_available' � refusing to ring with cold pipeline
+============================== warnings summary ===============================
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+tests/unit/test_twilio_bridge.py::test_outbound_dropped_until_stream_sid_known
+tests/unit/test_twilio_bridge.py::test_inbound_mulaw_decoded_and_queued
+tests/unit/test_twilio_bridge.py::test_clear_sends_twilio_clear_frame
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\tenant-config-admission-20261005\backend\app\infrastructure\telephony\twilio_media_gateway.py:97: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started = datetime.utcnow()
+
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+tests/unit/test_twilio_bridge.py::test_outbound_audio_is_mulaw_json_frames
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\tenant-config-admission-20261005\backend\app\infrastructure\telephony\twilio_media_gateway.py:103: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    session.last_send_latency_ms = (datetime.utcnow() - started).total_seconds() * 1000
+
+tests/unit/test_opening_mode_not_direction.py::test_realtime_callee_first_outbound_bridge_is_outbound_and_waits
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\tenant-config-admission-20261005\backend\app\realtime\runtime.py:187: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    started_at=datetime.utcnow(),
+
+tests/unit/test_opening_mode_not_direction.py::test_realtime_callee_first_outbound_bridge_is_outbound_and_waits
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\tenant-config-admission-20261005\backend\app\realtime\runtime.py:188: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    last_activity_at=datetime.utcnow(),
+
+tests/unit/test_opening_mode_not_direction.py::test_realtime_callee_first_outbound_bridge_is_outbound_and_waits
+  <string>:17: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_opening_mode_not_direction.py::test_prewarm_callee_first_builds_an_outbound_config
+1 failed, 215 passed, 11 warnings in 5.38s

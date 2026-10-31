@@ -1,0 +1,84 @@
+[
+  {
+    "phase": "baseline",
+    "command": "& \"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" docs/sessions/artifacts/agent-knowledge-cleanup/check.py baseline",
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007",
+    "environment": {
+      "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007\\backend",
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "pytest_argv": [
+      "tests/unit/test_assistant_knowledge_authorization.py",
+      "-q",
+      "--tb=short",
+      "--disable-warnings"
+    ],
+    "exit_code": 1,
+    "prohibited_attempts": 0,
+    "source_unchanged": true
+  },
+  {
+    "phase": "final",
+    "command": "& \"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" docs/sessions/artifacts/agent-knowledge-cleanup/check.py final",
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007",
+    "environment": {
+      "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007\\backend",
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "pytest_argv": [
+      "tests/unit/test_assistant_knowledge_authorization.py",
+      "tests/unit/test_assistant_agent_service.py",
+      "tests/unit/test_knowledge_model_sections.py",
+      "tests/unit/test_knowledge_tool.py",
+      "tests/unit/test_knowledge_relevance.py",
+      "tests/unit/test_agent_knowledge_repairs.py",
+      "tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+      "tests/security/test_kb_tool_injection.py",
+      "-q",
+      "--tb=short",
+      "--disable-warnings"
+    ],
+    "exit_code": 1,
+    "prohibited_attempts": 0,
+    "source_unchanged": true
+  },
+  {
+    "phase": "corrected",
+    "command": "& \"C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe\" docs/sessions/artifacts/agent-knowledge-cleanup/check.py corrected",
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007",
+    "environment": {
+      "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007\\backend",
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1"
+    },
+    "pytest_argv": [
+      "tests/unit/test_assistant_knowledge_authorization.py",
+      "tests/unit/test_assistant_agent_service.py",
+      "tests/unit/test_knowledge_model_sections.py",
+      "tests/unit/test_knowledge_tool.py",
+      "tests/unit/test_knowledge_relevance.py",
+      "tests/unit/test_agent_knowledge_repairs.py",
+      "tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+      "tests/security/test_kb_tool_injection.py",
+      "-q",
+      "--tb=short",
+      "--disable-warnings"
+    ],
+    "exit_code": 0,
+    "prohibited_attempts": 0,
+    "source_unchanged": true
+  },
+  {
+    "command": "& \"C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe\" -m ruff check --select F backend/app/domain/services/voice_pipeline/knowledge_tool.py backend/app/infrastructure/assistant/agent.py backend/app/infrastructure/assistant/tools/__init__.py backend/app/infrastructure/assistant/tools/campaign_admin.py backend/app/infrastructure/assistant/tools/llm_schemas.py backend/app/services/scripts/knowledge/sections.py backend/tests/security/test_kb_tool_injection.py backend/tests/unit/test_agent_knowledge_repairs.py backend/tests/unit/test_assistant_knowledge_authorization.py backend/tests/unit/test_knowledge_relevance.py backend/tests/unit/voice_pipeline/test_turn_streamer_kb_prefetch.py",
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007",
+    "exit_code": 1,
+    "diagnostics": "16 existing F401 in assistant/agent.py; no others"
+  },
+  {
+    "command": "git diff --check",
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\agent-knowledge-cleanup-20261007",
+    "exit_code": 0
+  }
+]

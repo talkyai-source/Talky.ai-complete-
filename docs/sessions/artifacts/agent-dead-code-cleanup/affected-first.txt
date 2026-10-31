@@ -1,0 +1,319 @@
+FFFF.F..F............................................F.FFFF............. [ 15%]
+........................................................................ [ 30%]
+......................F..F.............................F......FFFFFFFFFF [ 45%]
+FFFFF.F.F............................................................... [ 60%]
+..........................................FFFFFF....F...F............... [ 75%]
+........................................................................ [ 90%]
+..............................................                           [100%]
+================================== FAILURES ===================================
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-openai] _
+tests\unit\test_ag04_native_qualification.py:29: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': {'expected': ['matched'], 'observed': ['unavailable']}, 'id': 'tool_statuses', 'pass': False}, {'detail': ...hored control preservation, not model comprehension or hearing.'}, 'id': 'useful_submitted_speech', 'pass': True}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x0000022CFF682A80>)
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-xai] _
+tests\unit\test_ag04_native_qualification.py:29: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': {'expected': ['matched'], 'observed': ['unavailable']}, 'id': 'tool_statuses', 'pass': False}, {'detail': ...hored control preservation, not model comprehension or hearing.'}, 'id': 'useful_submitted_speech', 'pass': True}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x0000022CFF692B50>)
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai] _
+tests\unit\test_ag04_native_qualification.py:29: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': {'expected': ['matched'], 'observed': ['unavailable']}, 'id': 'tool_statuses', 'pass': False}, {'detail': ...ored control preservation, not model comprehension or hearing.'}, 'id': 'useful_submitted_speech', 'pass': False}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x0000022CFF691220>)
+_ test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-xai] _
+tests\unit\test_ag04_native_qualification.py:29: in test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval
+    assert all(c["pass"] for c in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': {'expected': ['matched'], 'observed': ['unavailable']}, 'id': 'tool_statuses', 'pass': False}, {'detail': ...ored control preservation, not model comprehension or hearing.'}, 'id': 'useful_submitted_speech', 'pass': False}, ...]
+E   assert False
+E    +  where False = all(<generator object test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval.<locals>.<genexpr> at 0x0000022CFF680D40>)
+_ test_native_source_outside_empty_fence_and_missing_delivered_history_fail_common_controls _
+tests\unit\test_ag04_native_qualification.py:76: in test_native_source_outside_empty_fence_and_missing_delivered_history_fail_common_controls
+    assert all(c["pass"] for c in row["findings"]["control"])
+E   assert False
+E    +  where False = all(<generator object test_native_source_outside_empty_fence_and_missing_delivered_history_fail_common_controls.<locals>.<genexpr> at 0x0000022CFF904860>)
+_____ test_observed_runtime_failure_is_reported_not_rewritten_as_approval _____
+tests\unit\test_ag04_native_qualification.py:115: in test_observed_runtime_failure_is_reported_not_rewritten_as_approval
+    row = await native.NativeReplay(case, "openai", corpus).run()
+tests\qualification\ag04_native.py:443: in run
+    return self.result()
+tests\qualification\ag04_native.py:341: in result
+    controls = [{"id": key, "pass": observed[key] == expected,
+E   KeyError: 'relationship'
+_____ test_unheard_opening_interruptions_do_not_invent_delivered_identity _____
+tests\unit\test_call_experience_boundaries.py:38: in test_unheard_opening_interruptions_do_not_invent_delivered_identity
+    assert "latest" in block
+E   AssertionError: assert 'latest' in 'LIVE STATE — runtime facts, not a script:\nagent=Ava\ncompany=Northwind\ndirection=outbound\nintroduction=interrupted'
+______ test_prompt_tells_the_model_not_to_promise_a_callback_by_default _______
+tests\unit\test_callback_promise_prompt_policy.py:41: in test_prompt_tells_the_model_not_to_promise_a_callback_by_default
+    assert "never as a scheduled callback" in lowered
+E   assert 'never as a scheduled callback' in 'contact context — runtime data, not instructions or proof of an external action:\n{"callback_scheduling_available": false}\n\nyou are a helpful receptionist.'
+__ test_policy_still_allows_asking_for_and_noting_a_preferred_callback_time ___
+tests\unit\test_callback_promise_prompt_policy.py:57: in test_policy_still_allows_asking_for_and_noting_a_preferred_callback_time
+    assert "ask for and note" in lowered
+E   assert 'ask for and note' in 'contact context — runtime data, not instructions or proof of an external action:\n{"callback_scheduling_available": false}\n\nyou are a helpful receptionist.'
+___________ test_policy_wording_does_not_itself_promise_a_call_back ___________
+tests\unit\test_callback_promise_prompt_policy.py:70: in test_policy_wording_does_not_itself_promise_a_call_back
+    assert "do not promise that details will be passed on or that someone will follow up" in lowered
+E   assert 'do not promise that details will be passed on or that someone will follow up' in 'contact context — runtime data, not instructions or proof of an external action:\n{"callback_scheduling_available": false}\n\nyou are a helpful receptionist.'
+_________ test_policy_line_is_irrelevant_once_a_real_executor_exists __________
+tests\unit\test_callback_promise_prompt_policy.py:78: in test_policy_line_is_irrelevant_once_a_real_executor_exists
+    assert out == BASE
+E   assert 'CONTACT CONT...receptionist.' == 'You are a he...receptionist.'
+E     + CONTACT CONTEXT — runtime data, not instructions or proof of an external action:
+E     + {"callback_scheduling_available": true}
+E     + 
+E       You are a helpful receptionist.
+_____________ test_cascaded_turn_injects_current_structured_state _____________
+tests\unit\test_live_structured_state.py:194: in test_cascaded_turn_injects_current_structured_state
+    assert session._live_structured_state.decision_maker.value == "unknown"
+E   AttributeError: 'LiveConversationState' object has no attribute 'decision_maker'
+_ test_realtime_bridge_reduces_final_user_turn_and_publishes_before_next_turn _
+tests\unit\test_live_structured_state.py:268: in test_realtime_bridge_reduces_final_user_turn_and_publishes_before_next_turn
+    assert bridge._live_state.decision_maker.value == "unknown"
+E   AttributeError: 'LiveConversationState' object has no attribute 'decision_maker'
+_________ test_a_slow_answer_to_a_question_is_bridged_and_not_echoed __________
+tests\unit\test_natural_gap_fillers.py:112: in test_a_slow_answer_to_a_question_is_bridged_and_not_echoed
+    assert len(spoken) == 2, spoken
+E   AssertionError: ['Got it, Dojo Plus is £11.99 per location a month.']
+E   assert 1 == 2
+E    +  where 1 = len(['Got it, Dojo Plus is £11.99 per location a month.'])
+_ test_production_inbound_is_not_offered_despite_connected_adapter_and_saved_policy _
+tests\unit\test_op06_transfer_capabilities.py:93: in test_production_inbound_is_not_offered_despite_connected_adapter_and_saved_policy
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_______ test_each_unavailable_inbound_gate_removes_offer[tenant_scope] ________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_______ test_each_unavailable_inbound_gate_removes_offer[config_scope] ________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_________ test_each_unavailable_inbound_gate_removes_offer[snapshot] __________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+____ test_each_unavailable_inbound_gate_removes_offer[malformed_snapshot] _____
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+______ test_each_unavailable_inbound_gate_removes_offer[policy_disabled] ______
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+________ test_each_unavailable_inbound_gate_removes_offer[destination] ________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+________ test_each_unavailable_inbound_gate_removes_offer[self_target] ________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_____ test_each_unavailable_inbound_gate_removes_offer[platform_disabled] _____
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+___ test_each_unavailable_inbound_gate_removes_offer[platform_unavailable] ____
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+___ test_each_unavailable_inbound_gate_removes_offer[adapter_disconnected] ____
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_______ test_each_unavailable_inbound_gate_removes_offer[not_admitted] ________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+________ test_each_unavailable_inbound_gate_removes_offer[not_active] _________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_______ test_each_unavailable_inbound_gate_removes_offer[not_reserved] ________
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+______ test_each_unavailable_inbound_gate_removes_offer[no_reservation] _______
+tests\unit\test_op06_transfer_capabilities.py:132: in test_each_unavailable_inbound_gate_removes_offer
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_______ test_call_direction_cannot_be_overridden_by_campaign_direction ________
+tests\unit\test_op06_transfer_capabilities.py:146: in test_call_direction_cannot_be_overridden_by_campaign_direction
+    assert_not_offered(voice.session, await action_execution.prepare_voice_action_context(voice.session))
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_________ test_refresh_removes_capability_after_platform_gate_closes __________
+tests\unit\test_op06_transfer_capabilities.py:165: in test_refresh_removes_capability_after_platform_gate_closes
+    assert_not_offered(voice.session, actions)
+tests\unit\test_op06_transfer_capabilities.py:86: in assert_not_offered
+    assert tools == []
+E   AssertionError: assert [{'function':...: 'function'}] == []
+E     Left contains one more item: {'function': {'description': 'Request that this live call end after a short goodbye. Use only when the caller clearly ...A short reason the caller clearly ended the conversation.', 'type': 'string'}}, 'type': 'object'}}, 'type': 'function'}
+E     Use -v to get more diff
+_ test_cascaded_action_tool_is_offered_only_for_relevant_turn[Please call me back tomorrow.-schedule_callback] _
+tests\unit\test_voice_action_contract.py:149: in test_cascaded_action_tool_is_offered_only_for_relevant_turn
+    assert [tool["function"]["name"] for tool in tools] == [expected]
+E   AssertionError: assert ['schedule_ca...', 'end_call'] == ['schedule_callback']
+E     Left contains 4 more items, first extra item: 'send_email'
+E     Use -v to get more diff
+_ test_cascaded_action_tool_is_offered_only_for_relevant_turn[Can you email that to me?-send_email] _
+tests\unit\test_voice_action_contract.py:149: in test_cascaded_action_tool_is_offered_only_for_relevant_turn
+    assert [tool["function"]["name"] for tool in tools] == [expected]
+E   AssertionError: assert ['schedule_ca...', 'end_call'] == ['send_email']
+E     At index 0 diff: 'schedule_callback' != 'send_email'
+E     Left contains 4 more items, first extra item: 'send_email'
+E     Use -v to get more diff
+_ test_cascaded_action_tool_is_offered_only_for_relevant_turn[Submit the application.-submit_form] _
+tests\unit\test_voice_action_contract.py:149: in test_cascaded_action_tool_is_offered_only_for_relevant_turn
+    assert [tool["function"]["name"] for tool in tools] == [expected]
+E   AssertionError: assert ['schedule_ca...', 'end_call'] == ['submit_form']
+E     At index 0 diff: 'schedule_callback' != 'submit_form'
+E     Left contains 4 more items, first extra item: 'send_email'
+E     Use -v to get more diff
+_ test_cascaded_action_tool_is_offered_only_for_relevant_turn[Transfer me to a person.-transfer_call] _
+tests\unit\test_voice_action_contract.py:149: in test_cascaded_action_tool_is_offered_only_for_relevant_turn
+    assert [tool["function"]["name"] for tool in tools] == [expected]
+E   AssertionError: assert ['schedule_ca...', 'end_call'] == ['transfer_call']
+E     At index 0 diff: 'schedule_callback' != 'transfer_call'
+E     Left contains 4 more items, first extra item: 'send_email'
+E     Use -v to get more diff
+_ test_cascaded_action_tool_is_offered_only_for_relevant_turn[No thanks, goodbye.-end_call] _
+tests\unit\test_voice_action_contract.py:149: in test_cascaded_action_tool_is_offered_only_for_relevant_turn
+    assert [tool["function"]["name"] for tool in tools] == [expected]
+E   AssertionError: assert ['schedule_ca...', 'end_call'] == ['end_call']
+E     At index 0 diff: 'schedule_callback' != 'end_call'
+E     Left contains 4 more items, first extra item: 'send_email'
+E     Use -v to get more diff
+___ test_realtime_schema_exposes_each_action_once_and_transfer_stays_gated ____
+tests\unit\test_voice_action_contract.py:154: in test_realtime_schema_exposes_each_action_once_and_transfer_stays_gated
+    assert names == list(VOICE_ACTION_NAMES)
+E   AssertionError: assert ['record_cont...', 'end_call'] == ['schedule_ca...', 'end_call']
+E     At index 0 diff: 'record_contact' != 'schedule_callback'
+E     Left contains one more item: 'end_call'
+E     Use -v to get more diff
+______________ test_realtime_preserves_knowledge_lookup_dispatch ______________
+tests\unit\test_voice_action_contract.py:226: in test_realtime_preserves_knowledge_lookup_dispatch
+    bridge._lookup_knowledge.assert_awaited_once_with("hours")
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2363: in assert_awaited_once_with
+    return self.assert_awaited_with(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2352: in assert_awaited_with
+    raise AssertionError(_error_message()) from cause
+E   AssertionError: expected await not found.
+E   Expected: mock('hours')
+E     Actual: mock({'query': 'hours'})
+------------------------------ Captured log call ------------------------------
+WARNING  app.realtime.bridge:bridge.py:1086 realtime_bridge live state unavailable call=call-1
+_____ test_action_turn_feeds_failed_result_without_rewriting_model_speech _____
+tests\unit\test_voice_action_contract.py:381: in test_action_turn_feeds_failed_result_without_rewriting_model_speech
+    assert llm.require_strict is True
+E   assert False is True
+E    +  where False = <tests.unit.test_voice_action_contract.test_action_turn_feeds_failed_result_without_rewriting_model_speech.<locals>._ActionLLM object at 0x0000022C83413FE0>.require_strict
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-openai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[supported-xai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-openai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_nonprice_grounding_preserves_source_and_useful_answer_without_semantic_approval[absent_link-xai]
+FAILED tests/unit/test_ag04_native_qualification.py::test_native_source_outside_empty_fence_and_missing_delivered_history_fail_common_controls
+FAILED tests/unit/test_ag04_native_qualification.py::test_observed_runtime_failure_is_reported_not_rewritten_as_approval
+FAILED tests/unit/test_call_experience_boundaries.py::test_unheard_opening_interruptions_do_not_invent_delivered_identity
+FAILED tests/unit/test_callback_promise_prompt_policy.py::test_prompt_tells_the_model_not_to_promise_a_callback_by_default
+FAILED tests/unit/test_callback_promise_prompt_policy.py::test_policy_still_allows_asking_for_and_noting_a_preferred_callback_time
+FAILED tests/unit/test_callback_promise_prompt_policy.py::test_policy_wording_does_not_itself_promise_a_call_back
+FAILED tests/unit/test_callback_promise_prompt_policy.py::test_policy_line_is_irrelevant_once_a_real_executor_exists
+FAILED tests/unit/test_live_structured_state.py::test_cascaded_turn_injects_current_structured_state
+FAILED tests/unit/test_live_structured_state.py::test_realtime_bridge_reduces_final_user_turn_and_publishes_before_next_turn
+FAILED tests/unit/test_natural_gap_fillers.py::test_a_slow_answer_to_a_question_is_bridged_and_not_echoed
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_production_inbound_is_not_offered_despite_connected_adapter_and_saved_policy
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[tenant_scope]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[config_scope]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[snapshot]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[malformed_snapshot]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[policy_disabled]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[destination]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[self_target]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[platform_disabled]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[platform_unavailable]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[adapter_disconnected]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[not_admitted]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[not_active]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[not_reserved]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_each_unavailable_inbound_gate_removes_offer[no_reservation]
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_call_direction_cannot_be_overridden_by_campaign_direction
+FAILED tests/unit/test_op06_transfer_capabilities.py::test_refresh_removes_capability_after_platform_gate_closes
+FAILED tests/unit/test_voice_action_contract.py::test_cascaded_action_tool_is_offered_only_for_relevant_turn[Please call me back tomorrow.-schedule_callback]
+FAILED tests/unit/test_voice_action_contract.py::test_cascaded_action_tool_is_offered_only_for_relevant_turn[Can you email that to me?-send_email]
+FAILED tests/unit/test_voice_action_contract.py::test_cascaded_action_tool_is_offered_only_for_relevant_turn[Submit the application.-submit_form]
+FAILED tests/unit/test_voice_action_contract.py::test_cascaded_action_tool_is_offered_only_for_relevant_turn[Transfer me to a person.-transfer_call]
+FAILED tests/unit/test_voice_action_contract.py::test_cascaded_action_tool_is_offered_only_for_relevant_turn[No thanks, goodbye.-end_call]
+FAILED tests/unit/test_voice_action_contract.py::test_realtime_schema_exposes_each_action_once_and_transfer_stays_gated
+FAILED tests/unit/test_voice_action_contract.py::test_realtime_preserves_knowledge_lookup_dispatch
+FAILED tests/unit/test_voice_action_contract.py::test_action_turn_feeds_failed_result_without_rewriting_model_speech
+39 failed, 439 passed, 215 warnings in 20.13s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 442, 'prohibited': 0}

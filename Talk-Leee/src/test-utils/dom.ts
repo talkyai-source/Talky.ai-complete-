@@ -36,6 +36,11 @@ export function ensureDom() {
     setProp("FocusEvent", dom.window.FocusEvent);
     setProp("PointerEvent", (dom.window as unknown as { PointerEvent?: unknown }).PointerEvent ?? dom.window.MouseEvent);
     setProp("getComputedStyle", dom.window.getComputedStyle.bind(dom.window));
+    // jsdom implements both of these; the list above just never forwarded them,
+    // so any component that reads a stored token — AuthProvider does, on mount —
+    // died with "localStorage.getItem is not a function" instead of rendering.
+    setProp("localStorage", dom.window.localStorage);
+    setProp("sessionStorage", dom.window.sessionStorage);
 
     if (!globalThis.requestAnimationFrame) {
         setProp("requestAnimationFrame", (cb: FrameRequestCallback) => window.setTimeout(() => cb(Date.now()), 0) as unknown as number);

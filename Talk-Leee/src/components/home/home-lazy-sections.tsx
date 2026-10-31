@@ -29,11 +29,6 @@ const CTASection = dynamic(() => import("@/components/home/cta-section").then((m
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[320px]" />,
 });
 
-const ContactSection = dynamic(() => import("@/components/home/contact-section").then((m) => m.ContactSection), {
-  ssr: true,
-  loading: () => <SectionPlaceholder minHeightClassName="min-h-[420px]" />,
-});
-
 const Footer = dynamic(() => import("@/components/home/footer").then((m) => m.Footer), {
   ssr: true,
   loading: () => <SectionPlaceholder minHeightClassName="min-h-[240px]" />,
@@ -41,7 +36,7 @@ const Footer = dynamic(() => import("@/components/home/footer").then((m) => m.Fo
 
 function SectionPlaceholder({ minHeightClassName }: { minHeightClassName: string }) {
   return (
-    <section className={`bg-cyan-100 dark:bg-background ${minHeightClassName}`}>
+    <section className={`bg-cyan-50 dark:bg-black ${minHeightClassName}`}>
       <div className="mx-auto h-full max-w-7xl px-4 md:px-6 lg:px-8" />
     </section>
   );
@@ -52,7 +47,7 @@ function FAQSection() {
     {
       question: "What is Talk-Lee AI?",
       answer:
-        "Talk-Lee AI is a fully featured platform that automates phone calls with intelligent voice agents, helping teams scale conversations without queues or delays.",
+        "Talk-Lee AI provides voice agents for configured inbound and outbound calling workflows, with campaign settings and call records.",
     },
     {
       question: "Do I need technical expertise to use Talk-Lee AI?",
@@ -68,11 +63,11 @@ function FAQSection() {
     },
     {
       question: "Can calls be transferred to human agents?",
-      answer: "Absolutely. Talk-Lee AI can forward calls to live agents whenever needed or requested by customers.",
+      answer: "Live transfer to a human agent is not currently available. An agent can collect a request for your team to review; this does not arrange a callback.",
     },
     {
       question: "Is Talk-Lee AI secure and compliant?",
-      answer: "Yes. We provide built‑in consent handling, encryption, GDPR/TCPA tooling, and enterprise‑grade compliance features.",
+      answer: "Access, consent and recording controls are available. Review the configuration, data handling and applicable requirements for your intended use before launch.",
     },
     {
       question: "Can I resell Talk-Lee AI under my own brand?",
@@ -80,15 +75,15 @@ function FAQSection() {
     },
     {
       question: "Do you provide phone numbers for campaigns?",
-      answer: "Talk-Lee AI issues dedicated numbers for your outbound and inbound campaigns.",
+      answer: "Talk-Lee AI issues dedicated numbers for your inbound and outbound campaigns.",
     },
   ];
 
   return (
-    <section id="faq" className="bg-cyan-100 dark:bg-background py-20 px-4 md:px-6 lg:px-8 overflow-hidden">
+    <section id="faq" className="bg-cyan-50 dark:bg-black py-20 px-4 md:px-6 lg:px-8 overflow-hidden">
       <div className="max-w-5xl mx-auto">
         <h2 className="text-center text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-          Frequently Asked Questions - Talk-Lee AI
+          Frequently Asked Questions
         </h2>
         <div className="mt-10 space-y-3">
           {items.map((item) => (
@@ -115,7 +110,12 @@ function FAQSection() {
   );
 }
 
+const HERO_VIDEO_SRC = "/images/hero-navbar-video.mp4";
+
+type HeroVideoWindow = Window & { __heroVideo?: Promise<Blob | null>; __heroVideoUrl?: string };
+
 function NavbarHeroBackgroundVideo() {
+  const [videoSrc, setVideoSrc] = useState<string | undefined>(undefined);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const videoARef = useRef<HTMLVideoElement | null>(null);
   const videoBRef = useRef<HTMLVideoElement | null>(null);
@@ -163,10 +163,39 @@ function NavbarHeroBackgroundVideo() {
     return () => io.disconnect();
   }, []);
 
+  // Both crossfade elements play the same file. Pointing each at the URL makes
+  // the browser download it twice, so the file is fetched once (started by an
+  // inline script in page.tsx, which also attaches the resulting blob URL to
+  // both elements before hydration) and shared. This effect adopts that URL,
+  // or fetches the file itself if the script did not run.
+  useEffect(() => {
+    const w = window as HeroVideoWindow;
+    let cancelled = false;
+    const resolveUrl = (): Promise<string> => {
+      if (w.__heroVideoUrl) return Promise.resolve(w.__heroVideoUrl);
+      return (
+        w.__heroVideo ??
+        fetch(HERO_VIDEO_SRC)
+          .then((res) => (res.ok ? res.blob() : null))
+          .catch(() => null)
+      ).then((blob) => {
+        if (!blob) return HERO_VIDEO_SRC;
+        w.__heroVideoUrl ??= URL.createObjectURL(blob);
+        return w.__heroVideoUrl;
+      });
+    };
+    void resolveUrl().then((url) => {
+      if (!cancelled) setVideoSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     const a = videoARef.current;
     const b = videoBRef.current;
-    if (!a || !b) return;
+    if (!a || !b || !videoSrc) return;
     if (!isInView) {
       try { a.pause(); } catch {}
       try { b.pause(); } catch {}
@@ -174,7 +203,7 @@ function NavbarHeroBackgroundVideo() {
     }
     if (activeRef.current === "A") safePlay(a);
     else safePlay(b);
-  }, [isInView]);
+  }, [isInView, videoSrc]);
 
   useEffect(() => {
     const a = videoARef.current;
@@ -224,7 +253,10 @@ function NavbarHeroBackgroundVideo() {
   return (
     <div
       ref={wrapRef}
-      className="pointer-events-none absolute inset-x-0 top-0 z-0 h-screen overflow-hidden"
+      // Spans the navbar strip plus the full hero at any height: the hero is
+      // min-h since 8fd92e44 and can grow past one screen, where h-screen
+      // left a flat band below the video.
+      className="pointer-events-none absolute inset-x-0 bottom-0 top-[calc(-1*var(--home-navbar-height))] z-0 overflow-hidden"
       aria-hidden="true"
       style={{
         backgroundImage: `url("${fallbackPoster}")`,
@@ -238,7 +270,9 @@ function NavbarHeroBackgroundVideo() {
         ref={videoARef}
         className={videoClass}
         style={{ opacity: opacityA, transition: transitionStyle }}
-        src="/images/hero-navbar-video.mp4"
+        src={videoSrc}
+        data-hero-video=""
+        suppressHydrationWarning
         autoPlay
         muted
         playsInline
@@ -251,7 +285,9 @@ function NavbarHeroBackgroundVideo() {
         ref={videoBRef}
         className={videoClass}
         style={{ opacity: opacityB, transition: transitionStyle }}
-        src="/images/hero-navbar-video.mp4"
+        src={videoSrc}
+        data-hero-video=""
+        suppressHydrationWarning
         muted
         playsInline
         preload="metadata"
@@ -265,29 +301,34 @@ function NavbarHeroBackgroundVideo() {
 export function HomeLazySections() {
   return (
     <>
-      <NavbarHeroBackgroundVideo />
+      {/* One positioning context for the video and the hero, so the video's
+          bottom-0 tracks the hero's real height instead of one screen. */}
+      <div className="relative">
+        <NavbarHeroBackgroundVideo />
+        <div className="relative z-10">
+          <Hero
+            title="AI Voice Agent Platform for Seamless Call Automation"
+            description={[
+              "Configure AI voice agents for inbound enquiries and outbound campaigns using your approved business information.",
+              "Choose a supported model and voice, set calling rules, and review the effective configuration before starting a campaign.",
+              "Review call records and captured details to decide what needs a follow-up or a correction from your team.",
+            ]}
+            adjustForNavbar
+            stats={[
+              { label: "Inbound & outbound", value: "Calls" },
+              { label: "Campaign settings", value: "Controls" },
+              { label: "Review outcomes", value: "Records" },
+            ]}
+          />
+        </div>
+      </div>
       <div className="relative z-10">
-        <Hero
-          title="AI Voice Agent Platform for Seamless Call Automation"
-          description={[
-            "Automate inbound and outbound calls with intelligent AI voice agents that deliver end-to-end customer support, appointment scheduling, and enterprise-grade engagement — 24/7.",
-            "Intelligent voice communication platform powered by advanced AI agents, built to operate at scale with high accuracy and reliability. Real-time speech recognition, natural language processing, and seamless call automation support enterprise-scale outbound campaigns.",
-            "The platform enables natural, human-like conversations through adaptive dialogue handling, intent detection, and contextual understanding. It ensures consistent performance across large call volumes while maintaining clarity, responsiveness, and automation efficiency for enterprise communication workflows.",
-          ]}
-          adjustForNavbar
-          stats={[
-            { label: "Response Time", value: "<500ms" },
-            { label: "Concurrent Calls", value: "1000+" },
-            { label: "Completion Rate", value: "94%" },
-          ]}
-        />
         <SecondaryHero />
         <StatsSection />
         <PackagesSection />
         <FeaturesSection />
         <CTASection />
         <FAQSection />
-        <ContactSection />
         <Footer />
       </div>
     </>

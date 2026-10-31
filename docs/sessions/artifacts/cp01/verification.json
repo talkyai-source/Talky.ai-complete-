@@ -1,0 +1,71 @@
+{
+  "candidate": "ce43b268a108e6afe1a8e49d9f4e25d36e9849a2",
+  "date": "2026-10-04",
+  "scope": "CP01 only; local verification; no production release",
+  "checks": {
+    "contact_frontend": {
+      "passed": 52,
+      "failed": 0,
+      "next": "16.3.8",
+      "lint_errors": 0,
+      "lint_warnings": 1
+    },
+    "backend_focused": {
+      "passed": 30,
+      "failed": 0
+    },
+    "postgres_integration": {
+      "passed": 6,
+      "failed": 0
+    },
+    "admin": {
+      "tests_passed": 13,
+      "build": "passed",
+      "lint": "passed",
+      "vite": "7.3.6"
+    },
+    "website_build": {
+      "status": "passed",
+      "typescript": "passed",
+      "static_pages": 70
+    },
+    "marketing_lint": {
+      "status": "passed",
+      "files": 17
+    },
+    "full_backend_initial": {
+      "passed": 10447,
+      "skipped": 16,
+      "failed": 5,
+      "seconds": 1118.74,
+      "disposition": "One CP01 auth-inventory failure fixed and verified. Four unchanged timing cases classified separately; full suite not claimed clean."
+    },
+    "llm_timing_replay": {
+      "passed": 12,
+      "failed": 0,
+      "source_changes": false
+    },
+    "pjsip_cli_replay": {
+      "passed": true,
+      "seconds": 5.95
+    },
+    "fake_soak_replay": {
+      "threshold_seconds": 6,
+      "observed_seconds": 6.266,
+      "expected_exit": 7,
+      "both_fake_experiments_cleaned": true,
+      "status": "timing_threshold_failed"
+    },
+    "fake_soak_diagnostic": {
+      "seconds": 5.235,
+      "both_fake_experiments_cleaned": true
+    },
+    "final_browser_to_database": {
+      "status": "not_run",
+      "reason": "Automatic approval review rejected starting the loopback Next production preview: blocked by policy."
+    }
+  },
+  "production_acceptance": "not_run",
+  "pushed": false,
+  "deployed": false
+}

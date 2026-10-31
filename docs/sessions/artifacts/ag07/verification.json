@@ -1,0 +1,46 @@
+{
+  "package_id": "AG07",
+  "status": "in_progress",
+  "base_revision": "59718df898f765a20ef99aaf51428028222db5d5",
+  "mechanical_candidate": "09bcd50fe0f600fce9ca6af9c882f794ed45883f",
+  "candidate_revision": "7f9ec58f3657e8a5fd7bcd3a3e3d882fb1f5a341",
+  "original_commits": [
+    "eaebd8fe13b027427296193020ba1c98c0341f2a",
+    "79d6362dfdfcf02f7c95939d597a171b0142ebfa"
+  ],
+  "backend": {
+    "passed": 2750,
+    "skipped": 0,
+    "xfailed": 0,
+    "warnings": 2598,
+    "modules": 174,
+    "seconds": 83.49,
+    "exit_code": 0
+  },
+  "lint": "passed with existing CI F401/F841 exclusions",
+  "not_run": [
+    "live providers",
+    "human acoustic/semantic acceptance",
+    "production release",
+    "restartable live-call recovery"
+  ],
+  "artifacts_sha256_lf": {
+    "backend-integrated-final.txt": "b6cf27d9988bc7695ca1cb58e6830a01778f381b4f0a4fabba0e60e1303d414e",
+    "caller-search-base-d8ecd6d0.txt": "5bab0a7b101eb7ddff0d35e45ee7a869c5692f865240c8e2d821a59c22638fa6",
+    "caller-search-code-after.txt": "d5a8a4c50ef3a21582e52bf58751f79a72cfa87c7c475f40413bc078a0a81a6d",
+    "caller-search-code-before.txt": "c50f4bab3e117aa319faf8eab511a89930979646663b36236ac052ade06f27cf",
+    "caller-search-files-before.txt": "d38238b43565b53faf4e0fbcd819a95baeae547d0703302bb7178a1c1e363bd6",
+    "followup-final.txt": "683f0935187b979bfa816ac9e6b6831657f09fbc44dead8980a63ea14672a194",
+    "followup-ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "integrated-command.json": "2713b12e552524ef1af8d91cae63bd33ae59eff444a09e0359aee2e8e4c909c4",
+    "lint-integrated-final.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "live-path-before-cleanup.txt": "9d17459c3739f46740f500b8c04ccd680e7b07a5d3e080dbd6dbccb92f10a800",
+    "mechanical-ast.json": "a9e9d852f6103ecd36eb1b89b98a21fd17c3433a2baeddf75271abd713436cd2",
+    "relationship-grammar-after.txt": "a7e5ce3f860a800c1dea0fc56a7c8634424aa9f68488979c190115db32717a5d",
+    "relationship-grammar-before.txt": "9a7fdfdca523124dc2a6b4f85276068b2e52e9261e5b753df993c232e3a1ac56",
+    "ruff-final.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "scoped-after.txt": "78bdcd4ad65f48168e8b50761ee9f0b45997c4908c56636e9e70b7e1aa461c64",
+    "scoped-before.txt": "27f0db5d81384e4667aec478f4663ec11da5255356ffc1a136a57bc9eaae5a9f",
+    "scoped-final.txt": "f37c653c425e559576660c79f70df17388660a3b01e1c7fd550d93e09229ce2d"
+  }
+}

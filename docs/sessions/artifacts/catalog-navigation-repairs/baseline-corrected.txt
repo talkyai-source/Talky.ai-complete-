@@ -1,0 +1,53 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_oversized_navigation_heading_remains_browsable_without_clipping_source _
+
+    def test_oversized_navigation_heading_remains_browsable_without_clipping_source():
+        heading = "Authored long heading " * 410
+        rows = [{"id": "first", "source_id": "manual", "source_version": 1, "version": 1,
+                 "heading": heading, "content": "Complete source body, excluding tax."}]
+        catalog = build_section_catalog(rows, tenant_id="tenant", campaign_id="campaign", source_policy="call_snapshot")
+        page = render_catalog_page(catalog)
+>       assert page["status"] == "catalog"
+E       AssertionError: assert 'too_large' == 'catalog'
+E         - catalog
+E         + too_large
+
+tests\unit\test_catalog_navigation.py:38: AssertionError
+_______ test_shared_loop_four_catalog_steps_still_reaches_exact_source ________
+
+    @pytest.mark.asyncio
+    async def test_shared_loop_four_catalog_steps_still_reaches_exact_source():
+        session = catalog_session()
+        steps = navigation_steps(session)
+        requests = []
+    
+        async def model(messages, **kwargs):
+            requests.append(kwargs)
+            if kwargs.get("tools") and len(requests) <= len(steps):
+                args = steps[len(requests) - 1]
+                kwargs["tool_calls_sink"].append({"id": str(len(requests)), "name": kt.KB_TOOL_NAME,
+                                                   "arguments": args, "arguments_raw": json.dumps(args)})
+            else:
+                yield "The authored conditions apply."
+    
+        async def runner(name, args):
+            return await kt.run_knowledge_lookup(session, args)
+    
+        # getattr preserves the actual pre-fix behavior for the baseline run.
+        factory = getattr(kt, "knowledge_navigation_continuation", lambda _: None)
+        output = [part async for part in stream_tool_turn(SimpleNamespace(stream_chat_with_timeout=model),
+            [Message(role=MessageRole.USER, content="Please explain the late section.")],
+            tools=[kt.KNOWLEDGE_TOOL_SPEC], tool_runner=runner, max_tool_rounds=3,
+            read_only_tools={kt.KB_TOOL_NAME}, navigation_round_allowed=factory(session))]
+        assert output == ["The authored conditions apply."]
+>       assert session._knowledge_evidence["status"] == "available"
+E       AssertionError: assert 'catalog' == 'available'
+E         - available
+E         + catalog
+
+tests\unit\test_catalog_navigation.py:72: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_catalog_navigation.py::test_oversized_navigation_heading_remains_browsable_without_clipping_source
+FAILED tests/unit/test_catalog_navigation.py::test_shared_loop_four_catalog_steps_still_reaches_exact_source
+2 failed in 4.15s

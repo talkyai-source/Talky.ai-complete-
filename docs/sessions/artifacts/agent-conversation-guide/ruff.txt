@@ -1,0 +1,24 @@
+backend\app\services\scripts\prompts\composer.py:42:5: F401 [*] `app.services.scripts.prompts.direction.INBOUND_DIRECTIVE_SENTINEL` imported but unused
+   |
+40 | from app.domain.services.campaign_brief import render_campaign_brief
+41 | from app.services.scripts.prompts.direction import (
+42 |     INBOUND_DIRECTIVE_SENTINEL,
+   |     ^^^^^^^^^^^^^^^^^^^^^^^^^^ F401
+43 |     inbound_directive_block,
+44 | )
+   |
+   = help: Remove unused import: `app.services.scripts.prompts.direction.INBOUND_DIRECTIVE_SENTINEL`
+
+backend\app\services\scripts\prompts\composer.py:57:5: F401 [*] `app.services.scripts.prompts.personas.PERSONAS` imported but unused
+   |
+55 |     PERSONA_BODIES,
+56 |     PERSONA_OPENINGS,
+57 |     PERSONAS,
+   |     ^^^^^^^^ F401
+58 |     PersonaType,
+59 |     REQUIRED_SLOTS_BY_PERSONA,
+   |
+   = help: Remove unused import: `app.services.scripts.prompts.personas.PERSONAS`
+
+Found 2 errors.
+[*] 2 fixable with the `--fix` option.

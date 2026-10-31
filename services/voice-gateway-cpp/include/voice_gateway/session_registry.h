@@ -8,7 +8,6 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 #include "voice_gateway/session.h"
@@ -17,7 +16,11 @@ namespace voice_gateway {
 
 enum class StartSessionResult {
     Started,
+    // Same session id and the same non-empty controller config digest.
     AlreadyExists,
+    // Same id but a different/absent digest, or the prior id is still stopping.
+    ConfigConflict,
+    CapacityExceeded,
     InvalidConfig,
     InternalError,
 };
@@ -53,6 +56,9 @@ struct ProcessStatsSnapshot {
     uint64_t stt_restarts_committed_total{0};
     // TTS chunks refused by the utterance/chunk-seq idempotency gate (VG-13).
     uint64_t tts_chunks_rejected_stale_total{0};
+    uint64_t callback_batches_delivered_total{0};
+    uint64_t callback_batches_failed_total{0};
+    uint64_t callback_batches_dropped_total{0};
 };
 
 class SessionRegistry {
@@ -78,6 +84,7 @@ public:
     [[nodiscard]] RtpSessionPtr get_session(const std::string& session_id) const;
     [[nodiscard]] std::vector<SessionStatsSnapshot> list_sessions() const;
     [[nodiscard]] bool all_sessions_healthy() const;
+    [[nodiscard]] bool can_accept_session() const;
     [[nodiscard]] ProcessStatsSnapshot snapshot() const;
 
     // Erase self-stopped sessions (watchdog timeout / socket_error) that the
@@ -94,6 +101,8 @@ private:
     std::vector<RtpSessionPtr> collect_sessions_locked_copy() const;
 
     void reaper_loop();
+    void finish_retirement(const std::string& id, const RtpSessionPtr& session,
+                           const std::string& reason);
 
     // A self-stopped session is reaped once observed not-running for at least
     // this long. The grace period must comfortably exceed the request_stop()
@@ -115,7 +124,9 @@ private:
     // (sockets closing / threads joining). A new start on the same id is rejected
     // while the id is here, so it cannot rebind the port before the old session's
     // sockets are actually closed (VG-16).
-    std::unordered_set<std::string> stopping_;
+    std::unordered_map<std::string, RtpSessionPtr> stopping_;
+    // Counters survive retirement for this process lifetime; gauges do not.
+    ProcessStatsSnapshot retired_media_totals_;
     // session_id -> first steady_clock time the reaper observed it not-running.
     std::unordered_map<std::string, std::chrono::steady_clock::time_point> stopped_since_;
     uint64_t sessions_started_total_{0};

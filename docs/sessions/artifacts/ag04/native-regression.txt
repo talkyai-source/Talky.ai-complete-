@@ -1,0 +1,19 @@
+........................................................................ [ 30%]
+........................................................................ [ 60%]
+........................................................................ [ 90%]
+........................                                                 [100%]
+============================== warnings summary ===============================
+tests/unit/test_ag04_native_qualification.py: 157 warnings
+tests/unit/test_realtime_relationship_ownership.py: 3 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_live_structured_state.py::test_cascaded_turn_injects_current_structured_state
+tests/unit/test_live_structured_state.py::test_cascaded_turn_injects_current_structured_state
+tests/unit/test_live_structured_state.py::test_nonstreaming_cascaded_entry_point_uses_the_same_state_contract
+tests/unit/test_live_structured_state.py::test_nonstreaming_cascaded_entry_point_uses_the_same_state_contract
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+240 passed, 164 warnings in 9.07s

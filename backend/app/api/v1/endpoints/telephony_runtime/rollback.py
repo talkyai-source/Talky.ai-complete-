@@ -1,4 +1,5 @@
 """POST /telephony/sip/runtime/rollback — revert to a prior policy version."""
+
 from __future__ import annotations
 
 from typing import Optional
@@ -9,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.core.db_utils import acquire_with_tenant
 from app.infrastructure.telephony.runtime_policy_adapter import (
     RuntimeCommandError,
     RuntimePolicyAdapter,
@@ -28,6 +30,17 @@ from ._shared import (
 from .schemas import RuntimeRollbackRequest, RuntimeRollbackResponse
 
 router = APIRouter(tags=["Telephony SIP Runtime"])
+
+
+def _is_simulated(*stage_results: dict) -> bool:
+    """True when every adapter stage ran in simulate mode (no command executed)."""
+    stages = [
+        stage
+        for result in stage_results
+        for stage in result.values()
+        if isinstance(stage, dict)
+    ]
+    return bool(stages) and all(stage.get("mode") == "simulate" for stage in stages)
 
 
 @router.post("/rollback", response_model=RuntimeRollbackResponse)
@@ -57,8 +70,18 @@ async def rollback_runtime_policy(
         {"target_version": payload.target_version, "reason": payload.reason or ""}
     )
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_body, cached_code = await _claim_idempotency(
                 conn,
@@ -139,6 +162,7 @@ async def rollback_runtime_policy(
                     FROM tenant_runtime_policy_versions
                     WHERE tenant_id = $1
                       AND policy_version = $2
+                      AND build_status IN ('active', 'superseded', 'rolled_back')
                     LIMIT 1
                     """,
                     current_user.tenant_id,
@@ -200,8 +224,18 @@ async def rollback_runtime_policy(
             type_suffix="runtime-rollback-failed",
             extras={"runtime_error": exc.to_dict()},
         )
-        async with db_pool.acquire() as conn:
-            await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+        async with acquire_with_tenant(
+            db_pool,
+            current_user.tenant_id,
+            user_id=current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        ) as conn:
+            await apply_tenant_rls_context(
+                conn,
+                current_user.tenant_id,
+                current_user.id,
+                request_id=request.headers.get("x-request-id"),
+            )
             async with conn.transaction():
                 await _log_runtime_event(
                     conn,
@@ -223,8 +257,18 @@ async def rollback_runtime_policy(
                 )
         return response
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             await conn.execute(
                 """
@@ -272,6 +316,7 @@ async def rollback_runtime_policy(
                 status="rolled_back",
                 apply_result=apply_result,
                 verify_result=verify_result,
+                simulated=_is_simulated(apply_result, verify_result),
             ).model_dump()
             await _store_idempotency_result(
                 conn,

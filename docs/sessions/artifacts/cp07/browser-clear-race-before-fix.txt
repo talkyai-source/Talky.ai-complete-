@@ -1,0 +1,2 @@
+### Error
+Error: clear_other_tab retained history/toasts or restored old privacy

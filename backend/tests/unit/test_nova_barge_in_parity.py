@@ -73,6 +73,17 @@ class _Msg:
         self.type = mtype
 
 
+class _Results(_Msg):
+    """An interim Results message carrying ``text``."""
+
+    def __init__(self, text: str, is_final: bool = False) -> None:
+        super().__init__("Results")
+        alt = types.SimpleNamespace(transcript=text, confidence=0.9)
+        self.channel = types.SimpleNamespace(alternatives=[alt])
+        self.is_final = is_final
+        self.speech_final = False
+
+
 class _FakeConn:
     """Records handlers, then replays a scripted SpeechStarted on start_listening."""
 
@@ -148,43 +159,73 @@ async def _collect(provider: DeepgramNovaSTTProvider, limit: int = 1, timeout: f
     return out
 
 
+# 2026-09-28 (call d3a21591): a bare SpeechStarted used to fire barge-in at
+# once. Nova takes over on loud lines, its VAD fires on the noise, and ten
+# replies were cut off in 90 s with no caller words behind them. SpeechStarted
+# now arms the barge-in and the caller's first real words fire it. The parity
+# requirement of TKT-008 still holds: when barge-in fires, BOTH the direct
+# callback and the BargeInSignal happen, exactly as with Flux.
+
+
 @pytest.mark.asyncio
-async def test_speech_started_yields_a_barge_in_signal():
-    """The regression this ticket fixes: Nova emitted nothing on SpeechStarted."""
+async def test_real_words_after_speech_started_yield_a_barge_in_signal():
     provider = DeepgramNovaSTTProvider()
-    provider._client = _FakeClient(_FakeConn([_Msg("SpeechStarted")]))
-
-    items = await _collect(provider, limit=1)
-
-    assert items, "Nova yielded nothing for SpeechStarted — handle_barge_in() would never run"
-    assert isinstance(items[0], BargeInSignal), (
-        f"expected BargeInSignal (the shared contract Flux emits), got {type(items[0]).__name__}"
+    provider._client = _FakeClient(
+        _FakeConn([_Msg("SpeechStarted"), _Results("can you tell me the price")])
     )
 
-
-@pytest.mark.asyncio
-async def test_barge_in_signal_has_empty_text_not_none():
-    """
-    Nova's SpeechStarted is a pure VAD event with no transcript yet, so empty text
-    is correct — but it must be a string, because TranscriptHandler reads it.
-    """
-    provider = DeepgramNovaSTTProvider()
-    provider._client = _FakeClient(_FakeConn([_Msg("SpeechStarted")]))
-
     items = await _collect(provider, limit=1)
 
-    assert isinstance(items[0].text, str)
-    assert items[0].text == ""
+    assert items and isinstance(items[0], BargeInSignal), items
+    assert items[0].text == "can you tell me the price"
 
 
 @pytest.mark.asyncio
 async def test_direct_callback_still_fires_alongside_the_signal():
     """Both halves are required. The signal must not have replaced the callback."""
     provider = DeepgramNovaSTTProvider()
-    provider._client = _FakeClient(_FakeConn([_Msg("SpeechStarted")]))
+    provider._client = _FakeClient(
+        _FakeConn([_Msg("SpeechStarted"), _Results("wait a second please")])
+    )
 
     await _collect(provider, limit=1)
 
     assert provider._fired, (  # type: ignore[attr-defined]
         "on_barge_in was not called — TTS would keep playing over the caller"
     )
+
+
+@pytest.mark.asyncio
+async def test_speech_started_with_no_words_does_not_interrupt():
+    """Line noise: VAD fires, no words ever come. The agent keeps talking."""
+    provider = DeepgramNovaSTTProvider()
+    provider._client = _FakeClient(_FakeConn([_Msg("SpeechStarted")]))
+
+    items = await _collect(provider, limit=1, timeout=1.0)
+
+    assert not any(isinstance(i, BargeInSignal) for i in items), items
+    assert not provider._fired  # type: ignore[attr-defined]
+
+
+@pytest.mark.asyncio
+async def test_a_backchannel_does_not_interrupt_but_a_hard_interrupt_does():
+    provider = DeepgramNovaSTTProvider()
+    provider._client = _FakeClient(
+        _FakeConn([_Msg("SpeechStarted"), _Results("yeah")])
+    )
+    items = await _collect(provider, limit=2, timeout=1.0)
+    assert not any(isinstance(i, BargeInSignal) for i in items), items
+
+    provider = DeepgramNovaSTTProvider()
+    provider._client = _FakeClient(_FakeConn([_Msg("SpeechStarted"), _Results("stop")]))
+    items = await _collect(provider, limit=1)
+    assert items and isinstance(items[0], BargeInSignal), items
+
+
+@pytest.mark.asyncio
+async def test_words_without_a_speech_started_do_not_barge_in():
+    """Unchanged: an ordinary interim transcript is not a barge-in."""
+    provider = DeepgramNovaSTTProvider()
+    provider._client = _FakeClient(_FakeConn([_Results("hello there")]))
+    items = await _collect(provider, limit=1, timeout=1.0)
+    assert not any(isinstance(i, BargeInSignal) for i in items), items

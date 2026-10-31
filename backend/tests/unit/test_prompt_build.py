@@ -35,10 +35,15 @@ def test_no_blocks_no_slots_returns_base_unchanged():
 
 
 def test_empty_state_adds_no_captured_header():
+    """Empty state carries neutral capability data, with no invented contacts."""
     for order in (_LEGACY, _CACHED):
         out = build_turn_prompt("BASE", captured_slots=CallState(), **order)
-        assert out == "BASE"
-        assert "CAPTURED" not in out
+        assert "CONTACT CONTEXT" in out
+        assert "callback_scheduling_available" in out.lower()
+    legacy_out = build_turn_prompt("BASE", captured_slots=CallState(), **_LEGACY)
+    assert legacy_out.rstrip().endswith("BASE")
+    cached_out = build_turn_prompt("BASE", captured_slots=CallState(), **_CACHED)
+    assert cached_out.startswith("BASE")
 
 
 def test_no_live_state_block_leaves_output_unchanged():
@@ -106,7 +111,7 @@ def test_legacy_puts_live_state_and_captured_on_top():
     )
     assert (
         out.index("LIVESTATE")
-        < out.index("CAPTURED")
+        < out.index("CONTACT CONTEXT")
         < out.index("BASE")
         < out.index("ACCENT")
         < out.index("FLOOR")
@@ -149,7 +154,7 @@ def test_stable_blocks_all_precede_every_per_turn_block():
         **_CACHED,
     )
     stable_end = max(out.index(b) for b in ("BASE", "ENDSESSION", "TAGS", "ACCENT"))
-    volatile_start = min(out.index(b) for b in ("ASKAI", "KB", "CAPTURED", "LIVESTATE"))
+    volatile_start = min(out.index(b) for b in ("ASKAI", "KB", "CONTACT CONTEXT", "LIVESTATE"))
     assert stable_end < volatile_start
 
 
@@ -165,7 +170,7 @@ def test_live_state_is_the_last_per_turn_block():
         **_CACHED,
     )
     assert out.index("KB") < out.index("LIVESTATE") < out.index("FLOOR")
-    assert out.index("CAPTURED") < out.index("LIVESTATE")
+    assert out.index("CONTACT CONTEXT") < out.index("LIVESTATE")
 
 
 def test_captured_facts_survive_the_move():
@@ -175,9 +180,9 @@ def test_captured_facts_survive_the_move():
         captured_slots=CallState(email="bob@acme.com", email_confirmed=True),
         **_CACHED,
     )
-    assert "CAPTURED" in out
+    assert "CONTACT CONTEXT" in out
     assert "bob@acme.com" in out
-    assert out.index("BASE") < out.index("CAPTURED")
+    assert out.index("BASE") < out.index("CONTACT CONTEXT")
 
 
 def test_the_two_orders_contain_exactly_the_same_blocks():
@@ -196,7 +201,7 @@ def test_the_two_orders_contain_exactly_the_same_blocks():
     legacy = build_turn_prompt("BASE", **kwargs, **_LEGACY)
     cached = build_turn_prompt("BASE", **kwargs, **_CACHED)
     for token in ("BASE", "LIVESTATE", "ASKAI", "KB", "ENDSESSION",
-                  "TAGS", "ACCENT", "FLOOR", "CAPTURED", "bob@acme.com"):
+                  "TAGS", "ACCENT", "FLOOR", "CONTACT CONTEXT", "bob@acme.com"):
         assert token in legacy, f"{token} missing from legacy order"
         assert token in cached, f"{token} missing from cache-friendly order"
     assert sorted(legacy.split()) == sorted(cached.split())
@@ -223,3 +228,44 @@ def test_explicit_argument_beats_the_env(monkeypatch):
     monkeypatch.setenv("VOICE_PROMPT_CACHE_ORDER", "false")
     out = build_turn_prompt("BASE", live_state_block="LIVESTATE", **_CACHED)
     assert out.startswith("BASE")
+
+
+# ── the compliance floor is spoken once, last (2026-09-02) ───────────────────
+
+_FLOORED_BASE = (
+    "BASE PERSONA\n\n## NON-NEGOTIABLES (these few always hold, on every call)\n"
+    "- rule one\n- rule two\n\n\nBRAND ACCURACY — your company name is \"Acme\"."
+)
+
+
+def test_base_floor_is_relocated_to_the_very_end_after_trailing():
+    """The composer appends the floor after the tenant text; per-turn blocks
+    then used to land after it, so a compact copy was re-appended every turn
+    and the model read NON-NEGOTIABLES twice. Now the base floor itself moves
+    to the recency slot and there is exactly one copy."""
+    out = build_turn_prompt(
+        _FLOORED_BASE,
+        knowledge_block="KB",
+        live_state_block="LIVESTATE",
+        trailing_block="CRAFT",
+    )
+    assert out.count("## NON-NEGOTIABLES") == 1
+    assert out.rstrip().endswith('your company name is "Acme".')
+    assert out.index("CRAFT") < out.index("## NON-NEGOTIABLES")
+    assert out.index("KB") < out.index("## NON-NEGOTIABLES")
+    assert out.index("LIVESTATE") < out.index("## NON-NEGOTIABLES")
+    assert out.startswith("BASE PERSONA")
+
+
+def test_base_floor_relocation_holds_under_the_legacy_order():
+    out = build_turn_prompt(
+        _FLOORED_BASE, knowledge_block="KB", trailing_block="CRAFT",
+        cache_friendly_order=False,
+    )
+    assert out.count("## NON-NEGOTIABLES") == 1
+    assert out.index("CRAFT") < out.index("## NON-NEGOTIABLES")
+
+
+def test_base_without_a_floor_is_unchanged_by_relocation():
+    out = build_turn_prompt("BASE", trailing_block="FLOOR")
+    assert out == "BASE\n\nFLOOR"

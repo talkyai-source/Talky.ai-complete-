@@ -1,0 +1,19 @@
+{
+  "candidate": "0b2a7e130e103da4f1328dbee60ba682d9e67db3",
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_feedback_local_privacy.py",
+    "-q",
+    "--tb=short",
+    "-ra"
+  ],
+  "source_before": {
+    "backend/app/domain/services/call_feedback_service.py": "041702f0c49647c07ab03834a916b214ba81577424a519e76709502c13f7889d",
+    "backend/tests/unit/test_feedback_local_privacy.py": "b57667e7db6b5fb7cc88bbcab372cda3b203e8a129eb548595d653426ab0ec67"
+  },
+  "scope": "Temporary synthetic audio, real local I/O and injected faults; Windows explicit creation requests are not POSIX modes/deployed ACL acceptance.",
+  "exit_code": 1,
+  "source_unchanged": true
+}

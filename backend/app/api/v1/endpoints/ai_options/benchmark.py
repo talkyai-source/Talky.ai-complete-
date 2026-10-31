@@ -10,10 +10,14 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import get_current_user
-from app.domain.models.ai_config import AIProviderConfig, GEMINI_MODELS
+from app.core.security.api_security import rate_limit_dependency
+from app.core.security.rbac import Permission, require_permission
+from app.domain.models.ai_config import AIProviderConfig, CEREBRAS_MODELS, DEEPSEEK_MODELS, GEMINI_MODELS, OPENAI_MODELS
 from app.domain.models.conversation import Message, MessageRole
+from app.infrastructure.llm.cerebras import CerebrasLLMProvider
 from app.infrastructure.llm.gemini import GeminiLLMProvider
 from app.infrastructure.llm.groq import GroqLLMProvider
+from app.infrastructure.llm.openai import OpenAILLMProvider
 from app.infrastructure.tts.deepgram_tts import DeepgramTTSProvider
 from app.infrastructure.tts.elevenlabs_tts import ElevenLabsTTSProvider
 from app.infrastructure.tts.google_tts_streaming import GoogleTTSStreamingProvider
@@ -32,7 +36,63 @@ class LatencyBenchmarkResponse(BaseModel):
     total_pipeline_ms: float
 
 
-@router.post("/benchmark", response_model=LatencyBenchmarkResponse)
+def _select_benchmark_llm(config: AIProviderConfig, *, openai_key=None):
+    """Pick the LLM provider the benchmark must drive, plus its API key.
+
+    Decided by the config's provider (falling back to the model id's catalog
+    for rows saved before ``llm_provider`` existed). Before this the benchmark
+    knew only Gemini-or-Groq, so a Cerebras config was sent to Groq with the
+    Cerebras model id and Groq answered 404 ``model_not_found`` (live 2026-09-02).
+    """
+    provider = (config.llm_provider or "").strip().lower()
+    model = config.llm_model
+    if provider == "openai" or model in {m.id for m in OPENAI_MODELS}:
+        key = openai_key or os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise HTTPException(status_code=503, detail="OpenAI API key not configured")
+        return OpenAILLMProvider(), key
+    if provider == "gemini" or model in {m.id for m in GEMINI_MODELS}:
+        key = os.getenv("GEMINI_API_KEY")
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Gemini API key not configured. Set GEMINI_API_KEY in .env.",
+            )
+        return GeminiLLMProvider(), key
+    if provider == "cerebras" or model in {m.id for m in CEREBRAS_MODELS}:
+        key = os.getenv("CEREBRAS_API_KEY")
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Cerebras API key not configured. Set CEREBRAS_API_KEY in .env.",
+            )
+        return CerebrasLLMProvider(), key
+    if provider == "deepseek" or model in {m.id for m in DEEPSEEK_MODELS}:
+        from app.domain.services.credential_resolver import resolve_sync_env_only
+
+        # DEEPSEEK_API_KEY plus the DEEPSEEK_API_KEYS pool (platform key rotation).
+        key = resolve_sync_env_only("deepseek")
+        if not key:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="DeepSeek API key not configured. Set DEEPSEEK_API_KEY in .env.",
+            )
+        from app.infrastructure.llm.deepseek import DeepSeekLLMProvider
+        return DeepSeekLLMProvider(), key
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Groq API key not configured",
+        )
+    return GroqLLMProvider(), key
+
+
+@router.post(
+    "/benchmark",
+    response_model=LatencyBenchmarkResponse,
+    dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.TENANTS_UPDATE))],
+)
 async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_current_user)):
     """
     Run a full pipeline latency benchmark.
@@ -47,29 +107,19 @@ async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_curre
     """
     import os as _os
 
-    is_gemini = config.llm_provider == "gemini" or config.llm_model in {m.id for m in GEMINI_MODELS}
-
-    if is_gemini:
-        llm_key = os.getenv("GEMINI_API_KEY")
-        if not llm_key:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Gemini API key not configured. Set GEMINI_API_KEY in .env."
-            )
-    else:
-        llm_key = os.getenv("GROQ_API_KEY")
-        if not llm_key:
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Groq API key not configured"
-            )
+    openai_key = None
+    if config.llm_provider == "openai":
+        from app.domain.services.credential_resolver import get_credential_resolver
+        openai_key = await get_credential_resolver().resolve(
+            "openai", tenant_id=getattr(current_user, "tenant_id", None),
+        )
+    llm, llm_key = _select_benchmark_llm(config, openai_key=openai_key)
 
     voice_id = config.tts_voice_id
     sample_rate = config.tts_sample_rate
 
     try:
         # Initialize providers
-        llm = GeminiLLMProvider() if is_gemini else GroqLLMProvider()
         await llm.initialize({
             "api_key": llm_key,
             "model": config.llm_model,

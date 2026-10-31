@@ -13,7 +13,9 @@ working unchanged.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+
+from app.api.v1.dependencies import require_admin_tenant
 
 # Resource modules
 from . import codec_policies as _codec_policies_mod
@@ -61,7 +63,14 @@ from .trunks import (
     update_sip_trunk,
 )
 
-router = APIRouter(prefix="/telephony/sip", tags=["Telephony SIP"])
+router = APIRouter(
+    prefix="/telephony/sip",
+    tags=["Telephony SIP"],
+    # SIP credentials, PBX routing, and trunk allotments are tenant-level
+    # administration. Tenant scoping alone is insufficient: without this
+    # dependency even readonly users could invoke mutating subroutes.
+    dependencies=[Depends(require_admin_tenant)],
+)
 router.include_router(_trunks_mod.router)
 router.include_router(_codec_policies_mod.router)
 router.include_router(_route_policies_mod.router)

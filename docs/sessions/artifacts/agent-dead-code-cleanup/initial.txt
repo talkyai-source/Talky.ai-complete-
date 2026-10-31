@@ -1,0 +1,118 @@
+.................................FF....F................................ [ 26%]
+........................................................................ [ 53%]
+........................................................................ [ 80%]
+.....................FF.FF.FF.........................                   [100%]
+================================== FAILURES ===================================
+_ test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[] _
+tests\unit\test_model_contact_recording.py:384: in test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence
+    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
+app\domain\services\voice_pipeline\transcript_handler.py:27: in <module>
+    from app.domain.services.voice_pipeline.live_structured_state import (
+E   ImportError: cannot import name 'CallerRelationshipEvidence' from 'app.domain.services.voice_pipeline.live_structured_state' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\voice_pipeline\live_structured_state.py)
+_ test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[ My password is Qwerty!.] _
+tests\unit\test_model_contact_recording.py:384: in test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence
+    from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
+app\domain\services\voice_pipeline\transcript_handler.py:27: in <module>
+    from app.domain.services.voice_pipeline.live_structured_state import (
+E   ImportError: cannot import name 'CallerRelationshipEvidence' from 'app.domain.services.voice_pipeline.live_structured_state' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\voice_pipeline\live_structured_state.py)
+_____ test_caller_first_hello_reaches_model_once_without_presynth_script ______
+app\domain\services\telephony\modes\__init__.py:20: in <module>
+    from app.domain.services.telephony.config import _outbound_first_speaker
+app\domain\services\telephony\config.py:14: in <module>
+    from app.domain.services.telephony_session_config import (
+app\domain\services\telephony_session_config.py:21: in <module>
+    from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
+app\domain\services\voice_orchestrator.py:39: in <module>
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+app\domain\services\voice_pipeline_service.py:29: in <module>
+    from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+E   ImportError: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+
+The above exception was the direct cause of the following exception:
+tests\unit\test_model_contact_recording.py:470: in test_caller_first_hello_reaches_model_once_without_presynth_script
+    monkeypatch.setattr("app.domain.services.telephony.modes.agent_first._send_outbound_greeting", player)
+..\..\..\backend\.venv\Lib\site-packages\_pytest\monkeypatch.py:103: in derive_importpath
+    target = resolve(module)
+..\..\..\backend\.venv\Lib\site-packages\_pytest\monkeypatch.py:82: in resolve
+    raise ImportError(f"import error in {used}: {ex}") from ex
+E   ImportError: import error in app.domain.services.telephony.modes: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+______ test_a_completed_turn_writes_the_lead_detail_through_the_pipeline ______
+tests\unit\test_live_call_lead_capture.py:493: in test_a_completed_turn_writes_the_lead_detail_through_the_pipeline
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+app\domain\services\voice_pipeline_service.py:29: in <module>
+    from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+E   ImportError: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+________ test_a_completed_turn_that_established_nothing_writes_nothing ________
+tests\unit\test_live_call_lead_capture.py:569: in test_a_completed_turn_that_established_nothing_writes_nothing
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+app\domain\services\voice_pipeline_service.py:29: in <module>
+    from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+E   ImportError: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+____ test_the_binding_is_read_off_the_telephony_voice_session_for_outbound ____
+tests\unit\test_live_call_lead_capture.py:649: in test_the_binding_is_read_off_the_telephony_voice_session_for_outbound
+    from app.domain.services.telephony import lifecycle
+app\domain\services\telephony\lifecycle.py:39: in <module>
+    from app.domain.services.telephony.config import (
+app\domain\services\telephony\config.py:14: in <module>
+    from app.domain.services.telephony_session_config import (
+app\domain\services\telephony_session_config.py:21: in <module>
+    from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
+app\domain\services\voice_orchestrator.py:39: in <module>
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+app\domain\services\voice_pipeline_service.py:29: in <module>
+    from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+E   ImportError: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+_________________ test_an_unbound_session_resolves_to_no_call _________________
+tests\unit\test_live_call_lead_capture.py:682: in test_an_unbound_session_resolves_to_no_call
+    from app.domain.services.telephony import lifecycle
+app\domain\services\telephony\lifecycle.py:39: in <module>
+    from app.domain.services.telephony.config import (
+app\domain\services\telephony\config.py:14: in <module>
+    from app.domain.services.telephony_session_config import (
+app\domain\services\telephony_session_config.py:21: in <module>
+    from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
+app\domain\services\voice_orchestrator.py:39: in <module>
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+app\domain\services\voice_pipeline_service.py:29: in <module>
+    from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+E   ImportError: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+_________ test_capture_turn_slots_writes_nothing_for_an_unbound_call __________
+tests\unit\test_live_call_lead_capture.py:713: in test_capture_turn_slots_writes_nothing_for_an_unbound_call
+    from app.domain.services.telephony import lifecycle
+app\domain\services\telephony\lifecycle.py:39: in <module>
+    from app.domain.services.telephony.config import (
+app\domain\services\telephony\config.py:14: in <module>
+    from app.domain.services.telephony_session_config import (
+app\domain\services\telephony_session_config.py:21: in <module>
+    from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
+app\domain\services\voice_orchestrator.py:39: in <module>
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+app\domain\services\voice_pipeline_service.py:29: in <module>
+    from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+E   ImportError: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+______ test_capture_turn_slots_never_raises_when_the_state_map_explodes _______
+tests\unit\test_live_call_lead_capture.py:734: in test_capture_turn_slots_never_raises_when_the_state_map_explodes
+    from app.domain.services.telephony import lifecycle
+app\domain\services\telephony\lifecycle.py:39: in <module>
+    from app.domain.services.telephony.config import (
+app\domain\services\telephony\config.py:14: in <module>
+    from app.domain.services.telephony_session_config import (
+app\domain\services\telephony_session_config.py:21: in <module>
+    from app.domain.services.voice_orchestrator import Direction, VoiceSessionConfig
+app\domain\services\voice_orchestrator.py:39: in <module>
+    from app.domain.services.voice_pipeline_service import VoicePipelineService
+app\domain\services\voice_pipeline_service.py:29: in <module>
+    from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+E   ImportError: cannot import name 'LLMGuardrailsConfig' from 'app.domain.services.llm_guardrails' (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dead-code-cleanup-20261007\backend\app\domain\services\llm_guardrails.py)
+=========================== short test summary info ===========================
+FAILED tests/unit/test_model_contact_recording.py::test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[]
+FAILED tests/unit/test_model_contact_recording.py::test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[ My password is Qwerty!.]
+FAILED tests/unit/test_model_contact_recording.py::test_caller_first_hello_reaches_model_once_without_presynth_script
+FAILED tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_writes_the_lead_detail_through_the_pipeline
+FAILED tests/unit/test_live_call_lead_capture.py::test_a_completed_turn_that_established_nothing_writes_nothing
+FAILED tests/unit/test_live_call_lead_capture.py::test_the_binding_is_read_off_the_telephony_voice_session_for_outbound
+FAILED tests/unit/test_live_call_lead_capture.py::test_an_unbound_session_resolves_to_no_call
+FAILED tests/unit/test_live_call_lead_capture.py::test_capture_turn_slots_writes_nothing_for_an_unbound_call
+FAILED tests/unit/test_live_call_lead_capture.py::test_capture_turn_slots_never_raises_when_the_state_map_explodes
+9 failed, 261 passed, 62 warnings in 16.82s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 245, 'prohibited': 0}

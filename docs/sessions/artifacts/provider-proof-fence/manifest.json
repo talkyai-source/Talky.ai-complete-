@@ -1,0 +1,120 @@
+{
+  "source_commit": "c9d3f87e6dd7c9011008f886419e17888a1a6825",
+  "base_commit": "3648fe70",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+    "PYTHONPATH": [
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+      "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+    ]
+  },
+  "cwd": "backend",
+  "checks": [
+    {
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/unit/test_provider_family_termination.py",
+        "tests/unit/test_confirmation_aware_hangup.py",
+        "tests/unit/test_confirmation_aware_call_endpoints.py",
+        "tests/unit/test_admin_operational_media_controls.py",
+        "tests/unit/test_telephony_orphan_recovery_confirmation.py",
+        "tests/unit/test_inbound_lifecycle_fail_closed.py",
+        "tests/unit/test_freeswitch_transfer_api.py",
+        "tests/unit/test_outbound_campaign_boundaries.py",
+        "tests/unit/test_main_telephony_shutdown.py",
+        "-q",
+        "--tb=short"
+      ],
+      "result": {
+        "passed": 232,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 3
+      },
+      "log": "focused-final.txt"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/unit/test_op02_lease_api_boundary.py",
+        "tests/unit/test_telephony_bridge_auth.py",
+        "tests/unit/test_campaign_service_direction_race.py",
+        "-q",
+        "--tb=short"
+      ],
+      "result": {
+        "passed": 46,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 6
+      },
+      "log": "authorization-regression.txt"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "ruff",
+        "check",
+        "app/",
+        "--select",
+        "F",
+        "--extend-ignore",
+        "F401,F841"
+      ],
+      "exit_code": 0,
+      "log": "ruff-ci.txt"
+    },
+    {
+      "command": [
+        "python",
+        "-m",
+        "ruff",
+        "check",
+        "tests/unit/test_provider_family_termination.py",
+        "--select",
+        "F"
+      ],
+      "exit_code": 0,
+      "log": "ruff-new-test.txt"
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--cached",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "files": {
+    "backend/app/api/v1/endpoints/admin/calls.py": "652dbaab049594f69d61d818a7bda8421eabb6799d97108a04c9dc400a50bd8b",
+    "backend/app/api/v1/endpoints/calls.py": "55e490b019b2ab2566aef7df6907e7adbeafb5e416ec635583a084a4512c3a87",
+    "backend/app/api/v1/endpoints/telephony_bridge.py": "233c668c191e8ba0a2f416ba4f14568485897b3fba86555a9bcdc8d05cd05b80",
+    "backend/app/domain/services/telephony/lifecycle.py": "1f91cbc99d9c3d94ad1fd7499df9b09b236281292a60d75212930e91735624ee",
+    "backend/app/domain/services/telephony/termination.py": "aecd175f19b6cbcaf14ab9aecfb41226113e49c6d4b5e34b4ef94973af47849b",
+    "backend/app/main.py": "809faa7bfae37457ff969bc951a2691d4ca866a2d0cac7ef7b51c66088ed2018",
+    "backend/tests/unit/test_admin_operational_media_controls.py": "9cfbd638e1ebde30a97e4adb709af2b9356351b12a504269e6813ba7555380bc",
+    "backend/tests/unit/test_confirmation_aware_call_endpoints.py": "7e182ee2c1816325755b46fd4af85274c30c466bc2380e0d18cdee05df6033be",
+    "backend/tests/unit/test_confirmation_aware_hangup.py": "640044218c11879497d528dc33a8fc16c2ed8b7bf731f451b4117098f852cd69",
+    "backend/tests/unit/test_freeswitch_transfer_api.py": "983952a92867a2d9a94ae16f50f12c9e2cfd7ed61f13f6b19999ea8caab34f7f",
+    "backend/tests/unit/test_inbound_lifecycle_fail_closed.py": "ab6b988299f5221c72c174402660082c2cbc82d9f565ee2fd4e84ccf19767d3d",
+    "backend/tests/unit/test_main_telephony_shutdown.py": "2939ab2fc87658773b35251213128859a48dfd5afc986879829d37f7f1ce476d",
+    "backend/tests/unit/test_outbound_campaign_boundaries.py": "d7eede005378072437e782918d8f743db6062c498fb92770d6b7e3dc4c638e8c",
+    "backend/tests/unit/test_provider_family_termination.py": "a53100fbf24f15b8d8fe1568cfe4a5760c27d38e370f93f213ce62aaa6d907ba",
+    "backend/tests/unit/test_telephony_orphan_recovery_confirmation.py": "09c8b7f6091be07537e5ef381cbfc122cec6e8bd8a94904eedd7f9e378a8275e"
+  },
+  "limits": [
+    "Synthetic SQL, ARI and lifecycle ports; no real DB/provider or HTTP authentication qualification.",
+    "Final source has only comment/format changes after the nine-module run; behavior is unchanged.",
+    "No host/account identity proof; ambiguous provider families remain held.",
+    "DB-outage all-leg inventory in the inbound lease-loss fallback remains a separate open boundary."
+  ]
+}

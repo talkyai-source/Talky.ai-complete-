@@ -1,0 +1,74 @@
+Fresh complete_schema executed; active-owner index present
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running stamp_revision  -> 0008_tenant_voice_tuning
+  tenant_ai_configs is empty (schema-only bootstrap); skipping historical six-tenant AI data move
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 0008_tenant_voice_tuning -> 0009_dialer_failure_class, add failure_category + failure_reason to dialer_jobs (Track 2 retry classifier)
+INFO  [alembic.runtime.migration] Running upgrade 0009_dialer_failure_class -> 0010_campaign_knowledge, campaign knowledge tree (vectorless RAG)
+INFO  [alembic.runtime.migration] Running upgrade 0010_campaign_knowledge -> 0011_campaign_tts_provider, per-campaign TTS provider
+INFO  [alembic.runtime.migration] Running upgrade 0011_campaign_tts_provider -> 0012_call_feedback, durable call feedback audio and transcription state
+INFO  [alembic.runtime.migration] Running upgrade 0012_call_feedback -> 0013_canonical_rls_policies, one canonical tenant-isolation policy per table, and FORCE it
+INFO  [alembic.runtime.migration] Running upgrade 0013_canonical_rls_policies -> 0014_admin_media_controls, admin media access and persistent outbound-call pause control
+INFO  [alembic.runtime.migration] Running upgrade 0014_admin_media_controls -> 0015_conversation_reviews, per-conversation reviews, a reward ledger, and prompt identity on the call
+INFO  [alembic.runtime.migration] Running upgrade 0015_conversation_reviews -> 0016_prompt_version_rollback, store prompt bodies so a version can actually be rolled back to
+INFO  [alembic.runtime.migration] Running upgrade 0016_prompt_version_rollback -> 0017_test_calls, mark test calls so they can be reviewed but never billed
+INFO  [alembic.runtime.migration] Running upgrade 0017_test_calls -> 0018_calls_lead_id_nullable, make calls.lead_id nullable � a call does not always come from a lead
+INFO  [alembic.runtime.migration] Running upgrade 0018_calls_lead_id_nullable -> 0019_ai_config_migration_records, move the internal Dojo tenant onto the MVP pair, and repair the dead-Llama five
+INFO  [alembic.runtime.migration] Running upgrade 0019_ai_config_migration_records -> 0020_contact_and_lead_capture, expanded contact fields (goals.md �11) + structured lead capture (�7)
+INFO  [alembic.runtime.migration] Running upgrade 0020_contact_and_lead_capture -> 0021_billing_topup, minute top-ups: packages, orders, and an immutable ledger (goals.md �9)
+INFO  [alembic.runtime.migration] Running upgrade 0021_billing_topup -> 0022_inbound_calling_foundation, strict inbound calling foundation
+INFO  [alembic.runtime.migration] Running upgrade 0022_inbound_calling_foundation -> 0023_admin_media_deletion_safety, durable, idempotent admin media deletion intents
+INFO  [alembic.runtime.migration] Running upgrade 0023_admin_media_deletion_safety -> 0024_recording_permissions, granular recording access permissions
+INFO  [alembic.runtime.migration] Running upgrade 0024_recording_permissions -> 0025_media_hold_serialization, serialize compliance holds with irreversible media deletion
+INFO  [alembic.runtime.migration] Running upgrade 0025_media_hold_serialization -> 0026_media_delete_recovery, allow audited recovery of incomplete permanent media deletions
+INFO  [alembic.runtime.migration] Running upgrade 0026_media_delete_recovery -> 0027_media_delete_request_keys, bind every permanent-delete idempotency key to one durable intent
+INFO  [alembic.runtime.migration] Running upgrade 0027_media_delete_request_keys -> 0028_call_terminal_settle_cas, make outbound terminal settlement monotonic and exactly once
+INFO  [alembic.runtime.migration] Running upgrade 0028_call_terminal_settle_cas -> 0029_trunk_runtime_status, track live Asterisk trunk runtime evidence in the Alembic chain
+INFO  [alembic.runtime.migration] Running upgrade 0029_trunk_runtime_status -> 0030_inbound_transfer_leg_usage, add durable usage settlement for inbound transfer legs
+INFO  [alembic.runtime.migration] Running upgrade 0030_inbound_transfer_leg_usage -> 0031_inbound_lease_safety, enforce a safe inbound concurrency heartbeat window
+INFO  [alembic.runtime.migration] Running upgrade 0031_inbound_lease_safety -> 0032_inbound_billing_hold, persist and recover reasoned inbound billing holds
+INFO  [alembic.runtime.migration] Running upgrade 0032_inbound_billing_hold -> 0033_bootstrap_contract_repair, repair schema contracts skipped by the documented 0021 bootstrap stamp
+INFO  [alembic.runtime.migration] Running upgrade 0033_bootstrap_contract_repair -> 0034_inbound_billing_four_eye, require four-eye approval for manual inbound charge finalization
+INFO  [alembic.runtime.migration] Running upgrade 0034_inbound_billing_four_eye -> 0035_user_profiles_role_widen, widen the user_profiles.role CHECK to every UserRole
+INFO  [alembic.runtime.migration] Running upgrade 0035_user_profiles_role_widen -> 0036_inbound_rejection_log, durable pre-row inbound rejection log
+INFO  [alembic.runtime.migration] Running upgrade 0036_inbound_rejection_log -> 0037_inbound_duration_quarantine, quarantine inbound duration with no durable Answer proof
+INFO  [alembic.runtime.migration] Running upgrade 0037_inbound_duration_quarantine -> 0038_tenant_table_rls_backfill, force canonical tenant isolation on legacy tenant-scoped tables
+INFO  [alembic.runtime.migration] Running upgrade 0038_tenant_table_rls_backfill -> 0039_contact_capture_audit, Add auditable contact-capture values and state.
+INFO  [alembic.runtime.migration] Running upgrade 0039_contact_capture_audit -> 0040_calls_campaign_nullable, Allow inbound and PBX-originated calls without a campaign.
+INFO  [alembic.runtime.migration] Running upgrade 0040_calls_campaign_nullable -> 0041_tenant_campaign_fk, Enforce tenant-safe campaign and authoritative ownership relationships.
+INFO  [alembic.runtime.migration] Running upgrade 0041_tenant_campaign_fk -> 0042_dialer_origination_guard, pin one durable calls row to each dialer job attempt
+INFO  [alembic.runtime.migration] Running upgrade 0042_dialer_origination_guard -> 0043_campaign_direction_lock, serialize every campaign direction change with the canonical advisory lock
+INFO  [alembic.runtime.migration] Running upgrade 0043_campaign_direction_lock -> 0044_webhook_null_tenant_rls, Make unowned webhook rows platform-only without deleting global records.
+INFO  [alembic.runtime.migration] Running upgrade 0044_webhook_null_tenant_rls -> 0045_refresh_session_binding, Bind each refresh-token family to the login session it was issued for.
+INFO  [alembic.runtime.migration] Running upgrade 0045_refresh_session_binding -> 0046_inbound_extension_bindings, Give one assignment table two kinds of address: a public DID or an extension.
+INFO  [alembic.runtime.migration] Running upgrade 0046_inbound_extension_bindings -> 0047_protect_ai_config_backup, Put the leftover AI-config backup table behind the same tenant policy.
+INFO  [alembic.runtime.migration] Running upgrade 0047_protect_ai_config_backup -> 0048_crm_deliveries, Durable per-provider CRM receipts, queued in the call transaction.
+INFO  [alembic.runtime.migration] Running upgrade 0048_crm_deliveries -> 0049_lead_detail_evidence, Keep source and confirmation evidence with captured lead details.
+INFO  [alembic.runtime.migration] Running upgrade 0049_lead_detail_evidence -> 0050_assistant_execution_perms, Separate communication execution from connector configuration permissions.
+INFO  [alembic.runtime.migration] Running upgrade 0050_assistant_execution_perms -> 0051_crm_destination_identity, Retain the verified CRM account owning each durable remote receipt.
+INFO  [alembic.runtime.migration] Running upgrade 0051_crm_destination_identity -> 0052_public_contact_enquiries, Own the durable public enquiry intake; its content is platform-only.
+INFO  [alembic.runtime.migration] Running upgrade 0052_public_contact_enquiries -> 0053_billing_price_options, Approved recurring price choices and durable checkout identities.
+INFO  [alembic.runtime.migration] Running upgrade 0053_billing_price_options -> 0054_billing_webhook_receipts, Recoverable webhook receipts and separate delivery/review records.
+INFO  [alembic.runtime.migration] Running upgrade 0054_billing_webhook_receipts -> 0055_invoice_snapshots, Append-only provider invoice observations; no synthetic historical backfill.
+INFO  [alembic.runtime.migration] Running upgrade 0055_invoice_snapshots -> 0056_billing_refund_snapshots, Retain verified refund observations separately from accounting movements.
+INFO  [alembic.runtime.migration] Running upgrade 0056_billing_refund_snapshots -> 0057_transcript_save_state, Distinguish a final saved transcript from partial or unavailable evidence.
+INFO  [alembic.runtime.migration] Running upgrade 0057_transcript_save_state -> 0058_crm_contact_effect, Retain the original account-bound CRM contact creation intent.
+INFO  [alembic.runtime.migration] Running upgrade 0058_crm_contact_effect -> 0059_auth_identity_contract, Make existing verified-signup columns part of the migrated contract.
+INFO  [alembic.runtime.migration] Running upgrade 0059_auth_identity_contract -> 0060_dialer_active_job_owner, Install the existing one-active-job-per-lead contract without discarding jobs.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running downgrade 0060_dialer_active_job_owner -> 0059_auth_identity_contract, Install the existing one-active-job-per-lead contract without discarding jobs.
+INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.
+INFO  [alembic.runtime.migration] Will assume transactional DDL.
+INFO  [alembic.runtime.migration] Running upgrade 0059_auth_identity_contract -> 0060_dialer_active_job_owner, Install the existing one-active-job-per-lead contract without discarding jobs.
+..............                                                           [100%]
+============================== warnings summary ===============================
+tests/integration/test_op05_pre_attempt_holds.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+14 passed, 10 warnings in 7.49s
+PASS fresh bootstrap -> 0008 -> head; retained guard on downgrade/rerun; 14 PG controls

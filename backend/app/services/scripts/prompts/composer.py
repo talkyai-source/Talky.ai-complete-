@@ -1,4 +1,4 @@
-"""Layered system-prompt composer for CAMPAIGN outbound telephony calls.
+"""Direction-separated system-prompt composer for campaign telephony calls.
 
 Assembles the final system prompt in this order (each layer is stable or
 grows less stable as you go down — this lets future Anthropic/OpenAI
@@ -9,7 +9,7 @@ prompt caching break on the boundary between layers):
   3. CAMPAIGN slots            filled from the campaign's slot dict
   4. Additional instructions   optional freeform from campaign.system_prompt
 
-The CAPTURED-slots header is prepended later, per-turn, by
+The neutral contact-state header is prepended later, per-turn, by
 `prompt_builder.compose_system_prompt()`. That layer is independent.
 
 Provider-agnostic: the composed string is what goes into
@@ -33,12 +33,18 @@ Call site for this composer is exactly one place:
 """
 from __future__ import annotations
 
+from app.services.scripts.prompts.policies import load_policy
+
 import logging
+from dataclasses import dataclass
 from typing import Any, Mapping, Optional
 
+from app.domain.services.campaign_brief import render_campaign_brief
 from app.services.scripts.prompts.direction import (
-    INBOUND_DIRECTIVE_SENTINEL,
     inbound_directive_block,
+)
+from app.services.scripts.prompts.inbound import (
+    TRUE_INBOUND_DIRECTIVE, INBOUND_LEAD_BODY, INBOUND_LEAD_DETAILS,
 )
 from app.services.scripts.prompts.guardrails import (
     COMMUNICATION_PRINCIPLES,
@@ -49,16 +55,33 @@ from app.services.scripts.prompts.guardrails import (
 from app.services.scripts.prompts.personas import (
     PERSONA_BODIES,
     PERSONA_OPENINGS,
-    PERSONAS,
     PersonaType,
     REQUIRED_SLOTS_BY_PERSONA,
     format_common_issues,
     format_escalate_triggers,
+    format_lead_gen_campaign_controls,
     format_new_patient_info_needed,
     format_qualification_questions,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class PromptLayer:
+    """One exact, ordered section of the composed system prompt."""
+
+    key: str
+    label: str
+    content: str
+
+
+@dataclass(frozen=True)
+class PromptDocument:
+    """The prompt plus the same boundaries used to assemble it."""
+
+    system_prompt: str
+    layers: tuple[PromptLayer, ...]
 
 
 def _format_pronunciations(value: Any) -> str:
@@ -112,80 +135,17 @@ def _format_pronunciations(value: Any) -> str:
     )
 
 
-# The LAST thing the model reads before the tenant/floor blocks — so it is the
-# recency restatement of turn shape. 2026-08-06: "Keep it short, natural, and
-# useful" was too soft to counteract an 11s monologue, and it did not say when
-# to STOP. It now names the fewest-sentences target and puts the question at
-# the end of the turn, matching HARD RULES 2/3 and COMMUNICATION PRINCIPLES
-# word-for-word in intent — three blocks, one instruction.
-#
-# 2026-08-07: "+ often just a few words" added. The contract already said
-# "fewest sentences", but a SENTENCE was still the unit — and a model that
-# reads "sentence" writes a full clause. Naming the sub-sentence turn here
-# keeps the recency slot saying exactly what HARD RULE 2 now says.
-FINAL_RESPONSE_CONTRACT = """\
-## FINAL RESPONSE CONTRACT
-For every reply, speak only the words the caller should hear, in the fewest
-sentences that actually answer them — often just a few words. Ask at most one
-question and let it be the last thing you say, then stop. Do not output
-markdown, bullets, stage directions, labels, internal reasoning, or tool names.
-Do not override the hard rules above.
-"""
+# Compatibility export: turn shape is described once in the conversation guide.
+FINAL_RESPONSE_CONTRACT = ''
 
 
 def brand_correction_line(company_name: str) -> str:
-    """A per-call instruction so the agent always says the real company name
-    even when STT mis-hears it ("Dojo" -> "Dodge"). Driven by the same
-    ``company_name`` as the persona + keyterms, so it's correct for every
-    campaign with zero per-tenant setup. Empty company -> no line. Returned
-    with a leading blank line so it appends cleanly after the composed prompt.
-    """
-    name = (company_name or "").strip()
-    if not name:
-        return ""
-    return (
-        f"\n\nBRAND ACCURACY — your company name is \"{name}\". Speech-to-text "
-        f"may garble it into a similar-sounding word. Whenever the caller "
-        f"clearly means your company, treat it as \"{name}\" and always say and "
-        f"spell it correctly — never repeat a mis-heard version back to them."
-    )
+    """The configured brand is already stated in the guide and runtime identity."""
+    return ""
 
 
-# Applied to EVERY composed prompt (every persona, slot-based or
-# knowledge-driven). Makes the campaign's vectorless-RAG knowledge base the
-# single source of truth and resolves any prompt-vs-knowledge conflict in the
-# knowledge base's favour. Placed high in the prompt (right after the hard
-# guardrails) so it dominates the facts the persona body may also mention.
-#
-# 2026-08-06 — the "fact not written here" bullet now says what to DO (one line
-# + a question) instead of only what to avoid. Production transcripts had the
-# agent narrating the miss to the caller: "I couldn't find a clear location
-# statement in the company info I pulled..." — technically honest, but it hands
-# the caller a status report on the retrieval instead of a next step, and it
-# leaks that there is a knowledge base at all. The last bullet's
-# never-mention-the-KB rule was widened for the same reason: "the company info
-# I pulled" slipped past a rule that only named "the knowledge base".
-KNOWLEDGE_PRECEDENCE = """\
-## FACTS — SOURCE OF TRUTH
-Answer business facts — pricing, packages, fees, availability, services,
-coverage, policies, timelines, and any specific detail — ONLY from what is
-written in THIS prompt: your campaign details and persona above, plus the
-"Company knowledge" section when one is provided (retrieved from this campaign's
-knowledge base).
-- When a "Company knowledge" section is present it is AUTHORITATIVE: if anything
-  else conflicts with it, follow the Company knowledge.
-- State prices, numbers, dates, and specific facts ONLY when they appear in this
-  prompt (campaign details, persona, or Company knowledge) — never from memory,
-  training, or assumption.
-- If a fact the caller asks for is NOT written anywhere in this prompt, offer
-  the follow-up in ONE short line and move the call on with a question — "I'll
-  get you that exact figure. What's the best email for it?" The caller hears
-  the next step; what you looked through and came up short on stays yours.
-  Do not guess, estimate, round, or invent.
-- Read facts naturally for the phone (paraphrase). Never read them aloud like a
-  document, and never mention "the knowledge base", the company info you were
-  given, that facts were retrieved, or that you went looking.
-"""
+# Company facts come from source text; campaign customization still supplies context.
+KNOWLEDGE_PRECEDENCE = load_policy("company_knowledge")
 
 
 class PromptCompositionError(ValueError):
@@ -225,19 +185,16 @@ _KNOWLEDGE_DRIVEN_BODIES: dict[str, str] = {
 # ones ("I couldn't find that in the company info I pulled"). Now it names the
 # one-line + question shape, and the closing sentence gives a concrete target
 # instead of the unmeasurable "short".
-_KNOWLEDGE_DRIVEN_SUFFIX = (
-    "\n\nAnswer using the company knowledge provided to you in this prompt. "
-    "Treat those facts as authoritative. If the caller asks something the "
-    "knowledge does not cover, offer to follow up in one short line and ask "
-    "your next question — never describe what you looked at or came up short "
-    "on, and never guess or invent. Answer in the fewest sentences that "
-    "actually answer them — often just a few words — ask one question at a "
-    "time, and then stop."
-)
+_KNOWLEDGE_DRIVEN_SUFFIX = ""  # Shared facts and voice rules already apply.
+
 
 
 def _compose_knowledge_driven_body(
-    persona_type: str, agent_name: str, company_name: str
+    persona_type: str,
+    agent_name: str,
+    company_name: str,
+    body_override: str | None = None,
+    opening_key: str = "outbound",
 ) -> str:
     """Persona body for knowledge-driven (slot-free) campaigns.
 
@@ -247,10 +204,33 @@ def _compose_knowledge_driven_body(
     the lean identity shell for now. The knowledge-precedence rule is added
     once for every persona by compose_prompt.
     """
+    # ROLLBACK (goals.md §6). `body_override` is an archived template body for a
+    # pinned earlier version, resolved by prompts.bodies. It substitutes the
+    # template only — composition continues normally, so a pinned campaign still
+    # gets its own agent and company name.
+    if body_override:
+        try:
+            return body_override.format(
+                agent_name=agent_name, company_name=company_name
+            )
+        except (KeyError, IndexError, ValueError) as exc:
+            # An archived body that references placeholders this path does not
+            # supply. Degrade to the current prompt rather than raise: the whole
+            # module's contract is that a rollback can cost you the rollback,
+            # never the call.
+            logger.warning(
+                "prompt_pin_body_unformattable err=%s — composing from the "
+                "current prompt instead",
+                exc,
+            )
     if persona_type == "lead_gen":
-        from app.services.scripts.prompts.personas.lead_gen import LEAD_GEN_KD_BODY
-        return LEAD_GEN_KD_BODY.format(
-            agent_name=agent_name, company_name=company_name
+        from app.services.scripts.prompts.personas.lead_gen import lead_gen_kd_body
+        # The shared opening carries a {call_reason} slot that only slot-based
+        # campaigns fill; here the shape line points at the campaign guidance.
+        return lead_gen_kd_body(opening_key).format(
+            agent_name=agent_name,
+            company_name=company_name,
+            call_reason="[the reason in your campaign guidance]",
         )
     base = _KNOWLEDGE_DRIVEN_BODIES.get(
         persona_type, _KNOWLEDGE_DRIVEN_BODIES["customer_support"]
@@ -266,7 +246,11 @@ def compose_prompt(
     additional_instructions: Optional[str] = None,
     *,
     direction: str = "outbound",
+    opening_mode: str | None = None,
     knowledge_driven: bool = False,
+    body_override: str | None = None,
+    campaign_brief: Mapping[str, Any] | None = None,
+    _layer_collector: list[PromptLayer] | None = None,
 ) -> str:
     """Return the final system prompt string.
 
@@ -288,11 +272,12 @@ def compose_prompt(
         creator hot-patch behaviour without a code deploy.
     direction:
         ``"outbound"`` (default) when the platform initiated the call,
-        or ``"inbound"`` when the caller is reaching out / first-speaker
-        is ``"user"``. Selects the persona's OPENING block and prepends
-        the canonical inbound directive when applicable. The default
-        preserves pre-T4 behaviour for callers that pass only positional
-        arguments.
+        or ``"inbound"`` when the carrier rang us. Never derived from
+        first_speaker.
+    opening_mode:
+        ``"agent_first"`` / ``"callee_first"`` — who talks first. Callee-first
+        controls turn-taking within the selected call direction. ``None``
+        defaults to caller-first for inbound and agent-first for outbound.
 
     Raises
     ------
@@ -307,20 +292,47 @@ def compose_prompt(
         )
 
     direction_key = (direction or "outbound").strip().lower()
+    if direction_key not in ("outbound", "inbound"):
+        raise PromptCompositionError(
+            f"Unknown direction {direction_key!r}. Known directions: "
+            "['inbound', 'outbound']"
+        )
+    # Only lead_gen's legacy 'inbound' opening means caller-first outbound.
+    # Select true call direction before consulting those historical keys.
+    true_inbound = direction_key == "inbound"
+    if true_inbound and body_override:
+        # The existing archive has no direction metadata and includes outbound
+        # openings/playbooks. Never silently apply one to a carrier-inbound call.
+        raise PromptCompositionError("Archived persona bodies are not approved for inbound calls")
+    if opening_mode:
+        callee_first = opening_mode.strip().lower() == "callee_first"
+    else:
+        callee_first = direction_key == "inbound"
+    opening_key = "inbound" if callee_first else "outbound"
+    if true_inbound:
+        opening_key = "inbound"
+    elif persona_type != "lead_gen":
+        # Support/receptionist's legacy 'inbound' openings really are inbound;
+        # only lead_gen's legacy key means callee-first OUTBOUND.
+        opening_key = "outbound"
 
     if knowledge_driven:
         # Knowledge-first campaign: skip the per-persona content slots and use
         # a lean identity + tone body. The substance is injected from the
         # campaign's knowledge base at call time (knowledge/session_inject).
-        persona_block = _compose_knowledge_driven_body(
-            persona_type, agent_name, company_name
+        persona_block = (
+            INBOUND_LEAD_BODY.format(agent_name=agent_name, company_name=company_name)
+            + _KNOWLEDGE_DRIVEN_SUFFIX
+        ) if true_inbound and persona_type == "lead_gen" else _compose_knowledge_driven_body(
+            persona_type, agent_name, company_name,
+            body_override=body_override, opening_key=opening_key,
         )
     else:
         persona_openings = PERSONA_OPENINGS[persona_type]
-        if direction_key not in persona_openings:
+        if opening_key not in persona_openings:
             raise PromptCompositionError(
-                f"Persona {persona_type!r} has no opening for direction "
-                f"{direction_key!r}. Known directions: {sorted(persona_openings)}"
+                f"Persona {persona_type!r} has no opening {opening_key!r}. "
+                f"Known openings: {sorted(persona_openings)}"
             )
 
         slots = _prepare_slots(persona_type, campaign_slots)
@@ -339,9 +351,26 @@ def compose_prompt(
         # selected opening with the body. Both pieces share {placeholders}
         # that are filled in a single str.format pass below — no recursive
         # substitution, no template-engine.
+        # ROLLBACK also applies here (goals.md §6). Without this, a slot-based
+        # campaign pinned to an older version got the pinned *label* and the
+        # current *text* — the exact mislabelling the identity mechanism exists
+        # to prevent, and invisible because the prompt still composes fine.
+        # Caught by scripts/verify_prompt_rollback: identical prompt_hash on a
+        # supposedly rolled-back call.
+        #
+        # The archived body is substituted; the direction opening is not, since
+        # openings are per-direction routing rather than part of the versioned
+        # persona body.
+        persona_body = body_override or PERSONA_BODIES[persona_type]
         persona_template = (
-            persona_openings[direction_key] + "\n" + PERSONA_BODIES[persona_type]
+            persona_openings[opening_key] + "\n" + persona_body
         )
+        if true_inbound and persona_type == "lead_gen":
+            persona_template = INBOUND_LEAD_BODY + "\n" + INBOUND_LEAD_DETAILS
+        elif not true_inbound and callee_first and persona_type != "lead_gen":
+            # The canonical callee-first directive owns this opening. Neither
+            # a receptionist greeting nor an already-played agent greeting fits.
+            persona_template = persona_body
         # The {direction_opening} marker on the body is a no-op placeholder
         # for the legacy / backward-compat alias path that pre-merged the
         # opening into the body string. With the explicit concatenation
@@ -371,17 +400,32 @@ def compose_prompt(
     )
 
     parts: list[str] = []
-    # Inbound calls get the canonical direction directive at position 0
-    # so early-token attention dominates any outbound-flavoured prose
-    # that might still be in the persona body. This block also carries
-    # the INBOUND_DIRECTIVE_SENTINEL, which the runtime
-    # select_inbound_base_prompt() reads as an idempotency signal.
-    if direction_key == "inbound":
-        parts.append(
+
+    def add_layer(key: str, label: str, content: str) -> None:
+        if not content:
+            return
+        parts.append(content)
+        if _layer_collector is not None:
+            _layer_collector.append(
+                PromptLayer(key=key, label=label, content=content)
+            )
+    # Direction-specific instructions lead a body selected for that direction.
+    # No true-inbound prompt contains the outbound caller-first directive.
+    if true_inbound:
+        opening_policy = (
+            "Wait for the caller before speaking. Answer their request without a second greeting."
+            if callee_first else
+            "Greet the caller once, then listen. Do not repeat a greeting already delivered by the runtime."
+        )
+        add_layer("opening", "Opening and direction", TRUE_INBOUND_DIRECTIVE + "\n" + opening_policy)
+    elif callee_first:
+        add_layer(
+            "opening",
+            "Opening and direction",
             inbound_directive_block(
                 agent_name=agent_name,
                 company_name=company_name,
-            )
+            ),
         )
         # Metric (T4-B2) — distinguishes preferred compose-time
         # injection from the runtime fallback. A future climb in
@@ -394,24 +438,31 @@ def compose_prompt(
             record_inbound_directive_applied("compose")
         except Exception as exc:  # noqa: BLE001
             logger.debug("voice_metrics_directive_record_failed err=%s", exc)
-    parts.append(guardrails_hard_block)
+    add_layer("non_negotiables", "Identity and non-negotiables", guardrails_hard_block)
     # Knowledge base is the single source of truth — seated DIRECTLY after the
     # HARD RULES (effectively "Hard Rule 11") so the anti-hallucination rule —
     # whose failure (invented prices) is the costliest error — lives in the
     # top-of-prompt attention window, not mid-prompt.
-    parts.append(KNOWLEDGE_PRECEDENCE)
-    parts.append(guardrails_rest_block)
+    add_layer("knowledge_precedence", "Knowledge precedence", KNOWLEDGE_PRECEDENCE)
+    add_layer("voice_guardrails", "Voice guardrails", guardrails_rest_block)
     # Communication-quality rules (7 C's + Grice) — shared with Ask AI via the
     # COMMUNICATION_PRINCIPLES constant, placed right after the guardrails.
-    parts.append(COMMUNICATION_PRINCIPLES)
+    add_layer("communication", "Communication principles", COMMUNICATION_PRINCIPLES)
     # Pronunciations sit between guardrails and persona so the model
     # picks them up before reading the company-name-heavy persona body.
     # Renders to "" when the campaign didn't supply pronunciations,
     # which the join below skips naturally.
     pron_block = _format_pronunciations(campaign_slots.get("pronunciations"))
     if pron_block:
-        parts.append(pron_block)
-    parts.append(persona_block)
+        add_layer("pronunciations", "Pronunciations", pron_block)
+    add_layer("persona", "Persona", persona_block)
+    campaign_brief_block = render_campaign_brief(
+        campaign_brief,
+        representative_name=agent_name,
+        brand=company_name,
+    )
+    if campaign_brief_block:
+        add_layer("campaign_brief", "Campaign brief", campaign_brief_block)
     if additional_instructions:
         extra = additional_instructions.strip()
         if extra:
@@ -420,43 +471,69 @@ def compose_prompt(
             # old closing "Reminder" restated the same point a second time
             # (2026-07-02 prompt-craft audit). Priority is owned by HARD RULES
             # and the compliance floor.
-            parts.append(
+            add_layer(
+                "campaign_guidance",
+                "Additional campaign guidance",
                 "## ADDITIONAL CAMPAIGN INSTRUCTIONS\n"
                 "Follow these campaign-specific instructions wherever they add "
                 "detail; the safety and compliance rules above still hold.\n\n"
-                + extra
+                + extra,
             )
 
-    parts.append(FINAL_RESPONSE_CONTRACT)
+    add_layer("response_contract", "Response contract", FINAL_RESPONSE_CONTRACT)
 
     # Call control (the END_CALL sentinel — the agent's one real way to end a
     # call) + lead-gen conversation craft. Before the compliance floor so the
     # floor keeps the recency slot on its invariants.
     from app.domain.services.voice_pipeline.end_call import call_control_rules
-    parts.append(call_control_rules())
-
-    # Wrong-person / gatekeeper pivot + graceful-exit rules (2026-07-08 audit:
-    # agent went silent after "is this David?" -> "No."). Placed right after
-    # call_control_rules — same trailing, high-recency slot — so the pivot
-    # instruction is fresh on every turn, still ahead of the compliance floor.
-    from app.domain.services.voice_pipeline.gatekeeper import gatekeeper_rules
-    parts.append(gatekeeper_rules())
+    add_layer("call_control", "Call control", call_control_rules(direction=direction_key))
 
     # The non-negotiable safety floor goes LAST (after the tenant's own
     # additional_instructions) so it wins on the few invariants via recency —
     # without altering anything the campaign author wrote. See compliance_floor.
-    parts.append(compliance_floor(company_name))
+    add_layer(
+        "compliance",
+        "Compliance floor and brand accuracy",
+        compliance_floor(company_name) + brand_correction_line(company_name),
+    )
 
     composed = "\n\n".join(parts)
-    # Brand accuracy: keep the agent saying the campaign's real company name
-    # even when STT mis-hears it. Appended after the response contract — the
-    # same position telephony used before this moved into the composer.
-    composed += brand_correction_line(company_name)
     logger.debug(
         "compose_prompt persona=%s direction=%s agent=%s company=%s chars=%d",
         persona_type, direction_key, agent_name, company_name, len(composed),
     )
     return composed
+
+
+def compose_prompt_document(
+    persona_type: PersonaType,
+    agent_name: str,
+    company_name: str,
+    campaign_slots: Mapping[str, Any],
+    additional_instructions: Optional[str] = None,
+    *,
+    direction: str = "outbound",
+    opening_mode: str | None = None,
+    knowledge_driven: bool = False,
+    body_override: str | None = None,
+    campaign_brief: Mapping[str, Any] | None = None,
+) -> PromptDocument:
+    """Compose once and expose the real boundaries used by the prompt."""
+    layers: list[PromptLayer] = []
+    system_prompt = compose_prompt(
+        persona_type=persona_type,
+        agent_name=agent_name,
+        company_name=company_name,
+        campaign_slots=campaign_slots,
+        additional_instructions=additional_instructions,
+        direction=direction,
+        opening_mode=opening_mode,
+        knowledge_driven=knowledge_driven,
+        body_override=body_override,
+        campaign_brief=campaign_brief,
+        _layer_collector=layers,
+    )
+    return PromptDocument(system_prompt=system_prompt, layers=tuple(layers))
 
 
 def _prepare_slots(
@@ -471,6 +548,7 @@ def _prepare_slots(
     slots: dict[str, Any] = dict(campaign_slots)
 
     if persona_type == "lead_gen":
+        slots["campaign_controls"] = format_lead_gen_campaign_controls(slots)
         qq = slots.get("qualification_questions")
         if isinstance(qq, list):
             slots["qualification_questions"] = format_qualification_questions(qq)
@@ -501,12 +579,14 @@ def _prepare_slots(
             slots["opening_hours"] = "; ".join(
                 f"{day}: {h}" for day, h in hours.items()
             )
-        # Sensible defaults for optional-ish fields so empty campaigns
-        # still compose cleanly.
-        slots.setdefault("client_term", "patient")
+        # Empty campaigns still compose, but a default must never state a
+        # business fact the operator did not give (standards HAL-1, ARC-4):
+        # "24 hours" notice and "See website" were invented policy, and
+        # "patient" assumed every receptionist is a clinic.
+        slots.setdefault("client_term", "customer")
         slots.setdefault("prep_info", "")
-        slots.setdefault("cancellation_notice", "24 hours")
-        slots.setdefault("service_details", "See website for details.")
+        slots.setdefault("cancellation_notice", "")
+        slots.setdefault("service_details", "")
         slots.setdefault("departments", "")
 
     return slots

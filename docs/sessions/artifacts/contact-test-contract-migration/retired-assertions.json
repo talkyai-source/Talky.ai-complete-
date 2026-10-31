@@ -1,0 +1,49 @@
+{
+  "test_email_confirmation": [
+    "test_confirmed_email_prompt_injects_exact_spoken_readback",
+    "test_unconfirmed_email_prompt_injects_exact_spoken_readback",
+    "test_agent_readback_seed_ignored_when_not_a_confirmation_turn",
+    "test_multiword_email_from_agent_readback_seeds_and_confirms",
+    "test_domain_only_with_confirm_question_still_does_not_count",
+    "test_domain_plus_local_signal_is_a_readback",
+    "test_domain_only_mention_without_local_or_confirm_is_not_readback",
+    "test_gate_false_when_last_real_turn_is_unrelated",
+    "test_gate_skips_interposed_silence_check",
+    "test_gate_detects_dotted_and_digit_local_parts"
+  ],
+  "test_phone_confirmation": [
+    "test_full_phone_mention_with_unrelated_question_is_not_confirmation_gate",
+    "test_agent_read_back_phone_skips_silence_check",
+    "test_agent_read_back_phone_matches_any_formatting"
+  ],
+  "test_contact_capture_best_practice": [
+    "test_provider_first_then_name_then_yes_is_captured",
+    "test_a_confirmed_phone_is_never_replaced_by_the_line_number",
+    "test_a_no_leaves_nothing_confirmed",
+    "test_asking_for_a_new_number_does_not_offer_the_line_number",
+    "test_a_yes_to_this_number_confirms_the_line_number"
+  ],
+  "test_email_llm_first_capture": [
+    "test_an_ambiguous_address_gets_a_plain_either_or_question",
+    "test_the_short_path_one_question_then_yes",
+    "test_nothing_is_confirmed_before_the_callers_yes",
+    "test_the_live_call_now_ends_with_the_email_confirmed",
+    "test_a_caller_correction_wins_and_the_wrong_read_back_is_never_confirmed",
+    "test_a_confirmed_email_is_never_replaced_by_a_later_read_back",
+    "test_each_new_read_back_replaces_an_unconfirmed_one"
+  ],
+  "test_call_1436672a_regressions": [
+    "test_both_checks_sit_in_the_gate_every_spoken_sentence_passes",
+    "test_a_second_phone_number_is_stored_as_phone_2",
+    "test_a_fresh_two_word_address_after_a_failed_one_gets_the_question_too",
+    "test_a_later_address_without_asking_for_another_does_not_replace_the_first",
+    "test_a_second_email_is_asked_one_word_or_dot_then_stored_beside_the_first",
+    "test_a_number_said_as_words_is_captured_with_its_country"
+  ],
+  "test_phantom_goodbye_recovery": [
+    "test_a_recovery_line_does_not_hide_the_email_readback_behind_it",
+    "test_a_real_readback_is_not_an_interstitial",
+    "test_a_silence_check_is_still_an_interstitial",
+    "test_every_recovery_line_is_recognised_as_an_interstitial"
+  ]
+}

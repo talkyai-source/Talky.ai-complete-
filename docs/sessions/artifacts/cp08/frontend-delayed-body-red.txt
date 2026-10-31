@@ -1,0 +1,47 @@
+✔ JSON request cannot retry as the account that logged in while it was pending (47.0771ms)
+✔ binary request cannot retry as the account that logged in while it was pending (1.5308ms)
+✔ an old failed response cannot clear the newer token or fire its session-expired handler (1.3365ms)
+✔ an old successful response is discarded after the local identity changes (1.0088ms)
+✔ late API logout completion cannot erase a later sign-in (2.5594ms)
+✔ unverified account transition stops protected writes until the new identity is checked (3.7367ms)
+✔ wrong login credentials do not refresh or sign out an existing session (2.0051ms)
+✔ same-identity parallel requests share rotation and retry with the new bearer and expected tenant (17.216ms)
+✔ logout endpoint absence remains unconfirmed instead of reporting success (1.8767ms)
+✖ a delayed blob body cannot expose the previous account after response headers arrive (12.2631ms)
+✖ a delayed json body cannot expose the previous account after response headers arrive (1.5195ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 9
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5518.1184
+
+✖ failing tests:
+
+test at src\lib\http-client.identity.test.ts:2:8092
+✖ a delayed blob body cannot expose the previous account after response headers arrive (12.2631ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (identityChanged).
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\http-client.identity.test.ts:159:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at src\lib\http-client.identity.test.ts:2:8092
+✖ a delayed json body cannot expose the previous account after response headers arrive (1.5195ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection (identityChanged).
+      at async TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\http-client.identity.test.ts:159:5)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    operator: 'rejects',
+    diff: 'simple'
+  }

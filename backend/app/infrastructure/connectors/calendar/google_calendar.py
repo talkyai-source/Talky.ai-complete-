@@ -6,13 +6,14 @@ Day 24: Unified Connector System
 """
 import os
 import logging
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 import httpx
 
-from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens
-from app.infrastructure.connectors.calendar.base import CalendarProvider, CalendarEvent
+from app.infrastructure.connectors.base import ConnectorFactory, ConnectorProviderError, OAuthTokens
+from app.infrastructure.connectors.calendar.base import CalendarProvider, CalendarEvent, utc_datetime, available_intervals
 
 logger = logging.getLogger(__name__)
 
@@ -266,6 +267,28 @@ class GoogleCalendarConnector(CalendarProvider):
                 metadata={"htmlLink": data.get("htmlLink")}
             )
     
+    async def get_event_reference(self, event_id: str) -> str:
+        """Observe one saved default-calendar reference; never infer action success."""
+        if not isinstance(event_id, str) or re.fullmatch(r"(?!\.{1,2}$)[!-~]{1,512}", event_id) is None:
+            raise ValueError("Invalid saved event reference")
+        async with httpx.AsyncClient(timeout=10) as client:
+            response = await client.get(
+                f"{self.API_BASE_URL}/calendars/primary/events/{quote(event_id, safe='')}",
+                headers=self._get_auth_headers(), params={"fields": "id"},
+            )
+        if response.status_code != 200:
+            raise ConnectorProviderError(
+                provider=self.provider_name, operation="get_event_reference",
+                category="not_found" if response.status_code in (404, 410) else "provider_error",
+                status_code=response.status_code, message="Calendar observation unavailable",
+            )
+        data = response.json()
+        # Deleted Google tombstones can contain only an ID. Do not require
+        # dates or copy any subject, attendee, body, or provider diagnostic.
+        if not isinstance(data, dict) or data.get("id") != event_id:
+            raise ValueError("Calendar observation reference mismatch")
+        return event_id
+
     async def update_event(
         self,
         event_id: str,
@@ -344,8 +367,8 @@ class GoogleCalendarConnector(CalendarProvider):
     ) -> List[CalendarEvent]:
         """List events in a time range."""
         params = {
-            "timeMin": start_time.isoformat() + "Z",
-            "timeMax": end_time.isoformat() + "Z",
+            "timeMin": utc_datetime(start_time).isoformat(),
+            "timeMax": utc_datetime(end_time).isoformat(),
             "maxResults": max_results,
             "singleEvents": "true",
             "orderBy": "startTime"
@@ -394,37 +417,19 @@ class GoogleCalendarConnector(CalendarProvider):
         duration_minutes: int = 30
     ) -> List[Dict[str, datetime]]:
         """Get available time slots by checking busy times."""
-        # Get existing events
-        events = await self.list_events(start_time, end_time)
-        
-        # Build busy periods
-        busy_periods = [
-            (event.start_time, event.end_time)
-            for event in events
-            if event.start_time and event.end_time
-        ]
-        busy_periods.sort(key=lambda x: x[0])
-        
-        # Find free slots
-        available = []
-        current = start_time
-        slot_duration = timedelta(minutes=duration_minutes)
-        
-        for busy_start, busy_end in busy_periods:
-            if current + slot_duration <= busy_start:
-                available.append({
-                    "start": current,
-                    "end": busy_start
-                })
-            current = max(current, busy_end)
-        
-        if current + slot_duration <= end_time:
-            available.append({
-                "start": current,
-                "end": end_time
-            })
-        
-        return available
+        # FreeBusy includes all-day events and is not truncated by an event-list page.
+        async with httpx.AsyncClient() as client:
+            response = await client.post(f"{self.API_BASE_URL}/freeBusy", headers=self._get_auth_headers(),
+                json={"timeMin": utc_datetime(start_time).isoformat(),
+                      "timeMax": utc_datetime(end_time).isoformat(), "items": [{"id": "primary"}]})
+            if response.status_code != 200:
+                from app.infrastructure.connectors.google_errors import google_api_error_from_response
+                raise google_api_error_from_response("google_calendar", response, "free_busy")
+            calendar = (response.json().get("calendars") or {}).get("primary")
+            if not isinstance(calendar, dict) or calendar.get("errors") or "busy" not in calendar:
+                raise ValueError("Calendar availability was not confirmed by the provider")
+            return available_intervals(start_time, end_time,
+                [(period["start"], period["end"]) for period in calendar["busy"]], duration_minutes)
 
 
 # Register with factory

@@ -1,0 +1,2 @@
+Tracked executable-source search; exit 1 means no matches.
+exit_code=1

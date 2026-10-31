@@ -7,8 +7,12 @@ on:
     branches: [main]
 
 env:
-  PYTHON_VERSION: "3.10"
-  NODE_VERSION: "20"
+  # Match production and backend-voice-tests. The package itself requires
+  # Python >=3.11, so 3.10 cannot be a meaningful compatibility gate.
+  PYTHON_VERSION: "3.12"
+  # 22.18+ runs TypeScript type stripping unflagged, which the Admin test
+  # suite relies on (its .mjs tests import .ts sources directly).
+  NODE_VERSION: "22"
 
 jobs:
   # ──────────────────────────────────────────────────────────────────
@@ -123,23 +127,17 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-asyncio pytest-cov ruff pip-audit bandit fakeredis
+          pip install pytest pytest-asyncio pytest-cov ruff pip-audit bandit 'fakeredis[lua]'
 
       - name: Lint with Ruff
         # The repository still has substantial legacy style/import debt. Keep
         # the gate blocking for syntax errors, undefined names, and other
         # runtime-invalid constructs; broaden it only as that debt is retired.
-        run: ruff check app/ --select E9,F63,F7,F82
+        run: ruff check app/ --select F --extend-ignore F401,F841
 
       - name: Dependency vulnerability audit (pip-audit)
-        # Fails the build on any unaccepted CVE in production deps.
-        # Temporary reviewed exception (2026-07-16): patched LangSmith requires
-        # websockets>=15, while both realtime provider adapters still use the
-        # websockets 13 connection ABI. The application does not import or
-        # expose LangSmith TracingMiddleware, the affected surface. All other
-        # reported packages are upgraded or removed in requirements.in; delete
-        # this exception as soon as the realtime compatibility migration lands.
-        run: pip-audit -r requirements.txt --ignore-vuln GHSA-f4xh-w4cj-qxq8
+        # Fails the build on every known vulnerability in production deps.
+        run: pip-audit -r requirements.txt
 
       - name: SAST scan (bandit)
         # The repository has a reviewed medium-severity legacy backlog. Keep
@@ -147,41 +145,261 @@ jobs:
         # that backlog is fixed instead of making every CI run unconditionally red.
         run: bandit -r app/ -lll -x app/tests
 
-      - name: Init test database
+      - name: Bootstrap and migrate primary test database
         run: |
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -v ON_ERROR_STOP=1 -c \
+            "CREATE ROLE authenticated NOLOGIN NOSUPERUSER NOBYPASSRLS;"
           PGPASSWORD=testpassword psql -h localhost -U talky -d talky_test \
             -f database/complete_schema.sql -v ON_ERROR_STOP=1
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_test \
+            alembic stamp 0008_tenant_voice_tuning
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_test \
+            alembic upgrade head
         env:
           PGPASSWORD: testpassword
 
-      - name: Alembic round-trip (upgrade → downgrade → upgrade)
-        # Catches migrations that have no working downgrade path. A failed
-        # downgrade in production = unrecoverable rollback, so we test it here.
-        # Uses a separate DB so the test fixtures aren't disturbed.
+      - name: Preserved baseline bootstrap contract
+        # Restore the historical dump with the exact PostgreSQL client family
+        # that produced it, stamp only its proven revision, and exercise every
+        # migration through head. This is intentionally a disposable database.
+        run: |
+          PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
+            -c "CREATE DATABASE talky_preserved_baseline_test;"
+          docker run --rm --network host \
+            -e PGPASSWORD=testpassword \
+            -v "$PWD:/work:ro" \
+            postgres:16.14-alpine \
+            psql -h 127.0.0.1 -U talky -d talky_preserved_baseline_test \
+              -v ON_ERROR_STOP=1 \
+              -f /work/database/schema/baseline_2026-06-02.sql
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            alembic stamp 0008_tenant_voice_tuning
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            alembic upgrade head
+          TEST_DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            pytest tests/integration/test_bootstrap_contract_repair.py -q
+          TEST_DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_preserved_baseline_test \
+            pytest tests/integration/test_inbound_hold_resolution.py -q
+        env:
+          PGPASSWORD: testpassword
+
+      - name: Legacy false-stamp repair and inbound migration round-trip
+        # Reproduce the historic false 0021 marker, exercise the 0022 rollback
+        # guard only within its supported boundary, then converge to head.
+        # Migration 0033 is forward-only, so CI must never downgrade from head.
         run: |
           PGPASSWORD=testpassword psql -h localhost -U talky -d postgres \
             -c "CREATE DATABASE talky_alembic_test;"
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
+            -f database/complete_schema.sql -v ON_ERROR_STOP=1
           DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
-            alembic upgrade head
+            alembic stamp 0021_billing_topup
           DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
-            alembic downgrade base
+            alembic upgrade 0022_inbound_calling_foundation
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
+            -v ON_ERROR_STOP=1 -c \
+            "UPDATE platform_runtime_controls SET inbound_controls_reason='downgrade guard proof' WHERE id=1;"
+          if DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+              alembic downgrade 0021_billing_topup; then
+            echo "0022 downgrade unexpectedly accepted retained inbound control state" >&2
+            exit 1
+          fi
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
+            -v ON_ERROR_STOP=1 -c \
+            "UPDATE platform_runtime_controls SET inbound_controls_reason=NULL WHERE id=1;"
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic downgrade 0021_billing_topup
+          PGPASSWORD=testpassword psql -h localhost -U talky -d talky_alembic_test \
+            -v ON_ERROR_STOP=1 <<'SQL'
+          DO $$
+          BEGIN
+            IF to_regprocedure('prevent_call_event_mutation()') IS NULL
+               OR NOT EXISTS (
+                    SELECT 1 FROM pg_trigger
+                    WHERE tgname = 'call_events_immutable' AND NOT tgisinternal
+               )
+               OR EXISTS (
+                    SELECT 1 FROM pg_class
+                    WHERE oid IN ('call_events'::regclass, 'call_legs'::regclass)
+                      AND (NOT relrowsecurity OR NOT relforcerowsecurity)
+               )
+               OR to_regclass('public.inbound_campaign_configs') IS NOT NULL THEN
+              RAISE EXCEPTION '0022 downgrade did not restore the safe baseline';
+            END IF;
+          END
+          $$;
+          SQL
+          DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
+            alembic upgrade 0022_inbound_calling_foundation
           DATABASE_URL=postgresql://talky:testpassword@localhost:5432/talky_alembic_test \
             alembic upgrade head
         env:
           PGPASSWORD: testpassword
 
+      - name: Migrated inbound database integration
+        run: |
+          pytest \
+            tests/integration/test_inbound_reassignment_history.py \
+            tests/integration/test_inbound_hold_resolution.py \
+            tests/integration/test_bootstrap_contract_repair.py \
+            tests/integration/test_assemblyai_settings_persistence.py \
+            tests/integration/test_call_redial.py \
+            tests/integration/test_contact_enquiries.py \
+            tests/integration/test_support_pg.py \
+            tests/integration/test_support_articles_pg.py \
+            tests/integration/test_support_migration.py \
+            tests/integration/test_payg_pg.py \
+            tests/integration/test_payg_migration.py \
+            tests/integration/test_billing_price_options.py \
+            tests/integration/test_billing_checkout.py \
+            tests/integration/test_billing_state_events.py \
+            tests/integration/test_billing_topup_events.py \
+            tests/integration/test_billing_webhook_migration.py \
+            tests/integration/test_billing_webhook_http.py \
+            tests/integration/test_billing_webhook_receipts.py \
+            tests/integration/test_billing_webhook_reconciliation.py \
+            tests/integration/test_billing_invoice_projection.py \
+            tests/integration/test_billing_read_truth.py \
+            tests/integration/test_knowledge_retrieval_boundaries.py \
+            tests/integration/test_billing_refund_projection.py \
+            tests/integration/test_topup_usage.py \
+            tests/integration/test_action_execution_receipts.py \
+            tests/integration/test_ag05_lead_evidence.py \
+            tests/integration/test_ag06_action_cancellation.py \
+            tests/integration/test_ag06_crm_admission.py \
+            tests/integration/test_ag06_dashboard_receipts.py \
+            tests/integration/test_cp08_credential_transactions.py \
+            tests/integration/test_cp08_current_identity.py \
+            tests/integration/test_crm_deliveries.py \
+            tests/integration/test_reminder_recipients.py \
+            tests/integration/test_op01_metering.py \
+            tests/integration/test_op01_auth_metering.py \
+            tests/integration/test_op04_trunk_lifecycle.py \
+            tests/integration/test_op05_active_job_migration.py \
+            tests/integration/test_op05_pre_attempt_holds.py \
+            tests/integration/test_op05_pacing_holds.py \
+            tests/integration/test_dialer_destination_busy_pg.py \
+            tests/integration/test_dnc_schema_migration.py \
+            tests/integration/test_op07_native_dnc.py \
+            tests/integration/test_dnc_settlement_truth.py \
+            -q
+        env:
+          TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          TALKY_CRM_TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          TALKY_ACTION_TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          JWT_SECRET: ci-test-secret-key-not-for-production-32chars
+          ENVIRONMENT: test
+
+      - name: Migrated Admin PostgreSQL control contracts (serial)
+        # These fixtures exercise global administrator invariants. Keep them
+        # in one serial invocation after migration/inbound fixtures finish;
+        # never run this step concurrently against the same database.
+        run: |
+          python - <<'PY'
+          import os
+          from urllib.parse import urlparse
+          dsn = os.environ.get("TEST_ADMIN_DATABASE_URL")
+          assert dsn, "TEST_ADMIN_DATABASE_URL must be explicit; skipping is not acceptance"
+          target = urlparse(dsn)
+          assert target.hostname in {"localhost", "127.0.0.1"} and target.path.endswith("_test"), "Admin contracts require a disposable local test database"
+          PY
+          command -v pg_config >/dev/null
+          export TALKY_BACKUP_PG_BIN="$(pg_config --bindir)"
+          for pg_client in psql pg_dump pg_restore; do
+            test -x "$TALKY_BACKUP_PG_BIN/$pg_client"
+          done
+          pytest -o addopts='' \
+            tests/integration/test_admin_authority_invariant.py \
+            tests/integration/test_admin_mutation_guard.py \
+            tests/integration/test_admin_action_cancel_authority.py \
+            tests/integration/test_admin_connector_session_authority.py \
+            tests/integration/test_connector_permission_expiry.py \
+            tests/integration/test_connector_authorize_session.py \
+            tests/integration/test_admin_inbound_current_authority.py \
+            tests/integration/test_admin_inbound_reassignment_reads.py \
+            tests/integration/test_admin_inbound_reassignment_cancellation.py \
+            tests/integration/test_admin_media_current_authority.py \
+            tests/integration/test_admin_media_recovery.py \
+            tests/integration/test_admin_feedback_current_authority.py \
+            tests/integration/test_admin_incident_authority.py \
+            tests/integration/test_admin_tenant_atomicity.py \
+            tests/integration/test_admin_incidents.py \
+            tests/integration/test_legacy_incidents_adoption.py \
+            tests/integration/test_alertmanager_incidents.py \
+            tests/integration/test_connector_lifecycle.py \
+            tests/integration/test_connector_audit_atomicity.py \
+            tests/integration/test_formal_user_credential_hold.py \
+            tests/integration/test_formal_account_holds.py \
+            tests/integration/test_formal_account_principal.py \
+            tests/integration/test_formal_appeal_submission.py \
+            tests/integration/test_formal_enforcement_projection.py \
+            tests/integration/test_assistant_runtime_receipts.py \
+            tests/integration/test_suspension_expiry.py \
+            tests/integration/test_call_authority_formal_holds.py \
+            tests/integration/test_account_hold_telephony.py \
+            tests/unit/test_suspension_revokes_sessions_pg.py \
+            tests/integration/test_control_backend_binding.py \
+            tests/integration/test_termination_receipts.py \
+            tests/integration/test_feedback_attempt_ownership.py \
+            tests/integration/test_admin_real_auth_journey.py \
+            tests/integration/test_admin_canonical_context.py \
+            tests/integration/test_admin_runtime_privileges.py \
+            tests/integration/test_legacy_tenant_rls_repair.py \
+            tests/integration/test_auth_logout_refresh_lock_order.py \
+            tests/integration/test_admin_user_name_audit.py \
+            tests/integration/test_admin_users_tenants_crud.py \
+            tests/integration/test_admin_user_operation_receipts.py \
+            tests/integration/test_admin_user_operations.py \
+            tests/integration/test_admin_user_primary_membership.py \
+            tests/integration/test_admin_user_hold_block_conflicts.py \
+            tests/integration/test_admin_partner_directory.py \
+            tests/integration/test_admin_audit_security_reads.py \
+            tests/integration/test_admin_tenant_status_projection.py \
+            tests/integration/test_admin_dashboard_tenant_counts.py \
+            tests/integration/test_admin_usage_owned_reads.py \
+            tests/integration/test_admin_parent_expiry_composition.py \
+            tests/integration/test_admin_original_account_inspection.py \
+            tests/integration/test_backup_snapshot_restore.py \
+            tests/integration/test_supplier_evidence.py \
+            -q --junitxml=admin-postgres-results.xml
+          python - <<'PY'
+          import xml.etree.ElementTree as ET
+          report = ET.parse("admin-postgres-results.xml").getroot()
+          assert report.findall(".//testcase"), "Admin database contracts collected no cases"
+          assert not report.findall(".//skipped"), "Admin database contracts must run, not silently skip"
+          PY
+        env:
+          TEST_ADMIN_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          TALKY_BACKUP_TEST_ADMIN_DSN: postgresql://talky:testpassword@127.0.0.1:5432/talky_alembic_test
+          TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
+          PYTEST_ADDOPTS: ""
+          JWT_SECRET: ci-test-secret-key-not-for-production-32chars
+          ENVIRONMENT: test
+
+      - name: Isolated provider admission Redis contracts
+        run: pytest tests/integration/test_op02_redis_admission.py -q
+        env:
+          TEST_REDIS_URL: redis://127.0.0.1:6379/0
+
+      - name: Offline conversation path contracts
+        run: pytest tests/integration/test_voice_pipeline_conversation.py -q
+
       - name: Run tests with pytest (with coverage)
+        # Integration tests own the migrated database above. This is the full
+        # canonical unit/security release suite, with no per-feature selection.
         # Coverage threshold starts intentionally LOW so it lands without
         # breaking the build. Ratchet it upward in follow-up PRs as test
         # coverage grows. Never lower it.
         run: |
-          pytest tests/ -v --tb=short -q \
+          pytest tests/unit tests/security -v --tb=short -q \
             --cov=app \
             --cov-report=term-missing \
             --cov-report=xml:coverage.xml \
             --cov-fail-under=20
         env:
           DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_test
+          TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
           REDIS_HOST: localhost
           REDIS_PORT: 6379
           JWT_SECRET: ci-test-secret-key-not-for-production-32chars
@@ -260,22 +478,84 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Dependency vulnerability audit
-        # FIX: added — npm audit blocks on high/critical severity
-        run: npm audit --audit-level=high
-        continue-on-error: false
-
       - name: Lint
-        # FIX: removed || true — lint failures now block merges
         run: npm run lint
 
+      # Each check reports even when an earlier one failed, so one red step
+      # never hides the state of the others. The job still fails on any of them.
       - name: Type check
-        run: npx tsc --noEmit
+        if: ${{ !cancelled() }}
+        run: npm run typecheck
+
+      - name: Test
+        if: ${{ !cancelled() }}
+        run: npm test
 
       - name: Build
+        if: ${{ !cancelled() }}
         run: npm run build
         env:
           NEXT_PUBLIC_API_BASE_URL: http://localhost:8000/api/v1
+
+      - name: Dependency vulnerability audit
+        # Audit what ships (production dependencies). High and critical
+        # findings block the release; moderate findings stay visible for
+        # follow-up. Dev/build tooling is excluded by owner decision 2026-10-21:
+        # braces GHSA-vfj7-8cjw-p6xm (no fix published) reaches the tree only
+        # through Storybook's webpack builder and eslint-config-next. Runs last
+        # (and even after a failed check) so it cannot skip lint, tests and build.
+        if: ${{ !cancelled() }}
+        run: npm audit --omit=dev --audit-level=high
+
+  # Admin control plane: lint + dependency audit + test + production build.
+  admin-frontend:
+    name: Admin Frontend
+    runs-on: ubuntu-latest
+    needs: [secret-scan, secret-guard]
+    env:
+      # Build configuration validation is mandatory. This CI artifact is not
+      # deployment acceptance; hosting/CORS are checked against the release.
+      VITE_API_BASE_URL: https://api.talkleeai.com/api/v1
+    defaults:
+      run:
+        working-directory: Admin/frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: Admin/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Dependency vulnerability audit
+        run: npm audit --audit-level=high
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  # Telephony ingress: fail-closed routing and rollback assertions.
+  telephony-static:
+    name: Telephony Ingress Safety
+    runs-on: ubuntu-latest
+    needs: [secret-scan, secret-guard]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate telephony routing, admission, and rollback contracts
+        run: python telephony/tests/test_telephony_stack.py
 
   # ──────────────────────────────────────────────────────────────────
   # Docker: build + image vulnerability scan (Trivy)
@@ -283,7 +563,7 @@ jobs:
   docker-build:
     name: Docker Build & Scan
     runs-on: ubuntu-latest
-    needs: [backend, frontend]
+    needs: [backend, frontend, admin-frontend, telephony-static]
 
     steps:
       - uses: actions/checkout@v4

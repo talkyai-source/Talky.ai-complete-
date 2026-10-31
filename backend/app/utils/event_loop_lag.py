@@ -20,17 +20,13 @@ none of them: a gateway callback drop, a stall in this process, or upstream RTP
 loss. On 2026-08-13 that produced 421 warnings across 36 of 38 calls that
 nobody could act on.
 
-Two facts settle it, and both are now attached to the warning:
+Two observations help investigation, but neither establishes the source:
 
-* **Was audio lost?** Reconstructed after the fact for that run from the
-  ``audio_level`` sample counts: delivery ratio p50 exactly 1.000, mean 1.0089,
-  3.4% of one-second windows short against 3.1% long. Near-symmetric — the
-  signature of BUNCHING, not loss. Every byte arrived, some of it late and in
-  bursts. RTP loss was never the cause and could have been struck off on day
-  one. That ratio is now computed live, per warning.
-* **Could this process run?** ``current_ms()`` below. High at gap time means we
-  were too busy to service the callback and it is ours to fix; ~0 means we were
-  idle and waiting, so the lateness came from outside.
+* The delivered-audio ratio describes batching over the observed interval.
+  Ratios near one are consistent with bunching, but cannot exclude packet loss.
+* ``current_ms()`` is the most recent scheduling sample, not a measurement
+  covering the entire audio gap. A healthy latest sample cannot exonerate this
+  process or assign fault to the carrier. The peak is process-wide, not per-call.
 
 ``None`` is reported distinctly from ``0.0`` throughout: "we did not measure"
 and "the loop was healthy" are different claims, and conflating them is exactly
@@ -83,10 +79,14 @@ def reset() -> None:
 def describe() -> str:
     """Compact summary for embedding in another log line.
 
-    Emits ``stall=ours`` / ``stall=not-ours`` so the reader of a gap warning
-    gets the verdict without having to remember what a healthy lag looks like.
+    A recent scheduling observation is not a causal verdict about an audio
+    gap. A healthy sample cannot exonerate earlier stalls, the gateway or the
+    callback transport; a stalled sample cannot prove the carrier was healthy.
     """
     if _last_ms is None:
         return "loop_lag=unmeasured"
-    verdict = "ours" if _last_ms > _NOISE_FLOOR_MS else "not-ours"
-    return f"loop_lag_ms={_last_ms:.1f} loop_lag_peak_ms={_peak_ms:.1f} stall={verdict}"
+    observation = "stalled" if _last_ms > _NOISE_FLOOR_MS else "healthy"
+    return (
+        f"loop_lag_ms={_last_ms:.1f} loop_lag_peak_ms={_peak_ms:.1f} "
+        f"loop_recent={observation} source=undetermined"
+    )

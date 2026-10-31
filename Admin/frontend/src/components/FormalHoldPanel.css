@@ -1,0 +1,114 @@
+/* Keep consequential controls reachable without changing other Admin dialogs. */
+.formal-hold-panel.modal-content {
+    display: flex;
+    flex-direction: column;
+    width: min(800px, calc(100vw - 32px));
+    max-width: 800px;
+    max-height: 90vh;
+    max-height: 90dvh;
+    padding: 0;
+    overflow: hidden;
+    overflow-wrap: anywhere;
+}
+
+.formal-hold-panel > .modal-header {
+    flex: 0 0 auto;
+    align-items: flex-start;
+    justify-content: space-between;
+    padding: 16px 20px;
+}
+
+.formal-hold-panel > .modal-header h2 {
+    flex: 1;
+    min-width: 0;
+    margin: 0;
+    font-size: 20px;
+    line-height: 1.4;
+}
+
+.formal-hold-panel > .modal-header button {
+    flex: 0 0 auto;
+}
+
+.formal-hold-panel > .modal-body {
+    min-height: 0;
+    min-width: 0;
+    overflow-y: auto;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.formal-hold-panel section,
+.formal-hold-panel form {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    min-width: 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.formal-hold-panel p,
+.formal-hold-panel h3,
+.formal-hold-panel h4 {
+    margin: 0;
+}
+
+.formal-hold-panel label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    min-width: 0;
+}
+
+.formal-hold-panel .form-input {
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    font: inherit;
+}
+
+.formal-hold-panel textarea {
+    resize: vertical;
+}
+
+.formal-hold-panel .formal-hold-check {
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+.formal-hold-panel .formal-hold-check input {
+    flex-shrink: 0;
+    margin-top: 5px;
+}
+
+.formal-hold-panel .formal-hold-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.formal-hold-panel .btn {
+    min-height: 40px;
+    max-width: 100%;
+    justify-content: center;
+    white-space: normal;
+}
+
+.formal-hold-panel .formal-hold-refresh {
+    align-self: flex-start;
+}
+
+.formal-hold-panel :is(button, input, select, textarea):focus-visible {
+    outline: 2px solid var(--accent-blue);
+    outline-offset: 2px;
+}
+
+@media (max-width: 480px) {
+    .formal-hold-panel > .modal-header,
+    .formal-hold-panel > .modal-body {
+        padding: 16px;
+    }
+}

@@ -1,0 +1,81 @@
+FFF.FFFFF....FFF..                                                       [100%]
+================================== FAILURES ===================================
+_ test_idle_final_short_answer_reaches_model[Yes.-Please confirm that address is correct.] _
+backend\tests\unit\test_agent_input_repairs.py:52: in test_idle_final_short_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['Yes.']
+E     Right contains one more item: 'Yes.'
+E     Use -v to get more diff
+_ test_idle_final_short_answer_reaches_model[Okay.-I can explain those options.] _
+backend\tests\unit\test_agent_input_repairs.py:52: in test_idle_final_short_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['Okay.']
+E     Right contains one more item: 'Okay.'
+E     Use -v to get more diff
+_ test_idle_final_short_answer_reaches_model[Sure.-Tell me if you want to continue.] _
+backend\tests\unit\test_agent_input_repairs.py:52: in test_idle_final_short_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['Sure.']
+E     Right contains one more item: 'Sure.'
+E     Use -v to get more diff
+_______________ test_numeric_first_answer_reaches_model[7-0.99] _______________
+backend\tests\unit\test_agent_input_repairs.py:82: in test_numeric_first_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['7']
+E     Right contains one more item: '7'
+E     Use -v to get more diff
+______________ test_numeric_first_answer_reaches_model[42-0.99] _______________
+backend\tests\unit\test_agent_input_repairs.py:82: in test_numeric_first_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['42']
+E     Right contains one more item: '42'
+E     Use -v to get more diff
+_____________ test_numeric_first_answer_reaches_model[-12.5-0.9] ______________
+backend\tests\unit\test_agent_input_repairs.py:82: in test_numeric_first_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['-12.5']
+E     Right contains one more item: '-12.5'
+E     Use -v to get more diff
+________ test_numeric_first_answer_reaches_model[+44 20 1234 5678-0.9] ________
+backend\tests\unit\test_agent_input_repairs.py:82: in test_numeric_first_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['+44 20 1234 5678']
+E     Right contains one more item: '+44 20 1234 5678'
+E     Use -v to get more diff
+______________ test_numeric_first_answer_reaches_model[42-None] _______________
+backend\tests\unit\test_agent_input_repairs.py:82: in test_numeric_first_answer_reaches_model
+    assert observed == [reply]
+E   AssertionError: assert [] == ['42']
+E     Right contains one more item: '42'
+E     Use -v to get more diff
+_______ test_fresh_caller_speech_revokes_actual_pending_close[Okay...] ________
+backend\tests\unit\test_agent_input_repairs.py:118: in test_fresh_caller_speech_revokes_actual_pending_close
+    service._shutdown_session_for_end_action.assert_not_awaited()
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+______ test_fresh_caller_speech_revokes_actual_pending_close[Thank you] _______
+backend\tests\unit\test_agent_input_repairs.py:118: in test_fresh_caller_speech_revokes_actual_pending_close
+    service._shutdown_session_for_end_action.assert_not_awaited()
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+_______ test_fresh_caller_speech_revokes_actual_pending_close[Bye bye.] _______
+backend\tests\unit\test_agent_input_repairs.py:118: in test_fresh_caller_speech_revokes_actual_pending_close
+    service._shutdown_session_for_end_action.assert_not_awaited()
+..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_idle_final_short_answer_reaches_model[Yes.-Please confirm that address is correct.]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_idle_final_short_answer_reaches_model[Okay.-I can explain those options.]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_idle_final_short_answer_reaches_model[Sure.-Tell me if you want to continue.]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_numeric_first_answer_reaches_model[7-0.99]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_numeric_first_answer_reaches_model[42-0.99]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_numeric_first_answer_reaches_model[-12.5-0.9]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_numeric_first_answer_reaches_model[+44 20 1234 5678-0.9]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_numeric_first_answer_reaches_model[42-None]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_fresh_caller_speech_revokes_actual_pending_close[Okay...]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_fresh_caller_speech_revokes_actual_pending_close[Thank you]
+FAILED backend\tests\unit\test_agent_input_repairs.py::test_fresh_caller_speech_revokes_actual_pending_close[Bye bye.]
+11 failed, 7 passed, 90 warnings in 12.61s

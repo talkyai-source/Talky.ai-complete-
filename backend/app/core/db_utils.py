@@ -27,6 +27,7 @@ For backend-internal jobs that legitimately need cross-tenant reads
 and the helper opens the connection with ``app.bypass_rls = 'on'``
 plus a nil-UUID sentinel — the same pattern the dialer already uses.
 """
+
 from __future__ import annotations
 
 import logging
@@ -61,6 +62,8 @@ async def acquire_with_tenant(
     pool: asyncpg.Pool,
     tenant_id: Optional[str],
     *,
+    user_id: Optional[str] = None,
+    request_id: Optional[str] = None,
     timeout: Optional[float] = None,
 ) -> AsyncIterator[asyncpg.Connection]:
     """Acquire a connection with the right RLS context already set.
@@ -69,6 +72,8 @@ async def acquire_with_tenant(
     * ``tenant_id`` is ``None`` → ``SET LOCAL app.bypass_rls = 'on'``
       plus nil-UUID sentinel; use for genuinely cross-tenant reads
       (admin tooling, workers).
+    * ``user_id``/``request_id`` are optional audit context. They are set in
+      the same transaction and therefore cannot leak to the next pool user.
 
     SET LOCAL inside the wrapping transaction guarantees the GUC is
     dropped when the connection is returned to the pool, so a later
@@ -97,5 +102,15 @@ async def acquire_with_tenant(
                 await conn.execute("SET LOCAL app.bypass_rls = 'on'")
                 await conn.execute(
                     f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'"
+                )
+            if user_id is not None:
+                await conn.execute(
+                    "SELECT set_config('app.current_user_id', $1, true)",
+                    str(user_id),
+                )
+            if request_id is not None:
+                await conn.execute(
+                    "SELECT set_config('app.current_request_id', $1, true)",
+                    str(request_id).strip()[:128],
                 )
             yield conn

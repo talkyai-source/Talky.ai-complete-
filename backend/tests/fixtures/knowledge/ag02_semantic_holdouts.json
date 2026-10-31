@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "status": "Predeclared synthetic holdouts; no provider outputs inspected; human answer review required",
+  "corpora": {
+    "equipment": [
+      {"id": "comet", "heading": "Comet equipment kit", "content": "The Comet kit costs GBP 30 per day. Shipping costs GBP 12. The Comet kit requires mains power and has no battery."},
+      {"id": "pulse", "heading": "Pulse equipment kit", "content": "The Pulse kit costs GBP 50 per day. Shipping is free. The Pulse kit has a rechargeable battery."}
+    ],
+    "appointments": [
+      {"id": "hours", "heading": "Consultation booking hours", "content": "Consultations can be booked Monday to Friday from 09:00 to 17:00. No appointments are available on Saturday or Sunday. Clinical advice is not provided by this booking service."},
+      {"id": "regions", "heading": "Home visit service regions", "content": "Home visits are available in Northborough and Eastford. Farport is outside the service area."},
+      {"id": "discount", "heading": "Returning client booking discount", "content": "Returning clients receive a GBP 5 booking discount. First-time clients pay the full booking fee. A prior enquiry does not establish returning-client status."}
+    ],
+    "shop": [
+      {"id": "refund", "heading": "Customer refund processing", "content": "The shop returns approved refund money to the customer's original payment card within five working days after inspecting the returned goods. The customer does not pay the shop again to obtain a refund."},
+      {"id": "supplier", "heading": "Supplier settlement payments", "content": "The shop pays its suppliers on Friday. This supplier payment timetable is not the customer refund timetable."},
+      {"id": "shipping", "heading": "Replacement delivery time", "content": "A replacement parcel normally arrives within two working days after dispatch. Delivery time does not determine when refund money arrives."}
+    ],
+    "education": [
+      {"id": "university", "heading": "University course fees", "content": "University course fees are GBP 490 for one term. The source does not describe astronomy classes or a product named Universe."}
+    ],
+    "association": [
+      {"id": "organization", "heading": "Organization membership", "content": "Organization membership costs GBP 50 annually. This is a business networking association; organ donation membership is not offered."}
+    ],
+    "library": [
+      {"id": "late", "heading": "Library overdue fees", "content": "Returning a borrowed book late costs GBP 1 for each overdue day. A seven-day grace period applies to children's books only."},
+      {"id": "closed", "heading": "Library Sunday returns", "content": "The library is closed on Sunday. There is no external return box. A book due on Sunday can be returned on Monday without an overdue fee."}
+    ]
+  },
+  "cases": [
+    {"id": "H01", "corpus": "equipment", "query": "What do I pay each day to hire the Comet kit?", "kind": "positive_paraphrase", "expected_node_ids": ["comet"], "human_review_rule": "GBP30 per day for Comet; do not substitute Pulse pricing."},
+    {"id": "H02", "corpus": "equipment", "query": "Is shipping free for Comet, like it is for Pulse?", "kind": "wrong_product", "expected_node_ids": ["comet", "pulse"], "human_review_rule": "Comet shipping is GBP12; Pulse's waiver must not transfer to Comet."},
+    {"id": "H03", "corpus": "equipment", "query": "Does the Comet kit have the rechargeable battery that Pulse has?", "kind": "wrong_product", "expected_node_ids": ["comet", "pulse"], "human_review_rule": "No Comet battery; it requires mains. Do not attribute Pulse's feature to Comet."},
+    {"id": "H04", "corpus": "equipment", "query": "Not Pulse, I mean Comet. Can I use it without a wall socket?", "kind": "negation_correction", "expected_node_ids": ["comet"], "human_review_rule": "Respect the correction to Comet; no battery and mains required."},
+    {"id": "H05", "corpus": "equipment", "query": "How much is the kit per day?", "kind": "ambiguous_product", "expected_node_ids": [], "human_review_rule": "Clarify which kit or explicitly distinguish both; never silently select one."},
+    {"id": "H06", "corpus": "appointments", "query": "Can I arrange a consultation on a weekday afternoon?", "kind": "positive_paraphrase", "expected_node_ids": ["hours"], "human_review_rule": "Weekday hours09:00–17:00; this is availability, not a confirmed booking."},
+    {"id": "H07", "corpus": "appointments", "query": "I need someone this Sunday afternoon. Are consultations available then?", "kind": "time_constraint", "expected_node_ids": ["hours"], "human_review_rule": "No Sunday appointments; do not drop Sunday when reformulating."},
+    {"id": "H08", "corpus": "appointments", "query": "Do you come out to homes in Northborough?", "kind": "positive_paraphrase", "expected_node_ids": ["regions"], "human_review_rule": "Home visits available in Northborough; no fabricated appointment."},
+    {"id": "H09", "corpus": "appointments", "query": "I live in Farport, not Eastford. Can you visit my home?", "kind": "region_negation", "expected_node_ids": ["regions"], "human_review_rule": "Farport is outside service area; do not substitute Eastford."},
+    {"id": "H10", "corpus": "appointments", "query": "I used your service before. Is there any money off my booking?", "kind": "positive_paraphrase", "expected_node_ids": ["discount"], "human_review_rule": "Returning-client booking discountGBP5, qualified by the caller's stated prior use."},
+    {"id": "H11", "corpus": "appointments", "query": "I only asked about your service before; I have never used it. Do I get the returning-client discount?", "kind": "eligibility_relationship", "expected_node_ids": ["discount"], "human_review_rule": "An enquiry does not establish returning-client eligibility; do not treat caller as existing client."},
+    {"id": "H12", "corpus": "shop", "query": "After you inspect my returned purchase, how long until the money comes back to my card?", "kind": "positive_paraphrase", "expected_node_ids": ["refund"], "human_review_rule": "Approved refund within5working days after inspection; preserve approval/inspection conditions."},
+    {"id": "H13", "corpus": "shop", "query": "I'm a supplier waiting to be paid, not a customer asking for a refund. When do you pay me?", "kind": "relationship_direction", "expected_node_ids": ["supplier"], "human_review_rule": "Supplier paymentsFriday; do not substitute customer refund timing."},
+    {"id": "H14", "corpus": "shop", "query": "For an approved refund, am I paying you again or are you returning money to me?", "kind": "payment_direction", "expected_node_ids": ["refund"], "human_review_rule": "Shop returns money to customer's original card; customer does not pay again."},
+    {"id": "H15", "corpus": "shop", "query": "Once you dispatch the replacement parcel, how quickly should it get here?", "kind": "positive_paraphrase", "expected_node_ids": ["shipping"], "human_review_rule": "Normally2working days afterdispatch, not refund timing or guaranteed delivery."},
+    {"id": "H16", "corpus": "education", "query": "What are Universe courses priced at?", "kind": "unrelated_noun", "expected_node_ids": [], "human_review_rule": "Do not reinterpret Universe as University or invent astronomy pricing; clarify or decline unsupported fact."},
+    {"id": "H17", "corpus": "association", "query": "How much does organ donation membership cost?", "kind": "unrelated_noun", "expected_node_ids": ["organization"], "human_review_rule": "Organ donation membership is not offered; never quote organization membership price as its cost."},
+    {"id": "H18", "corpus": "library", "query": "What do I owe if I bring an adult book back after its due date?", "kind": "positive_paraphrase", "expected_node_ids": ["late"], "human_review_rule": "GBP1each overdue day; children's-only grace must not apply to adult book."},
+    {"id": "H19", "corpus": "library", "query": "My book is due Sunday. Will you charge me if I return it Monday?", "kind": "condition_exception", "expected_node_ids": ["closed"], "human_review_rule": "No overduefee under specific Sundaydue/Mondayreturn exception; do not apply genericfee."},
+    {"id": "H20", "corpus": "library", "query": "Can I leave my book in your outside return box on Sunday?", "kind": "absent_capability", "expected_node_ids": ["closed"], "human_review_rule": "No external returnbox; do not invent return method from library being closed."}
+  ]
+}

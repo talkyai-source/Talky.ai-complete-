@@ -1,0 +1,18 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+__________ test_revised_transcript_does_not_publish_obsolete_summary __________
+tests\unit\test_ag06_crm_evidence.py:22: in test_revised_transcript_does_not_publish_obsolete_summary
+    assert all("Caller requested a callback" not in body for body in bodies)
+E   assert False
+E    +  where False = all(<generator object test_revised_transcript_does_not_publish_obsolete_summary.<locals>.<genexpr> at 0x000002527657B780>)
+___ test_unknown_contact_create_never_reconciles_against_changed_recipient ____
+tests\unit\test_ag06_crm_evidence.py:40: in test_unknown_contact_create_never_reconciles_against_changed_recipient
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.crm_sync_service:crm_sync_service.py:299 crm_sync provider=salesforce call=77777777-7777-7777-7777-777777777777 phase=creating_contact status=unknown
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_crm_evidence.py::test_revised_transcript_does_not_publish_obsolete_summary
+FAILED tests/unit/test_ag06_crm_evidence.py::test_unknown_contact_create_never_reconciles_against_changed_recipient
+2 failed in 0.92s

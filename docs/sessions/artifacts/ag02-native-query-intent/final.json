@@ -1,0 +1,78 @@
+{
+  "head": "76ba91eabfea5cbf1f6b106202e16a5dbf858b1b",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-native-query-intent-20261007\\backend",
+  "runner_argv": [
+    "../docs/sessions/artifacts/ag02-native-query-intent/runner.py",
+    "final"
+  ],
+  "pytest_argv": [
+    "tests/unit/test_realtime_quality_pass.py",
+    "tests/unit/test_realtime_profile_contract.py",
+    "tests/unit/test_realtime_independent.py",
+    "tests/unit/test_explicit_secret_boundary.py",
+    "tests/unit/test_true_inbound_prompt_separation.py",
+    "tests/unit/test_prompt_versions.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings",
+    "-o",
+    "addopts="
+  ],
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-native-query-intent-20261007\\backend",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test"
+  },
+  "versions": {
+    "pytest": "7.4.4",
+    "pytest-asyncio": "0.23.3",
+    "pydantic": "2.12.5",
+    "httpx": "0.28.1",
+    "websockets": "15.0.1"
+  },
+  "source_before": {
+    "backend/app/realtime/prompts.py": "2ceef7c2287583f5ba2c444438c29df58a035ded879ebee61f9042fedee83b9a",
+    "backend/app/realtime/openai.py": "ace9e72aff7717d6305de70c3400904f8114dff877929f05b97d04ce93c3a3b4",
+    "backend/app/realtime/prompt_config.py": "855dcb8cfaa45c0288ac13344019d043e3673c11ca19ab564e9808ffa0d51e2d",
+    "backend/app/realtime/runtime.py": "c23f47977d85ec2e021e21944ee127df91154f027aed420b8f16dfecd983342a",
+    "backend/app/realtime/personas.py": "9b36c03a6b386751a45dab9913567b0d22b68abb8245cc4f4947b0b7d024dd1f",
+    "backend/app/realtime/xai.py": "1b33ccdda11f4e823e296e44bd906799be71916320fcc196dea5fc9b7a005740",
+    "backend/app/domain/services/telephony_session_config.py": "b08317afbfcd26c2339d1562f8ae61dcad00bf33da1d07aa4be6b564ad8ec516",
+    "backend/app/domain/services/voice_orchestrator.py": "676c61fa5d4c4681094e9c2fbc374898096bcdb32fe19decc5ac41e66df1a922",
+    "backend/app/services/scripts/prompts/versions.py": "931fe3d94ff60f71087033dc8ccf72a14d3319fc6f556d100e6937ca0d449fee",
+    "backend/tests/unit/test_realtime_quality_pass.py": "dd520670f22f77a44a4d5e2ae8bb20c187719d834479344514a0bfdb77949cc0",
+    "backend/tests/unit/test_realtime_profile_contract.py": "a72d7b37788258ee3678e9d1ad878147ef7b5152066a5b8cf0536a7e65633b66",
+    "backend/tests/unit/test_realtime_independent.py": "7fef4dca86648302ea163f69e6b7a767134751b98e8145d122078038fa86a0bc",
+    "backend/tests/unit/test_explicit_secret_boundary.py": "269435732115c55a5164693061a054727405eb3e624a928ac9f52b25e581d21c",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "a9d7a922534b1ee29bc5b4d124732fe1a9757af60cb9436505df54936bd61ffc",
+    "backend/tests/unit/test_prompt_versions.py": "d7333cc9d461576a1b0b9a9ce9d3fa280b087e2a179e165c04ccb5e03a9c55ea"
+  },
+  "source_after": {
+    "backend/app/realtime/prompts.py": "2ceef7c2287583f5ba2c444438c29df58a035ded879ebee61f9042fedee83b9a",
+    "backend/app/realtime/openai.py": "ace9e72aff7717d6305de70c3400904f8114dff877929f05b97d04ce93c3a3b4",
+    "backend/app/realtime/prompt_config.py": "855dcb8cfaa45c0288ac13344019d043e3673c11ca19ab564e9808ffa0d51e2d",
+    "backend/app/realtime/runtime.py": "c23f47977d85ec2e021e21944ee127df91154f027aed420b8f16dfecd983342a",
+    "backend/app/realtime/personas.py": "9b36c03a6b386751a45dab9913567b0d22b68abb8245cc4f4947b0b7d024dd1f",
+    "backend/app/realtime/xai.py": "1b33ccdda11f4e823e296e44bd906799be71916320fcc196dea5fc9b7a005740",
+    "backend/app/domain/services/telephony_session_config.py": "b08317afbfcd26c2339d1562f8ae61dcad00bf33da1d07aa4be6b564ad8ec516",
+    "backend/app/domain/services/voice_orchestrator.py": "676c61fa5d4c4681094e9c2fbc374898096bcdb32fe19decc5ac41e66df1a922",
+    "backend/app/services/scripts/prompts/versions.py": "931fe3d94ff60f71087033dc8ccf72a14d3319fc6f556d100e6937ca0d449fee",
+    "backend/tests/unit/test_realtime_quality_pass.py": "dd520670f22f77a44a4d5e2ae8bb20c187719d834479344514a0bfdb77949cc0",
+    "backend/tests/unit/test_realtime_profile_contract.py": "a72d7b37788258ee3678e9d1ad878147ef7b5152066a5b8cf0536a7e65633b66",
+    "backend/tests/unit/test_realtime_independent.py": "7fef4dca86648302ea163f69e6b7a767134751b98e8145d122078038fa86a0bc",
+    "backend/tests/unit/test_explicit_secret_boundary.py": "269435732115c55a5164693061a054727405eb3e624a928ac9f52b25e581d21c",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "a9d7a922534b1ee29bc5b4d124732fe1a9757af60cb9436505df54936bd61ffc",
+    "backend/tests/unit/test_prompt_versions.py": "d7333cc9d461576a1b0b9a9ce9d3fa280b087e2a179e165c04ccb5e03a9c55ea"
+  },
+  "source_unchanged": true,
+  "pytest_exit_code": 0,
+  "network": {
+    "internal_socketpairs": 277,
+    "prohibited_socket_attempts": 0,
+    "prohibited_transport_attempts": 0
+  },
+  "scope": "Actual prompt/config/campaign/runtime serialization with synthetic storage and WebSocket acknowledgements. No provider, DB, speech or customer execution. Existing venv, not exact-lock dependency qualification."
+}

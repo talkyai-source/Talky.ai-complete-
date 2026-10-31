@@ -1,0 +1,255 @@
+{
+  "recorded_on": "2026-10-05",
+  "package": "CP07",
+  "status": "in_progress",
+  "base_commit": "8f11f335e21bd29731e880ef0116472acc41f59d",
+  "implementation_commit": "40232996372305b8ab100bc8fc57a3957296f4e4",
+  "branch": "codex/production-ready-20261004",
+  "result": "Local notification isolation and truthful unavailable routing verified; external background automation and deployed acceptance remain unfinished.",
+  "checks": [
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "--test",
+        "--test-concurrency=1",
+        "--import",
+        "tsx",
+        "--import",
+        "./src/test-utils/setup.ts",
+        "src/lib/notifications.test.ts",
+        "src/lib/notifications-isolation.test.tsx",
+        "src/lib/notification-mutations.test.ts",
+        "src/components/notifications/qualified-lead-alerts.test.ts",
+        "src/components/campaigns/contact-lists.test.tsx",
+        "src/components/settings/sip-trunks-list.test.tsx",
+        "src/components/settings/recording-policy-section.test.ts",
+        "src/lib/queries/inbound-queries.test.ts",
+        "src/lib/structural-auth-isolation.test.ts",
+        "src/lib/http-client.test.ts",
+        "src/lib/http-client.session-expired.test.ts",
+        "src/lib/post-auth-navigation.test.ts",
+        "src/components/calls/conversation-review-panel.test.tsx",
+        "src/components/campaigns/live-calls-panel.test.tsx",
+        "src/lib/billing-read.test.ts",
+        "src/components/billing/billing-overview.test.tsx",
+        "src/components/billing/topup-card.test.tsx"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-final-tests.txt",
+      "elapsed_seconds": 174.62,
+      "tests": 140,
+      "pass": 140,
+      "fail": 0,
+      "skipped": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        "src/app/campaigns/page.tsx",
+        "src/app/connectors/page.tsx",
+        "src/app/meetings/page.tsx",
+        "src/app/settings/page.tsx",
+        "src/components/campaigns/contact-lists.test.tsx",
+        "src/components/campaigns/contact-lists.tsx",
+        "src/components/notifications/notification-center.tsx",
+        "src/components/notifications/qualified-lead-alerts.test.ts",
+        "src/components/notifications/qualified-lead-alerts.tsx",
+        "src/components/providers/app-providers.tsx",
+        "src/components/settings/recording-policy-section.tsx",
+        "src/components/settings/sip-trunks-list.tsx",
+        "src/components/settings/telephony-providers-section.tsx",
+        "src/lib/api-hooks.ts",
+        "src/lib/app-query-client.ts",
+        "src/lib/auth-context.tsx",
+        "src/lib/backend-api.ts",
+        "src/lib/event-stream-api.ts",
+        "src/lib/notification-mutations.test.ts",
+        "src/lib/notification-mutations.ts",
+        "src/lib/notifications-client.tsx",
+        "src/lib/notifications-isolation.test.tsx",
+        "src/lib/notifications.test.ts",
+        "src/lib/notifications.ts",
+        "src/lib/queries/inbound-queries.ts"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-lint.txt",
+      "elapsed_seconds": 25.88
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "-p",
+        "tsconfig.json",
+        "--noEmit"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-typecheck.txt",
+      "elapsed_seconds": 56.03
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": [
+        "node",
+        "node_modules/next/dist/bin/next",
+        "build",
+        "--webpack"
+      ],
+      "exit_code": 0,
+      "artifact": "frontend-build.txt",
+      "elapsed_seconds": 226.72
+    },
+    {
+      "cwd": "backend",
+      "command": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "pytest",
+        "tests/unit/test_webhook_delivery_unavailable.py",
+        "tests/unit/test_stream_events_response_owner.py",
+        "tests/unit/test_campaign_stream_events_rls.py",
+        "tests/security/test_admin_tenant_isolation.py",
+        "-q"
+      ],
+      "exit_code": 0,
+      "artifact": "backend-final-tests.txt",
+      "elapsed_seconds": 10.49,
+      "passed": 45
+    },
+    {
+      "cwd": "backend",
+      "command": [
+        "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F,E9",
+        "app/api/v1/endpoints/stream_events.py",
+        "app/api/v1/endpoints/webhooks_admin.py",
+        "tests/unit/test_stream_events_response_owner.py",
+        "tests/unit/test_webhook_delivery_unavailable.py"
+      ],
+      "exit_code": 0,
+      "artifact": "backend-lint.txt",
+      "elapsed_seconds": 0.39
+    }
+  ],
+  "source_unchanged_during_final_checks": true,
+  "browser_evidence": "docs/sessions/artifacts/cp07/browser-validation.json",
+  "browser_visual_review": {
+    "reviewer": "root",
+    "screenshots": [
+      "browser-account-a.png",
+      "browser-account-b.png",
+      "browser-clear-after-delayed-storage.png",
+      "browser-logout.png"
+    ],
+    "result": "Inspected: respective scoped synthetic alerts and empty clear/logout states; fixture styling only."
+  },
+  "reviews": [
+    {
+      "reviewer": "root",
+      "scope": "Integration, notification consumers, ownership checks, final tests/build, screenshots and plan integrity"
+    },
+    {
+      "reviewer": "realtime_audit",
+      "scope": "Scoped store/auth lifecycle and regression reproductions"
+    },
+    {
+      "reviewer": "llm_audit",
+      "scope": "Mutation/query attribution, consumer review and authenticated event response ownership"
+    },
+    {
+      "reviewer": "audio_audit",
+      "scope": "Delivery contract and latent endpoint review; independent auth review and Chromium replay"
+    }
+  ],
+  "runtime": {
+    "node": "v25.8.1",
+    "python": "3.12.12",
+    "next": "16.3.8",
+    "os": "Windows"
+  },
+  "scope_checks": {
+    "feature_freeze_active": true,
+    "CP05_CP06_deferred": true,
+    "baseline_maturity_unchanged": true,
+    "frozen_assessment_blobs_unchanged": true
+  },
+  "not_performed": [
+    "Real customer call/email/webhook",
+    "Production database mutation",
+    "Deployment",
+    "Push",
+    "Remote CI",
+    "Full repository test suite",
+    "Deployed cookie/account acceptance",
+    "Background receiver delivery acceptance"
+  ],
+  "remaining": [
+    "Authorized durable external alert/receipt and HTTP egress contract",
+    "Designated environment account/session acceptance",
+    "Backend event stamp rollout before or together with frontend",
+    "CP06 billing recipients deferred",
+    "CP08 wider HTTP lifecycle, business caches and email history isolation"
+  ],
+  "cleanup_limit": "Test browser/server stopped; ignored inactive tmp/cp07-browser retained because automatic approval review blocked its recursive deletion ('blocked by policy').",
+  "digest_convention": "SHA256 of staged Git blob bytes: LF-normalized text and raw binary. This manifest is excluded to avoid a circular digest.",
+  "artifact_git_blob_sha256": {
+    "docs/production ready.md": "6cff78cb95e6b567841592609b29cbc4c949e4fda8ea10322fb3919b7bb066c4",
+    "docs/production-readiness/execution-tracker.json": "655a24b2ea87f3cf3cb6b8808310972ac2a58f927ac6acaa399115529d1a2930",
+    "docs/sessions/2026-10-04-cp07-delivery-contracts.md": "f784f85fc2df22e0732bbf2e3065f9c0200a487117a0028f91eb8e2caa7d6a4a",
+    "docs/sessions/2026-10-05-cp07-implementation.md": "d23609f8ad4b89d52ea17a570ba410fa9a4bc6ac355c984315c0e45c5501a6bf",
+    "docs/sessions/artifacts/cp07/auth-delta-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/cp07/auth-isolation-tests.txt": "e51516da52ac6333ce38a05a6c60ebe7d89f6c964db72cf6efce96dac12be1ef",
+    "docs/sessions/artifacts/cp07/auth-logout-refresh-before.txt": "fec5d6a8c409660edac497d291960320019af1f0ec5fabf5e57fe16de8f357bb",
+    "docs/sessions/artifacts/cp07/backend-final-tests.txt": "3252db1db2c0264839b8e4bec65e32ab84a5f42ba0a0e12b784a2c3a4427c0d0",
+    "docs/sessions/artifacts/cp07/backend-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/cp07/browser-account-a.png": "0a0f45f4ef8ac4f59d021c98dd0a31eb5e2ef0929f4bcc76a28125fccafa6962",
+    "docs/sessions/artifacts/cp07/browser-account-b.png": "2bf1862296913cfffb2e52ee3f9e1699721e749ee5ea751e983f4ba86b9b1305",
+    "docs/sessions/artifacts/cp07/browser-cleanup.json": "b097ebab03b6052f732f5fd1e7358ec161a264a8fe608189bde3dadaad0b9fc0",
+    "docs/sessions/artifacts/cp07/browser-clear-after-delayed-storage.png": "73918619144fcdf8549da2e767166731e8253aebd0a5c5f7c6bb4f6ea2d91e54",
+    "docs/sessions/artifacts/cp07/browser-clear-race-before-fix.json": "00fdb1ac23e91ec0e929b0c42a5b43e16fcb5b41d9527187697da2f14f38f286",
+    "docs/sessions/artifacts/cp07/browser-clear-race-before-fix.txt": "c13a5eef04690402c90c5c13a33dca9a080e12973560f65be2d93c839fc8daa1",
+    "docs/sessions/artifacts/cp07/browser-harness/auth-context.ts": "4082e60736cfd0abfdcb5062a5230bdc6e4cac83046dc2a4b3567496d99d0439",
+    "docs/sessions/artifacts/cp07/browser-harness/backend-api.ts": "e7613f107d322e5617a8d4137350814bd727ec9b6d1e597a89633581c7ca78a9",
+    "docs/sessions/artifacts/cp07/browser-harness/browser-run.js": "92ec7060fdcb24408e369be2b5f93862191517abb6cb25537fbee92effe1d37b",
+    "docs/sessions/artifacts/cp07/browser-harness/build.mjs": "426f8b47f8ec676076b8e0aa345eef424f4f9fb19d7bd79fb6505569ab5915fc",
+    "docs/sessions/artifacts/cp07/browser-harness/harness.tsx": "39af46d429c3bf88971e018d8957e75fbcc065beb211ba9c2b2ece9abdcd09df",
+    "docs/sessions/artifacts/cp07/browser-harness/index.html": "2223ec04272ef7d8f5c1d495be376863037bc9d33624f6348f0b5ba301d45958",
+    "docs/sessions/artifacts/cp07/browser-harness/server.mjs": "48f48ec4e173c339ba053ef041fef80a070f421bdb5f9b3ea73fce2312f3cd81",
+    "docs/sessions/artifacts/cp07/browser-harness/write-browser-evidence.py": "a095ded26c92c35637712bbc0fca80bc2e430780b759b3337cbe07e1ed8bab76",
+    "docs/sessions/artifacts/cp07/browser-logout.png": "512bbe0cc26cd197dee60dc3983c9e629824dc1e35792210abb7c21297fb3a3a",
+    "docs/sessions/artifacts/cp07/browser-state-a-restored.json": "b398c359741c3a80161029cc2e61712f1151b356a94882ed0bdcbec9839d1957",
+    "docs/sessions/artifacts/cp07/browser-state-a.json": "97140df4d57d704111a41c834b084997af128c3d72e87e44092519f02ad90019",
+    "docs/sessions/artifacts/cp07/browser-state-b-late-response.json": "48918f6d7adf1e29950c781011bee815e1cfb8d5b7f8ec768510e38ab0a3799f",
+    "docs/sessions/artifacts/cp07/browser-state-clear-other-tab.json": "3b68819803d59893401c68c3b1f0d58527ac12f7c28204904e19e988c7649309",
+    "docs/sessions/artifacts/cp07/browser-state-cleared.json": "36fad0a8c684e09b168a0ae09a59621a124288c16e9257c2e0161fba040fdc36",
+    "docs/sessions/artifacts/cp07/browser-state-delayed-before-clear.json": "5cc7af5f980adb854bc1a6e25288a8524568fa12c5a6061a178f5983a6a8fcc5",
+    "docs/sessions/artifacts/cp07/browser-state-logout-tab0.json": "bed80b7d5dc1f0e8f3ac95343c4eb94d89e7a70714d397d21586f7806a6e0daa",
+    "docs/sessions/artifacts/cp07/browser-state-logout-tab1.json": "32205d30faa7eb4bdc9ce27848b6bd7896c37ce7b020bbbb822f231138ff79ce",
+    "docs/sessions/artifacts/cp07/browser-validation-run.txt": "59ea8e2337579288347cdaf22583d1c777e590bd4939bd3fc1a6e654ae98f67f",
+    "docs/sessions/artifacts/cp07/browser-validation.json": "4271a6a6993dad277037748677e2e03da86d0a062f3f76977e90ac35e4bbbfe8",
+    "docs/sessions/artifacts/cp07/browser-validation.md": "938d4fea2b0df3fb96fa330895d5e5508d5e972a9db9ed8d436c7bba1e95a082",
+    "docs/sessions/artifacts/cp07/event-response-owner-checks.json": "7c04ff4a8b28dd427d0471d8b891a12e603124ded2ad478e27fef1faf434c530",
+    "docs/sessions/artifacts/cp07/final-checks.json": "476fbc5e798d74a67eaf71cb3500b4987fc900298e3bea9e478c83d6104e31a1",
+    "docs/sessions/artifacts/cp07/frontend-build.txt": "4d01263404d8088170e25638bc17f08d19ecc67db9ccca05a9acba4770879886",
+    "docs/sessions/artifacts/cp07/frontend-checks.json": "2d4493852f664a2a2968665f1b5530fea58b726239e0de7036249a9e1c97099b",
+    "docs/sessions/artifacts/cp07/frontend-final-tests.txt": "479ef7ef42f167e4426dfdca39f04f8f6a9dfb22147c7d7f9ba600af490e2ac7",
+    "docs/sessions/artifacts/cp07/frontend-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/cp07/frontend-pre-final-auth-tests.txt": "b76dfd3e7667a99ca666c3a805950b2e685d3892773f70882054f7026ad6d190",
+    "docs/sessions/artifacts/cp07/frontend-pre-final-command.json": "7b9f1828723f2a2a252106c6cf380873f7f6fb63699461c0aa861811f40cc984",
+    "docs/sessions/artifacts/cp07/frontend-typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/cp07/notification-isolation-before.txt": "f03bf9a2e1a663ea5802c2c516f0345fdf8447258dddf243d3fa023535c119ee",
+    "docs/sessions/artifacts/cp07/root-frontend-tests-initial.txt": "3434dc33073e620be60d492059c40c65233f07ddddcb06e59cb29e4b560dc529",
+    "docs/sessions/artifacts/cp07/store-clear-before.txt": "2e876cd5bec40bf99993b6569df4d95e7ae817917640ea72e304215d878818ee",
+    "docs/sessions/artifacts/cp07/store-clear-delta-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/cp07/store-clear-delta-tests.txt": "2a2a2091acc69360417b1cc1ed7dfb1dead079505a80bc5f7bcd3348de314f7e",
+    "docs/sessions/artifacts/cp07/webhook-unavailable-tests.txt": "4a1b716a5bcb1a6f9aa20e5abff9f8cc758c84fa4e19883f39c4c202b60354d1"
+  }
+}

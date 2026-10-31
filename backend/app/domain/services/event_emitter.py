@@ -20,6 +20,7 @@ For higher-throughput emission points (e.g. dialer worker batch
 progress), wrap calls in a Redis SETNX/EXPIRE throttle so the table
 isn't hammered. See `dialer_worker.py` for the canonical example.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -28,6 +29,8 @@ import logging
 from typing import Any, Optional
 
 import asyncpg
+
+from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +82,10 @@ async def emit_event(
     except Exception as exc:  # noqa: BLE001 — fire-and-forget by design
         logger.warning(
             "emit_event.failed tenant=%s category=%s title=%r error=%s",
-            tenant_id, category, title, exc,
+            tenant_id,
+            category,
+            title,
+            exc,
         )
 
 
@@ -98,11 +104,9 @@ async def cleanup_expired_events_loop(
     while not stop_event.is_set():
         try:
             total = 0
-            async with pool.acquire() as conn:
-                await conn.execute("SET app.bypass_rls = 'on'")
-                await conn.execute(
-                    "SET app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"
-                )
+            # Cross-tenant retention worker. The canonical helper keeps bypass
+            # transaction-local so it cannot leak to the next pool borrower.
+            async with acquire_with_tenant(pool, None) as conn:
                 # Delete in bounded batches so a large backlog can't long-lock.
                 for _ in range(200):  # hard cap = 1M rows/run, plenty
                     status = await conn.execute(
@@ -150,7 +154,10 @@ async def emit_event_via_pool(
     call — fine at low rates, throttled higher up at the worker level.
     """
     try:
-        async with pool.acquire() as conn:
+        # stream_events is tenant-scoped and under FORCE ROW LEVEL SECURITY, so
+        # a bare pool acquisition has no tenant GUC and the INSERT is rejected
+        # by the policy's WITH CHECK. The caller always knows the tenant here.
+        async with acquire_with_tenant(pool, str(tenant_id)) as conn:
             await emit_event(
                 conn,
                 tenant_id=tenant_id,
@@ -163,5 +170,14 @@ async def emit_event_via_pool(
                 actor_user_id=actor_user_id,
                 metadata=metadata,
             )
-    except Exception as exc:  # noqa: BLE001
-        logger.warning("emit_event_via_pool.failed error=%s", exc)
+    except Exception as exc:  # noqa: BLE001 — fire-and-forget by design
+        # Log the tenant: the most likely failure now is the row being rejected
+        # (or the tenant context never being set), and that is invisible
+        # otherwise because emission is deliberately swallowed.
+        logger.warning(
+            "emit_event_via_pool.failed tenant=%s category=%s title=%r error=%s",
+            tenant_id,
+            category,
+            title,
+            exc,
+        )

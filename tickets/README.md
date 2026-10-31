@@ -152,7 +152,7 @@ remaining 5 plus their real prerequisites — not a re-run of the whole fix docu
 ## Ground rules (added, project-specific)
 
 6. **Production is live and calls real people.** Every ticket carries a Don't list. Read it.
-   The master safety list is `HANDOFF-NEXT-AGENT.md` §3 and it overrides anything here.
+   The master safety list is `docs/sessions/worklogs/HANDOFF-NEXT-AGENT.md` §3 and it overrides anything here.
 7. **No claim without evidence.** "Verified" means a command was run and its output pasted into
    the ticket. A subagent's report is not evidence. A green test is evidence.
 8. **Docs reference modules and functions, never line numbers.** Line numbers rot within a week —

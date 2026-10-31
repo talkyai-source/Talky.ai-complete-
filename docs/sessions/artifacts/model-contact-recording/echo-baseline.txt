@@ -1,0 +1,14 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[] _
+tests\unit\test_model_contact_recording.py:416: in test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence
+    assert result["saved"] and result["validation_status"] == "awaiting_confirmation"
+E   assert (False)
+_ test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[ My password is Qwerty!.] _
+tests\unit\test_model_contact_recording.py:416: in test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence
+    assert result["saved"] and result["validation_status"] == "awaiting_confirmation"
+E   assert (False)
+=========================== short test summary info ===========================
+FAILED tests/unit/test_model_contact_recording.py::test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[]
+FAILED tests/unit/test_model_contact_recording.py::test_actual_transcript_dispatch_echo_cleanup_keeps_canonical_contact_evidence[ My password is Qwerty!.]
+2 failed, 30 warnings in 1.64s

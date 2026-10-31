@@ -241,6 +241,16 @@ GOOGLE_CLIENT_SECRET=your-google-client-secret
 HUBSPOT_CLIENT_ID=your-hubspot-client-id
 HUBSPOT_CLIENT_SECRET=your-hubspot-client-secret
 
+# Salesforce OAuth (Connected App: web-server flow, PKCE, scopes api id refresh_token offline_access;
+# callback URL = ${API_BASE_URL}/api/v1/connectors/callback)
+SALESFORCE_CLIENT_ID=your-connected-app-consumer-key
+SALESFORCE_CLIENT_SECRET=your-connected-app-consumer-secret
+# Optional: https://test.salesforce.com for sandboxes, or a My Domain login host
+SALESFORCE_LOGIN_URL=https://login.salesforce.com
+# Optional overrides
+SALESFORCE_API_VERSION=v60.0
+SALESFORCE_ACCESS_TOKEN_TTL_SECONDS=900   # Salesforce sends no expires_in; refresh proactively
+
 # Callback Configuration
 API_BASE_URL=https://api.talky.ai  # For OAuth redirect
 FRONTEND_URL=http://localhost:3000  # Success/error redirect

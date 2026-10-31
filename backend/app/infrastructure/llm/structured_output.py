@@ -41,6 +41,8 @@ import logging
 import os
 from typing import Any, Optional
 
+from app.domain.models.ai_config import GroqModel
+
 logger = logging.getLogger(__name__)
 
 #: Models on which Groq accepts ``strict: true`` json_schema requests.
@@ -119,12 +121,12 @@ def strict_mode_active(model: Optional[str]) -> bool:
 def summariser_model() -> str:
     """Model for the offline call-summary extraction.
 
-    Overridable so an operator can move this job onto a strict-capable model
-    without a code change. The default stays llama-3.3-70b — changing the model
-    that writes customer-visible summaries is not a decision to make silently
-    on someone's behalf.
+    Operators may override this independently with ``CALL_SUMMARY_MODEL``.
+    The default must be one this production Groq account can serve; both legacy
+    Llama ids return 404 here. GPT-OSS also gives this job constrained decoding
+    through the strict-schema capability above.
     """
     return (
         os.getenv("CALL_SUMMARY_MODEL", "").strip()
-        or "llama-3.3-70b-versatile"
+        or GroqModel.GPT_OSS_20B.value
     )

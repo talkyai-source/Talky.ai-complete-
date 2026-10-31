@@ -1,0 +1,24 @@
+{
+  "baseline_commit": "69d09fe5",
+  "observed_date": "2026-10-05",
+  "command": "python -m pytest -q tests/unit/test_ag03_relationship_acceptance.py",
+  "phase": "initial 16-case independent acceptance run before AG03 implementation",
+  "result": {"failed": 11, "passed": 5, "seconds": 2.28},
+  "confirmed_failures": [
+    "Actual RealtimeBridge event pump admits an existing-customer claim after explicit denial and 30 ordinary caller turns; bounded contact history no longer contains the denial.",
+    "Quoted script affirmation, reported colleague affirmation, conditional affirmation, negated reported affirmation, other-supplier customer status and quoted earlier assistant affirmation clear the caller denial.",
+    "Quoted script denial, reported colleague denial, conditional denial and negated reported denial manufacture a caller denial."
+  ],
+  "positive_controls_passed": [
+    "Genuine later caller affirmation allows the claim after the long call.",
+    "Third-party manager affirmation does not reverse an existing denial.",
+    "Third-party manager denial and unrelated factual no do not manufacture denial.",
+    "Assistant/system campaign text does not reverse caller denial."
+  ],
+  "scope": "Synthetic events through actual bridge validation and shared guard; fake provider and a playback-admission spy. No provider requests, audio or external effects.",
+  "limitations": [
+    "This artifact records the observed pytest result; it is not a raw pytest log.",
+    "The later test module adds further cases; its eventual count must not be confused with this 16-case baseline.",
+    "The older preserved d7b58405 reproduction demonstrates the same history bound through the legacy history-only API. This run exercises the actual bridge event gate instead."
+  ]
+}

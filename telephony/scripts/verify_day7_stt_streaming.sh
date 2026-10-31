@@ -138,6 +138,9 @@ cmake --build "$GATEWAY_BUILD_DIR" -- -j"$(nproc)" >/dev/null
 ctest --test-dir "$GATEWAY_BUILD_DIR" --output-on-failure >/dev/null
 
 echo "[6/13] Starting C++ voice gateway runtime..."
+# shellcheck source=gateway_test_env.sh
+source "$SCRIPT_DIR/gateway_test_env.sh"
+provision_voice_gateway_test_env
 "$GATEWAY_BUILD_DIR/voice_gateway" --host "$GATEWAY_HOST" --port "$GATEWAY_HTTP_PORT" >"$GATEWAY_LOG" 2>&1 &
 GW_PID=$!
 for _ in $(seq 1 80); do

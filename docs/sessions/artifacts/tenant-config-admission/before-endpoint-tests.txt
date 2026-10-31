@@ -1,0 +1,47 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+_ test_actual_origination_boundary_returns_503_without_opening_provider[exception-ai] _
+tests\unit\test_tenant_profile_admission.py:179: in test_actual_origination_boundary_returns_503_without_opening_provider
+    error = await _assert_call_error(path, 503)
+tests\unit\test_outbound_campaign_boundaries.py:541: in _assert_call_error
+    assert caught.value.status_code == status
+E   AssertionError: assert 404 == 503
+E    +  where 404 = HTTPException(status_code=404, detail={'error': 'campaign_not_found'}).status_code
+E    +    where HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) = <ExceptionInfo HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) tblen=4>.value
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.tenant_ai_config_resolver:tenant_ai_config_resolver.py:117 tenant_ai_config_lookup_failed tenant=11111111-[redacted digits=12 ..11]-[redacted digits=12 ..11] err=synthetic lookup unavailable � falling back to process default
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=11111111-[redacted digits=12 ..11]-[redacted digits=12 ..11] campaign=33333333-[redacted digits=12 ..33]-[redacted digits=12 ..33] source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_actual_origination_boundary_returns_503_without_opening_provider[exception-tuning] _
+tests\unit\test_tenant_profile_admission.py:179: in test_actual_origination_boundary_returns_503_without_opening_provider
+    error = await _assert_call_error(path, 503)
+tests\unit\test_outbound_campaign_boundaries.py:541: in _assert_call_error
+    assert caught.value.status_code == status
+E   AssertionError: assert 404 == 503
+E    +  where 404 = HTTPException(status_code=404, detail={'error': 'campaign_not_found'}).status_code
+E    +    where HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) = <ExceptionInfo HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) tblen=4>.value
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_tuning:voice_tuning.py:222 voice_tuning_db_lookup_failed tenant=11111111-[redacted digits=12 ..11]-[redacted digits=12 ..11] err=synthetic lookup unavailable � falling back to env+defaults
+_ test_actual_origination_boundary_returns_503_without_opening_provider[unwired-ai] _
+tests\unit\test_tenant_profile_admission.py:179: in test_actual_origination_boundary_returns_503_without_opening_provider
+    error = await _assert_call_error(path, 503)
+tests\unit\test_outbound_campaign_boundaries.py:541: in _assert_call_error
+    assert caught.value.status_code == status
+E   AssertionError: assert 404 == 503
+E    +  where 404 = HTTPException(status_code=404, detail={'error': 'campaign_not_found'}).status_code
+E    +    where HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) = <ExceptionInfo HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) tblen=4>.value
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=11111111-[redacted digits=12 ..11]-[redacted digits=12 ..11] campaign=33333333-[redacted digits=12 ..33]-[redacted digits=12 ..33] source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_actual_origination_boundary_returns_503_without_opening_provider[unwired-tuning] _
+tests\unit\test_tenant_profile_admission.py:179: in test_actual_origination_boundary_returns_503_without_opening_provider
+    error = await _assert_call_error(path, 503)
+tests\unit\test_outbound_campaign_boundaries.py:541: in _assert_call_error
+    assert caught.value.status_code == status
+E   AssertionError: assert 404 == 503
+E    +  where 404 = HTTPException(status_code=404, detail={'error': 'campaign_not_found'}).status_code
+E    +    where HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) = <ExceptionInfo HTTPException(status_code=404, detail={'error': 'campaign_not_found'}) tblen=4>.value
+=========================== short test summary info ===========================
+FAILED tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-ai]
+FAILED tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[exception-tuning]
+FAILED tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[unwired-ai]
+FAILED tests/unit/test_tenant_profile_admission.py::test_actual_origination_boundary_returns_503_without_opening_provider[unwired-tuning]
+4 failed, 22 deselected in 9.17s

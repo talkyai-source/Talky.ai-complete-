@@ -26,19 +26,67 @@ Audio Streaming:
 Reference: https://developers.deepgram.com/docs/flux/configuration
 """
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import json
 import asyncio
-import random
+import time
 import websockets
 import logging
-from collections import deque
-from urllib.parse import quote
-from typing import AsyncIterator, Optional, Callable, Deque, Any
 from dataclasses import dataclass
+from urllib.parse import quote
+from typing import AsyncIterator, Optional, Callable, Any
 
 from app.domain.interfaces.stt_provider import STTProvider
 from app.domain.models.conversation import TranscriptChunk, AudioChunk, BargeInSignal
+from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.audio_utils import validate_pcm_format
+
+
+def _ws_is_dead(ws) -> bool:
+    """True when the websocket is known closed/closing. Unknown means alive."""
+    if getattr(ws, "close_code", None) is not None:
+        return True
+    state = getattr(ws, "state", None)
+    return getattr(state, "name", "") in ("CLOSING", "CLOSED")
+
+
+@dataclass(eq=False)
+class _FluxConnection:
+    """One socket owns one provider permit, including its prewarm lifetime."""
+
+    ws: object
+    slot: object
+    observation: ProviderAttempt | None = None
+    recognition: ProviderAttempt | None = None
+    closed: bool = False
+    adopted: bool = False
+    _close_task: Optional[asyncio.Task] = None
+
+    def recognized(self) -> None:
+        if self.observation and self.observation.closed:
+            return
+        if self.observation:
+            self.observation.recognized()
+        if self.recognition:
+            self.recognition.recognized()
+            self.recognition.finish(outcome="recognized")
+
+    async def close(self) -> None:
+        if self._close_task is None:
+            self.closed = True
+            self._close_task = asyncio.create_task(self._close_once())
+        # Cleanup and stream teardown can overlap. Both join the same bounded
+        # WebSocket close; cancelling one waiter must not abandon its permit.
+        await asyncio.shield(self._close_task)
+
+    async def _close_once(self) -> None:
+        try:
+            await self.ws.close()
+        finally:
+            if self.observation:
+                # Closing an adopted stream outside its normal completion is cancellation.
+                self.observation.finish(asyncio.CancelledError() if self.adopted else None, outcome="connected")
+            await self.slot.__aexit__(None, None, None)
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +114,6 @@ CAPTURE_EOT_THRESHOLD = float(os.getenv("FLUX_CAPTURE_EOT_THRESHOLD", "0.9"))
 # _UNRESOLVED idiom in turn_ender.py.
 _CONFIGURE_UNSET = object()
 
-# WebSocket reconnection configuration
-FLUX_MAX_RECONNECTS = 3          # Maximum mid-call reconnect attempts
-FLUX_RECONNECT_BASE_DELAY = 0.5  # Initial backoff (seconds)
-
-
 def _env_timeout_default() -> int:
     """Default eot_timeout_ms — reads from typed TelephonySettings
     (T4-C5). Kept as a function (rather than inlined) so test code that
@@ -86,19 +129,6 @@ def _env_eager_default() -> Optional[float]:
     eager mode via ``TELEPHONY_FLUX_EAGER_EOT_THRESHOLD=off``."""
     from app.core.telephony_settings import get_telephony_settings
     return get_telephony_settings().flux.eager_eot_threshold
-FLUX_RECONNECT_MAX_DELAY = 8.0   # Maximum backoff cap
-
-# Reconnect-replay buffer: keep the last N optimal-chunk frames so that on a
-# transient WS drop we can replay them to the new connection before resuming
-# the live audio stream. Caller speech that was already sent but not yet
-# transcribed (Flux had no chance to emit a TurnInfo before the close) gets a
-# second chance. Without this, brief network hiccups silently delete words
-# from the middle of an utterance.
-# 15 frames * 40ms = 600ms of replay capacity — long enough to bridge the
-# default reconnect backoff (0.5–4s with jitter) plus the new WS handshake.
-FLUX_RECONNECT_BUFFER_FRAMES = 15
-
-
 @dataclass
 class FluxEagerTurnState:
     """Tracks speculative LLM call state for EagerEndOfTurn pattern."""
@@ -155,6 +185,7 @@ class DeepgramFluxSTTProvider(STTProvider):
     """
     
     def __init__(self):
+        self._observation_context = None
         self._api_key: Optional[str] = None
         self._config: dict = {}
         self._model: str = "flux-general-en"
@@ -216,6 +247,13 @@ class DeepgramFluxSTTProvider(STTProvider):
         self._muted_calls: set[str] = set()
         self._mute_lock = asyncio.Lock()
 
+        # Liveness: monotonic time of the last message of ANY type Flux sent
+        # for a call. Flux emits a TurnInfo "Update" roughly every 0.25 s even
+        # when it hears no words, so a live stream keeps this fresh on a loud
+        # line where no transcript text ever arrives. Read by the resilient
+        # wrapper's silent-stream watchdog (see seconds_since_last_message).
+        self._last_message_at: dict[str, float] = {}
+
         # Eager turn state tracking
         self._eager_states: dict[str, FluxEagerTurnState] = {}
         self._stream_stats: dict[str, FluxStreamStats] = {}
@@ -223,12 +261,11 @@ class DeepgramFluxSTTProvider(STTProvider):
         # Pre-established WebSocket connections keyed by call_id.
         # pre_connect() stores a ws here; stream_transcribe() pops and reuses it,
         # eliminating the ~2s handshake from the hot path.
-        self._pre_connections: dict = {}
-
-        # Per-call replay buffers (one deque each) holding the most recent
-        # optimal-chunk frames sent on the active WS. Used by stream_transcribe()
-        # to repaint audio onto a new connection after a transient drop.
-        self._reconnect_buffers: dict[str, Deque[bytes]] = {}
+        self._pre_connections: dict[str, _FluxConnection] = {}
+        self._preconnect_tasks: dict[str, asyncio.Task] = {}
+        self._connections: set[_FluxConnection] = set()
+        self._connection_generation = 0
+        self._guard = get_provider_guard("deepgram")
 
     def _validate_turn_config(self) -> None:
         """Validate Flux turn-detection parameter ranges."""
@@ -270,12 +307,27 @@ class DeepgramFluxSTTProvider(STTProvider):
     def is_muted(self, call_id: str) -> bool:
         """Check if microphone is muted for a call."""
         return call_id in self._muted_calls
+
+    def seconds_since_last_message(self, call_id: Optional[str]) -> Optional[float]:
+        """Seconds since Flux last sent any message for ``call_id``.
+
+        None when nothing has been received yet (or the call is unknown), so
+        the caller falls back to its previous behaviour instead of treating a
+        stream that never spoke as alive.
+        """
+        if not call_id:
+            return None
+        at = self._last_message_at.get(call_id)
+        if at is None:
+            return None
+        return max(0.0, time.monotonic() - at)
         
     async def initialize(self, config: dict) -> None:
         """Initialize Deepgram Flux with configuration"""
         self._config = config
         
         # Get API key
+        self._observation_context = config.get("observation_context")
         self._api_key = config.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
         if not self._api_key:
             raise ValueError("DEEPGRAM_API_KEY not set")
@@ -473,36 +525,72 @@ class DeepgramFluxSTTProvider(STTProvider):
         stream_transcribe() will pop the stored connection and reuse it,
         skipping the ~2s WebSocket handshake from the hot path entirely.
 
-        Non-fatal: if the pre-connect fails, stream_transcribe() falls back to
-        its normal connect path automatically.
+        Failures propagate to the caller's existing warmup policy. In
+        particular, the strict pre-originate gate must not report readiness
+        after an exhausted provider allowance or failed handshake.
         """
         if not self._api_key:
-            logger.warning("pre_connect called before initialize() — skipping")
+            raise RuntimeError("Deepgram API key not set. Call initialize() first.")
+
+        if call_id in self._pre_connections:
             return
+        generation = self._connection_generation
+        task = self._preconnect_tasks.get(call_id)
+        if task is None:
+            task = asyncio.create_task(self._open_connection(call_id))
+            self._preconnect_tasks[call_id] = task
+        try:
+            connection = await task
+            if generation != self._connection_generation or connection.closed:
+                await self._close_connection(connection)
+                raise RuntimeError("Flux provider closed during prewarm")
+            if not connection.adopted:
+                self._pre_connections[call_id] = connection
+        finally:
+            if self._preconnect_tasks.get(call_id) is task:
+                self._preconnect_tasks.pop(call_id, None)
+
+    async def _open_connection(self, call_id: Optional[str]) -> _FluxConnection:
+        generation = self._connection_generation
 
         params = self._build_connection_params(call_id)
         query = "&".join(f"{k}={v}" for k, v in params)
         url = f"wss://api.deepgram.com/v2/listen?{query}"
+        api_key = self._api_key
         headers = {
-            "Authorization": f"Token {self._api_key}",
+            "Authorization": f"Token {api_key}",
             "User-Agent": "TalkyAI-VoiceAgent/1.0",
         }
 
+        slot = self._guard.acquire()
+        await slot.__aenter__()
+        observation = ProviderAttempt("stt", "flux", api_key, self._observation_context)
+        recognition = ProviderAttempt("stt", "flux", api_key, self._observation_context)
         try:
-            ws = await websockets.connect(url, extra_headers=headers)
-            self._pre_connections[call_id] = ws
-            logger.info(
-                "Deepgram Flux pre-connected for call %s "
-                "(eager=%s eot=%s timeout_ms=%s)",
-                call_id, self._eager_eot_threshold,
-                self._eot_threshold, self._eot_timeout_ms,
-            )
-        except Exception as exc:
-            logger.warning(
-                "Deepgram Flux pre_connect failed for %s — "
-                "stream_transcribe() will connect normally: %s",
-                call_id, exc,
-            )
+            ws = await websockets.connect(url, additional_headers=headers)
+        except BaseException as exc:
+            observation.finish(exc)
+            await slot.__aexit__(None, None, None)
+            raise
+        observation.accepted()
+        recognition.accepted()
+        connection = _FluxConnection(ws, slot, observation=observation, recognition=recognition)
+        self._connections.add(connection)
+        if generation != self._connection_generation or not self._api_key:
+            await self._close_connection(connection)
+            raise RuntimeError("Flux provider closed during handshake")
+        return connection
+
+    async def _close_connection(self, connection: _FluxConnection) -> None:
+        try:
+            await connection.close()
+        finally:
+            if connection._close_task is not None and not connection._close_task.done():
+                connection._close_task.add_done_callback(
+                    lambda _task: self._connections.discard(connection)
+                )
+            else:
+                self._connections.discard(connection)
 
     async def stream_transcribe(
         self,
@@ -533,30 +621,15 @@ class DeepgramFluxSTTProvider(STTProvider):
         if not self._api_key:
             raise RuntimeError("Deepgram API key not set. Call initialize() first.")
         
-        # Initialize eager turn state and reconnect-replay buffer for this call
+        # Provider recovery and replay are owned by ResilientSTTProvider.
         if call_id:
             self._eager_states[call_id] = FluxEagerTurnState()
             self._stream_stats[call_id] = FluxStreamStats()
-            self._reconnect_buffers[call_id] = deque(
-                maxlen=FLUX_RECONNECT_BUFFER_FRAMES
-            )
         eager_state = self._eager_states.get(call_id) if call_id else None
         stream_stats = self._stream_stats.get(call_id) if call_id else None
-        reconnect_buffer = (
-            self._reconnect_buffers.get(call_id) if call_id else None
-        )
         stop_reason = "running"
-        
-        # Build WebSocket URL with Flux turn-detection parameters.
-        # eager_eot_threshold is optional and only added when explicitly configured.
-        params = self._build_connection_params(call_id)
-        query = "&".join(f"{k}={v}" for k, v in params)
-        url = f"wss://api.deepgram.com/v2/listen?{query}"
-        
-        headers = {
-            "Authorization": f"Token {self._api_key}",
-            "User-Agent": "TalkyAI-VoiceAgent/1.0"
-        }
+        stream_error: Optional[Exception] = None
+        input_exhausted_at: Optional[float] = None
         
         # Bounded queue — prevents unbounded memory growth on slow consumers
         transcript_queue: asyncio.Queue = asyncio.Queue(maxsize=50)
@@ -573,7 +646,7 @@ class DeepgramFluxSTTProvider(STTProvider):
             Flux v2 control messages accept `CloseStream`/`Configure`; sending
             JSON `KeepAlive` causes UNPARSABLE_CLIENT_MESSAGE errors.
             """
-            nonlocal last_audio_time
+            nonlocal last_audio_time, stream_error
             silence_bytes = int(
                 self._sample_rate * (FLUX_HEARTBEAT_SILENCE_MS / 1000.0) * 2
             )
@@ -590,10 +663,9 @@ class DeepgramFluxSTTProvider(STTProvider):
                             await ws.send(silent_frame)
                             last_audio_time = current_time
                             logger.debug("Sent Flux silence heartbeat frame")
-                        except websockets.exceptions.ConnectionClosed:
-                            break
                         except Exception as e:
-                            logger.warning(f"Flux silence heartbeat failed: {e}")
+                            stream_error = e
+                            stop_event.set()
                             break
             except asyncio.CancelledError:
                 pass
@@ -602,7 +674,7 @@ class DeepgramFluxSTTProvider(STTProvider):
         
         async def send_audio(ws):
             """Send validated audio chunks to WebSocket with optimal chunking"""
-            nonlocal last_audio_time, stop_reason
+            nonlocal last_audio_time, stop_reason, stream_error, input_exhausted_at
             chunks_sent = 0
             chunks_skipped = 0
             chunks_invalid = 0
@@ -689,13 +761,6 @@ class DeepgramFluxSTTProvider(STTProvider):
                                     extra={"call_id": call_id, "flux_startup_ms": round(elapsed_ms)},
                                 )
                         await ws.send(chunk_to_send)
-                        # Stash a copy in the reconnect-replay buffer. deque
-                        # auto-evicts the oldest entry once maxlen is exceeded
-                        # so memory is bounded. The overhead is one append per
-                        # frame, no allocations beyond the bytes object we
-                        # already had.
-                        if reconnect_buffer is not None:
-                            reconnect_buffer.append(chunk_to_send)
                         audio_buffer = audio_buffer[FLUX_OPTIMAL_CHUNK_BYTES:]
                         chunks_sent += 1
                         if stream_stats:
@@ -709,21 +774,20 @@ class DeepgramFluxSTTProvider(STTProvider):
                     if stream_stats:
                         stream_stats.frames_sent_total += 1
                     
-            except websockets.exceptions.ConnectionClosed:
-                # Normal during shutdown/disconnect.
-                logger.debug("Flux send_audio stopped: websocket closed")
-            except Exception as e:
+                input_exhausted_at = time.monotonic()
+                await ws.send(json.dumps({"type": "CloseStream"}))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
                 stop_reason = "stt_internal_error"
-                logger.error(f"Flux send_audio error: {e}")
-            finally:
-                logger.debug(f"send_audio ending. Sent {chunks_sent} chunks, {chunks_skipped} skipped, {chunks_invalid} invalid")
-                if chunks_invalid > 0 or chunks_skipped > 0:
-                    logger.info(f"Flux audio stats: {chunks_sent} sent, {chunks_skipped} skipped, {chunks_invalid} invalid")
+                stream_error = exc
                 stop_event.set()
-        
+            finally:
+                logger.debug("Flux sender ended: sent=%s skipped=%s invalid=%s", chunks_sent, chunks_skipped, chunks_invalid)
+
         async def receive_transcripts(ws):
             """Receive and process Flux TurnInfo events"""
-            nonlocal stop_reason
+            nonlocal stop_reason, stream_error
             logger.debug("receive_transcripts started")
             msg_count = 0
             turn_info_count = 0
@@ -731,6 +795,8 @@ class DeepgramFluxSTTProvider(STTProvider):
             try:
                 async for message in ws:
                     msg_count += 1
+                    if call_id:
+                        self._last_message_at[call_id] = time.monotonic()
                     data = json.loads(message)
                     msg_type = data.get("type", "")
                     if stream_stats:
@@ -745,7 +811,11 @@ class DeepgramFluxSTTProvider(STTProvider):
                         transcript_text = data.get("transcript", "")
                         
                         if turn_info_count <= 10:
-                            logger.debug(f"TurnInfo: event={event}, transcript={transcript_text[:30]!r}")
+                            logger.debug(
+                                "TurnInfo: event=%s transcript_chars=%d",
+                                event,
+                                len(transcript_text or ""),
+                            )
                         
                         if stop_event.is_set():
                             break
@@ -777,8 +847,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 # (a) short acknowledgement ("yeah", "ok", "mhm")
                                 if is_backchannel(transcript_text):
                                     logger.info(
-                                        "Flux StartOfTurn backchannel %r — barge-in suppressed",
-                                        (transcript_text or "")[:24],
+                                        "Flux StartOfTurn backchannel — barge-in suppressed"
                                     )
                                     continue
                                 # (b) hesitation noise ("uh", "um", "erm"). This
@@ -788,8 +857,7 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 # sentence. See backchannel._DISFLUENCIES.
                                 if is_disfluency(transcript_text):
                                     logger.info(
-                                        "Flux StartOfTurn disfluency %r — barge-in suppressed",
-                                        (transcript_text or "")[:24],
+                                        "Flux StartOfTurn disfluency — barge-in suppressed"
                                     )
                                     continue
                                 # (c) min-words guard, now DISABLED by default
@@ -800,8 +868,9 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 word_count = len((transcript_text or "").split())
                                 if word_count < self._min_interrupt_words:
                                     logger.info(
-                                        "Flux StartOfTurn short %r (<%d words) — barge-in deferred",
-                                        (transcript_text or "")[:24],
+                                        "Flux StartOfTurn short words=%d threshold=%d — "
+                                        "barge-in deferred",
+                                        word_count,
                                         self._min_interrupt_words,
                                     )
                                     continue
@@ -847,7 +916,10 @@ class DeepgramFluxSTTProvider(STTProvider):
                         
                         # Handle EagerEndOfTurn - start LLM early (speculative)
                         elif event == "EagerEndOfTurn":
-                            logger.debug(f"Flux EagerEndOfTurn: '{transcript_text}'")
+                            logger.debug(
+                                "Flux EagerEndOfTurn transcript_chars=%d",
+                                len(transcript_text or ""),
+                            )
                             if transcript_text and transcript_text.strip():
                                 # Track speculative state
                                 if eager_state:
@@ -889,7 +961,10 @@ class DeepgramFluxSTTProvider(STTProvider):
                         
                         # Handle EndOfTurn - finalize turn
                         elif event == "EndOfTurn":
-                            logger.info(f"Flux EndOfTurn: '{transcript_text}'")
+                            logger.info(
+                                "Flux EndOfTurn transcript_chars=%d",
+                                len(transcript_text or ""),
+                            )
 
                             if transcript_text and transcript_text.strip():
                                 if not first_final_logged[0]:
@@ -945,7 +1020,14 @@ class DeepgramFluxSTTProvider(STTProvider):
                                 chunk = TranscriptChunk(
                                     text=transcript,
                                     is_final=False,
-                                    confidence=alternatives[0].get("confidence")
+                                    confidence=alternatives[0].get("confidence"),
+                                    metadata={
+                                        "alternatives": tuple(
+                                            str(item.get("transcript") or "")
+                                            for item in alternatives[1:]
+                                            if item.get("transcript")
+                                        )
+                                    },
                                 )
                                 await transcript_queue.put(chunk)
                     
@@ -954,196 +1036,101 @@ class DeepgramFluxSTTProvider(STTProvider):
                     
                     elif msg_type == "Error":
                         stop_reason = "stt_provider_error"
-                        logger.warning(f"Flux Error from Deepgram: {data}")
-                        
-            except websockets.exceptions.ConnectionClosed:
-                if stop_reason == "running":
-                    stop_reason = "stt_stream_closed"
-                logger.info("Flux WebSocket closed")
-            except Exception as e:
-                if stop_reason == "running":
-                    stop_reason = "stt_internal_error"
-                logger.error(f"Flux receive error: {e}")
+                        raise RuntimeError(f"Flux provider error: {data.get('code', 'unknown')}")
+                if input_exhausted_at is None and not stop_event.is_set():
+                    raise RuntimeError("Flux socket ended while caller input is still active")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if input_exhausted_at is None or stop_reason == "stt_provider_error":
+                    stream_error = stream_error or exc
+                    if stop_reason == "running":
+                        stop_reason = "stt_stream_closed"
             finally:
-                logger.debug(f"receive_transcripts ending. Total: {msg_count} msgs, {turn_info_count} TurnInfo")
+                if call_id:
+                    self._last_message_at.pop(call_id, None)
                 stop_event.set()
-                await transcript_queue.put(None)
-        
-        # Main connection with automatic reconnection loop.
-        # Auth errors (401/403) are fatal — do not reconnect.
-        reconnect_count = 0
+
+        # One connection per adapter stream. The wrapper owns recovery, and
+        # unexpected completion must reach it as an error rather than EOF.
+        ws = None
+        connection = None
+        tasks = []
         try:
+            connect_started = time.monotonic()
+            preconnected = bool(call_id and (
+                call_id in self._pre_connections or call_id in self._preconnect_tasks
+            ))
+            if call_id:
+                await self.pre_connect(call_id)
+                connection = self._pre_connections.pop(call_id)
+                if _ws_is_dead(connection.ws):
+                    # A prewarmed socket can sit idle for the whole ring time.
+                    # If the server already closed it, sending the first frame
+                    # would fail the call: replace it while nothing depends on it.
+                    logger.warning(
+                        "stt_prewarm_socket_dead call_id=%s — reopening before first audio",
+                        call_id,
+                    )
+                    await self._close_connection(connection)
+                    connection = await self._open_connection(call_id)
+            else:
+                connection = await self._open_connection(call_id)
+            connection.adopted = True
+            ws = connection.ws
+            logger.info(
+                "stt_ws_open call_id=%s provider=deepgram-flux preconnected=%s connect_ms=%.1f",
+                call_id, preconnected, (time.monotonic() - connect_started) * 1000,
+            )
+            await ws.send(bytes(int(self._sample_rate * .1) * 2))
+            tasks = [
+                asyncio.create_task(send_audio(ws)),
+                asyncio.create_task(receive_transcripts(ws)),
+                asyncio.create_task(send_silence_heartbeat(ws)),
+            ]
             while True:
                 try:
-                    # Re-use a pre-established connection (pre_connect() called
-                    # before pipeline start) to skip the initial WebSocket handshake.
-                    # Only available on the first attempt (reconnect_count == 0);
-                    # subsequent reconnects always open a fresh connection.
-                    _preconn = (
-                        self._pre_connections.pop(call_id, None)
-                        if (call_id and reconnect_count == 0)
-                        else None
-                    )
-                    if _preconn is not None:
-                        ws = _preconn
-                        _ws_handshake_ms = 0.0
-                        logger.info(
-                            "Using pre-connected Deepgram Flux for %s "
-                            "(eager=%s, eot=%s, timeout_ms=%s)",
-                            call_id,
-                            self._eager_eot_threshold,
-                            self._eot_threshold,
-                            self._eot_timeout_ms,
-                        )
-                    else:
-                        _ws_handshake_start = asyncio.get_event_loop().time()
-                        ws = await websockets.connect(url, extra_headers=headers)
-                        _ws_handshake_ms = (
-                            asyncio.get_event_loop().time() - _ws_handshake_start
-                        ) * 1000.0
-                        logger.info(
-                            "stt_ws_open call_id=%s attempt=%d handshake_ms=%.0f "
-                            "eager=%s eot=%s timeout_ms=%s",
-                            call_id, reconnect_count + 1, _ws_handshake_ms,
-                            self._eager_eot_threshold, self._eot_threshold,
-                            self._eot_timeout_ms,
-                            extra={
-                                "call_id": call_id,
-                                "stt_ws_handshake_ms": round(_ws_handshake_ms),
-                                "stt_reconnect_attempt": reconnect_count + 1,
-                            },
-                        )
-
-                    try:
-                        # Send initial silent frame (per Deepgram docs)
-                        silent_frame = bytes(3200)  # 100ms of silence
-                        await ws.send(silent_frame)
-
-                        # Reconnect-replay: on a mid-call reconnect, repaint the
-                        # last ~600ms of audio so caller speech that was lost
-                        # in-flight gets a second chance. No-op on the first
-                        # connection (buffer is empty).
-                        if (
-                            reconnect_count > 0
-                            and reconnect_buffer is not None
-                            and len(reconnect_buffer) > 0
-                        ):
-                            replay_count = len(reconnect_buffer)
-                            for replay_chunk in list(reconnect_buffer):
-                                try:
-                                    await ws.send(replay_chunk)
-                                except Exception:
-                                    break
-                            logger.info(
-                                "stt_reconnect_replay call_id=%s frames=%d "
-                                "ms=%d — repainted recent audio after WS drop",
-                                call_id, replay_count,
-                                replay_count * FLUX_OPTIMAL_CHUNK_MS,
-                                extra={
-                                    "call_id": call_id,
-                                    "stt_replay_frames": replay_count,
-                                },
-                            )
-
-                        # Reset stop_event so receive/send tasks run fresh
-                        stop_event.clear()
-
-                        # Start tasks
-                        send_task = asyncio.create_task(send_audio(ws))
-                        receive_task = asyncio.create_task(receive_transcripts(ws))
-                        heartbeat_task = asyncio.create_task(send_silence_heartbeat(ws))
-
-                        # Yield transcripts until stream ends
-                        while True:
-                            try:
-                                chunk = await asyncio.wait_for(
-                                    transcript_queue.get(),
-                                    timeout=0.01
-                                )
-                                if chunk is None:
-                                    break
-                                yield chunk
-                            except asyncio.TimeoutError:
-                                if stop_event.is_set() and transcript_queue.empty():
-                                    break
-                                continue
-
-                        # Graceful close
-                        try:
-                            await ws.send(json.dumps({"type": "CloseStream"}))
-                        except Exception:
-                            pass
-
-                        # Cancel helper tasks
-                        for task in [send_task, receive_task, heartbeat_task]:
-                            if not task.done():
-                                task.cancel()
-                        await asyncio.gather(
-                            send_task, receive_task, heartbeat_task, return_exceptions=True
-                        )
-                    finally:
-                        try:
-                            await ws.close()
-                        except Exception:
-                            pass
-
-                    # If send_audio finished cleanly (audio_stream exhausted), stop.
-                    if stop_reason not in ("running", "stt_stream_closed"):
+                    chunk = await asyncio.wait_for(transcript_queue.get(), timeout=.05)
+                    if isinstance(chunk, TranscriptChunk) and chunk.is_final and chunk.text.strip():
+                        connection.recognized()
+                    yield chunk
+                except asyncio.TimeoutError:
+                    if stop_event.is_set() and transcript_queue.empty():
                         break
-                    # Normal completion — done.
-                    break
-
-                except websockets.exceptions.ConnectionClosed as e:
-                    # Unexpected drop — decide whether to reconnect
-                    if stop_event.is_set():
-                        break  # Call ended intentionally
-                    reconnect_count += 1
-                    if stream_stats:
-                        stream_stats.stream_reconnect_total += 1
-                    if reconnect_count > FLUX_MAX_RECONNECTS:
-                        stop_reason = "stt_provider_error"
-                        logger.error(
-                            f"Flux WS dropped — max reconnects ({FLUX_MAX_RECONNECTS}) reached"
-                        )
-                        raise
-                    delay = min(
-                        FLUX_RECONNECT_BASE_DELAY * (2 ** (reconnect_count - 1)),
-                        FLUX_RECONNECT_MAX_DELAY,
-                    ) * (0.5 + random.random())
-                    logger.warning(
-                        f"Flux WS dropped (code={e.code}), reconnect "
-                        f"{reconnect_count}/{FLUX_MAX_RECONNECTS} in {delay:.2f}s"
-                    )
-                    stop_event.clear()
-                    # Drain stale items from previous connection so the consumer
-                    # does not process transcripts from the dropped session.
-                    while not transcript_queue.empty():
-                        try:
-                            transcript_queue.get_nowait()
-                        except asyncio.QueueEmpty:
-                            break
-                    await asyncio.sleep(delay)
-
-                except Exception as e:
-                    if "401" in str(e) or "403" in str(e):
-                        stop_reason = "stt_auth_error"
-                    elif stop_reason == "running":
-                        stop_reason = "stt_provider_error"
-                    logger.error(f"Flux connection error: {e}")
-                    raise
-
+                    # Allow final transcripts after a normal input EOF, but do
+                    # not wait forever for a provider's CloseStream response.
+                    if input_exhausted_at is not None and time.monotonic() - input_exhausted_at >= 1.0:
+                        break
+            if stream_error is not None:
+                if connection.observation:
+                    connection.observation.finish(stream_error)
+                raise RuntimeError(f"Flux stream failed: {stream_error}") from stream_error
+            if connection.observation:
+                connection.observation.finish(outcome="recognized" if connection.observation.output_seen else "connected")
+        except BaseException as exc:
+            if connection and connection.observation:
+                connection.observation.finish(exc)
+            raise
         finally:
-            if stop_reason == "running":
-                stop_reason = "stt_stream_closed"
+            stop_event.set()
+            for task in tasks:
+                if not task.done():
+                    task.cancel()
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            if connection is not None:
+                try:
+                    await self._close_connection(connection)
+                except Exception:
+                    pass
             if stream_stats:
-                stream_stats.stop_reason = stop_reason
-            # Clean up per-call state to prevent unbounded singleton growth
+                stream_stats.stop_reason = stop_reason if stop_reason != "running" else "input_exhausted"
             if call_id:
                 self._eager_states.pop(call_id, None)
                 self._stream_stats.pop(call_id, None)
-                self._reconnect_buffers.pop(call_id, None)
                 self._pending_config.pop(call_id, None)
-    
+                self._last_message_at.pop(call_id, None)
+
     def detect_turn_end(self, transcript_chunk: TranscriptChunk) -> bool:
         """Detect if user finished speaking (empty final chunk = EndOfTurn)"""
         return transcript_chunk.is_final and not transcript_chunk.text
@@ -1162,14 +1149,22 @@ class DeepgramFluxSTTProvider(STTProvider):
     async def cleanup(self) -> None:
         """Release resources"""
         self._api_key = None
+        self._connection_generation += 1
         self._eager_states.clear()
         self._stream_stats.clear()
-        for _ws in list(self._pre_connections.values()):
-            try:
-                await _ws.close()
-            except Exception:
-                pass
+        tasks = list(self._preconnect_tasks.values())
+        self._preconnect_tasks.clear()
         self._pre_connections.clear()
+        for task in tasks:
+            task.cancel()
+        try:
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            await asyncio.gather(
+                *(self._close_connection(connection) for connection in list(self._connections)),
+                return_exceptions=True,
+            )
         logger.info("DeepgramFlux cleaned up")
     
     @property

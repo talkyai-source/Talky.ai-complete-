@@ -1,0 +1,262 @@
+FFFFFFFFFF........FF                                                     [100%]
+================================== FAILURES ===================================
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[could not-results0] _
+
+modal = 'could not', results = {}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'unco...n:send_email') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:370 Blocked unconfirmed voice action claim: send_email
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[could not-results1] _
+
+modal = 'could not'
+results = {'send_email': {'confirmation_allowed': False, 'message': 'Synthetic provider rejected the send request.', 'message_id': None, 'provider': 'synthetic-email', ...}}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'acti...email:failed') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[couldn't-results0] _
+
+modal = "couldn't", results = {}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'unco...n:send_email') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:370 Blocked unconfirmed voice action claim: send_email
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[couldn't-results1] _
+
+modal = "couldn't"
+results = {'send_email': {'confirmation_allowed': False, 'message': 'Synthetic provider rejected the send request.', 'message_id': None, 'provider': 'synthetic-email', ...}}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'acti...email:failed') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[cannot-results0] _
+
+modal = 'cannot', results = {}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'unco...n:send_email') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:370 Blocked unconfirmed voice action claim: send_email
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[cannot-results1] _
+
+modal = 'cannot'
+results = {'send_email': {'confirmation_allowed': False, 'message': 'Synthetic provider rejected the send request.', 'message_id': None, 'provider': 'synthetic-email', ...}}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'acti...email:failed') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[can't-results0] _
+
+modal = "can't", results = {}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'unco...n:send_email') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:370 Blocked unconfirmed voice action claim: send_email
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[can't-results1] _
+
+modal = "can't"
+results = {'send_email': {'confirmation_allowed': False, 'message': 'Synthetic provider rejected the send request.', 'message_id': None, 'provider': 'synthetic-email', ...}}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'acti...email:failed') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[can not-results0] _
+
+modal = 'can not', results = {}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'unco...n:send_email') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:370 Blocked unconfirmed voice action claim: send_email
+_ test_explicit_passive_email_failure_is_not_a_completion_claim[can not-results1] _
+
+modal = 'can not'
+results = {'send_email': {'confirmation_allowed': False, 'message': 'Synthetic provider rejected the send request.', 'message_id': None, 'provider': 'synthetic-email', ...}}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": FAILURE}])
+    @pytest.mark.parametrize("modal", ["could not", "couldn't", "cannot", "can't", "can not"])
+    def test_explicit_passive_email_failure_is_not_a_completion_claim(modal, results):
+>       assert LLMGuardrails().validate_response(
+            f"The email {modal} be sent.", action_results=results,
+        ) == (True, None)
+E       AssertionError: assert (False, 'acti...email:failed') == (True, None)
+E         At index 0 diff: False != True
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:21: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+_ test_actual_native_failed_action_recovers_with_exact_passive_failure[openai] _
+
+provider = 'openai'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["openai", "xai"])
+    async def test_actual_native_failed_action_recovers_with_exact_passive_failure(provider):
+        case = {
+            "id": "passive-email-failure", "semantic_ids": [], "expect": {},
+            "synthetic_action_results": {"send_email": FAILURE},
+            "steps": [
+                {"kind": "caller", "item": "request", "text": "Please email the details."},
+                {"kind": "tool", "name": "send_email", "arguments": {}},
+                {"kind": "response", "text": "The email was sent to you."},
+                {"kind": "response", "text": "The email could not be sent."},
+            ],
+        }
+        row = await NativeReplay(case, provider, _corpus(ROOT)).run()
+>       assert row["submitted_speech"] == ["The email could not be sent."]
+E       AssertionError: assert [] == ['The email c...not be sent.']
+E         Right contains one more item: 'The email could not be sent.'
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:56: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-d961d377533945478aa25f664bc6b582 reason=action_failed:send_email:failed
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-d961d377533945478aa25f664bc6b582 reason=action_failed:send_email:failed
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-3' coro=<<async_generator_athrow without __name__>()>>
+__ test_actual_native_failed_action_recovers_with_exact_passive_failure[xai] __
+
+provider = 'xai'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("provider", ["openai", "xai"])
+    async def test_actual_native_failed_action_recovers_with_exact_passive_failure(provider):
+        case = {
+            "id": "passive-email-failure", "semantic_ids": [], "expect": {},
+            "synthetic_action_results": {"send_email": FAILURE},
+            "steps": [
+                {"kind": "caller", "item": "request", "text": "Please email the details."},
+                {"kind": "tool", "name": "send_email", "arguments": {}},
+                {"kind": "response", "text": "The email was sent to you."},
+                {"kind": "response", "text": "The email could not be sent."},
+            ],
+        }
+        row = await NativeReplay(case, provider, _corpus(ROOT)).run()
+>       assert row["submitted_speech"] == ["The email could not be sent."]
+E       AssertionError: assert [] == ['The email c...not be sent.']
+E         Right contains one more item: 'The email could not be sent.'
+E         Use -v to get more diff
+
+tests\unit\test_passive_email_failure_guard.py:56: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-b783dc927ab14bbab9cd048fc6ef5777 reason=action_failed:send_email:failed
+WARNING  app.domain.services.llm_guardrails:llm_guardrails.py:381 Blocked failed/unconfirmed voice action claim: send_email status=failed
+WARNING  app.realtime.bridge:bridge.py:542 realtime_playout_rejected call=ag04-synthetic-b783dc927ab14bbab9cd048fc6ef5777 reason=action_failed:send_email:failed
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-6' coro=<<async_generator_athrow without __name__>()>>
+============================== warnings summary ===============================
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[openai]
+tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[xai]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-parity-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[could not-results0]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[could not-results1]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[couldn't-results0]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[couldn't-results1]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[cannot-results0]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[cannot-results1]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[can't-results0]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[can't-results1]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[can not-results0]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_explicit_passive_email_failure_is_not_a_completion_claim[can not-results1]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[openai]
+FAILED tests/unit/test_passive_email_failure_guard.py::test_actual_native_failed_action_recovers_with_exact_passive_failure[xai]
+12 failed, 8 passed, 2 warnings in 3.23s

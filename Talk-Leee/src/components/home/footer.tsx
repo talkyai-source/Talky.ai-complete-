@@ -1,27 +1,44 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import React from "react";
+import { useAuth } from "@/lib/auth-context";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
+
+// Shared by the Login/Dashboard link and its empty slot so the slot has the
+// same box as the link it stands in for.
+const authLinkClassName =
+  "font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full";
 
 export function Footer() {
   const currentYear = new Date().getFullYear();
-  const pathname = usePathname();
-  const isHome = pathname === "/";
+  const { status, user } = useAuth();
+
+  // The Login/Dashboard link. `null` while the auth state is unresolved
+  // (server render, hydration, /auth/me in flight): the slot then renders
+  // empty but keeps its box, so a signed-in visitor never sees "Login".
+  const authAction =
+    status === "authenticated"
+      ? { label: "Dashboard", href: postAuthDashboard(user?.role) }
+      : status === "anonymous"
+        ? { label: "Login", href: "/auth/login" }
+        : null;
 
   const navLinks = [
     { label: "Home", href: "/" },
-    { label: "Products", href: "/ai-voice-dialer" },
-    { label: "Use Cases", href: isHome ? "#use-cases" : "/#use-cases" },
-    { label: "FAQ", href: isHome ? "#faq" : "/#faq" },
-    { label: "Contact", href: isHome ? "#contact" : "/#contact" },
+    { label: "Products", href: "/products" },
+    { label: "Use Cases", href: "/use-cases" },
+    { label: "Industries", href: "/industries" },
+    { label: "Pricing", href: "/pricing" },
+    { label: "Contact Us", href: "/contact" },
   ];
 
   return (
-    <footer className="bg-cyan-100 dark:bg-background pt-16 pb-8 px-4 md:px-6 lg:px-8 border-t border-border/60">
+    <footer className="bg-card pt-16 pb-8 px-4 md:px-6 lg:px-8 border-t border-border/60">
       <div className="max-w-7xl mx-auto">
-        {/* Top Section */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-8 mb-12">
+        <div className="grid grid-cols-2 gap-10 sm:grid-cols-[1.5fr_1fr_1fr] lg:gap-12">
+          {/* Brand block */}
+          <div className="col-span-2 sm:col-span-1 flex flex-col items-start gap-6">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-3 group">
             <svg viewBox="327 327 369 369" className="w-8 h-8 text-primary dark:text-foreground" aria-hidden="true" fill="currentColor">
@@ -32,75 +49,98 @@ export function Footer() {
             </span>
           </Link>
 
-          {/* Navigation */}
-          <nav>
-            <ul className="flex flex-wrap items-center justify-center gap-6 md:gap-8">
-              {navLinks.map((link) => (
-                <React.Fragment key={link.label}>
-                  <li>
-                    <Link
-                      href={link.href}
-                      className="text-base font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
-                    >
-                      {link.label}
-                    </Link>
-                  </li>
-                  {link.label === "Use Cases" ? (
-                    <li>
-                      <button
-                        type="button"
-                        className="text-base font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md inline-flex items-center"
-                        aria-haspopup="menu"
-                        aria-expanded={false}
-                      >
-                        Industries
-                      </button>
-                    </li>
-                  ) : null}
-                </React.Fragment>
-              ))}
-            </ul>
-          </nav>
-        </div>
-
-        {/* Divider */}
-        <hr className="border-border/60 mb-8" />
-
-        {/* Bottom Section */}
-        <div className="flex flex-col md:flex-row items-center justify-between gap-6 text-sm">
-          <div className="text-gray-700 dark:text-muted-foreground text-center md:text-left">
+          <div className="text-sm text-gray-700 dark:text-muted-foreground">
             <p>© {currentYear} Talk-Lee. All rights reserved.</p>
             <p className="mt-1">Powered by Aresync</p>
           </div>
+          </div>
 
-          <div className="flex items-center gap-6">
+          {/* Link columns. One grid whose two columns are the outer grid's own
+              tracks (column subgrid) and whose rows both lists share (row
+              subgrid), so row N of the navigation and row N of the secondary
+              links sit in the same track and take its height. row-span-6 is
+              the longer list's row count; both lists span the same six tracks. */}
+          <div className="col-span-2 grid grid-cols-subgrid content-start gap-y-4">
+          {/* Navigation */}
+          <nav className="row-span-6 grid grid-rows-subgrid">
+            <ul className="row-span-6 grid grid-rows-subgrid items-center justify-items-start gap-y-4">
+              {navLinks.map((link) => (
+                <li key={link.label}>
+                  {/* block: the link box is the row line box (as the
+                      secondary links already are as grid items), so its
+                      centre is the row centre whatever the font metrics. */}
+                  <Link
+                    href={link.href}
+                    className="block text-base font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+                  >
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </nav>
+
+          {/* Secondary links */}
+          <div className="row-span-6 grid grid-rows-subgrid items-center justify-items-start gap-y-4 text-sm">
+            <Link
+              href="/docs"
+              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"
+            >
+              Documentation
+            </Link>
             <Link
               href="/terms"
-              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"
             >
               Terms of Service
             </Link>
             <Link
               href="/privacy"
-              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"
             >
               Privacy Policy
             </Link>
-            <Link 
-              href="/auth/login" 
-              className="font-medium text-gray-700 dark:text-muted-foreground hover:text-primary dark:hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
-            >
-              Login
-            </Link>
+            {authAction ? (
+              <Link href={authAction.href} className={authLinkClassName}>
+                {authAction.label}
+              </Link>
+            ) : (
+              // Empty slot: same box as the link, invisible, until auth resolves.
+              <span aria-hidden="true" data-auth-slot className={`${authLinkClassName} invisible`}>
+                Dashboard
+              </span>
+            )}
             <Link 
               href="/auth/register" 
-              className="font-semibold text-primary dark:text-foreground hover:text-primary/90 dark:hover:text-foreground/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md"
+              className="font-semibold text-primary dark:text-foreground hover:text-primary/90 dark:hover:text-foreground/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"
             >
               Start Free Trial
             </Link>
           </div>
+          </div>
         </div>
       </div>
+
+      {/* Reserved room for future footer rows (~two rows). */}
+      <div aria-hidden="true" className="h-28" />
+
+      {/* Keeps the last footer row clear of the fixed Ask AI button
+          (voice-agent-popup.tsx: h-11 pill at bottom-5 left-2 sm:bottom-6
+          sm:left-3). The strip must be at least the button's bottom gap +
+          its height + breathing room, or the button covers the bottom-left
+          links at max scroll. */}
+      <div
+        aria-hidden="true"
+        style={
+          {
+            "--askai-bottom-gap": "24px", // bottom-5 (20px) / sm:bottom-6 (24px) — use the larger
+            "--askai-button-height": "44px", // h-11
+            "--askai-breathing-room": "16px", // 8px minimum clearance + 8px margin
+            height:
+              "calc(var(--askai-bottom-gap) + var(--askai-button-height) + var(--askai-breathing-room))",
+          } as CSSProperties
+        }
+      />
     </footer>
   );
 }

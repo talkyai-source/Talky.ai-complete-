@@ -76,13 +76,25 @@ async def block_entity(
     db_client: Client = Depends(get_db_client),
 ):
     """Block a new entity for the caller's tenant."""
+    # `normalized_number` is a LOOKUP key, not a display value. CallGuard
+    # compares it byte-for-byte against its own normalisation of the number
+    # about to be dialled, so storing whatever the UI typed ("(415) 555-1234")
+    # produced a row that blocked precisely nothing. Normalise through the one
+    # DNC function and reject non-E.164 rather than persist a dud.
+    from app.domain.services.dnc_service import normalize_e164_for_storage
+
+    try:
+        normalized = normalize_e164_for_storage(request.value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
     try:
         import uuid
         payload = {
             "id": str(uuid.uuid4()),
             "tenant_id": current_user.tenant_id,
             "phone_number": request.value,
-            "normalized_number": request.value,
+            "normalized_number": normalized,
             "reason": request.reason,
             "source": "manual",
             "created_at": datetime.utcnow().isoformat(),

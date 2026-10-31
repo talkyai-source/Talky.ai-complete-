@@ -1,0 +1,135 @@
+{
+  "package": "CP02",
+  "date": "2026-10-04",
+  "implementation_commit": "6ca82160e7f1ffc62229f0b5bd09c684db255936",
+  "base_commit": "a56af2fc2bf387d2505e1aeb1689f851abb1b356",
+  "branch": "codex/production-ready-20261004",
+  "package_status": "in_progress",
+  "scope": "Existing purchase selection and activation repairs; no new paid offers or provider account changes.",
+  "reviews": [
+    "Root bug-hunt/code-review of root causes and HTTP contracts",
+    "audio_audit migration/catalog, actual RLS and frontend recovery review",
+    "realtime_audit independent backend payment and purchase binding review",
+    "llm_audit checkout implementation and regression review"
+  ],
+  "checks": [
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/unit/test_billing_catalog.py tests/unit/test_billing_checkout_contract.py tests/unit/test_billing_checkout_http.py tests/unit/test_billing_mode.py tests/unit/test_billing_plan_change_preserves_topup_minutes.py tests/unit/test_billing_topup_webhook_routing.py tests/unit/test_billing_minutes_agree_with_gate.py tests/unit/test_topup_service.py tests/unit/test_inbound_activation_gaps.py tests/unit/test_subscription_status_vocabulary.py tests/unit/test_call_guard_subscription_cache.py tests/unit/test_prod_gate_stripe.py tests/unit/test_prod_fail_closed.py tests/security/test_kms_master_key_gate.py tests/unit/test_rls_set_local_invariant.py tests/unit/test_endpoint_auth_audit.py -q",
+      "exit_code": 0,
+      "passed": 1464,
+      "skipped": 1,
+      "artifact": "backend-focused.txt",
+      "limit": "Pre-existing stale public-route inventory skip. Ran before final card-method parameter delta; follow-up below covers that delta."
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/unit/test_billing_checkout_contract.py tests/unit/test_billing_checkout_http.py -q",
+      "exit_code": 0,
+      "passed": 43,
+      "artifact": "backend-checkout-final.txt"
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m pytest tests/integration/test_billing_price_options.py tests/integration/test_billing_checkout.py -q",
+      "environment": {
+        "TEST_DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp02_test",
+        "ENVIRONMENT": "test"
+      },
+      "exit_code": 0,
+      "passed": 34,
+      "artifact": "backend-postgres.txt",
+      "limit": "Actual PG/RLS, synthetic SDK/service responses; not a signed provider event or sandbox charge. Card-method parameter delta followed this run and is covered by SDK follow-up."
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": "node --test --test-concurrency=1 --import tsx --import ./src/test-utils/setup.ts src/components/billing/billing-plan-selector.test.tsx src/lib/billing-purchase.test.ts src/lib/billing-local-route.test.ts src/lib/billing-api.test.ts src/components/billing/billing-overview.test.tsx",
+      "exit_code": 0,
+      "passed": 49,
+      "artifact": "frontend-focused.txt"
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": "npx eslint src/lib/billing-purchase.ts src/lib/billing-purchase.test.ts src/lib/billing-local-route.test.ts src/lib/billing-api.ts src/lib/billing-types.ts src/components/billing/use-billing-purchase.ts src/components/billing/billing-plan-selector.tsx src/components/billing/billing-plan-selector.test.tsx src/components/billing/billing-overview.tsx src/components/billing/billing-overview.test.tsx src/app/billing/page.tsx src/app/billing/plans/page.tsx src/app/api/v1/[...path]/route.ts",
+      "exit_code": 0,
+      "artifact": "frontend-lint.txt"
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": "npm run typecheck",
+      "exit_code": 0,
+      "artifact": "frontend-typecheck.txt"
+    },
+    {
+      "cwd": "Talk-Leee",
+      "command": "npm run build",
+      "exit_code": 0,
+      "next_version": "16.3.8",
+      "static_pages": 70,
+      "artifact": "frontend-build.txt",
+      "limit": "Existing custom Cache-Control warning; no browser/provider acceptance implied."
+    },
+    {
+      "cwd": "backend",
+      "command": "python -m ruff check --select F,E9 <changed Python paths in implementation commit>",
+      "exit_code": 0,
+      "artifact": "backend-lint.txt"
+    }
+  ],
+  "local_billing_mode": "Effective local process billing mode: unconfigured",
+  "not_run": [
+    "Full backend and full frontend suites on this CP02 candidate",
+    "Live/test Stripe account price validation or financial operations",
+    "Signed provider webhook browser-to-provider-to-database acceptance",
+    "Browser mobile and assistive-technology acceptance",
+    "Production deployment, CI execution, customer acceptance"
+  ],
+  "release_dependencies": [
+    "CP03 durable event recovery/order and delayed payment handling",
+    "Approved monthly/annual prices for designated account",
+    "Legacy open checkout reconciliation",
+    "CP04 invoice truth and CP06 cancellation/communication acceptance",
+    "Billing-owner allowance/reset approval and canonical routing configuration"
+  ],
+  "cleanup": "Disposable PostgreSQL server stopped after checks. No application server or build process left running by this task.",
+  "artifacts": {
+    "backend-checkout-final.txt": {
+      "path": "docs/sessions/artifacts/cp02/backend-checkout-final.txt",
+      "sha256_git_blob": "63642dd1ba6d88a87e903df9ace4b89a470cc733359f0c11ff606150589d34a9"
+    },
+    "backend-focused.txt": {
+      "path": "docs/sessions/artifacts/cp02/backend-focused.txt",
+      "sha256_git_blob": "a89e998c0e1736e9930b598404f9e939d1f5034410849ffd426c7e86b9f3b446"
+    },
+    "backend-lint.txt": {
+      "path": "docs/sessions/artifacts/cp02/backend-lint.txt",
+      "sha256_git_blob": "9f35387b7b02d952f329f3a71e83d294e8de45f8990392c92bb00471446e1fd8"
+    },
+    "backend-postgres.txt": {
+      "path": "docs/sessions/artifacts/cp02/backend-postgres.txt",
+      "sha256_git_blob": "8869aa4d26cdca0f052d1edf7287dfb8987e2f3638438f0c35b134965cbcb124"
+    },
+    "frontend-build.txt": {
+      "path": "docs/sessions/artifacts/cp02/frontend-build.txt",
+      "sha256_git_blob": "cb051c1b365dd4bb9c61461c78ca577476c1aae36743aa15cd8889178f0db114"
+    },
+    "frontend-focused.txt": {
+      "path": "docs/sessions/artifacts/cp02/frontend-focused.txt",
+      "sha256_git_blob": "02c89f7c4c2c5ec062f20393f25c41dc8c632adb998ff9818b886a95912e7775"
+    },
+    "frontend-lint.txt": {
+      "path": "docs/sessions/artifacts/cp02/frontend-lint.txt",
+      "sha256_git_blob": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "frontend-typecheck.txt": {
+      "path": "docs/sessions/artifacts/cp02/frontend-typecheck.txt",
+      "sha256_git_blob": "f277a59365fd7265e8f83b35aa6762dcb2b859b5b960362c4b7b8f3308ba2853"
+    },
+    "local-billing-mode.txt": {
+      "path": "docs/sessions/artifacts/cp02/local-billing-mode.txt",
+      "sha256_git_blob": "3191d03eb33b42a25a513f7417c25febc59cef000953ff7e38d09f9f9b5c7b0c"
+    }
+  },
+  "digest_convention": "SHA-256 of normalized Git index blob bytes, not raw Windows worktree bytes. Artifacts are committed with this manifest.",
+  "artifact_normalization": "Line endings normalized and trailing terminal display whitespace removed; textual test/build results retained."
+}

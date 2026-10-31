@@ -1,9 +1,9 @@
 """
 Telephony Providers — per-tenant Twilio / Vonage credential management.
 
-Lets a tenant admin save their own cloud-telephony credentials, validate
-them against the provider, and pick which provider (Twilio / Vonage /
-local SIP trunk / none) is active for their outbound calls.
+Lets a tenant admin retain cloud credentials and inspect their check results.
+Cloud activation is only available for explicitly enabled nonproduction
+qualification. Credential checks do not establish outbound call readiness.
 
 The SIP-trunk side has its own existing CRUD router at /telephony/sip/*;
 this router only handles cloud providers and the active-provider pointer.
@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
 from app.infrastructure.connectors.encryption import get_encryption_service
+from app.domain.services.telephony.provider_availability import CLOUD_PROVIDERS, cloud_availability
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +68,14 @@ class TestResult(BaseModel):
     status_code: Optional[int] = None
     account_status: Optional[str] = None
     friendly_name: Optional[str] = None
+    check_scope: Optional[Literal["provider_account", "sdk_initialization"]] = None
+
+
+class ProviderAvailability(BaseModel):
+    activation_allowed: bool
+    qualification_only: bool
+    reason_code: Optional[str] = None
+    reason: str
 
 
 class ProviderRowOut(BaseModel):
@@ -81,6 +91,7 @@ class ProviderRowOut(BaseModel):
 class ProvidersListResponse(BaseModel):
     active: str
     providers: List[ProviderRowOut]
+    availability: Dict[str, ProviderAvailability]
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +191,8 @@ async def list_providers(
         )
         for r in rows
     ]
-    return ProvidersListResponse(active=active, providers=providers)
+    return ProvidersListResponse(active=active, providers=providers,
+        availability={provider: asdict(cloud_availability(provider)) for provider in CLOUD_PROVIDERS})
 
 
 @router.put("/{provider}", response_model=ProviderRowOut)
@@ -285,7 +297,7 @@ async def test_provider(
     db_pool=Depends(get_db_pool),
 ):
     """
-    Validate the saved credentials against the provider's API.
+    Check the saved provider configuration; this is not a call readiness test.
 
     Twilio: fetches the account record (cheapest auth-validating call).
     Vonage: instantiates the SDK client with the supplied auth.
@@ -342,6 +354,7 @@ async def test_provider(
     else:
         raise HTTPException(status_code=400, detail=f"Unsupported provider: {provider}")
 
+    result = {**result, "check_scope": "provider_account" if provider == "twilio" else "sdk_initialization"}
     new_status = "active" if result.get("ok") else "failed"
     tested_at = datetime.now(timezone.utc)
 
@@ -372,6 +385,7 @@ async def test_provider(
         status_code=result.get("status_code"),
         account_status=result.get("account_status"),
         friendly_name=result.get("friendly_name"),
+        check_scope=result["check_scope"],
     )
 
 
@@ -382,10 +396,10 @@ async def activate_provider(
     db_pool=Depends(get_db_pool),
 ):
     """
-    Pin which provider the dialer should resolve for this tenant.
+    Save a selection without promising a supported cloud campaign route.
 
     For ``twilio`` / ``vonage`` the matching credentials row must exist
-    and have a successful last test. For ``sip`` we require at least
+    and the nonproduction bridge must be explicitly enabled. For ``sip`` we require at least
     one active row in ``tenant_sip_trunks``. ``none`` always succeeds
     and effectively disables tenant-side telephony (falls back to the
     platform default).
@@ -397,6 +411,13 @@ async def activate_provider(
             status_code=400,
             detail=f"provider must be one of {ALLOWED_ACTIVE}",
         )
+
+    if target in CLOUD_PROVIDERS:
+        availability = cloud_availability(target)
+        if not availability.activation_allowed:
+            raise HTTPException(status_code=422, detail={
+                "code": availability.reason_code, "message": availability.reason,
+            })
 
     try:
         async with db_pool.acquire() as conn:

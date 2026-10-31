@@ -1,4 +1,5 @@
 """POST /telephony/sip/runtime/activate — precheck → apply → verify → commit."""
+
 from __future__ import annotations
 
 import json
@@ -10,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.telephony_runtime_policy import (
     PolicyCompilationError,
     compile_tenant_runtime_policy,
@@ -61,8 +63,18 @@ async def activate_runtime_policy(
     operation = "runtime_policy:activate"
     request_hash = _stable_hash({"note": payload.note or ""})
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_body, cached_code = await _claim_idempotency(
                 conn,
@@ -193,8 +205,18 @@ async def activate_runtime_policy(
             type_suffix="runtime-apply-failed",
             extras={"runtime_error": exc.to_dict()},
         )
-        async with db_pool.acquire() as conn:
-            await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+        async with acquire_with_tenant(
+            db_pool,
+            current_user.tenant_id,
+            user_id=current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        ) as conn:
+            await apply_tenant_rls_context(
+                conn,
+                current_user.tenant_id,
+                current_user.id,
+                request_id=request.headers.get("x-request-id"),
+            )
             async with conn.transaction():
                 await conn.execute(
                     """
@@ -239,8 +261,18 @@ async def activate_runtime_policy(
             type_suffix="runtime-verify-failed",
             extras={"runtime_error": exc.to_dict()},
         )
-        async with db_pool.acquire() as conn:
-            await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+        async with acquire_with_tenant(
+            db_pool,
+            current_user.tenant_id,
+            user_id=current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        ) as conn:
+            await apply_tenant_rls_context(
+                conn,
+                current_user.tenant_id,
+                current_user.id,
+                request_id=request.headers.get("x-request-id"),
+            )
             async with conn.transaction():
                 await conn.execute(
                     """
@@ -274,8 +306,18 @@ async def activate_runtime_policy(
                 )
         return response
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             await _log_runtime_event(
                 conn,

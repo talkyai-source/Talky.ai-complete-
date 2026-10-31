@@ -1,16 +1,19 @@
+import type { MinutesState } from "@/lib/minutes-allowance";
+import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { sharedHttpClient } from "@/lib/api";
-import { apiBaseUrl } from "@/lib/env";
+import type { CampaignBrief } from "@/lib/campaign-brief";
 
 // Dashboard Types
 export interface DashboardSummary {
     total_calls: number;
     answered_calls: number;
     failed_calls: number;
-    minutes_used: number;
+    minutes_used: number | null;
     // Plan allowance — Hisham's dashboard renders this in the usage gauge.
     // Optional for back-compat with older backends that don't return it.
-    minutes_included?: number;
-    minutes_remaining: number;
+    minutes_included?: number | null;
+    minutes_remaining: number | null;
+    minutes_state?: MinutesState;
     active_campaigns: number;
 
     // Live + monthly aggregate fields exposed by /dashboard/summary.
@@ -33,12 +36,49 @@ export interface MinutesStatus {
     exhausted: boolean;
 }
 
+// What GET /campaigns/{id}/stats returns under `blocking_reason`: the dialer's
+// current structured reason for not placing calls (backend BlockReason.to_dict()).
+export interface CampaignBlockingReason {
+    code: string;
+    message: string;
+    severity?: string;
+    stage?: string;
+    next_eligible_at?: string | null;
+    retry_after_seconds?: number | null;
+}
+
+// ...and under `activity` (backend `_campaign_activity`).
+export interface CampaignActivity {
+    state: string;
+    work_remaining: boolean;
+    waiting_on_schedule: boolean;
+    schedule_override_active: boolean;
+    reason_code: string | null;
+    next_eligible_at: string | null;
+}
+
+/**
+ * Whether the tenant's monthly minute quota is exhausted — the same signal
+ * that gates outbound Start (`outOfMinutes` above) and, on the inbound side,
+ * the admission reservation the call-guard takes before answer
+ * (`backend/app/domain/services/telephony/inbound_admission.py:1071-1087`
+ * reads this tenant's `minutes_allocated` against product-wide accounted
+ * usage regardless of call direction). `unlimited` tenants are never
+ * exhausted; a missing/unloaded status is treated as not exhausted rather
+ * than guessed.
+ */
+export function isMinutesExhausted(status: MinutesStatus | null | undefined): boolean {
+    return Boolean(status) && !status!.unlimited && status!.exhausted;
+}
+
 // Campaign Types
 export interface Campaign {
     id: string;
     name: string;
     description?: string;
     status: string;
+    /** Explicit call direction; absent on historical outbound campaigns. */
+    direction?: "inbound" | "outbound";
     system_prompt: string;
     voice_id: string;
     tts_provider?: string | null;   // per-campaign TTS engine; null = tenant global
@@ -49,13 +89,14 @@ export interface Campaign {
     created_at: string;
     started_at?: string;
     completed_at?: string;
-    script_config?: {
+    script_config?: CampaignVoiceSettingsValue & {
         persona_type?: PersonaType;
         company_name?: string;
         agent_names?: string[];
         agent_name_genders?: Record<string, string>;
         campaign_slots?: Record<string, unknown>;
         additional_instructions?: string;
+        campaign_brief?: CampaignBrief;
     };
     // Per-campaign calling hours + timezone (Phase 3c-v2). Null/absent = tenant default.
     calling_config?: CampaignCallingSchedule | null;
@@ -74,7 +115,9 @@ export interface CampaignCallingSchedule {
     ignore_schedule?: boolean;
 }
 
-export interface CampaignCreate {
+export interface CampaignCreate extends CampaignVoiceSettingsValue {
+    /** 2026-09-09: inbound campaigns are created with the SAME creator; only this differs. Default outbound. */
+    direction?: "outbound" | "inbound";
     name: string;
     description?: string;
     // Freeform extra instructions. Backend always keeps this below the
@@ -92,6 +135,7 @@ export interface CampaignCreate {
     // matching the selected voice's gender.
     agent_name_genders?: Record<string, string>;
     campaign_slots: Record<string, unknown>;
+    campaign_brief?: CampaignBrief;
     // Knowledge-first campaign (vectorless-RAG wizard): content comes from the
     // uploaded knowledge base, so per-persona content slots are not required and
     // the persona prompt is a lean identity+tone shell. Default false.
@@ -101,6 +145,68 @@ export interface CampaignCreate {
     tts_provider?: string;
     // Per-campaign calling hours + timezone (Phase 3c-v2).
     calling_schedule?: CampaignCallingSchedule;
+}
+
+/**
+ * One transfer leg of a call, exactly as `GET /calls/{call_id}` returns it.
+ *
+ * Every key is optional because the server projects each row straight from
+ * nullable `call_legs` columns and serialises the dict verbatim. Nothing here
+ * is frontend-invented — the key set is the server's SELECT list.
+ *   backend/app/api/v1/endpoints/calls.py:265       — CallDetail.transfer_legs
+ *   backend/app/api/v1/endpoints/calls.py:1329-1337 — the selected columns
+ */
+export interface TransferLeg {
+    id?: string | null;
+    leg_type?: string | null;
+    direction?: string | null;
+    provider?: string | null;
+    provider_leg_id?: string | null;
+    from_number?: string | null;
+    to_number?: string | null;
+    status?: string | null;
+    started_at?: string | null;
+    answered_at?: string | null;
+    ended_at?: string | null;
+    duration_seconds?: number | null;
+    metadata?: Record<string, unknown> | null;
+}
+
+/**
+ * The server's own reason a transfer leg reached its terminal state, or null
+ * when it did not supply one. Written into the leg metadata alongside the
+ * terminal status — backend/app/domain/services/telephony/inbound_transfer.py:1410-1435
+ * (`parent_already_terminal`, the raw adapter status, or `provider_target_absent`).
+ * Returns null rather than a placeholder so the caller renders nothing.
+ */
+export function transferLegTerminalReason(leg: TransferLeg): string | null {
+    const value = leg?.metadata?.terminal_reason;
+    if (typeof value !== "string") return null;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : null;
+}
+
+/**
+ * The message to show when starting a campaign is refused.
+ *
+ * The out-of-minutes gate answers 402 with a structured detail carrying its
+ * own `message`, already naming the allocation and the minutes used, and the
+ * http client exposes that object as `.details`:
+ *   backend/app/api/v1/endpoints/campaigns.py:657-671
+ *
+ * That server sentence is preferred over anything written here, because it is
+ * the only one that knows the tenant's real numbers. Nothing is computed from
+ * the allocation/used/remaining figures the payload also carries — they are
+ * the server's to phrase. Falls back to the transport error, then to a plain
+ * statement of what failed; never invents a reason.
+ */
+export function campaignStartErrorMessage(error: unknown): string {
+    const detail = (error as { details?: { message?: unknown } } | null)?.details;
+    const serverMessage = typeof detail?.message === "string" ? detail.message.trim() : "";
+    if (serverMessage) return serverMessage;
+    const transportMessage = error instanceof Error ? error.message.trim() : "";
+    if (transportMessage) return transportMessage;
+    return "Failed to start campaign";
 }
 
 // Call Types
@@ -114,7 +220,6 @@ export interface Call {
     outcome?: string;
     duration_seconds?: number;
     transcript?: string;
-    recording_url?: string;
     created_at: string;
     started_at?: string;
     ended_at?: string;
@@ -124,12 +229,92 @@ export interface Call {
     recording_id?: string | null;
     /** AI per-call verdict ("qualified | …", "callback | …", "no_interest | …") — the "was this call a success" answer. */
     lead_outcome?: string | null;
+    /** Contact the caller GAVE during the call (not the line they rang from). */
+    captured_phone?: string | null;
+    captured_email?: string | null;
+    /** false = the caller said it but never confirmed the read-back. */
+    captured_phone_confirmed?: boolean | null;
+    captured_email_confirmed?: boolean | null;
+    /** True when a reviewer has left a voice note on this call. */
+    has_feedback?: boolean;
+    /** Direction defaults to outbound for historical rows. */
+    direction?: "inbound" | "outbound";
+    /** Originating party. Null is valid for privacy-blocked inbound ANI. */
+    from_number?: string | null;
+    /** Destination party; for inbound calls this is the called public DID. */
+    to_number?: string | null;
+    /** Inbound caller identity. May be privacy-masked by the server. */
+    caller_ani?: string | null;
+    /** Public DID that received the inbound call. */
+    called_did?: string | null;
+    inbound_campaign_id?: string | null;
+    assignment_id?: string | null;
+    route_id?: string | null;
+    route_version?: number | null;
+    config_version?: number | null;
+    config_checksum?: string | null;
+    admission_status?: string | null;
+    admission_reason?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
+    billing_status?: string | null;
+    billing_hold_reason?: string | null;
+    /**
+     * Seconds the server actually settled for this call — read straight off
+     * the immutable usage ledger, NOT off `duration_seconds`.
+     *   backend/app/api/v1/endpoints/calls.py:263 (field)
+     *   backend/app/api/v1/endpoints/calls.py:1306-1312 (ledger read)
+     *
+     * Detail-only: the list endpoint does not project it. Null/absent for
+     * every call the server has not settled — an unsettled or held call has
+     * no billed quantity, and one must never be inferred from its duration.
+     */
+    billed_duration_seconds?: number | null;
+    recording_status?: string | null;
+    transcript_status?: string | null;
+    media_state?: string | null;
+    /**
+     * Transfer legs of this call. Detail-only — the list endpoint does not
+     * project them. Undefined when the server sent no array at all; an empty
+     * array is the ordinary case for a call that was never transferred.
+     */
+    transfer_legs?: TransferLeg[];
+}
+
+export interface CampaignTerminationSummary {
+    status: "confirmed" | "partial" | "lookup_failed";
+    total_selected: number;
+    requested: number;
+    attempted: number;
+    confirmed: number;
+    deferred: number;
+    unconfirmed: number;
+    missing_identity: number;
+    reasons: Record<string, number>;
+    lookup_error: string | null;
+}
+
+export interface CampaignControlResponse {
+    message: string;
+    campaign: Campaign & { termination_summary?: CampaignTerminationSummary };
+    termination_summary: CampaignTerminationSummary;
+}
+
+export interface CallListFilters {
+    direction?: "inbound" | "outbound";
+    inboundCampaignId?: string;
 }
 
 // AI Call Summary Types
 export interface CallSummaryObj {
     headline: string;
     outcome: string;
+    /** Structured lead qualification extracted after the call; optional on historical summaries. */
+    qualification_status?: "qualified" | "nurture" | "unqualified" | "unknown" | string;
+    decision_maker_status?: string;
+    identified_need?: string;
+    timeline?: string;
+    budget_information?: string;
     what_happened: string;
     key_points: string[];
     objections: Array<{ objection: string; handled: string }>;
@@ -145,6 +330,12 @@ export interface CallSummaryObj {
 export interface CallSummaryEnvelope {
     available: boolean;
     summary: CallSummaryObj | null;
+    source_evidence?: {
+        transcript_save_state: "complete" | "partial" | "failed" | "unknown";
+        summary_current: boolean;
+        review_required: boolean;
+        revision: string | null;
+    };
 }
 
 export interface CallDetail extends Call {
@@ -157,9 +348,21 @@ export interface Contact {
     id: string;
     campaign_id: string;
     phone_number: string;
+    /** Additional mobile value; falls back to phone_number in API responses. */
+    mobile_number?: string;
+    business_number?: string;
     first_name?: string;
     last_name?: string;
+    full_name?: string;
     email?: string;
+    company_name?: string;
+    job_title?: string;
+    best_time_to_call?: string;
+    timezone?: string;
+    calling_notes?: string;
+    preferred_contact_method?: string;
+    do_not_call?: boolean;
+    custom_fields?: Record<string, unknown>;
     status: string;
     last_call_result: string;
     call_attempts: number;
@@ -171,6 +374,26 @@ export interface Contact {
     follow_up_note?: string | null;
     qualified_at?: string | null;
     qualified_call_id?: string | null;
+    latest_analysis_note?: string | null;
+    latest_analysis_call_id?: string | null;
+    latest_analysis_at?: string | null;
+}
+
+export interface ContactMutation {
+    phone_number: string;
+    mobile_number?: string;
+    business_number?: string;
+    first_name?: string;
+    last_name?: string;
+    full_name?: string;
+    email?: string;
+    company_name?: string;
+    job_title?: string;
+    best_time_to_call?: string;
+    timezone?: string;
+    calling_notes?: string;
+    preferred_contact_method?: string;
+    do_not_call?: boolean;
 }
 
 // Contact List Types (grouped uploads / pasted batches).
@@ -204,12 +427,37 @@ interface CallListItem {
     talklee_call_id?: string;
     timestamp: string;
     to_number: string;
+    from_number?: string | null;
     status: string;
     duration_seconds?: number;
     outcome?: string;
     campaign_name?: string;
     recording_id?: string | null;
     lead_outcome?: string | null;
+    captured_phone?: string | null;
+    captured_email?: string | null;
+    captured_phone_confirmed?: boolean | null;
+    captured_email_confirmed?: boolean | null;
+    has_feedback?: boolean;
+    campaign_id?: string | null;
+    direction?: "inbound" | "outbound" | string;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    inbound_campaign_id?: string | null;
+    assignment_id?: string | null;
+    route_id?: string | null;
+    route_version?: number | null;
+    config_version?: number | null;
+    config_checksum?: string | null;
+    admission_status?: string | null;
+    admission_reason?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
+    billing_status?: string | null;
+    billing_hold_reason?: string | null;
+    recording_status?: string | null;
+    transcript_status?: string | null;
+    media_state?: string | null;
 }
 
 // Dashboard API - Real backend integration.
@@ -280,20 +528,29 @@ class DashboardApi {
         });
     }
 
-    async previewCampaignPrompt(input: {
+    async previewCampaignPrompt(input: CampaignVoiceSettingsValue & {
         persona_type: "lead_gen" | "customer_support" | "receptionist";
         company_name: string;
         agent_name: string;
         campaign_slots: Record<string, unknown>;
         additional_instructions?: string;
+        campaign_brief?: CampaignBrief;
         direction?: "outbound" | "inbound";
+        /** Who talks first. Independent of direction. */
+        opening_mode?: "agent_first" | "callee_first";
         knowledge_driven?: boolean;
     }): Promise<{
         system_prompt: string;
         greeting: string;
         direction: "outbound" | "inbound";
+        opening_mode: "agent_first" | "callee_first";
         has_inbound_directive: boolean;
         prompt_chars: number;
+        campaign_guidance_chars: number;
+        campaign_guidance_budget_chars: number;
+        /** Saving will be refused; the preview shows what a live call would run. */
+        over_budget: boolean;
+        layers: Array<{ key: string; label: string; content: string }>;
     }> {
         return this.client.request({
             path: "/campaigns/preview-prompt",
@@ -304,7 +561,9 @@ class DashboardApi {
                 agent_name: input.agent_name,
                 campaign_slots: input.campaign_slots,
                 additional_instructions: input.additional_instructions,
+                campaign_brief: input.campaign_brief,
                 direction: input.direction ?? "outbound",
+                opening_mode: input.opening_mode,
                 knowledge_driven: input.knowledge_driven ?? false,
             },
         });
@@ -339,14 +598,14 @@ class DashboardApi {
         });
     }
 
-    async pauseCampaign(id: string): Promise<{ message: string }> {
+    async pauseCampaign(id: string): Promise<CampaignControlResponse> {
         return this.client.request({
             path: `/campaigns/${id}/pause`,
             method: "POST",
         });
     }
 
-    async stopCampaign(id: string): Promise<{ message: string }> {
+    async stopCampaign(id: string): Promise<CampaignControlResponse> {
         return this.client.request({
             path: `/campaigns/${id}/stop`,
             method: "POST",
@@ -368,6 +627,10 @@ class DashboardApi {
         job_status_counts: Record<string, number>;
         call_outcome_counts: Record<string, number>;
         goals_achieved: number;
+        /** Why the dialer is not placing calls right now (null/absent when nothing blocks). */
+        blocking_reason?: CampaignBlockingReason | null;
+        /** What the campaign is doing, derived server-side from the block reason. */
+        activity?: CampaignActivity | null;
     }> {
         return this.client.request({
             path: `/campaigns/${id}/stats`,
@@ -423,7 +686,7 @@ class DashboardApi {
 
     async addContact(
         campaignId: string,
-        data: { phone_number: string; first_name?: string; last_name?: string; email?: string }
+        data: ContactMutation,
     ): Promise<{ message: string; contact: Contact }> {
         return this.client.request({
             path: `/campaigns/${campaignId}/contacts`,
@@ -448,7 +711,7 @@ class DashboardApi {
     async updateContact(
         campaignId: string,
         contactId: string,
-        data: { phone_number?: string; first_name?: string; last_name?: string; email?: string }
+        data: Partial<ContactMutation>
     ): Promise<{ message: string; contact: Contact }> {
         return this.client.request({
             path: `/campaigns/${campaignId}/contacts/${contactId}`,
@@ -458,20 +721,25 @@ class DashboardApi {
     }
 
     // Calls
-    async listCalls(page: number = 1, pageSize: number = 20): Promise<{ calls: Call[]; total: number }> {
+    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}): Promise<{ calls: Call[]; total: number }> {
         const response = await this.client.request<{ items: (CallListItem & { summary?: string })[]; total: number }>({
             path: "/calls",
             method: "GET",
-            params: { page: String(page), page_size: String(pageSize) },
+            params: {
+                page: String(page),
+                page_size: String(pageSize),
+                direction: filters.direction,
+                inbound_campaign_id: filters.inboundCampaignId,
+            },
         });
 
         // Map backend CallListItem to frontend Call format
         const calls: Call[] = response.items.map(item => ({
             id: item.id,
-            campaign_id: "",
+            campaign_id: item.campaign_id ?? "",
             campaign_name: item.campaign_name,
             lead_id: "",
-            phone_number: item.to_number,
+            phone_number: item.direction === "inbound" ? item.from_number || item.caller_ani || "Private caller" : item.to_number,
             status: item.status,
             outcome: item.outcome,
             duration_seconds: item.duration_seconds,
@@ -479,6 +747,31 @@ class DashboardApi {
             summary: item.summary,
             recording_id: item.recording_id,
             lead_outcome: item.lead_outcome,
+            captured_phone: item.captured_phone ?? null,
+            captured_email: item.captured_email ?? null,
+            captured_phone_confirmed: item.captured_phone_confirmed ?? null,
+            captured_email_confirmed: item.captured_email_confirmed ?? null,
+            has_feedback: item.has_feedback,
+            direction: item.direction === "inbound" ? "inbound" : "outbound",
+            from_number: item.from_number ?? item.caller_ani,
+            to_number: item.to_number ?? item.called_did,
+            caller_ani: item.caller_ani ?? item.from_number,
+            called_did: item.called_did ?? item.to_number,
+            inbound_campaign_id: item.inbound_campaign_id,
+            assignment_id: item.assignment_id,
+            route_id: item.route_id,
+            route_version: item.route_version,
+            config_version: item.config_version,
+            config_checksum: item.config_checksum,
+            admission_status: item.admission_status,
+            admission_reason: item.admission_reason,
+            consent_status: item.consent_status,
+            processing_status: item.processing_status,
+            billing_status: item.billing_status,
+            billing_hold_reason: item.billing_hold_reason,
+            recording_status: item.recording_status,
+            transcript_status: item.transcript_status,
+            media_state: item.media_state,
         }));
         
         return {
@@ -488,7 +781,7 @@ class DashboardApi {
     }
 
     async getCall(id: string): Promise<CallDetail> {
-        const response = await this.client.request<{
+        const response = await this.client.request<CallListItem & {
             id: string;
             talklee_call_id?: string;
             timestamp: string;
@@ -501,6 +794,8 @@ class DashboardApi {
             campaign_id?: string;
             lead_id?: string;
             summary?: string;
+            billed_duration_seconds?: number | null;
+            transfer_legs?: TransferLeg[];
         }>({
             path: `/calls/${id}`,
             method: "GET",
@@ -511,20 +806,47 @@ class DashboardApi {
             id: response.id,
             campaign_id: response.campaign_id || "",
             lead_id: response.lead_id || "",
-            phone_number: response.to_number,
+            phone_number: response.direction === "inbound" ? response.from_number || response.caller_ani || "Private caller" : response.to_number,
             status: response.status,
             outcome: response.outcome,
             duration_seconds: response.duration_seconds,
             transcript: response.transcript,
-            recording_url: response.recording_id ? this.getRecordingUrl(response.recording_id) : undefined,
             created_at: response.timestamp,
             summary: response.summary,
             recording_id: response.recording_id,
+            direction: response.direction === "inbound" ? "inbound" : "outbound",
+            from_number: response.from_number ?? response.caller_ani,
+            to_number: response.to_number ?? response.called_did,
+            caller_ani: response.caller_ani ?? response.from_number,
+            called_did: response.called_did ?? response.to_number,
+            inbound_campaign_id: response.inbound_campaign_id,
+            assignment_id: response.assignment_id,
+            route_id: response.route_id,
+            route_version: response.route_version,
+            config_version: response.config_version,
+            config_checksum: response.config_checksum,
+            admission_status: response.admission_status,
+            admission_reason: response.admission_reason,
+            consent_status: response.consent_status,
+            processing_status: response.processing_status,
+            billing_status: response.billing_status,
+            billing_hold_reason: response.billing_hold_reason,
+            // Passed through as sent. A non-number (absent field, older
+            // server, explicit null for an unsettled call) becomes undefined
+            // so that "the server billed nothing yet" stays distinguishable
+            // from a billed zero — neither is ever derived from duration.
+            billed_duration_seconds:
+                typeof response.billed_duration_seconds === "number"
+                    ? response.billed_duration_seconds
+                    : undefined,
+            recording_status: response.recording_status,
+            transcript_status: response.transcript_status,
+            media_state: response.media_state,
+            // Passed through untouched. A non-array (absent field, older
+            // server) becomes undefined rather than an invented empty list, so
+            // "the server said nothing" stays distinguishable from "no legs".
+            transfer_legs: Array.isArray(response.transfer_legs) ? response.transfer_legs : undefined,
         };
-    }
-    
-    private getRecordingUrl(recordingId: string): string {
-        return `${apiBaseUrl()}/recordings/${recordingId}/stream`;
     }
 
     async getCallTranscript(id: string, format: "json" | "text" = "json"): Promise<{

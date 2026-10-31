@@ -1,6 +1,7 @@
-import { useEffect, useRef, useCallback } from 'react';
+import { useRef, type RefObject } from 'react';
 import { X, AlertTriangle, AlertCircle, Info, Loader2 } from 'lucide-react';
 import './ConfirmationModal.css';
+import { useDialogFocus } from '../lib/use-dialog-focus';
 
 interface ConfirmationModalProps {
     isOpen: boolean;
@@ -12,6 +13,17 @@ interface ConfirmationModalProps {
     onConfirm: () => void;
     onCancel: () => void;
     loading?: boolean;
+    reason?: string;
+    onReasonChange?: (reason: string) => void;
+    reasonLabel?: string;
+    reasonPlaceholder?: string;
+    reasonMinLength?: number;
+    /** Preserve the exact reason/body after a deletion intent has been sent. */
+    reasonReadOnly?: boolean;
+    /** Failure from the confirmed action; the modal stays open and shows it. */
+    error?: string | null;
+    /** Stable owning-page control when the invoking row is removed. */
+    returnFocusFallback?: RefObject<HTMLElement | null>;
 }
 
 export function ConfirmationModal({
@@ -23,33 +35,25 @@ export function ConfirmationModal({
     variant = 'danger',
     onConfirm,
     onCancel,
-    loading = false
+    loading = false,
+    reason = '',
+    onReasonChange,
+    reasonLabel = 'Reason for this action',
+    reasonPlaceholder = 'Explain why this irreversible action is required',
+    reasonMinLength = 8,
+    reasonReadOnly = false,
+    error = null,
+    returnFocusFallback,
 }: ConfirmationModalProps) {
     const modalRef = useRef<HTMLDivElement>(null);
     const confirmButtonRef = useRef<HTMLButtonElement>(null);
+    const reasonInputRef = useRef<HTMLTextAreaElement>(null);
+    const requiresReason = Boolean(onReasonChange);
+    const normalizedReason = reason.trim();
+    const reasonIsValid = !requiresReason
+        || (normalizedReason.length >= reasonMinLength && /\p{L}/u.test(normalizedReason));
 
-    // Handle Escape key
-    const handleKeyDown = useCallback((e: KeyboardEvent) => {
-        if (e.key === 'Escape' && !loading) {
-            onCancel();
-        }
-    }, [onCancel, loading]);
-
-    // Focus trap
-    useEffect(() => {
-        if (isOpen) {
-            document.addEventListener('keydown', handleKeyDown);
-            // Focus the confirm button when modal opens
-            confirmButtonRef.current?.focus();
-            // Prevent body scroll
-            document.body.style.overflow = 'hidden';
-        }
-
-        return () => {
-            document.removeEventListener('keydown', handleKeyDown);
-            document.body.style.overflow = '';
-        };
-    }, [isOpen, handleKeyDown]);
+    useDialogFocus(isOpen, modalRef, onCancel, loading, returnFocusFallback);
 
     // Handle backdrop click
     const handleBackdropClick = (e: React.MouseEvent) => {
@@ -84,6 +88,7 @@ export function ConfirmationModal({
             <div
                 className="modal-content"
                 ref={modalRef}
+                tabIndex={-1}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="modal-header">
@@ -101,6 +106,35 @@ export function ConfirmationModal({
 
                 <div className="modal-body">
                     <p className="modal-message">{message}</p>
+                    {onReasonChange && (
+                        <label className="modal-reason-field">
+                            <span>{reasonLabel}</span>
+                            <textarea
+                                ref={reasonInputRef}
+                                data-dialog-autofocus
+                                value={reason}
+                                onChange={(event) => onReasonChange(event.target.value)}
+                                placeholder={reasonPlaceholder}
+                                minLength={reasonMinLength}
+                                maxLength={1000}
+                                rows={3}
+                                required
+                                disabled={loading}
+                                readOnly={reasonReadOnly}
+                                aria-describedby="modal-reason-help"
+                            />
+                            <small id="modal-reason-help">
+                                {reasonReadOnly ? 'This request has been sent. Its reason stays fixed when retrying the same deletion.' : reasonIsValid
+                                    ? 'This reason will be retained in the deletion audit.'
+                                    : `Enter a meaningful reason of at least ${reasonMinLength} characters.`}
+                            </small>
+                        </label>
+                    )}
+                    {error && (
+                        <div className="error-banner" role="alert">
+                            <p>{error}</p>
+                        </div>
+                    )}
                 </div>
 
                 <div className="modal-footer">
@@ -115,7 +149,7 @@ export function ConfirmationModal({
                         ref={confirmButtonRef}
                         className={`btn btn-${variant}`}
                         onClick={onConfirm}
-                        disabled={loading}
+                        disabled={loading || !reasonIsValid}
                     >
                         {loading ? (
                             <>

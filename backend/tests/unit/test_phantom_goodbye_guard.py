@@ -30,9 +30,10 @@ def _action(reason="user_goodbye", do_not_call=False):
     return {"reason": reason, "farewell": "bye", "do_not_call": do_not_call}
 
 
-def test_opt_out_always_honored_even_without_cue_or_turns():
+def test_model_opt_out_without_caller_evidence_cannot_end_call():
     a = _action(reason="user_done", do_not_call=True)
-    assert should_honor_end_session(a, "uh I dunno", user_turn_count=1) is True
+    assert should_honor_end_session(a, "uh I dunno", user_turn_count=1) is False
+    assert should_honor_end_session(a, "Stop calling me", user_turn_count=1) is True
 
 
 def test_honored_when_caller_said_goodbye():
@@ -44,9 +45,9 @@ def test_phantom_suppressed_when_no_cue_and_few_turns():
     assert should_honor_end_session(_action(), "tell me more", user_turn_count=1) is False
 
 
-def test_conversation_complete_honored_after_enough_turns():
+def test_model_completion_does_not_authorize_hangup_after_more_turns():
     a = _action(reason="conversation_complete")
-    assert should_honor_end_session(a, "okay sure", user_turn_count=3) is True
+    assert should_honor_end_session(a, "okay sure", user_turn_count=3) is False
 
 
 def test_conversation_complete_suppressed_when_too_early():

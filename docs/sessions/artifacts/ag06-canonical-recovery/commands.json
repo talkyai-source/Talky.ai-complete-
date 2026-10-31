@@ -1,0 +1,77 @@
+{
+  "tested_base": "db99f652fa2f921d5c0f24f8d25c002f228f12b2",
+  "source_commit": "5fcacd633c89f06b5bd05e18610ccd2a700c198a",
+  "source_binding": "Run used tested base plus the new integration module; 83 before/after LF hashes bind exact inputs to the source/evidence commits. Committing is not a rerun.",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag06-canonical-acceptance-20261006",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "explicit_environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag06-canonical-acceptance-20261006\\backend"
+  },
+  "runtime_limit": "Recorded existing-venv dependency provenance, not exact-requirements parity. Fresh DSNs and process-only synthetic JWT secret are pinned by runner; no tokens/secrets retained.",
+  "commands": [
+    {
+      "argv": [
+        "docs/sessions/artifacts/ag06-canonical-recovery/probe.py",
+        "--output",
+        "docs/sessions/artifacts/ag06-canonical-recovery/first-result.json"
+      ],
+      "stdout_stderr": "first.txt",
+      "exit_code": 1,
+      "passed": 9,
+      "failed": 1,
+      "warnings": 1,
+      "seconds": 60.18,
+      "source_snapshots": [
+        "first-test.py",
+        "first-probe.py"
+      ],
+      "limit": "Test-only deepcopy(asyncpg.Record) failure before final retention assertions; dict conversion is the sole correction."
+    },
+    {
+      "argv": [
+        "docs/sessions/artifacts/ag06-canonical-recovery/probe.py",
+        "--output",
+        "docs/sessions/artifacts/ag06-canonical-recovery/final-result.json"
+      ],
+      "stdout_stderr": "final.txt",
+      "exit_code": 0,
+      "passed": 10,
+      "warnings": 1,
+      "seconds": 23.73
+    },
+    {
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "backend/tests/integration/test_saved_acknowledgement_canonical.py",
+        "docs/sessions/artifacts/ag06-canonical-recovery/probe.py"
+      ],
+      "stdout_stderr": "lint.txt",
+      "exit_code": 0
+    },
+    {
+      "argv": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "overlap": "First 9 pass and final 10 pass are not additive; previous partial-schema 8 and unit 441 are separate overlapping owner evidence, not part of this run.",
+  "fixture_grants": "Fresh database only: CONNECT; public schema USAGE; all public tables SELECT; assistant_actions/resolutions INSERT UPDATE DELETE; sequences USAGE SELECT. Explicit fixture setup, not production grant validation.",
+  "not_executed": [
+    "Live providers",
+    "Customer databases",
+    "Existing public database migration/writes",
+    "Production grant qualification",
+    "Deployed HTTP server or browser",
+    "Push/deploy",
+    "Exact requirements installation/parity"
+  ]
+}

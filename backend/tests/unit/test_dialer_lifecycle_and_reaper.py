@@ -8,11 +8,15 @@ from app.domain.services.dialer.stuck_job_reaper import (
     reap_stuck_calls,
     STUCK_REASON,
     _INFLIGHT_CALL_STATUSES,
+    _PREANSWER_CALL_STATUSES,
+    _CONNECTED_CALL_STATUSES,
     _LIVE_CALL_STATUSES,
+    connected_call_stuck_timeout_seconds,
 )
 from app.domain.services.dialer.job_lifecycle import (
     cancel_active_jobs_for_campaign,
     cancel_active_jobs_for_lead,
+    NOT_ORIGINATED_JOB_STATUSES,
     REASON_CAMPAIGN_STOPPED,
 )
 
@@ -45,7 +49,7 @@ class _FakeConn:
 
 
 @pytest.mark.asyncio
-async def test_reaper_marks_in_flight_and_returns_count():
+async def test_reaper_flags_in_flight_without_releasing_owner():
     conn = _FakeConn(returned_ids=["a", "b", "c"])
     n = await reap_stuck_jobs(conn, timeout_seconds=90)
     assert n == 3
@@ -54,7 +58,8 @@ async def test_reaper_marks_in_flight_and_returns_count():
     assert args[0] == list(st.IN_FLIGHT_STATUSES)
     assert args[1] == STUCK_REASON
     assert args[2] == 90
-    assert "UPDATE dialer_jobs" in sql and "failed" in sql
+    assert "UPDATE dialer_jobs" in sql and "SET status" not in sql
+    assert "failure_reason IS DISTINCT FROM" in sql
 
 
 @pytest.mark.asyncio
@@ -64,24 +69,81 @@ async def test_reaper_noop_returns_zero():
 
 
 @pytest.mark.asyncio
-async def test_stuck_call_reaper_closes_zombie_calls():
-    # A stale non-terminal call must be closed so it frees its batch slot and
-    # leaves the live-calls panel.
+async def test_stuck_call_reaper_queues_proof_aware_termination():
+    # Age alone must never manufacture PBX proof. The stale call leaves the
+    # dialer batch vocabulary but stays nonterminal/operator-visible until the
+    # telephony owner confirms every leg absent.
     conn = _FakeConn(returned_ids=["c1", "c2"])
     n = await reap_stuck_calls(conn, timeout_seconds=600)
     assert n == 2
     sql, args = conn.calls[0]
-    assert args[0] == list(_INFLIGHT_CALL_STATUSES)
+    assert args[0] == list(_PREANSWER_CALL_STATUSES)
     assert args[1] == 600
-    assert "UPDATE calls" in sql and "'ended'" in sql
-    # Preserves any real outcome already written; only fills a missing one.
-    assert "COALESCE(outcome" in sql
+    assert args[2] == list(_CONNECTED_CALL_STATUSES)
+    assert args[3] >= 14_460
+    assert "UPDATE calls" in sql and "'termination_pending'" in sql
+    assert "ended_at" not in sql
+    assert "outcome" not in sql
 
 
 @pytest.mark.asyncio
 async def test_stuck_call_reaper_noop_returns_zero():
     conn = _FakeConn(returned_ids=[])
     assert await reap_stuck_calls(conn) == 0
+
+
+class _StaleCallSemanticConn:
+    def __init__(self, rows):
+        self.rows = rows
+        self.calls = []
+
+    async def fetch(self, sql, *args):
+        self.calls.append((sql, args))
+        preanswer, preanswer_timeout, connected, connected_timeout = args
+        reaped = []
+        for row in self.rows:
+            threshold = (
+                preanswer_timeout
+                if row["status"] in preanswer
+                else connected_timeout
+                if row["status"] in connected
+                else None
+            )
+            if threshold is not None and row["age_seconds"] > threshold:
+                reaped.append({"id": row["id"]})
+        return reaped
+
+
+@pytest.mark.asyncio
+async def test_answered_ten_minute_call_is_not_reaped_with_short_preanswer_timeout(
+    monkeypatch,
+):
+    monkeypatch.setenv("TELEPHONY_MAX_CALL_DURATION_S", "1800")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_GRACE_S", "300")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_STUCK_TIMEOUT_S", "600")
+    conn = _StaleCallSemanticConn(
+        [
+            {"id": "answered-live", "status": "answered", "age_seconds": 601},
+            {"id": "phantom-intent", "status": "initiated", "age_seconds": 601},
+        ]
+    )
+
+    reaped = await reap_stuck_calls(conn, timeout_seconds=600)
+
+    assert reaped == 1
+    _sql, args = conn.calls[0]
+    assert args[0] == list(_PREANSWER_CALL_STATUSES)
+    assert args[1] == 600
+    assert args[2] == list(_CONNECTED_CALL_STATUSES)
+    assert args[3] >= 14_700
+
+
+def test_connected_call_timeout_is_clamped_above_every_supported_call(monkeypatch):
+    monkeypatch.setenv("TELEPHONY_MAX_CALL_DURATION_S", "20000")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_GRACE_S", "300")
+    monkeypatch.setenv("DIALER_CONNECTED_CALL_STUCK_TIMEOUT_S", "1")
+
+    assert connected_call_stuck_timeout_seconds() == 20_300
 
 
 # ── reaper: must not kill a live/answered call's job (BUG 1 fix) ──────────
@@ -164,6 +226,23 @@ async def test_reaper_does_not_reap_job_with_live_answered_call():
     assert reaped == 0
     sql, args = conn.calls[0]
     assert args[3] == list(_LIVE_CALL_STATUSES)
+
+
+@pytest.mark.asyncio
+async def test_reaper_does_not_reap_job_awaiting_pbx_termination_proof():
+    """``termination_pending`` is stale, not terminal PBX evidence.
+
+    The call owner must retain its job/lead slot until confirmation-aware
+    recovery proves every provider leg absent and commits logical settlement.
+    """
+    jobs = [{"id": "job-proof", "status": "processing", "age_seconds": 900}]
+    calls_by_job_id = {"job-proof": "termination_pending"}
+    conn = _SemanticFakeConn(jobs, calls_by_job_id)
+
+    reaped = await reap_stuck_jobs(conn, timeout_seconds=120)
+
+    assert reaped == 0
+    assert "termination_pending" in _LIVE_CALL_STATUSES
 
 
 @pytest.mark.asyncio
@@ -254,7 +333,15 @@ def test_cancel_active_jobs_for_campaign_builds_correct_query():
     assert cap["update"]["status"] == "cancelled"
     assert cap["update"]["failure_reason"] == REASON_CAMPAIGN_STOPPED
     assert ("campaign_id", "camp-1") in cap["eq"]
-    assert cap["in"] == ("status", list(st.ACTIVE_STATUSES))
+    assert cap["in"] == ("status", list(NOT_ORIGINATED_JOB_STATUSES))
+    assert set(NOT_ORIGINATED_JOB_STATUSES) == {
+        "pending",
+        "queued",
+        "retry_scheduled",
+    }
+    assert set(NOT_ORIGINATED_JOB_STATUSES).isdisjoint(
+        {"processing", "calling"}
+    )
 
 
 def test_cancel_active_jobs_for_lead_builds_correct_query():

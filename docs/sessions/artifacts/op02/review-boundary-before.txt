@@ -1,0 +1,23 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+______ test_cold_stream_then_late_prewarm_cannot_recache_adopted_socket _______
+tests\unit\test_op02_provider_boundary_inventory.py:296: in test_cold_stream_then_late_prewarm_cannot_recache_adopted_socket
+    assert not primary._pre_connections, "late prewarm re-cached active stream's socket"
+E   AssertionError: late prewarm re-cached active stream's socket
+E   assert not {'a': _FluxConnection(ws=<tests.unit.test_op02_provider_boundary_inventory.Socket object at 0x000002B66D233620>, slot=...nfrastructure.providers.provider_concurrency._GuardSlot object at 0x000002B66D297BF0>, closed=False, _close_task=None)}
+E    +  where {'a': _FluxConnection(ws=<tests.unit.test_op02_provider_boundary_inventory.Socket object at 0x000002B66D233620>, slot=...nfrastructure.providers.provider_concurrency._GuardSlot object at 0x000002B66D297BF0>, closed=False, _close_task=None)} = DeepgramFluxSTTProvider(model=flux-general-en, sample_rate=16000)._pre_connections
+_____ test_failed_same_id_acquire_cannot_delete_already_live_lease[error] _____
+tests\unit\test_op02_provider_boundary_inventory.py:481: in test_failed_same_id_acquire_cannot_delete_already_live_lease
+    assert await global_slots.current_count(redis) == 1
+E   assert 0 == 1
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.global_concurrency:global_concurrency.py:187 global_concurrency_acquire_failed call=live err=synthetic failure before commit fail_closed=True
+____ test_failed_same_id_acquire_cannot_delete_already_live_lease[cancel] _____
+tests\unit\test_op02_provider_boundary_inventory.py:481: in test_failed_same_id_acquire_cannot_delete_already_live_lease
+    assert await global_slots.current_count(redis) == 1
+E   assert 0 == 1
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_cold_stream_then_late_prewarm_cannot_recache_adopted_socket
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_failed_same_id_acquire_cannot_delete_already_live_lease[error]
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_failed_same_id_acquire_cannot_delete_already_live_lease[cancel]
+3 failed, 17 deselected in 2.46s

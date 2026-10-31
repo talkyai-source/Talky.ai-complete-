@@ -7,10 +7,32 @@ import { Select } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
+import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv } from "@/lib/contact-csv";
+import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
+import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { ContactLists } from "@/components/campaigns/contact-lists";
-import { Upload, FileText, CheckCircle, AlertCircle, Loader2, Download, X, Search, Plus, Pencil, Trash2 } from "lucide-react";
+import { CsvImportMapper } from "@/components/contacts/csv-import-mapper";
+import {
+    AlertCircle,
+    Building2,
+    CheckCircle,
+    ChevronDown,
+    Download,
+    FileText,
+    ListChecks,
+    Loader2,
+    Pencil,
+    PhoneCall,
+    Plus,
+    Search,
+    Trash2,
+    Upload,
+    UserRound,
+    X,
+} from "lucide-react";
 import { motion } from "framer-motion";
 import Link from "next/link";
 
@@ -35,6 +57,75 @@ type ParseSummary = {
     invalid: number;
     headerError?: string;
 };
+
+function ContactRequirementsGuide() {
+    const steps = [
+        {
+            number: "01",
+            title: "Choose a campaign",
+            copy: "Contacts stay attached to the selected campaign and its contact lists.",
+            icon: ListChecks,
+        },
+        {
+            number: "02",
+            title: "Add a phone number",
+            copy: "Required. Use international format, for example +44 20 7946 0958.",
+            icon: PhoneCall,
+        },
+        {
+            number: "03",
+            title: "Identify the person",
+            copy: "First name, last name, and email make lists easier to review and personalise.",
+            icon: UserRound,
+        },
+        {
+            number: "04",
+            title: "Give the agent context",
+            copy: "Company, timezone, best call time, and notes help the AI handle the call well.",
+            icon: Building2,
+        },
+    ];
+
+    return (
+        <section
+            aria-labelledby="contact-setup-heading"
+            className="content-card relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.07] via-background to-background"
+        >
+            <div className="pointer-events-none absolute -right-24 -top-28 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+            <div className="relative">
+                <div className="mb-2 text-[11px] font-bold uppercase tracking-[0.18em] text-primary">Contact setup</div>
+                <div className="flex flex-col gap-2 lg:flex-row lg:items-end lg:justify-between">
+                    <div>
+                        <h2 id="contact-setup-heading" className="text-xl font-bold tracking-tight text-foreground">
+                            What you need before adding contacts
+                        </h2>
+                        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+                            Add one person manually or import a CSV. You can preview and map CSV columns before anything is saved.
+                        </p>
+                    </div>
+                    <span className="w-fit rounded-full border border-emerald-500/25 bg-emerald-500/10 px-3 py-1 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                        Only phone number is required
+                    </span>
+                </div>
+
+                <ol className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    {steps.map((step) => (
+                        <li key={step.number} className="rounded-2xl border border-border/75 bg-background/75 p-4 shadow-sm backdrop-blur-sm">
+                            <div className="flex items-center justify-between">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                                    <step.icon className="h-4 w-4" aria-hidden />
+                                </div>
+                                <span className="text-xs font-black tabular-nums text-muted-foreground/60">{step.number}</span>
+                            </div>
+                            <h3 className="mt-3 text-sm font-bold text-foreground">{step.title}</h3>
+                            <p className="mt-1 text-xs leading-5 text-muted-foreground">{step.copy}</p>
+                        </li>
+                    ))}
+                </ol>
+            </div>
+        </section>
+    );
+}
 
 function isLikelyValidPhone(raw: string): boolean {
     const cleaned = raw.replace(/[^\d]/g, "");
@@ -98,7 +189,24 @@ function parseCsvText(text: string): ParseSummary {
     return { headers, rows, valid, invalid };
 }
 
-const TEMPLATE_CSV = "phone_number,first_name,last_name,email\n+15551234567,Jane,Doe,jane@example.com\n+15557654321,John,Smith,\n";
+// The import template is GENERATED BY THE SERVER from the canonical field
+// registry (backend contact_fields.CONTACT_FIELDS) and downloaded from
+// GET /contacts/import-template. It used to be a string literal right here,
+// which drifts the moment a field is added to the registry — and the symptom
+// is a customer filling in a column the importer no longer reads. There is
+// deliberately no column list in this file any more.
+const TEMPLATE_FILENAME = "talklee-contacts-template.csv";
+
+/** A cell we could not use on a row that still imported (goals.md §11): the
+ *  backend names the row AND the field, and did not store the value.
+ *  `BulkImportResponse` in extended-api predates that, so it is narrowed here
+ *  rather than widening a shared type other callers depend on. */
+type ImportFieldError = {
+    row?: number | null;
+    field?: string | null;
+    value?: string | null;
+    error: string;
+};
 
 export default function ContactsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -129,12 +237,33 @@ export default function ContactsPage() {
 
     // Per-contact add/edit/delete (mirrors the campaign detail page).
     const [showAddContact, setShowAddContact] = useState(false);
-    const [contactForm, setContactForm] = useState({ phone_number: "", first_name: "", last_name: "", email: "" });
+    const [showContactDetails, setShowContactDetails] = useState(false);
+    const [contactForm, setContactForm] = useState<ContactFormState>(EMPTY_CONTACT_FORM);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
     const [savingContact, setSavingContact] = useState(false);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
 
+    async function loadCampaigns() {
+        try {
+            setLoading(true);
+            const data = await dashboardApi.listCampaigns();
+            const outbound = outboundCampaignsOnly(data.campaigns);
+            setCampaigns(outbound);
+            if (outbound.length > 0) {
+                setSelectedCampaign(outbound[0].id);
+            }
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Failed to load campaigns");
+        } finally {
+            setLoading(false);
+        }
+    }
+
     useEffect(() => {
+        // Mount data fetch; loadCampaigns() flips the loading flag
+        // synchronously so the page shows a spinner before the response
+        // lands — not state that render could derive.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; loadCampaigns sets loading/campaigns/error as it resolves
         loadCampaigns();
     }, []);
 
@@ -146,20 +275,28 @@ export default function ContactsPage() {
 
     // Reset filters + the home/upload split whenever the campaign changes.
     useEffect(() => {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- clears user-entered filters and panel state on campaign switch; these are user-owned values, not derived state
         setSearch("");
         setDebouncedSearch("");
         setSelectedListId(null);
         setShowUploadPanel(false);
         setShowAddContact(false);
+        setShowContactDetails(false);
         setEditingContact(null);
         setCampaignHasContacts(false);
         setFirstLoadDone(false);
         setContactsError("");
     }, [selectedCampaign]);
 
+    // Latest-request-wins: a slow response for a previous campaign/list/search
+    // must not overwrite the table (or the has-contacts flag) of the current one.
+    const contactsRequestSeq = useRef(0);
+
     const loadContacts = useCallback(async () => {
         if (!selectedCampaign) return;
         const unfiltered = !selectedListId && !debouncedSearch.trim();
+        const seq = ++contactsRequestSeq.current;
+        const superseded = () => seq !== contactsRequestSeq.current;
         try {
             setContactsLoading(true);
             setContactsError("");
@@ -167,19 +304,26 @@ export default function ContactsPage() {
                 listId: selectedListId,
                 search: debouncedSearch,
             });
+            if (superseded()) return;
             setContacts(res.items);
             // Only an UNFILTERED load is authoritative for "does this campaign
             // have any contacts at all".
             if (unfiltered) setCampaignHasContacts(res.total > 0);
         } catch (err) {
+            if (superseded()) return;
             setContactsError(err instanceof Error ? err.message : "Failed to load contacts");
         } finally {
-            setContactsLoading(false);
-            setFirstLoadDone(true);
+            if (!superseded()) {
+                setContactsLoading(false);
+                setFirstLoadDone(true);
+            }
         }
     }, [selectedCampaign, selectedListId, debouncedSearch]);
 
     useEffect(() => {
+        // Async contact fetch whenever campaign/list/search changes;
+        // loadContacts() owns the loading + error + results state.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch on filter change, not derivable during render
         void loadContacts();
     }, [loadContacts]);
 
@@ -187,13 +331,15 @@ export default function ContactsPage() {
         e.preventDefault();
         try {
             setSavingContact(true);
+            const payload = contactPayload(contactForm);
             if (editingContact) {
-                await dashboardApi.updateContact(selectedCampaign, editingContact.id, contactForm);
+                await dashboardApi.updateContact(selectedCampaign, editingContact.id, payload);
             } else {
-                await dashboardApi.addContact(selectedCampaign, contactForm);
+                await dashboardApi.addContact(selectedCampaign, payload);
             }
-            setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" });
+            setContactForm(EMPTY_CONTACT_FORM);
             setShowAddContact(false);
+            setShowContactDetails(false);
             setEditingContact(null);
             setCampaignHasContacts(true);
             setListsRefreshToken((t) => t + 1);
@@ -205,14 +351,52 @@ export default function ContactsPage() {
         }
     }
 
+    function startAddContact() {
+        setEditingContact(null);
+        setContactForm(EMPTY_CONTACT_FORM);
+        setShowContactDetails(false);
+        setShowAddContact(true);
+    }
+
+    function closeContactForm() {
+        setShowAddContact(false);
+        setShowContactDetails(false);
+        setEditingContact(null);
+        setContactForm(EMPTY_CONTACT_FORM);
+    }
+
     function startEditContact(contact: Contact) {
+        const fallbackName = (contact.full_name || "").trim().split(/\s+/).filter(Boolean);
+        const mobileNumber = contact.mobile_number && contact.mobile_number !== contact.phone_number
+            ? contact.mobile_number
+            : "";
         setEditingContact(contact);
         setContactForm({
             phone_number: contact.phone_number || "",
-            first_name: contact.first_name || "",
-            last_name: contact.last_name || "",
+            first_name: contact.first_name || fallbackName[0] || "",
+            last_name: contact.last_name || fallbackName.slice(1).join(" ") || "",
+            mobile_number: mobileNumber,
+            business_number: contact.business_number || "",
             email: contact.email || "",
+            company_name: contact.company_name || "",
+            job_title: contact.job_title || "",
+            best_time_to_call: contact.best_time_to_call || "",
+            timezone: contact.timezone || "",
+            calling_notes: contact.calling_notes || "",
+            preferred_contact_method: contact.preferred_contact_method || "",
+            do_not_call: Boolean(contact.do_not_call),
         });
+        setShowContactDetails(Boolean(
+            mobileNumber
+            || contact.business_number
+            || contact.company_name
+            || contact.job_title
+            || contact.best_time_to_call
+            || contact.timezone
+            || contact.calling_notes
+            || contact.preferred_contact_method
+            || contact.do_not_call
+        ));
         setShowAddContact(true);
     }
 
@@ -231,25 +415,9 @@ export default function ContactsPage() {
         }
     }
 
-    async function loadCampaigns() {
-        try {
-            setLoading(true);
-            const data = await dashboardApi.listCampaigns();
-            setCampaigns(data.campaigns);
-            if (data.campaigns.length > 0) {
-                setSelectedCampaign(data.campaigns[0].id);
-            }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to load campaigns");
-        } finally {
-            setLoading(false);
-        }
-    }
-
     function clearFile() {
         setFile(null);
         setParsed(null);
-        setResult(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
     }
 
@@ -322,16 +490,23 @@ export default function ContactsPage() {
         if (dropped) void acceptFile(dropped);
     }
 
-    function downloadTemplate() {
-        const blob = new Blob([TEMPLATE_CSV], { type: "text/csv;charset=utf-8" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "contacts-template.csv";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+    async function downloadTemplate() {
+        try {
+            const res = await sharedHttpClient().requestRaw({
+                path: "/contacts/import-template",
+                method: "GET",
+            });
+            const url = URL.createObjectURL(await res.blob());
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = TEMPLATE_FILENAME;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch {
+            setError("Could not download the sample CSV just now. Please try again.");
+        }
     }
 
     const canUpload = useMemo(() => {
@@ -353,8 +528,29 @@ export default function ContactsPage() {
             const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
             const { rows: contactRows } = parseContactsCsv(await file.text());
             const clean = contactRows.filter((r) => r.phone && isLikelyValidPhone(r.phone));
-            const csv = ["phone_number,first_name,last_name,email,company"]
-                .concat(clean.map((r) => [r.phone, r.first_name, r.last_name, r.email, r.company].map(esc).join(",")))
+            const csvHeaders = [
+                "phone_number", "full_name", "first_name", "last_name", "email",
+                "company_name", "mobile_number", "business_number", "job_title",
+                "best_time_to_call", "timezone", "calling_notes",
+                "preferred_contact_method", "do_not_call",
+            ];
+            const csv = [csvHeaders.join(",")]
+                .concat(clean.map((r) => [
+                    r.phone,
+                    r.full_name,
+                    r.first_name,
+                    r.last_name,
+                    r.email,
+                    r.company,
+                    r.mobile_number,
+                    r.business_number,
+                    r.job_title,
+                    r.best_time_to_call,
+                    r.timezone,
+                    r.calling_notes,
+                    r.preferred_contact_method,
+                    r.do_not_call,
+                ].map(esc).join(",")))
                 .join("\n");
             const cleanFile = new File([csv], "contacts.csv", { type: "text/csv" });
             const response = await extendedApi.uploadCSV(selectedCampaign, cleanFile, true);
@@ -379,12 +575,12 @@ export default function ContactsPage() {
     // its own for an empty campaign, or inside a collapsible "Add more" panel.
     const uploadCard = (
                     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="content-card">
-                        <div className="mb-4 flex items-center justify-between">
+                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <h3 className="text-sm font-semibold text-foreground">{campaignHasContacts ? "Add more contacts" : "Upload CSV"}</h3>
-                            <div className="flex items-center gap-2">
-                                <Button variant="outline" size="sm" onClick={downloadTemplate}>
+                            <div className="flex flex-wrap items-center gap-2">
+                                <Button variant="outline" size="sm" onClick={() => void downloadTemplate()}>
                                     <Download className="w-4 h-4" />
-                                    Download template
+                                    Download sample CSV
                                 </Button>
                                 {campaignHasContacts && (
                                     <Button variant="ghost" size="sm" onClick={() => { setShowUploadPanel(false); clearFile(); setError(""); }}>
@@ -415,21 +611,22 @@ export default function ContactsPage() {
                             )}
 
                             <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm">
-                                <label className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">CSV File</label>
+                                <label htmlFor="contacts-csv-file" className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">CSV File</label>
                                 <div
-                                    className={`mt-2 rounded-2xl border-2 border-dashed p-8 text-center shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out ${file || dragActive ? "border-ring/60 bg-background/60" : "border-border bg-background/50 hover:border-ring/50"} ${uploading ? "cursor-not-allowed opacity-70" : "cursor-pointer hover:-translate-y-0.5 hover:shadow-md"}`}
-                                    onClick={() => !uploading && fileInputRef.current?.click()}
+                                    className={`mt-2 rounded-2xl border-2 border-dashed p-4 text-center shadow-sm transition-[background-color,border-color,box-shadow] duration-150 ease-out sm:p-8 ${file || dragActive ? "border-ring/60 bg-background/60" : "border-border bg-background/50"} ${uploading ? "opacity-70" : "hover:border-ring/50 hover:shadow-md"}`}
                                     onDragEnter={handleDragOver}
                                     onDragOver={handleDragOver}
                                     onDragLeave={handleDragLeave}
                                     onDrop={handleDrop}
                                 >
                                     <input
+                                        id="contacts-csv-file"
                                         ref={fileInputRef}
                                         type="file"
+                                        tabIndex={-1}
                                         accept=".csv,text/csv"
                                         onChange={handleFileChange}
-                                        className="hidden"
+                                        className="sr-only"
                                         disabled={uploading}
                                     />
                                     {file ? (
@@ -437,6 +634,15 @@ export default function ContactsPage() {
                                             <FileText className="h-5 w-5 text-foreground" />
                                             <span className="text-sm font-semibold text-foreground">{file.name}</span>
                                             <span className="text-sm text-muted-foreground tabular-nums">({(file.size / 1024).toFixed(1)} KB)</span>
+                                            <Button
+                                                type="button"
+                                                variant="outline"
+                                                size="sm"
+                                                disabled={uploading}
+                                                onClick={() => fileInputRef.current?.click()}
+                                            >
+                                                Choose another
+                                            </Button>
                                             <button
                                                 type="button"
                                                 onClick={(e) => { e.stopPropagation(); clearFile(); }}
@@ -447,20 +653,26 @@ export default function ContactsPage() {
                                             </button>
                                         </div>
                                     ) : (
-                                        <div>
+                                        <button
+                                            type="button"
+                                            disabled={uploading}
+                                            onClick={() => fileInputRef.current?.click()}
+                                            aria-describedby="contacts-csv-help"
+                                            className="w-full rounded-xl p-2 text-center focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                        >
                                             <Upload className="mx-auto mb-2 h-8 w-8 text-muted-foreground" />
                                             <p className="text-sm font-medium text-foreground">Click to upload or drag and drop</p>
-                                            <p className="mt-1 text-xs text-muted-foreground">CSV only · max 10 MB · max {MAX_ROWS.toLocaleString()} rows</p>
-                                        </div>
+                                            <p id="contacts-csv-help" className="mt-1 text-xs text-muted-foreground">CSV only · max 10 MB · max {MAX_ROWS.toLocaleString()} rows</p>
+                                        </button>
                                     )}
                                 </div>
                             </div>
 
                             <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm">
                                 <h4 className="text-sm font-semibold text-foreground mb-2">CSV Format</h4>
-                                <p className="text-xs text-muted-foreground mb-2">Required column: <span className="font-semibold text-foreground">phone_number</span>. Optional: <span className="font-semibold text-foreground">first_name, last_name, email</span>. Any extra columns are stored as custom fields.</p>
+                                <p className="text-xs text-muted-foreground mb-2">Required column: <span className="font-semibold text-foreground">phone_number</span>. Use either <span className="font-semibold text-foreground">full_name</span> or <span className="font-semibold text-foreground">first_name, last_name</span>; email and company_name are optional. Extra columns are stored as custom fields.</p>
                                 <code className="inline-flex rounded-lg border border-border bg-background/70 px-2 py-1 text-xs font-semibold text-foreground">
-                                    phone_number,first_name,last_name,email
+                                    phone_number,full_name,email,company_name
                                 </code>
                                 <p className="text-xs text-muted-foreground mt-2">Phone numbers are normalized to E.164 server-side. 10-digit US numbers get +1 added automatically.</p>
                             </div>
@@ -518,15 +730,23 @@ export default function ContactsPage() {
                             )}
 
                             {error && (
-                                <div className="flex items-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                                <div role="alert" className="flex items-center gap-2 rounded-2xl border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                                     <AlertCircle className="h-4 w-4" />
                                     {error}
                                 </div>
                             )}
 
                             <Button
-                                onClick={handleUpload}
-                                disabled={!canUpload}
+                                onClick={() => {
+                                    // No file yet: open the same picker as the drop area
+                                    // instead of sitting inert with no feedback.
+                                    if (!file) {
+                                        fileInputRef.current?.click();
+                                        return;
+                                    }
+                                    void handleUpload();
+                                }}
+                                disabled={file ? !canUpload : uploading}
                                 className="w-full hover:scale-[1.02] hover:shadow-md active:scale-[0.99]"
                             >
                                 {uploading ? (
@@ -538,6 +758,10 @@ export default function ContactsPage() {
                         </div>
                     </motion.div>
     );
+
+    const fieldErrors: ImportFieldError[] =
+        (result as (BulkImportResponse & { field_errors?: ImportFieldError[] }) | null)
+            ?.field_errors ?? [];
 
     const resultCard = result ? (
                         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="content-card">
@@ -593,7 +817,240 @@ export default function ContactsPage() {
                                     </div>
                                 </div>
                             )}
+
+                            {/* §11 "Show row-level validation failures": cells we
+                                could not use on rows that DID import. The contact
+                                is not lost over one bad cell, but the cell is not
+                                stored either — and you are told which row and
+                                which column, or the value is gone silently. */}
+                            {fieldErrors.length > 0 && (
+                                <div className="mt-4">
+                                    <h4 className="mb-1 text-sm font-semibold text-foreground">
+                                        Values we could not use ({fieldErrors.length})
+                                    </h4>
+                                    <p className="mb-2 text-xs text-muted-foreground">
+                                        These contacts were imported; only the cell below was
+                                        left blank. Fix them in your file and re-upload, or
+                                        edit the contact here.
+                                    </p>
+                                    <div className="max-h-48 overflow-y-auto rounded-2xl border border-border bg-background/50">
+                                        <table className="w-full text-sm">
+                                            <thead className="sticky top-0 bg-muted/60">
+                                                <tr>
+                                                    <th className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted-foreground">Row</th>
+                                                    <th className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted-foreground">Column</th>
+                                                    <th className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted-foreground">Value</th>
+                                                    <th className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wide text-muted-foreground">Problem</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody className="divide-y divide-border">
+                                                {fieldErrors.map((err, i) => (
+                                                    <tr key={i}>
+                                                        <td className="px-3 py-2 font-semibold text-foreground">{err.row ?? "--"}</td>
+                                                        <td className="px-3 py-2 text-muted-foreground">{err.field ?? "--"}</td>
+                                                        <td className="px-3 py-2 text-muted-foreground">{err.value || "--"}</td>
+                                                        <td className="px-3 py-2 text-yellow-700 dark:text-yellow-300">{err.error}</td>
+                                                    </tr>
+                                                ))}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            )}
                         </motion.div>
+    ) : null;
+
+    const contactEditor = showAddContact ? (
+        <form
+            id="contact-inline-form"
+            onSubmit={handleSaveContact}
+            className="mb-6 rounded-2xl border border-primary/20 bg-primary/[0.035] p-4 sm:p-5"
+        >
+            <div className="mb-4 flex flex-col gap-1 border-b border-border/60 pb-4">
+                <h4 className="text-sm font-bold text-foreground">{editingContact ? "Edit contact details" : "New contact details"}</h4>
+                <p className="text-xs text-muted-foreground">Fields marked required must be completed. Extra context is optional but improves call quality.</p>
+            </div>
+            <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <div>
+                    <Label htmlFor="contact-phone">Phone Number <span className="text-destructive">*</span></Label>
+                    <Input
+                        id="contact-phone"
+                        type="tel"
+                        inputMode="tel"
+                        autoComplete="tel"
+                        value={contactForm.phone_number}
+                        onChange={(event) => setContactForm((previous) => ({ ...previous, phone_number: event.target.value }))}
+                        placeholder="+1234567890"
+                        required
+                        aria-describedby="contact-phone-help"
+                    />
+                    <p id="contact-phone-help" className="mt-1.5 text-xs text-muted-foreground">Required · include country code</p>
+                </div>
+                <div>
+                    <Label htmlFor="contact-first-name">First Name <span className="font-normal text-muted-foreground">(recommended)</span></Label>
+                    <Input
+                        id="contact-first-name"
+                        autoComplete="given-name"
+                        value={contactForm.first_name}
+                        onChange={(event) => setContactForm((previous) => ({ ...previous, first_name: event.target.value }))}
+                        placeholder="John"
+                    />
+                </div>
+                <div>
+                    <Label htmlFor="contact-last-name">Last Name</Label>
+                    <Input
+                        id="contact-last-name"
+                        autoComplete="family-name"
+                        value={contactForm.last_name}
+                        onChange={(event) => setContactForm((previous) => ({ ...previous, last_name: event.target.value }))}
+                        placeholder="Doe"
+                    />
+                </div>
+                <div>
+                    <Label htmlFor="contact-email">Email</Label>
+                    <Input
+                        id="contact-email"
+                        type="email"
+                        autoComplete="email"
+                        value={contactForm.email}
+                        onChange={(event) => setContactForm((previous) => ({ ...previous, email: event.target.value }))}
+                        placeholder="john@example.com"
+                    />
+                </div>
+            </div>
+
+            <div className="mb-4">
+                <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    aria-expanded={showContactDetails}
+                    aria-controls="contact-more-details"
+                    onClick={() => setShowContactDetails((visible) => !visible)}
+                    className="-ml-2"
+                >
+                    <ChevronDown
+                        aria-hidden
+                        className={"h-4 w-4 transition-transform " + (showContactDetails ? "rotate-180" : "")}
+                    />
+                    More details
+                </Button>
+                {showContactDetails && (
+                    <div
+                        id="contact-more-details"
+                        className="mt-3 grid grid-cols-1 gap-4 rounded-lg border border-border/70 bg-background/50 p-4 sm:grid-cols-2 lg:grid-cols-3"
+                    >
+                        <div>
+                            <Label htmlFor="contact-mobile-number">Mobile Number</Label>
+                            <Input
+                                id="contact-mobile-number"
+                                type="tel"
+                                inputMode="tel"
+                                autoComplete="tel"
+                                value={contactForm.mobile_number}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, mobile_number: event.target.value }))}
+                                placeholder="Optional alternate mobile"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="contact-business-number">Business Number</Label>
+                            <Input
+                                id="contact-business-number"
+                                type="tel"
+                                inputMode="tel"
+                                value={contactForm.business_number}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, business_number: event.target.value }))}
+                                placeholder="Optional office number"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="contact-company">Company</Label>
+                            <Input
+                                id="contact-company"
+                                autoComplete="organization"
+                                value={contactForm.company_name}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, company_name: event.target.value }))}
+                                placeholder="Acme Roofing"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="contact-job-title">Job Title or Role</Label>
+                            <Input
+                                id="contact-job-title"
+                                autoComplete="organization-title"
+                                value={contactForm.job_title}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, job_title: event.target.value }))}
+                                placeholder="Operations Manager"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="contact-best-time">Best Time to Call</Label>
+                            <Input
+                                id="contact-best-time"
+                                value={contactForm.best_time_to_call}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, best_time_to_call: event.target.value }))}
+                                placeholder="Mon–Fri, 9–11 AM"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="contact-timezone">Timezone</Label>
+                            <Input
+                                id="contact-timezone"
+                                value={contactForm.timezone}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, timezone: event.target.value }))}
+                                placeholder="America/New_York"
+                            />
+                        </div>
+                        <div>
+                            <Label htmlFor="contact-preferred-method">Preferred Contact Method</Label>
+                            <Select
+                                id="contact-preferred-method"
+                                ariaLabel="Preferred Contact Method"
+                                value={contactForm.preferred_contact_method}
+                                onChange={(next) => setContactForm((previous) => ({ ...previous, preferred_contact_method: next }))}
+                            >
+                                <option value="">No preference</option>
+                                <option value="phone">Phone</option>
+                                <option value="email">Email</option>
+                                <option value="sms">SMS</option>
+                                <option value="whatsapp">WhatsApp</option>
+                            </Select>
+                        </div>
+                        <div className="sm:col-span-2 lg:col-span-3">
+                            <Label htmlFor="contact-calling-notes">Calling Notes</Label>
+                            <textarea
+                                id="contact-calling-notes"
+                                value={contactForm.calling_notes}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, calling_notes: event.target.value }))}
+                                placeholder="Context the agent should know before calling"
+                                className="flex min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-foreground ring-offset-background transition-[background-color,border-color,box-shadow] placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                            />
+                        </div>
+                        <label className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3 sm:col-span-2 lg:col-span-3">
+                            <input
+                                type="checkbox"
+                                checked={contactForm.do_not_call}
+                                onChange={(event) => setContactForm((previous) => ({ ...previous, do_not_call: event.target.checked }))}
+                                className="mt-0.5 h-4 w-4 rounded border-input accent-amber-600"
+                            />
+                            <span>
+                                <span className="block text-sm font-medium text-foreground">Do not call this contact</span>
+                                <span className="block text-xs text-muted-foreground">This is an operational suppression flag. The dialer will exclude the contact; the agent will never be asked to discuss it.</span>
+                            </span>
+                        </label>
+                    </div>
+                )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+                <Button type="submit" size="sm" disabled={savingContact}>
+                    {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={closeContactForm}>
+                    Cancel
+                </Button>
+            </div>
+        </form>
     ) : null;
 
     const activeListName = selectedListId ? "the selected list" : null;
@@ -601,33 +1058,39 @@ export default function ContactsPage() {
     return (
         <DashboardLayout title="Contacts" description="Import and manage the contacts for your campaigns">
             {loading ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
+                <div className="flex h-64 items-center justify-center" role="status" aria-live="polite">
+                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" aria-hidden />
+                    <span className="sr-only">Loading campaigns…</span>
                 </div>
             ) : campaigns.length === 0 ? (
-                <div className="max-w-3xl">
-                    <div className="content-card text-center text-sm text-muted-foreground">
-                        You don&apos;t have any campaigns yet.{" "}
-                        <Link href="/campaigns" className="font-semibold text-emerald-700 hover:underline dark:text-emerald-400">
-                            Create a campaign
-                        </Link>{" "}
-                        first, then import contacts here.
+                <div className="max-w-5xl space-y-6">
+                    <ContactRequirementsGuide />
+                    <div className="content-card text-center">
+                        <h2 className="text-lg font-bold text-foreground">Create a campaign first</h2>
+                        <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
+                            Every contact belongs to a campaign so calls, recordings, and results stay organised in the right workspace.
+                        </p>
+                        <Button asChild className="mt-5">
+                            <Link href="/campaigns">Create a campaign</Link>
+                        </Button>
                     </div>
                 </div>
             ) : !firstLoadDone ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
+                <div className="flex h-64 items-center justify-center" role="status" aria-live="polite">
+                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" aria-hidden />
+                    <span className="sr-only">Loading contacts…</span>
                 </div>
             ) : campaignHasContacts ? (
                 // ─────────────── Contacts HOME ───────────────
                 <div className="space-y-6">
+                    <ContactRequirementsGuide />
                     {/* Toolbar: campaign selector + search + add-more */}
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+                        className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between"
                     >
-                        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+                        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
                             <Select
                                 value={selectedCampaign}
                                 onChange={(next) => setSelectedCampaign(next)}
@@ -641,24 +1104,50 @@ export default function ContactsPage() {
                                 ))}
                             </Select>
                             <div className="relative w-full sm:max-w-xs">
+                                <label htmlFor="contacts-search" className="sr-only">Search contacts by phone number</label>
                                 <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                                 <input
+                                    id="contacts-search"
                                     type="text"
                                     value={search}
                                     onChange={(e) => setSearch(e.target.value)}
-                                    placeholder="Search by phone, name or email…"
+                                    placeholder="Search by phone number…"
                                     className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
                                 />
                             </div>
                         </div>
-                        <Button onClick={() => { setShowUploadPanel((v) => !v); setResult(null); }}>
+                        <Button
+                            className="w-full sm:w-auto xl:shrink-0"
+                            aria-expanded={showUploadPanel}
+                            aria-controls="contacts-upload-panel"
+                            onClick={() => { setShowUploadPanel((v) => !v); setResult(null); }}
+                        >
                             <Plus className="w-4 h-4" />
                             Add more contacts
                         </Button>
                     </motion.div>
 
                     {/* Collapsible upload panel + last import result */}
-                    {showUploadPanel && uploadCard}
+                    {showUploadPanel && (
+                        <div id="contacts-upload-panel" className="space-y-4">
+                            {/* Look at the file BEFORE it becomes live dials
+                                (goals.md §11): how we read each column, which
+                                rows have problems, and who appears twice.
+                                Writes nothing — the existing upload below is
+                                still what commits. */}
+                            <div className="content-card">
+                                <h3 className="mb-1 text-sm font-semibold text-foreground">
+                                    Check the file first
+                                </h3>
+                                <p className="mb-3 text-xs text-muted-foreground">
+                                    See how your columns will be read and what needs
+                                    attention. Nothing is saved at this step.
+                                </p>
+                                <CsvImportMapper />
+                            </div>
+                            {uploadCard}
+                        </div>
+                    )}
                     {resultCard}
 
                     {/* Contact lists — one card per uploaded list */}
@@ -675,79 +1164,111 @@ export default function ContactsPage() {
                         animate={{ opacity: 1, y: 0 }}
                         className="content-card"
                     >
-                        <div className="mb-4 flex items-center justify-between">
-                            <h3 className="text-lg font-semibold text-foreground">
+                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <h3 className="min-w-0 text-lg font-semibold text-foreground">
                                 Contacts
                                 {activeListName && (
-                                    <span className="ml-2 text-sm font-normal text-muted-foreground">· filtered to {activeListName}</span>
+                                    <span className="block text-sm font-normal text-muted-foreground sm:ml-2 sm:inline">· filtered to {activeListName}</span>
                                 )}
                             </h3>
                             <Button
                                 size="sm"
-                                onClick={() => {
-                                    setEditingContact(null);
-                                    setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" });
-                                    setShowAddContact(true);
-                                }}
+                                className="w-full sm:w-auto"
+                                aria-expanded={showAddContact}
+                                aria-controls="contact-inline-form"
+                                onClick={startAddContact}
                             >
                                 <Plus className="w-4 h-4" />
                                 Add contact
                             </Button>
                         </div>
 
-                        {showAddContact && (
-                            <form onSubmit={handleSaveContact} className="mb-6 rounded-lg border border-border bg-muted/30 p-4">
-                                <div className="mb-4 grid grid-cols-2 gap-4 md:grid-cols-4">
-                                    <div>
-                                        <Label htmlFor="phone">Phone Number</Label>
-                                        <Input id="phone" value={contactForm.phone_number} onChange={(e) => setContactForm((p) => ({ ...p, phone_number: e.target.value }))} placeholder="+1234567890" required />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="first_name">First Name</Label>
-                                        <Input id="first_name" value={contactForm.first_name} onChange={(e) => setContactForm((p) => ({ ...p, first_name: e.target.value }))} placeholder="John" />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="last_name">Last Name</Label>
-                                        <Input id="last_name" value={contactForm.last_name} onChange={(e) => setContactForm((p) => ({ ...p, last_name: e.target.value }))} placeholder="Doe" />
-                                    </div>
-                                    <div>
-                                        <Label htmlFor="email">Email</Label>
-                                        <Input id="email" type="email" value={contactForm.email} onChange={(e) => setContactForm((p) => ({ ...p, email: e.target.value }))} placeholder="john@example.com" />
-                                    </div>
-                                </div>
-                                <div className="flex gap-2">
-                                    <Button type="submit" size="sm" disabled={savingContact}>
-                                        {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
-                                    </Button>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); }}>
-                                        Cancel
-                                    </Button>
-                                </div>
-                            </form>
-                        )}
+                        {contactEditor}
 
                         {contactsError && (
-                            <div className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                            <div role="alert" className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                                 <AlertCircle className="h-4 w-4" /> {contactsError}
                             </div>
                         )}
 
                         {contactsLoading ? (
-                            <div className="flex items-center justify-center py-10">
-                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                            <div className="flex items-center justify-center py-10" role="status" aria-live="polite">
+                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
+                                <span className="sr-only">Loading contacts…</span>
                             </div>
                         ) : contacts.length === 0 ? (
                             <div className="py-10 text-center text-muted-foreground">
                                 No contacts match your search or filter.
                             </div>
                         ) : (
-                            <div className="overflow-x-auto">
+                            <>
+                            <div className="space-y-3 md:hidden">
+                                {contacts.map((contact) => {
+                                    const displayName = contact.first_name || contact.last_name
+                                        ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim()
+                                        : contact.full_name?.trim() || "Name unavailable";
+                                    return (
+                                        <article key={contact.id} className={`rounded-xl border border-border p-4 ${contact.is_lead ? "bg-emerald-500/5" : "bg-background/40"}`}>
+                                            <div className="flex items-start justify-between gap-3">
+                                                <div className="min-w-0">
+                                                    <p className="break-words text-sm font-semibold tabular-nums text-foreground">{contact.phone_number}</p>
+                                                     <p className="mt-1 truncate text-sm text-muted-foreground">{displayName}</p>
+                                                     <ContactCapturedDetails leadId={contact.id} latestNote={contact.latest_analysis_note} />
+                                                     <p className="truncate text-xs text-muted-foreground">
+                                                         {[contact.job_title, contact.company_name].filter(Boolean).join(" · ") || contact.email || "No company or email"}
+                                                     </p>
+                                                     {(contact.best_time_to_call || contact.timezone || contact.preferred_contact_method) && (
+                                                         <p className="mt-1 text-xs text-muted-foreground">
+                                                             {[contact.best_time_to_call, contact.timezone, contact.preferred_contact_method].filter(Boolean).join(" · ")}
+                                                         </p>
+                                                     )}
+                                                 </div>
+                                                 {contact.do_not_call ? (
+                                                     <span className="shrink-0 rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                                                         Do not call
+                                                     </span>
+                                                 ) : contact.is_lead ? (
+                                                    <span className="shrink-0 rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                                                        Lead — follow up
+                                                    </span>
+                                                ) : (
+                                                    <span className="shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                                                        {contact.last_call_result || contact.status}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {/* pr-12: keeps Edit/Delete clear of the fixed chat
+                                                launcher's lane while scrolling (Group C, 2026-10). */}
+                                            <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3 pr-12">
+                                                <button
+                                                    type="button"
+                                                    onClick={() => startEditContact(contact)}
+                                                    aria-label={`Edit ${contact.phone_number}`}
+                                                    className="inline-flex h-11 items-center gap-2 rounded-lg border border-border px-3 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                                                >
+                                                    <Pencil className="h-4 w-4" aria-hidden /> Edit
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleDeleteContact(contact.id, contact.phone_number)}
+                                                    disabled={deletingContactId === contact.id}
+                                                    aria-label={`Delete ${contact.phone_number}`}
+                                                    className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+                                                >
+                                                    {deletingContactId === contact.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
+                                                </button>
+                                            </div>
+                                        </article>
+                                    );
+                                })}
+                            </div>
+                            <div className="hidden overflow-x-auto md:block">
                                 <table className="w-full">
                                     <thead className="border-b border-border">
                                         <tr>
-                                            <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Phone</th>
-                                            <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Name</th>
-                                            <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Email</th>
+                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Contact</th>
+                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Company / role</th>
+                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Call window</th>
                                             <th className="whitespace-nowrap px-4 py-2 text-left text-xs font-medium uppercase text-muted-foreground">Status</th>
                                             <th className="whitespace-nowrap px-4 py-2 text-right text-xs font-medium uppercase text-muted-foreground">Actions</th>
                                         </tr>
@@ -755,13 +1276,28 @@ export default function ContactsPage() {
                                     <tbody className="divide-y divide-border/60">
                                         {contacts.map((contact) => (
                                             <tr key={contact.id} className={`transition-colors hover:bg-muted/30 ${contact.is_lead ? "bg-green-500/5" : ""}`}>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm tabular-nums text-foreground">{contact.phone_number}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-muted-foreground">
-                                                    {contact.first_name || contact.last_name ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim() : "--"}
-                                                </td>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm text-muted-foreground">{contact.email || "--"}</td>
-                                                <td className="whitespace-nowrap px-4 py-3 text-sm">
-                                                    {contact.is_lead ? (
+                                                 <td className="px-4 py-3 text-sm">
+                                                     <p className="font-medium text-foreground">{contact.first_name || contact.last_name
+                                                         ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim()
+                                                         : contact.full_name?.trim() || "Name unavailable"}</p>
+                                                     <p className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">{contact.phone_number}</p>
+                                                     {contact.email ? <p className="max-w-56 truncate text-xs text-muted-foreground">{contact.email}</p> : null}
+                                                     <ContactCapturedDetails leadId={contact.id} latestNote={contact.latest_analysis_note} />
+                                                 </td>
+                                                 <td className="px-4 py-3 text-sm text-muted-foreground">
+                                                     <p>{contact.company_name || "--"}</p>
+                                                     {contact.job_title ? <p className="text-xs">{contact.job_title}</p> : null}
+                                                 </td>
+                                                 <td className="px-4 py-3 text-sm text-muted-foreground">
+                                                     <p>{contact.best_time_to_call || "Any time"}</p>
+                                                     <p className="text-xs">{[contact.timezone, contact.preferred_contact_method].filter(Boolean).join(" · ") || "No preference"}</p>
+                                                 </td>
+                                                 <td className="whitespace-nowrap px-4 py-3 text-sm">
+                                                     {contact.do_not_call ? (
+                                                         <span className="w-fit rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">
+                                                             Do not call
+                                                         </span>
+                                                     ) : contact.is_lead ? (
                                                         <span className="w-fit rounded-full border border-emerald-500/20 bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
                                                             Lead — follow up
                                                         </span>
@@ -799,12 +1335,44 @@ export default function ContactsPage() {
                                     </tbody>
                                 </table>
                             </div>
+                            </>
                         )}
                     </motion.div>
                 </div>
             ) : (
-                // ─────────────── Empty campaign: upload only ───────────────
-                <div className="max-w-3xl space-y-6">
+                // ─────────────── Empty campaign: add one or import many ───────────────
+                <div className="max-w-5xl space-y-6">
+                    <ContactRequirementsGuide />
+                    {contactsError && (
+                        <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
+                            <AlertCircle className="h-4 w-4" /> {contactsError}
+                        </div>
+                    )}
+                    <motion.div
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="content-card"
+                    >
+                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                            <div>
+                                <h3 className="text-lg font-semibold text-foreground">Add a contact manually</h3>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Enter one person now, or use the CSV importer below for a list.
+                                </p>
+                            </div>
+                            <Button
+                                size="sm"
+                                className="w-full sm:w-auto"
+                                aria-expanded={showAddContact}
+                                aria-controls="contact-inline-form"
+                                onClick={startAddContact}
+                            >
+                                <Plus className="h-4 w-4" />
+                                Add contact
+                            </Button>
+                        </div>
+                        {contactEditor}
+                    </motion.div>
                     {uploadCard}
                     {resultCard}
                 </div>

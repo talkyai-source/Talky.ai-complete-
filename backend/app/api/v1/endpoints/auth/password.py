@@ -11,6 +11,7 @@ from app.api.v1.dependencies import (
     get_current_user,
     get_db_client,
 )
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
     PasswordValidationError,
@@ -78,7 +79,7 @@ async def change_password(
             detail=str(exc),
         ) from exc
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         row = await conn.fetchrow(
             "SELECT password_hash FROM user_profiles WHERE id = $1",
             current_user.id,

@@ -1,0 +1,25 @@
+{
+  "base_revision": "e551a9487d7b79db541655bd14cb3e987311ee45",
+  "candidate_revision": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd",
+  "method": "SHA256 LF-normalized immutable git blobs",
+  "files": {
+    "backend/app/domain/services/voice_pipeline/contact_capture.py": "c05b0a4ed44b6910795dbbc596d560c9a8f9ca2d21e9d6a408e092decb53c084",
+    "backend/app/domain/services/voice_pipeline/grounded_figures.py": "857704949ae27f5de50099a9961e8f0129c4168df715532acd9bb66cc7337ec5",
+    "backend/app/domain/services/voice_pipeline/live_structured_state.py": "027847f85155cdc35cca525451fc4e437af4f1697c81a3f28f47ae34fb67a65c",
+    "backend/app/domain/services/voice_pipeline/turn_ender.py": "9cf3ff590969ae507fd7dd0cb918b7c389f8dc9596e49c704e5e86c6383e2963",
+    "backend/app/realtime/bridge.py": "0bc561ac9d0704fe18aee0f8e4e87d963f0579c2ba21452e722ae5bff6fb0e66",
+    "backend/scripts/evaluate_ag04_conversations.py": "b4876e7d5d771775ee34def686c51fad4c8b6f2b4143ebab512af0f25a14a0bd",
+    "backend/scripts/realtime_smoke.py": "5cc05e926097be3fd09e5d7d2662cf431e8780de2410ed36f3142ef07f8e0847",
+    "backend/tests/fixtures/conversation/ag04_native.json": "fc71df88b611e3072a82e4df5d3b5762f97ac0f77859030ab368b4a2d73b4fa7",
+    "backend/tests/fixtures/conversation/ag04_traditional.json": "dfb5232f3e85c9c84141becb159c5b1fb7bdf407f1e27341ec29201e758b4deb",
+    "backend/tests/qualification/ag04_native.py": "cd887f5f1c991638c2676b7cee982d97257f2e1ed4236f7ee131a42cbc67e7eb",
+    "backend/tests/qualification/ag04_traditional.py": "3648c975d6cd99ee2b9008c292b427d84a93e9515d0417736b0e92e51d7a0dd9",
+    "backend/tests/unit/test_ag04_iso_price_grounding.py": "bd0e47d7a805760351ebb5319a02d05a450e84f865a2b82707d129e3d5f60384",
+    "backend/tests/unit/test_ag04_native_qualification.py": "c4c9379403cc93f2bf0c7b25915433e17165ca77e59801ecebddc3adcaec9d31",
+    "backend/tests/unit/test_ag04_qualification_gate.py": "8d23199d4388aeeaff693ab48e0a18715b6615e42dcd4c88f6a2004e0cd6a8e7",
+    "backend/tests/unit/test_ag04_realtime_smoke.py": "57a3106b5fc908a1e459c2aac9fe95b5c13f50cc01af25d9e0f7d8fd59c7bae4",
+    "backend/tests/unit/test_ag04_traditional_qualification.py": "d06f74ee36fc5d8f5fc6eb19ab7c1ecca0dad7d3eb8a821696f6d89cbead9a93",
+    "backend/tests/unit/test_live_structured_state.py": "1908fb9a25c19bb4bcd016999498625903641b533bd8aff7829ef022e39474d7",
+    "backend/tests/unit/test_realtime_end_call_ownership.py": "cc98828547bf6ae3e864bbc90842df8efce529d20518bd327611af206209782a"
+  }
+}

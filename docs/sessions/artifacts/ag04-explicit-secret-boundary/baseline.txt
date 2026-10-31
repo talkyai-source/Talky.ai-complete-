@@ -1,0 +1,324 @@
+FFFFFFFFFFF.......                                                       [100%]
+================================== FAILURES ===================================
+_ test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[False-user] _
+
+role = 'user', final = False
+
+    @pytest.mark.parametrize("role", ["user", "assistant"])
+    @pytest.mark.parametrize("final", [False, True])
+    def test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text(role, final):
+        svc = TranscriptService()
+        metadata = {"provider_item_id": "opaque-item-4111", "caller_turn_order": 1,
+            "alternatives": [SECRET, {"transcript": SECRET, "confidence": 0.8}],
+            "transcript_alternatives": [{"text": SECRET}]}
+        before = deepcopy(metadata)
+        turn = svc.accumulate_turn("synthetic", role, MIXED, is_final=final, metadata=metadata)
+>       assert_safe(turn.content)
+
+tests\unit\test_explicit_secret_boundary.py:51: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[False-assistant] _
+
+role = 'assistant', final = False
+
+    @pytest.mark.parametrize("role", ["user", "assistant"])
+    @pytest.mark.parametrize("final", [False, True])
+    def test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text(role, final):
+        svc = TranscriptService()
+        metadata = {"provider_item_id": "opaque-item-4111", "caller_turn_order": 1,
+            "alternatives": [SECRET, {"transcript": SECRET, "confidence": 0.8}],
+            "transcript_alternatives": [{"text": SECRET}]}
+        before = deepcopy(metadata)
+        turn = svc.accumulate_turn("synthetic", role, MIXED, is_final=final, metadata=metadata)
+>       assert_safe(turn.content)
+
+tests\unit\test_explicit_secret_boundary.py:51: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[True-user] _
+
+role = 'user', final = True
+
+    @pytest.mark.parametrize("role", ["user", "assistant"])
+    @pytest.mark.parametrize("final", [False, True])
+    def test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text(role, final):
+        svc = TranscriptService()
+        metadata = {"provider_item_id": "opaque-item-4111", "caller_turn_order": 1,
+            "alternatives": [SECRET, {"transcript": SECRET, "confidence": 0.8}],
+            "transcript_alternatives": [{"text": SECRET}]}
+        before = deepcopy(metadata)
+        turn = svc.accumulate_turn("synthetic", role, MIXED, is_final=final, metadata=metadata)
+>       assert_safe(turn.content)
+
+tests\unit\test_explicit_secret_boundary.py:51: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[True-assistant] _
+
+role = 'assistant', final = True
+
+    @pytest.mark.parametrize("role", ["user", "assistant"])
+    @pytest.mark.parametrize("final", [False, True])
+    def test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text(role, final):
+        svc = TranscriptService()
+        metadata = {"provider_item_id": "opaque-item-4111", "caller_turn_order": 1,
+            "alternatives": [SECRET, {"transcript": SECRET, "confidence": 0.8}],
+            "transcript_alternatives": [{"text": SECRET}]}
+        before = deepcopy(metadata)
+        turn = svc.accumulate_turn("synthetic", role, MIXED, is_final=final, metadata=metadata)
+>       assert_safe(turn.content)
+
+tests\unit\test_explicit_secret_boundary.py:51: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_revision_retains_safe_original_and_uses_safe_hash_and_character_count __
+
+    def test_revision_retains_safe_original_and_uses_safe_hash_and_character_count():
+        svc = TranscriptService()
+        svc.accumulate_turn("synthetic", "user", MIXED, turn_index=1, is_final=True,
+            metadata={"provider_item_id": "item", "caller_turn_order": 1})
+        assert svc.annotate_turn_revision("synthetic", turn_index=1, provider_item_id="item",
+            caller_turn_order=1, content=MIXED + " Please help with setup.")
+        row = svc.get_transcript_json("synthetic")[0]
+>       assert_safe(row)
+
+tests\unit\test_explicit_secret_boundary.py:67: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = {'audio_window_end': None, 'audio_window_start': None, 'confidence': None, 'content': 'My name is Alex Morgan. My emai... My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456. Please help with setup.', ...}
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '{"role": "u...: "revised"}'
+E         '4111' is contained here:
+E         ?           ^^^^^^^^^^^^^^^^
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456. Please help with setup.", "timestamp": "2026-10-05T22:10:10.928141", "confidence": null, "talklee_call_id": null, "turn_index": 1, "event_type": "utterance", "is_final": true, "audio_window_start": null, "audio_window_end": null, "include_in_plaintext": true, "metadata": {"provider_item_id": "item", "caller_turn_order": 1, "asr_latest_revision": {"revision": 1, "provider_item_id": "item", "caller_turn_order": 1, "content": "My name is Alex Morgan. My email is...
+E         
+E         ...Full output truncated (2 lines hidden), use '-vv' to show
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret _
+
+    async def test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret():
+        from tests.unit.test_transcript_flush_pooled import _FakeConn, _FakePool
+        svc = TranscriptService()
+        svc.accumulate_turn("synthetic", "user", MIXED, is_final=True)
+        conn = _FakeConn()
+        pool = _FakePool(conn)
+>       assert await svc.flush_to_database("synthetic", db_pool=pool, tenant_id="tenant")
+E       assert False
+
+tests\unit\test_explicit_secret_boundary.py:86: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.transcript_service:transcript_service.py:617 transcript_flush_failed call=synthetic error_type=ValueError
+__ test_traditional_handler_fanout_and_actual_turn_capture_share_safe_source __
+
+    async def test_traditional_handler_fanout_and_actual_turn_capture_share_safe_source():
+        from tests.unit.test_ag03_caller_dispatch_order import pipeline, final
+        service, session = pipeline()
+        service.transcript_service = TranscriptService()
+        service._stream_llm_and_tts = AsyncMock(return_value=("Thanks for explaining.", 1.0, 1.0))
+        service._supports_llm_end_session_action = lambda _session: False
+        session._line_phone_checked = True
+        websocket = AsyncMock()
+        await service.handle_transcript(session, TranscriptChunk(text=MIXED, is_final=True,
+            metadata={"alternatives": (SECRET,)}), websocket)
+>       assert_safe(session.current_user_input)
+
+tests\unit\test_explicit_secret_boundary.py:106: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-openai] _
+
+provider = 'openai', revision = False
+
+    @pytest.mark.parametrize("provider", ["openai", "xai"])
+    @pytest.mark.parametrize("revision", [False, True])
+    async def test_actual_native_fanout_contact_and_revision_keep_matching_safe_source(provider, revision):
+        from tests.unit.test_ag05_native_contact_revision import replay
+        r = replay(provider)
+        if revision:
+            await r.step({"kind": "caller", "item": "source", "text": "My email is old@example.com."})
+        await r.step({"kind": "caller", "item": "source", "text": MIXED, "revision": revision})
+        rows = snapshot_slots(r.session.captured_slots)
+        assert rows["email"]["value"] == "alex@example.com"
+        assert rows["phone"]["value"] == "+14155552671"
+>       assert_safe(r.bridge._latest_caller_text)
+
+tests\unit\test_explicit_secret_boundary.py:133: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-xai] _
+
+provider = 'xai', revision = False
+
+    @pytest.mark.parametrize("provider", ["openai", "xai"])
+    @pytest.mark.parametrize("revision", [False, True])
+    async def test_actual_native_fanout_contact_and_revision_keep_matching_safe_source(provider, revision):
+        from tests.unit.test_ag05_native_contact_revision import replay
+        r = replay(provider)
+        if revision:
+            await r.step({"kind": "caller", "item": "source", "text": "My email is old@example.com."})
+        await r.step({"kind": "caller", "item": "source", "text": MIXED, "revision": revision})
+        rows = snapshot_slots(r.session.captured_slots)
+        assert rows["email"]["value"] == "alex@example.com"
+        assert rows["phone"]["value"] == "+14155552671"
+>       assert_safe(r.bridge._latest_caller_text)
+
+tests\unit\test_explicit_secret_boundary.py:133: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-openai] _
+
+provider = 'openai', revision = True
+
+    @pytest.mark.parametrize("provider", ["openai", "xai"])
+    @pytest.mark.parametrize("revision", [False, True])
+    async def test_actual_native_fanout_contact_and_revision_keep_matching_safe_source(provider, revision):
+        from tests.unit.test_ag05_native_contact_revision import replay
+        r = replay(provider)
+        if revision:
+            await r.step({"kind": "caller", "item": "source", "text": "My email is old@example.com."})
+        await r.step({"kind": "caller", "item": "source", "text": MIXED, "revision": revision})
+        rows = snapshot_slots(r.session.captured_slots)
+        assert rows["email"]["value"] == "alex@example.com"
+        assert rows["phone"]["value"] == "+14155552671"
+>       assert_safe(r.bridge._latest_caller_text)
+
+tests\unit\test_explicit_secret_boundary.py:133: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+_ test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-xai] _
+
+provider = 'xai', revision = True
+
+    @pytest.mark.parametrize("provider", ["openai", "xai"])
+    @pytest.mark.parametrize("revision", [False, True])
+    async def test_actual_native_fanout_contact_and_revision_keep_matching_safe_source(provider, revision):
+        from tests.unit.test_ag05_native_contact_revision import replay
+        r = replay(provider)
+        if revision:
+            await r.step({"kind": "caller", "item": "source", "text": "My email is old@example.com."})
+        await r.step({"kind": "caller", "item": "source", "text": MIXED, "revision": revision})
+        rows = snapshot_slots(r.session.captured_slots)
+        assert rows["email"]["value"] == "alex@example.com"
+        assert rows["phone"]["value"] == "+14155552671"
+>       assert_safe(r.bridge._latest_caller_text)
+
+tests\unit\test_explicit_secret_boundary.py:133: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+value = 'My name is Alex Morgan. My email is alex@example.com. My phone is +14155552671. My card number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456.'
+
+    def assert_safe(value):
+        text = json.dumps(value, default=str)
+>       assert "4111" not in text
+E       assert '4111' not in '"My name is... is 123456."'
+E         '4111' is contained here:
+E           number is 4111 1111 1111 1111. Our budget is 2500 and invoice number is 123456."
+E         ?           ++++
+
+tests\unit\test_explicit_secret_boundary.py:38: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_explicit_secret_boundary.py::test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[False-user]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[False-assistant]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[True-user]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_canonical_accumulation_removes_only_explicit_secret_from_all_known_text[True-assistant]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_revision_retains_safe_original_and_uses_safe_hash_and_character_count
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret
+FAILED tests/unit/test_explicit_secret_boundary.py::test_traditional_handler_fanout_and_actual_turn_capture_share_safe_source
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-openai]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[False-xai]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-openai]
+FAILED tests/unit/test_explicit_secret_boundary.py::test_actual_native_fanout_contact_and_revision_keep_matching_safe_source[True-xai]
+11 failed, 7 passed, 22 warnings in 3.31s

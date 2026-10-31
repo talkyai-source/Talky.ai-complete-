@@ -1,0 +1,58 @@
+..........FF.FFFF                                                        [100%]
+================================== FAILURES ===================================
+______ test_lost_owned_selection_refuses_default_factory[first_speaker] _______
+tests\unit\test_selected_warmup_lifecycle.py:197: in test_lost_owned_selection_refuses_default_factory
+    answered.orchestrator.create_voice_session.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+__ test_lost_owned_selection_refuses_default_factory[outbound_answer_clock] ___
+tests\unit\test_selected_warmup_lifecycle.py:197: in test_lost_owned_selection_refuses_default_factory
+    answered.orchestrator.create_voice_session.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_duplicate_registered_callback_at_pod_capacity_does_not_end_current_session _
+tests\unit\test_selected_warmup_lifecycle.py:218: in test_duplicate_registered_callback_at_pod_capacity_does_not_end_current_session
+    reject.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.lifecycle:lifecycle.py:3635 telephony_at_pod_capacity sessions=1 call_id=call � rejecting
+_ test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[before_callback] _
+tests\unit\test_selected_warmup_lifecycle.py:251: in test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease
+    answered.orchestrator.create_voice_session.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_status] _
+tests\unit\test_selected_warmup_lifecycle.py:251: in test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease
+    answered.orchestrator.create_voice_session.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+_ test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_lease] _
+tests\unit\test_selected_warmup_lifecycle.py:251: in test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease
+    answered.orchestrator.create_voice_session.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+=========================== short test summary info ===========================
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_lost_owned_selection_refuses_default_factory[first_speaker]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_lost_owned_selection_refuses_default_factory[outbound_answer_clock]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_duplicate_registered_callback_at_pod_capacity_does_not_end_current_session
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[before_callback]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_status]
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_lease]
+6 failed, 11 passed in 3.17s

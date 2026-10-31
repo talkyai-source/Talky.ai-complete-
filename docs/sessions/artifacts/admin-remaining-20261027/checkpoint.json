@@ -1,0 +1,44 @@
+{
+  "scope": "Evidence retained in the private workspace; hashes bind distinct checkpoints, not a combined live completion score.",
+  "runtime_source_before_docs": "d322b84abe0b71ee99e3ec98aae582bd38216196",
+  "full_admin_activation": false,
+  "feature_freeze_active": true,
+  "records": [
+    {
+      "path": "output/admin-backup-live-local/manifest.json",
+      "sha256": "c9701a3d4af38937891665983bf26845479c5ab20cb5e6106e8ba2e034b98df0"
+    },
+    {
+      "path": "output/admin-remaining-20261027/server/manifest.json",
+      "sha256": "32642f5c08404aa5bef78d178d7bf008fc7b3a4eff9bb0e7823105bdfb0cf587"
+    },
+    {
+      "path": "output/admin-supplier-evidence-local/supplier-handoff-v1.json",
+      "sha256": "1f856061b405c61a744c8b22db08af8dd9ff13b8e972b3677379ac1f7250faa7"
+    },
+    {
+      "path": "output/admin-supplier-evidence-local/supplier-pg-checkpoint-v2.json",
+      "sha256": "9d1827d959cac2a7c2d950e2486e0c4a44fff58fea73d3dc06381d7d01ca94e6"
+    },
+    {
+      "path": "output/admin-allowance-merge-local/owned-clones-v2.json",
+      "sha256": "6c079aa6945232a992ba4fbd5b783321233a14d28c7bca1491d670c0a375ffe8"
+    },
+    {
+      "path": "output/admin-deploy-gates-local/checkpoint-final-v4.json",
+      "sha256": "c80b45affe6d94789b19dbf256573da3a0e07487ea73e098e7d0c8aa37fcd958"
+    },
+    {
+      "path": "output/admin-backup-snapshot-local/disconnect-cleanup-checkpoint-v1.json",
+      "sha256": "5868cec29028e1ed9395853211097ea6f003b035532d6c93097d799e0dc6c18d"
+    },
+    {
+      "path": "output/admin-supplier-ci-local/voice-guard-repair-checkpoint-v1.json",
+      "sha256": "f9c2ec6c7c883b922602168c688fa759a83c5691315cc032efb65dccc7114e2e"
+    },
+    {
+      "path": "output/admin-remaining-20261027/f892-auth-merge-independent-review-v1.json",
+      "sha256": "bc0e865d0dd11baf5a654a780f148bde7d33101c546c4593048cf3a6368646a9"
+    }
+  ]
+}

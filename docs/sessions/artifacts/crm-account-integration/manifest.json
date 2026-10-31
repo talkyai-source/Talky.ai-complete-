@@ -1,0 +1,69 @@
+{
+  "date": "2026-10-06",
+  "source_commit": "35fe11b0e3c7f99f76881a43ac037b908c2a35b6",
+  "source_hashes_lf": {
+    "backend/app/services/crm_sync_service.py": "443e157411d0d48a9098f8d52a3cdbacb74c31b2c0f87e3f8ed7ec6d77711ff1",
+    "backend/app/services/connector_resolver.py": "dba41426e8b530afe323a323866cab797e12bfa0cfecb485cb978bb8b4d623e5",
+    "backend/app/services/email_service.py": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+    "backend/app/services/meeting_service.py": "26775c66e5dd9e5e1dafeca6a00af599d513594202111d56f517328b6473774d",
+    "backend/app/api/v1/endpoints/admin/calls.py": "4ee2b9cc6ba31f131ce57b01a8184d44b622f64b48756f7284856bf2b03e4cad",
+    "backend/app/infrastructure/connectors/crm/base.py": "e18c16b5055e77e0d1062da46aae6f0b12e18797e95acac97bb089b3b828c430",
+    "backend/app/infrastructure/connectors/crm/hubspot.py": "da902d16118d0df30e2b83adf88efc50551634c05945d2f2a7e39920a3756b22",
+    "backend/app/infrastructure/connectors/crm/salesforce.py": "38282ec10b2ead2fa82fb857bcd2048d5a7472601991c98bb94f24436c1870d9",
+    "backend/tests/unit/test_crm_sync_service.py": "f47477ad8c05a5ca4f31f035905931afd72c53a7fa2b006c3fbf5513dc2faa08",
+    "backend/tests/unit/test_ag06_crm_evidence.py": "d0b1e35a8cc63d75a604fcf89b620d572a98dc035c7558f0efccaade27b710db",
+    "backend/tests/unit/test_crm_sync_hooks.py": "b1fdccd586cedb23cb2c8291e52181d6fb3eb24ed1345a0e6d7c81c930ef0bec",
+    "backend/tests/unit/test_admin_crm_inspection.py": "310c22aab9b872001b8edcf56801269dad28fde15b826eeb72a8686633ee142a",
+    "backend/tests/unit/test_reviewed_selector_identity_types.py": "c1aea1efe6929be29cd0cfc1fe6cfd3fe6c571cd08d7d0fd28cc20369eb9e7a6",
+    "backend/tests/unit/test_reviewed_account_identity.py": "8b00221c871ad882e1e878e8fe53bc6568e72209ccba952b54974893b966d933",
+    "backend/tests/unit/test_inbox_original_account.py": "5ec8cb2518e619054a754ef9d6bfdfcc337022d8cf41585db57d79e620295a1a",
+    "backend/tests/unit/test_inbox_authorization_health.py": "78b1845dfb4e3032688ab1656c063566df9e39c50a9a5732c07f4b88679392cd"
+  },
+  "source_matches_committed_git": true,
+  "result": {
+    "passed": 333,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 1,
+    "modules": 8
+  },
+  "prohibited_network_attempts": 0,
+  "allowed_windows_internal_socketpairs": 572,
+  "independent_source_and_evidence_parity": {
+    "review_head": "27db06658c7fc420560648d02655829710434c85",
+    "reviewer": "account_finalize read-only",
+    "artifact_hashes_checked": 37,
+    "unchanged_source_references_checked": 15,
+    "combined_source_hashes_checked": 16,
+    "mismatches": 0,
+    "merged_resolver_contains_exact_two_reviewed_changes": true,
+    "tests_or_pg_repeated_by_reviewer": false
+  },
+  "production_gate_promoted": false,
+  "artifacts": {
+    "command.json": {
+      "sha256_raw": "c31a46149f53d8732c6c24425135a13cb0179d43a59497b5a48d3ffd1d2337b0",
+      "sha256_lf": "e889fa5d0c3c7c0e1e9549b9a2741a62b9d2c9d96f4a5f8ee1c278ea93087450"
+    },
+    "lint.txt": {
+      "sha256_raw": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "result.json": {
+      "sha256_raw": "5e1e4dc081200c91f803fc17885fe6d08e90829352693c298effeb820e193042",
+      "sha256_lf": "6bb161a697e2d1ecf8eefb85e5ce8766e652a04663a2dcaa21b1d0840c83f6f0"
+    },
+    "runner.py": {
+      "sha256_raw": "62011c9134be0b62b757668bbe9a7e180122e3e396ac01fd55dd30ef450cadae",
+      "sha256_lf": "62011c9134be0b62b757668bbe9a7e180122e3e396ac01fd55dd30ef450cadae"
+    },
+    "tests.txt": {
+      "sha256_raw": "3edd3d28a15a9b9b3bad84cdf72e54faf9ce58dd7e625ddb3c796c161c4de642",
+      "sha256_lf": "9e04e6a4313aae0b1971ca5b712c0413fcc5d57da7a147390ca7297547bfa040"
+    },
+    "verification.md": {
+      "sha256_raw": "0483855fd1a689f1f5604a8cfcc30b347e9d92cee98081d590a35f264ef87ce5",
+      "sha256_lf": "0483855fd1a689f1f5604a8cfcc30b347e9d92cee98081d590a35f264ef87ce5"
+    }
+  }
+}

@@ -1,0 +1,90 @@
+"""Read-only telephony preflight shared by campaign launch and single-call redial."""
+from __future__ import annotations
+
+import json
+import os
+
+from app.core.db_utils import acquire_with_tenant
+from app.domain.models.calling_rules import CallingRules
+from app.domain.services.dialer.campaign_schedule import effective_rules
+from app.domain.services.telephony import caller_id_guard, trunk_resolver
+from app.domain.services.telephony.provider_availability import TelephonySelectionError, require_production_outbound_selection
+
+
+_NO_LINE = "No phone line is ready to dial out. Connect or switch on a line in Settings → Telephony."
+_LINE_NOT_REGISTERED = (
+    "The phone line for this campaign is not registered with the carrier right now. "
+    "Check it in Settings → Telephony."
+)
+_CALLER_ID_UNVERIFIED = "The caller ID on this line is not verified yet. Ask support to verify it."
+
+# Plain-language text for each route refusal. ``reason_code`` stays the machine
+# value; only the sentence shown to the user is mapped.
+_REFUSAL_MESSAGES = {
+    "no_ready_trunk": _NO_LINE,
+    "no_own_trunk": _NO_LINE,
+    "selected_trunk_not_ready": _LINE_NOT_REGISTERED,
+    "campaign_assigned_trunk_not_ready": _LINE_NOT_REGISTERED,
+    "trunk_caller_id_not_verified": _CALLER_ID_UNVERIFIED,
+}
+
+
+def _refusal_message(code: str) -> str:
+    return _REFUSAL_MESSAGES.get(
+        code, f"Selected SIP trunk is not ready ({code}). Check its live status in Settings."
+    )
+
+
+def _object(raw) -> dict:
+    value = json.loads(raw) if isinstance(raw, str) else raw
+    return value if isinstance(value, dict) else {}
+
+
+def _rules_caller_id(calling_rules, campaign: dict) -> str:
+    return effective_rules(CallingRules.from_dict(_object(calling_rules)), _object(campaign.get("calling_config"))).caller_id or os.getenv("DEFAULT_CALLER_ID", "1001")
+
+
+async def evaluate_outbound_readiness(
+    db_pool, *, tenant_id: str, campaign_id: str, campaign: dict,
+    calling_rules: dict | str | None = None, environment: str | None = None,
+) -> dict:
+    """Inspect current route/ownership without warming providers or dialing."""
+    result = {
+        "campaign_id": str(campaign_id), "ready": True,
+        "reason_code": "sip_not_required", "reason": None, "trunk_id": None,
+        "caller_id": _rules_caller_id(calling_rules, campaign) if calling_rules is not None else None,
+    }
+    try:
+        await require_production_outbound_selection(db_pool, tenant_id=tenant_id, environment=environment)
+    except TelephonySelectionError as exc:
+        if exc.status_code == 503:
+            raise
+        result.update(ready=False, reason_code=exc.code, reason=exc.message)
+        return result
+    if not await trunk_resolver.requires_sip_readiness(db_pool, tenant_id=tenant_id, campaign=campaign):
+        return result
+    # Same normalisation as telephony_bridge: caller_id_guard compares the
+    # value to "production" exactly, so "Production " would read as non-prod.
+    environment = (environment or os.getenv("ENVIRONMENT", "development")).strip().lower()
+    route = await trunk_resolver.resolve_outbound_trunk(
+        db_pool, tenant_id=tenant_id, environment=environment, campaign_id=campaign_id,
+    )
+    result.update(trunk_id=route.trunk_id, caller_id=route.caller_id or result["caller_id"])
+    if route.refused or not route.endpoint:
+        code = route.reason if route.refused else "trunk_endpoint_missing"
+        result.update(ready=False, reason_code=code, reason=_refusal_message(code))
+        return result
+    if not result["caller_id"]:
+        if calling_rules is None:
+            async with acquire_with_tenant(db_pool, tenant_id) as conn:
+                calling_rules = await conn.fetchval("SELECT calling_rules FROM tenants WHERE id=$1::uuid", tenant_id)
+        result["caller_id"] = _rules_caller_id(calling_rules, campaign)
+    ownership = await caller_id_guard.check_caller_id_ownership(
+        db_pool, tenant_id=tenant_id, caller_id=result["caller_id"], environment=environment,
+    )
+    if not ownership.allowed:
+        result.update(ready=False, reason_code="caller_id_not_verified",
+                      reason=_CALLER_ID_UNVERIFIED)
+    else:
+        result["reason_code"] = "ready"
+    return result

@@ -3,10 +3,23 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Bot, ChevronDown, PhoneCall, Sparkles, Moon, Sun, X, Headphones, BadgeCheck } from "lucide-react";
+import { ChevronDown, Moon, Sun, X } from "lucide-react";
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/lib/auth-context";
+import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import { industryNavItems } from "@/Industries/industries";
+import { productNavItems, useCaseNavItems } from "@/lib/products-use-cases";
+
+// Mirrors the w-[680px]/w-[345px]/w-[520px] widths on `dropdownWidthClass` below exactly —
+// used only to compute the edge-clamp offset, never applied as an actual width itself.
+function getDropdownPanelWidthPx(label: string): number {
+  if (label === "Industries") return 680;
+  if (label === "Products" || label === "Use Cases") return 345;
+  return 520;
+}
+
+// Minimum gap the dropdown panel must keep from either screen edge.
+const DROPDOWN_EDGE_MARGIN_PX = 16;
 
 export function Navbar() {
   const pathname = usePathname();
@@ -16,68 +29,113 @@ export function Navbar() {
   const isUseCasesPage = pathname.startsWith("/use-cases");
   const isIndustriesPage = pathname.startsWith("/industries");
   const isProductsPage =
+    pathname === "/products" ||
+    pathname.startsWith("/products/") ||
     pathname === "/ai-voice-dialer" ||
     pathname.startsWith("/ai-voice-dialer/") ||
     pathname === "/ai-assist" ||
     pathname.startsWith("/ai-assist/") ||
     pathname === "/ai-voice-agent" ||
     pathname.startsWith("/ai-voice-agent/");
+  const isContactPage = pathname === "/contact" || pathname.startsWith("/contact/");
+  const isPricingPage = pathname === "/pricing" || pathname.startsWith("/pricing/");
+  const isLegalPage =
+    pathname === "/terms" ||
+    pathname.startsWith("/terms/") ||
+    pathname === "/privacy" ||
+    pathname.startsWith("/privacy/");
+  const isDocsPage = pathname === "/docs" || pathname.startsWith("/docs/");
+  // Every standalone marketing page shares one navbar treatment.
+  const isStandalonePage =
+    isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || isPricingPage || isContactPage || isLegalPage || isDocsPage;
   const mobileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
   const isCompact = true;
   const [isInHeroZone, setIsInHeroZone] = useState(true);
   const [suppressedDropdownLabel, setSuppressedDropdownLabel] = useState<string | null>(null);
+  const [pinnedLabel, setPinnedLabel] = useState<string | null>(null);
   const prefetchedRef = useRef<Set<string>>(new Set());
+  const desktopNavRef = useRef<HTMLUListElement | null>(null);
+  const dropdownTriggerRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
+  // Per-label horizontal translateX override (px), only populated when the panel's default
+  // centred position would come within DROPDOWN_EDGE_MARGIN_PX of a screen edge. Empty on
+  // the server/first render so hydration always matches (see the effect below).
+  const [dropdownTranslateX, setDropdownTranslateX] = useState<Record<string, number>>({});
+
+  // Recomputes the clamp for the given labels (all dropdown triggers if omitted) from each
+  // trigger's real on-screen position and the current viewport width. Only ever called from
+  // effects/event handlers below — never during render — so it does not run on every render.
+  const recomputeDropdownClamp = useCallback((labels?: string[]) => {
+    if (typeof window === "undefined") return;
+    const viewportWidth = window.innerWidth;
+    const targets = labels ?? Array.from(dropdownTriggerRefs.current.keys());
+    setDropdownTranslateX((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const label of targets) {
+        const trigger = dropdownTriggerRefs.current.get(label);
+        if (!trigger) continue; // guard: trigger not yet rendered (or unmounted)
+        const rect = trigger.getBoundingClientRect();
+        const triggerCenter = rect.left + rect.width / 2;
+        const panelWidth = getDropdownPanelWidthPx(label);
+        // Default position: panel centred under its trigger (left-1/2 -translate-x-1/2).
+        const defaultLeft = triggerCenter - panelWidth / 2;
+        const minLeft = DROPDOWN_EDGE_MARGIN_PX;
+        const maxLeft = Math.max(minLeft, viewportWidth - panelWidth - DROPDOWN_EDGE_MARGIN_PX);
+        const clampedLeft = Math.min(Math.max(defaultLeft, minLeft), maxLeft);
+        const needsOverride = Math.abs(clampedLeft - defaultLeft) > 0.5;
+        if (needsOverride) {
+          const translateXPx = clampedLeft - triggerCenter;
+          if (next[label] !== translateXPx) {
+            next[label] = translateXPx;
+            changed = true;
+          }
+        } else if (label in next) {
+          delete next[label];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
+
+  // Mount + resize: keep every dropdown's clamp current. Ref callbacks (which populate
+  // dropdownTriggerRefs) run during commit, before this effect, so refs are already
+  // populated by the time it fires.
+  useEffect(() => {
+    recomputeDropdownClamp();
+    const handleResize = () => recomputeDropdownClamp();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, [recomputeDropdownClamp]);
+
+  // Click-to-pin open: recompute the position of whichever panel just got pinned open.
+  useEffect(() => {
+    if (pinnedLabel) recomputeDropdownClamp([pinnedLabel]);
+  }, [pinnedLabel, recomputeDropdownClamp]);
+
+  // The single place that clears a click-pinned panel. Blurring the trigger
+  // matters here: group-focus-within would otherwise re-open the panel the
+  // instant pinnedLabel goes back to null and the unpinned CSS path (which
+  // still honours hover/focus-within) takes over again.
+  const closePinnedDropdown = useCallback(() => {
+    setPinnedLabel((prev) => {
+      if (prev) dropdownTriggerRefs.current.get(prev)?.blur();
+      return null;
+    });
+  }, []);
 
   const menuItems = useMemo(() => {
     return [
       { label: "Home", href: "/" },
-      {
-        label: "Products",
-        items: [
-          {
-            label: "AI Voice Dialer",
-            href: "/ai-voice-dialer",
-            description: "Automate calls, emails, and workflows with human-like voice agents.",
-            icon: PhoneCall,
-          },
-          {
-            label: "AI Assist",
-            href: "/ai-assist",
-            description: "Real-time guidance, call insights, and automated follow-ups for teams.",
-            icon: Sparkles,
-          },
-          {
-            label: "AI Voice Agent",
-            href: "/ai-voice-agent",
-            description: "Smarter conversations with natural dialogue and seamless handoffs.",
-            icon: Bot,
-          },
-        ],
-      },
-      {
-        label: "Use Cases",
-        items: [
-          {
-            label: "Customer Services & Support",
-            href: "/use-cases/customer-services-support",
-            description: "Deliver faster resolutions and consistent support with AI-powered conversations.",
-            icon: Headphones,
-          },
-          {
-            label: "Automated Lead Qualification",
-            href: "/use-cases/automated-lead-qualification",
-            description: "Engage, score, and route leads instantly so reps focus on high-intent prospects.",
-            icon: BadgeCheck,
-          },
-        ],
-      },
+      { label: "Products", items: [...productNavItems] },
+      { label: "Use Cases", items: [...useCaseNavItems] },
       { label: "Industries", items: [...industryNavItems] },
-      { label: "FAQ", href: isHome ? "#faq" : "/#faq" },
-      { label: "Contact", href: isHome ? "#contact" : "/#contact" },
+      { label: "Pricing", href: "/pricing" },
+      { label: "Contact Us", href: "/contact" },
     ];
-  }, [isHome]);
+  }, []);
 
   type MenuItem = (typeof menuItems)[number];
   type DropdownWithChildrenItem = Extract<MenuItem, { items: unknown[] }>;
@@ -110,16 +168,35 @@ export function Navbar() {
   // `NEXT_PUBLIC_ENABLE_DEV_AUTH=1`. A misconfigured prod build that
   // forgets to set NODE_ENV no longer accidentally writes a fake
   // token to AuthContext.
-  const { accessToken, setToken } = useAuth();
+  const { accessToken, setToken, status, user } = useAuth();
   useEffect(() => {
     if (process.env.NEXT_PUBLIC_ENABLE_DEV_AUTH !== "1") return;
     if (accessToken) return;
     setToken("dev-token");
   }, [accessToken, setToken]);
 
+  // The Login/Dashboard action. `null` while the auth state is unresolved
+  // (server render, hydration, /auth/me in flight): the slot then renders
+  // empty but keeps its box, so a signed-in visitor never sees "Login" and
+  // nothing around the slot moves when the label arrives.
+  const authAction =
+    status === "authenticated"
+      ? { label: "Dashboard", href: postAuthDashboard(user?.role) }
+      : status === "anonymous"
+        ? { label: "Login", href: "/auth/login" }
+        : null;
+
   const closeMobileMenu = useCallback(() => {
     const details = mobileMenuRef.current;
-    if (details?.hasAttribute("open")) details.removeAttribute("open");
+    if (details?.hasAttribute("open")) {
+      details.removeAttribute("open");
+      // The panel is about to be hidden; focus left inside it (the X button,
+      // a drawer item) would drop to <body>. Hand it back to the toggle, which
+      // is where Escape leaves it, so every way of closing lands in one place.
+      if (details.contains(document.activeElement)) {
+        details.querySelector<HTMLElement>(":scope > summary")?.focus();
+      }
+    }
     setMobileMenuOpen(false);
   }, []);
 
@@ -142,12 +219,38 @@ export function Navbar() {
   }, []);
 
   useEffect(() => {
+    // Close the mobile menu whenever route navigation completes — this
+    // reacts to an external event (pathname change), not to a render input.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- closes mobile menu on navigation, not derivable during render
     closeMobileMenu();
   }, [closeMobileMenu, pathname]);
 
   useEffect(() => {
+    // Clear any suppressed dropdown once the route actually changes, so a
+    // stale suppression doesn't linger on the new page.
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- clears dropdown suppression on navigation, not derivable during render
     setSuppressedDropdownLabel(null);
+    setPinnedLabel(null);
   }, [pathname]);
+
+  useEffect(() => {
+    // Listening on mousedown (not click) means a click that opens/switches a
+    // pinned panel via the trigger's own onClick is never also seen here as
+    // an "outside" click on the same gesture — the trigger is always inside
+    // desktopNavRef, so nav.contains(target) short-circuits before that.
+    if (!pinnedLabel) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      const nav = desktopNavRef.current;
+      if (nav && event.target instanceof Node && nav.contains(event.target)) return;
+      closePinnedDropdown();
+    };
+
+    document.addEventListener("mousedown", handlePointerDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+    };
+  }, [pinnedLabel, closePinnedDropdown]);
 
   useEffect(() => {
     if (!mobileMenuOpen) return;
@@ -198,14 +301,16 @@ export function Navbar() {
         aria-label="Primary"
         className={[
           "home-navbar-fixed dark px-3 sm:px-4 md:px-5 flex items-center h-[var(--home-navbar-height)]",
-          isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || (isHome && !isInHeroZone) ? "home-navbar-scrolled" : "",
-          isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage ? "home-navbar-page" : "",
+          isStandalonePage || (isHome && !isInHeroZone) ? "home-navbar-scrolled" : "",
+          isStandalonePage ? "home-navbar-page" : "",
           mobileMenuOpen ? "home-navbar-menu-open" : "",
         ].join(" ")}
         data-theme={theme}
         style={{
           fontFamily: "var(--font-manrope)",
-          ...(isAiVoices
+          // Light mode keeps the bespoke dark panel this page has always had; in dark
+          // mode it must fall through to the shared translucent treatment.
+          ...(isAiVoices && theme === "light"
             ? {
                 background: "rgba(0, 16, 34, 0.78)",
               }
@@ -213,11 +318,11 @@ export function Navbar() {
         }}
       >
         <div className="w-full">
-          <div className="navbarInnerGrid grid h-full grid-cols-[1fr_auto] md:grid-cols-[auto_auto_auto] items-center gap-3 md:gap-7">
+          <div className="navbarInnerGrid grid h-full grid-cols-[1fr_auto] lg:grid-cols-[auto_auto_auto] items-center gap-3 md:gap-7">
             <div className="flex items-center gap-3 justify-self-start">
               <details
                 ref={mobileMenuRef}
-                className="navbarMobileMenu relative md:hidden group"
+                className="navbarMobileMenu relative lg:hidden group"
                 onToggle={(event) => {
                   setMobileMenuOpen(event.currentTarget.open);
                 }}
@@ -225,7 +330,9 @@ export function Navbar() {
               <summary
                 className="home-menu-toggle list-none cursor-pointer"
                 style={{
-                  color: isAiVoices ? "#7dd3fc" : "rgba(226, 232, 240, 0.95)",
+                  // Light mode restyles this via .home-navbar-page; dark mode shares the
+                  // one slate tone so every page matches the /contact navbar.
+                  color: isAiVoices && theme === "light" ? "#7dd3fc" : "rgba(226, 232, 240, 0.95)",
                 }}
                 aria-label="Open navigation menu"
                 aria-haspopup="menu"
@@ -337,17 +444,28 @@ export function Navbar() {
                     );
                   })}
                   <li className="mt-1 border-t border-border/60 pt-1">
-                    <Link
-                      href="/dashboard"
-                      className={[
-                        "home-mobile-link text-sm font-medium focus-visible:outline-none text-foreground/90 hover:text-foreground",
-                      ].join(" ")}
-                      onClick={() => {
-                        closeMobileMenu();
-                      }}
-                    >
-                      Login
-                    </Link>
+                    {authAction ? (
+                      <Link
+                        href={authAction.href}
+                        className={[
+                          "home-mobile-link text-sm font-medium focus-visible:outline-none text-foreground/90 hover:text-foreground",
+                        ].join(" ")}
+                        onClick={() => {
+                          closeMobileMenu();
+                        }}
+                      >
+                        {authAction.label}
+                      </Link>
+                    ) : (
+                      // Empty slot: same row box, no text, until auth resolves.
+                      <span
+                        aria-hidden="true"
+                        data-auth-slot
+                        className="home-mobile-link text-sm font-medium text-foreground/90 invisible"
+                      >
+                        Dashboard
+                      </span>
+                    )}
                   </li>
                 </ul>
               </div>
@@ -369,13 +487,30 @@ export function Navbar() {
           </div>
 
           <ul
-            className="navbarDesktopNav hidden md:flex items-center justify-center gap-1.5 lg:gap-2.5"
+            ref={desktopNavRef}
+            className="navbarDesktopNav hidden lg:flex items-center justify-center gap-1.5 lg:gap-2.5"
             role="list"
           >
             {menuItems.map((item) => {
               const isIndustriesDropdown = item.label === "Industries";
               const dropdownWidthClass = isIndustriesDropdown ? "w-[680px]" : item.label === "Products" || item.label === "Use Cases" ? "w-[345px]" : "w-[520px]";
               const dropdownGridClass = isIndustriesDropdown ? "grid-cols-2" : "grid-cols-1";
+              const isPinned = pinnedLabel === item.label;
+              const suppressedByOtherPin = pinnedLabel !== null && !isPinned;
+              const dropdownVisibilityClasses = isPinned
+                ? "visible opacity-100 pointer-events-auto translate-y-0 scale-100"
+                : suppressedByOtherPin
+                  ? "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98]"
+                  : [
+                      "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98]",
+                      "group-hover:visible group-hover:opacity-100 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:scale-100",
+                      "group-focus-within:visible group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:scale-100",
+                    ].join(" ");
+              const chevronRotationClass = isPinned
+                ? "rotate-180"
+                : suppressedByOtherPin
+                  ? ""
+                  : "group-hover:rotate-180 group-focus-within:rotate-180";
               return (
                 <li key={item.label} className="relative">
                   {isDropdownWithChildrenItem(item) ? (
@@ -386,9 +521,14 @@ export function Navbar() {
                       }}
                       onMouseEnter={() => {
                         for (const child of item.items) prefetchHref(child.href);
+                        recomputeDropdownClamp([item.label]);
                       }}
                     >
                       <button
+                        ref={(el) => {
+                          if (el) dropdownTriggerRefs.current.set(item.label, el);
+                          else dropdownTriggerRefs.current.delete(item.label);
+                        }}
                         type="button"
                         className={[
                           "home-nav-link text-[13px] font-medium focus-visible:outline-none",
@@ -396,19 +536,33 @@ export function Navbar() {
                           "inline-flex items-center gap-1",
                         ].join(" ")}
                         aria-haspopup="menu"
+                        onFocus={() => recomputeDropdownClamp([item.label])}
+                        onClick={() => {
+                          if (isPinned) {
+                            // Closing via click must also override the CSS
+                            // hover fallback (group-hover), since the cursor
+                            // is still over the trigger after this click —
+                            // otherwise the panel stays visible until the
+                            // mouse actually leaves. Cleared on mouse-leave.
+                            setSuppressedDropdownLabel(item.label);
+                            closePinnedDropdown();
+                          } else {
+                            setSuppressedDropdownLabel(null);
+                            setPinnedLabel(item.label);
+                          }
+                        }}
                       >
                         {item.label}
                         <ChevronDown
-                          className="h-4 w-4 transition-transform duration-200 ease-out group-hover:rotate-180 group-focus-within:rotate-180"
+                          className={`h-4 w-4 transition-transform duration-200 ease-out ${chevronRotationClass}`}
                           aria-hidden
                         />
                       </button>
                       <div
                         className={[
                           `absolute left-1/2 top-full z-50 -translate-x-1/2 ${dropdownWidthClass} max-w-[92vw]`,
-                          "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98] transition-[opacity,transform] duration-200 ease-out",
-                          "group-hover:visible group-hover:opacity-100 group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:scale-100",
-                          "group-focus-within:visible group-focus-within:opacity-100 group-focus-within:pointer-events-auto group-focus-within:translate-y-0 group-focus-within:scale-100",
+                          "transition-[opacity,transform] duration-200 ease-out",
+                          dropdownVisibilityClasses,
                           suppressedDropdownLabel === item.label
                             ? "invisible opacity-0 pointer-events-none translate-y-2 scale-[0.98] duration-100"
                             : "",
@@ -416,10 +570,21 @@ export function Navbar() {
                         role="menu"
                         aria-label={item.label}
                         style={
-                          suppressedDropdownLabel === item.label
+                          dropdownTranslateX[item.label] !== undefined || suppressedDropdownLabel === item.label
                             ? {
-                                opacity: 0,
-                                pointerEvents: "none",
+                                // Edge-clamp override (see recomputeDropdownClamp): overrides only the
+                                // --tw-translate-x custom property that `-translate-x-1/2` sets, so the
+                                // vertical slide (--tw-translate-y) and scale animation, driven by their
+                                // own separate classes/custom properties, are left completely untouched.
+                                ...(dropdownTranslateX[item.label] !== undefined
+                                  ? ({ "--tw-translate-x": `${dropdownTranslateX[item.label]}px` } as React.CSSProperties)
+                                  : null),
+                                ...(suppressedDropdownLabel === item.label
+                                  ? {
+                                      opacity: 0,
+                                      pointerEvents: "none",
+                                    }
+                                  : null),
                               }
                             : undefined
                         }
@@ -440,6 +605,7 @@ export function Navbar() {
                                   ].join(" ")}
                                   onClick={() => {
                                     setSuppressedDropdownLabel(item.label);
+                                    closePinnedDropdown();
                                     (document.activeElement as HTMLElement | null)?.blur?.();
                                   }}
                                   style={{
@@ -499,15 +665,37 @@ export function Navbar() {
           </ul>
 
           <div className="navbarThemeWrap flex items-center gap-1.5 lg:gap-2.5 justify-self-end">
-            <Link
-              href="/dashboard"
-              className={[
-                "navbarDesktopAction hidden md:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-                isCompact ? "py-1" : "py-1.5",
-              ].join(" ")}
-            >
-              Login
-            </Link>
+            {authAction ? (
+              <Link
+                href={authAction.href}
+                className={[
+                  "navbarDesktopAction hidden lg:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400 transition-[background-color,box-shadow,transform] duration-200 ease-out shadow-[0_2px_8px_rgba(99,102,241,0.25),0_1px_2px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_16px_rgba(99,102,241,0.35),0_2px_4px_rgba(0,0,0,0.08)] hover:scale-[1.02] active:scale-[1.0] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                  isCompact ? "py-1" : "py-1.5",
+                ].join(" ")}
+              >
+                {/* The visible label sits over an invisible "Dashboard" so the
+                    button is the same width whichever label it shows — the
+                    grid's three auto columns would otherwise re-centre the
+                    nav links when the label changed. */}
+                <span className="grid justify-items-center">
+                  <span className="col-start-1 row-start-1">{authAction.label}</span>
+                  <span className="col-start-1 row-start-1 invisible" aria-hidden="true">Dashboard</span>
+                </span>
+              </Link>
+            ) : (
+              // Empty slot: identical box (classes, padding, text metrics),
+              // invisible, until the auth state resolves.
+              <span
+                aria-hidden="true"
+                data-auth-slot
+                className={[
+                  "navbarDesktopAction hidden lg:inline-flex px-3 text-[13px] font-medium rounded-lg bg-indigo-600 text-white invisible",
+                  isCompact ? "py-1" : "py-1.5",
+                ].join(" ")}
+              >
+                Dashboard
+              </span>
+            )}
             <button
               type="button"
               onClick={toggleTheme}

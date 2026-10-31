@@ -1,0 +1,11 @@
+.....F                                                                   [100%]
+================================== FAILURES ===================================
+_____ test_cancelled_actual_pre_originate_warmup_cleans_already_open_flux _____
+tests\unit\test_op02_lifecycle_ownership.py:132: in test_cancelled_actual_pre_originate_warmup_cleans_already_open_flux
+    cleanup.assert_awaited_once_with(session)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op02_lifecycle_ownership.py::test_cancelled_actual_pre_originate_warmup_cleans_already_open_flux
+1 failed, 5 passed in 4.28s

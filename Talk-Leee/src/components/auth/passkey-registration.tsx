@@ -90,43 +90,8 @@ export default function PasskeyRegistration({
       // Start registration
       const startResponse = await startPasskeyRegistration(token);
 
-      // Build the credential-creation options for the browser.
-      //
-      // CRITICAL: every field that the WebAuthn spec types as
-      // `BufferSource` (challenge, user.id, excludeCredentials[].id) must
-      // arrive as a *base64url string* from the backend so
-      // createWebAuthnCredential() can decode it. Earlier this code
-      // hardcoded `new TextEncoder().encode("user-id")` for user.id and
-      // a literal "user@example.com" for user.name — which (a) crashed
-      // base64toArrayBuffer at runtime with
-      //    TypeError: base64.replace is not a function
-      // because a Uint8Array isn't a string, and (b) would have
-      // registered every passkey under a bogus identity even if it had
-      // worked. Now we use the user info py_webauthn returned (user.id
-      // already base64url-encoded, user.name = real email,
-      // user.displayName = real display name).
-      const options = {
-        challenge: startResponse.challenge as unknown as BufferSource,
-        rp: startResponse.rp,
-        user: {
-          id: (startResponse.user?.id ?? "") as unknown as BufferSource,
-          name: startResponse.user?.name ?? "",
-          displayName: startResponse.user?.displayName ?? startResponse.user?.name ?? "",
-        },
-        pubKeyCredParams: startResponse.pubKeyCredParams || [
-          { type: "public-key", alg: -7 },
-          { type: "public-key", alg: -257 },
-        ],
-        authenticatorSelection: startResponse.authenticatorSelection || {
-          authenticatorAttachment: platformAvailable ? "platform" : undefined,
-          residentKey: "preferred",
-          userVerification: "preferred",
-        },
-        timeout: 60000,
-        attestation: "none",
-      } as unknown as PublicKeyCredentialCreationOptions;
-
-      const credential = await createWebAuthnCredential(options);
+      // Preserve the server's RP, user, excluded keys and verification policy.
+      const credential = await createWebAuthnCredential(startResponse.options);
 
       // Extract credential data
       const credentialData = extractCredentialCreateData(credential);

@@ -1,6 +1,11 @@
 # Day 30: CRM & Drive Integration
 
-> **Date**: January 14, 2026  
+> **Retired on 2026-09-02:** The `_save_call_data()` integration described
+> below is not present in the active call-end lifecycle. In particular, the
+> referenced `PostCallAnalyzer` was unwired and has been removed. Treat this
+> page as a historical implementation record, not proof of runtime behavior.
+
+> **Date**: January 14, 2026
 > **Focus**: Close the loop with customer systems - CRM sync and Drive backup  
 > **Status**: Implementation Complete ✅
 

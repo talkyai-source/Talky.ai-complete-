@@ -26,6 +26,11 @@ _ELEVENLABS_VOICES_URL = f"{_ELEVENLABS_API_BASE_URL}/v2/voices"
 _ELEVENLABS_VOICE_URL_TEMPLATE = f"{_ELEVENLABS_API_BASE_URL}/v1/voices/{{voice_id}}"
 _ELEVENLABS_TIMEOUT = aiohttp.ClientTimeout(total=15)
 _ELEVENLABS_CACHE_TTL_SECONDS = 300.0
+# A failed voices fetch is NOT cached as an empty catalog (that turned one slow
+# /v2/voices call into a 5-minute "Voice is not available" for every stock
+# voice). Retries are only throttled for this long so a hard outage does not
+# queue every call start behind the 15 s timeout.
+_ELEVENLABS_FAILURE_BACKOFF_SECONDS = 5.0
 _ELEVENLABS_VOICE_PAGE_SIZE = 100
 _ELEVENLABS_PREVIEW_CACHE_DIR = Path("/tmp/talky-elevenlabs-preview-cache")
 
@@ -35,6 +40,7 @@ _elevenlabs_models_cache_lock = asyncio.Lock()
 
 _elevenlabs_voices_cache: Optional[list[VoiceInfo]] = None
 _elevenlabs_voices_cache_expires_at: float = 0.0
+_elevenlabs_voices_retry_after: float = 0.0
 _elevenlabs_voices_cache_lock = asyncio.Lock()
 
 _elevenlabs_preview_url_cache: dict[str, str] = {}
@@ -47,6 +53,12 @@ _elevenlabs_last_error: Optional[str] = None
 
 def get_elevenlabs_last_error() -> Optional[str]:
     return _elevenlabs_last_error
+
+
+def elevenlabs_catalog_unavailable() -> bool:
+    """True when the last voices fetch failed and there is no catalog to fall
+    back on, so an empty list means "unknown", not "no public voices"."""
+    return _elevenlabs_last_error is not None and not _elevenlabs_voices_cache
 
 
 def get_cached_elevenlabs_voices() -> Optional[list[VoiceInfo]]:
@@ -201,6 +213,11 @@ def _normalize_elevenlabs_voice(payload: dict[str, Any]) -> Optional[VoiceInfo]:
     if preview_url:
         _elevenlabs_preview_url_cache[voice_id] = preview_url
 
+    sharing = payload.get("sharing") if isinstance(payload.get("sharing"), dict) else {}
+    is_public = payload.get("category") == "premade" or (
+        sharing.get("status") == "enabled" and sharing.get("enabled_in_library") is True
+    )
+
     return VoiceInfo(
         id=voice_id,
         name=name,
@@ -211,6 +228,7 @@ def _normalize_elevenlabs_voice(payload: dict[str, Any]) -> Optional[VoiceInfo]:
         accent_color=_voice_accent_color(gender),
         preview_text="Hello, I am your AI voice assistant. How can I help you today?",
         provider="elevenlabs",
+        provider_is_public=is_public,
         tags=sorted(set(tags)),
         preview_url=elevenlabs_preview_proxy_url(voice_id) if preview_url else None,
     )
@@ -289,24 +307,34 @@ def invalidate_elevenlabs_voices_cache() -> None:
     clone/delete so the new (or removed) voice shows up immediately instead
     of waiting out the 5-minute cache TTL."""
     global _elevenlabs_voices_cache, _elevenlabs_voices_cache_expires_at
+    global _elevenlabs_voices_retry_after
     _elevenlabs_voices_cache = None
     _elevenlabs_voices_cache_expires_at = 0.0
+    _elevenlabs_voices_retry_after = 0.0
 
 
 async def get_elevenlabs_voices_for_current_key() -> list[VoiceInfo]:
+    """Never raises. On a failed fetch it returns the last good catalog (stale
+    while error) or [] and does NOT cache the failure; callers that must tell
+    "outage" from "genuinely empty" check elevenlabs_catalog_unavailable()."""
     global _elevenlabs_voices_cache, _elevenlabs_voices_cache_expires_at
+    global _elevenlabs_voices_retry_after
     now = time.time()
     if _elevenlabs_voices_cache is not None and now < _elevenlabs_voices_cache_expires_at:
         return list(_elevenlabs_voices_cache)
+    if now < _elevenlabs_voices_retry_after:
+        return list(_elevenlabs_voices_cache or [])
 
     async with _elevenlabs_voices_cache_lock:
         now = time.time()
         if _elevenlabs_voices_cache is not None and now < _elevenlabs_voices_cache_expires_at:
             return list(_elevenlabs_voices_cache)
+        if now < _elevenlabs_voices_retry_after:
+            return list(_elevenlabs_voices_cache or [])
 
         if not elevenlabs_enabled():
-            _elevenlabs_voices_cache = []
-            _elevenlabs_voices_cache_expires_at = now + _ELEVENLABS_CACHE_TTL_SECONDS
+            # Not a healthy empty catalog: do not cache it, so setting the key
+            # takes effect on the next lookup.
             return []
 
         global _elevenlabs_last_error
@@ -337,15 +365,17 @@ async def get_elevenlabs_voices_for_current_key() -> list[VoiceInfo]:
 
             deduped = {voice.id: voice for voice in voices}
             _elevenlabs_voices_cache = list(deduped.values())
+            _elevenlabs_voices_cache_expires_at = time.time() + _ELEVENLABS_CACHE_TTL_SECONDS
+            _elevenlabs_voices_retry_after = 0.0
             _elevenlabs_last_error = None
         except Exception as exc:
             error_msg = str(exc)
             logger.warning("ElevenLabs voices lookup failed: %s", error_msg)
             _elevenlabs_last_error = error_msg
-            _elevenlabs_voices_cache = []
+            # Keep any previous good catalog; never replace it with [].
+            _elevenlabs_voices_retry_after = time.time() + _ELEVENLABS_FAILURE_BACKOFF_SECONDS
 
-        _elevenlabs_voices_cache_expires_at = time.time() + _ELEVENLABS_CACHE_TTL_SECONDS
-        return list(_elevenlabs_voices_cache)
+        return list(_elevenlabs_voices_cache or [])
 
 
 async def get_elevenlabs_voice_by_id(voice_id: str) -> Optional[VoiceInfo]:

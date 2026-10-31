@@ -24,11 +24,25 @@ captured value) so it always reflects the current connection even though
 """
 from __future__ import annotations
 
-from typing import Callable, Optional
+from typing import Awaitable, Callable, Optional
 
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 
 _adapter_getter: Optional[Callable[[], Optional[CallControlAdapter]]] = None
+_transfer_executor: Optional[Callable[..., Awaitable[dict]]] = None
+
+
+def register_transfer_executor(executor: Callable[..., Awaitable[dict]]) -> None:
+    """Register the existing policy-authorized transfer entry point."""
+    global _transfer_executor
+    _transfer_executor = executor
+
+
+async def execute_transfer(*args, **kwargs) -> dict:
+    """Use the registered policy boundary; never bypass it with adapter.transfer."""
+    if _transfer_executor is None:
+        raise RuntimeError("Telephony transfer execution is unavailable")
+    return await _transfer_executor(*args, **kwargs)
 
 
 def register_adapter_getter(

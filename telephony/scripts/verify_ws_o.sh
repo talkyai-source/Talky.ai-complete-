@@ -4,7 +4,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TELEPHONY_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_FILE="$TELEPHONY_ROOT/deploy/docker/docker-compose.telephony.yml"
-ENV_FILE="${1:-$TELEPHONY_ROOT/deploy/docker/.env.telephony.example}"
+ENV_FILE="${1:-$TELEPHONY_ROOT/deploy/docker/.env.telephony}"
 EVIDENCE_DIR="$TELEPHONY_ROOT/docs/phase_3/evidence/ws_o"
 
 STAGE_CONTROLLER="$SCRIPT_DIR/canary_stage_controller.sh"
@@ -32,7 +32,6 @@ cleanup() {
 trap cleanup EXIT
 
 compose_cmd=(docker compose --env-file "$TMP_ENV" -f "$COMPOSE_FILE")
-compose_backup_cmd=(docker compose --profile backup --env-file "$TMP_ENV" -f "$COMPOSE_FILE")
 SIP_PORT="$(grep -E '^OPENSIPS_SIP_PORT=' "$TMP_ENV" | tail -n1 | cut -d= -f2-)"
 TLS_PORT="$(grep -E '^OPENSIPS_TLS_PORT=' "$TMP_ENV" | tail -n1 | cut -d= -f2-)"
 if [[ -z "$SIP_PORT" ]]; then SIP_PORT="15060"; fi
@@ -91,21 +90,15 @@ wait_for_container_status() {
   done
 }
 
-wait_for_freeswitch_cli() {
-  local timeout_seconds="$1"
-  local start_epoch
-  start_epoch="$(date +%s)"
-  while true; do
-    if docker exec talky-freeswitch fs_cli -x status >/dev/null 2>&1; then
-      return 0
-    fi
-    local now_epoch
-    now_epoch="$(date +%s)"
-    if (( now_epoch - start_epoch >= timeout_seconds )); then
-      return 1
-    fi
-    sleep 1
-  done
+set_kv() {
+  local key="$1"
+  local value="$2"
+  local file="$3"
+  if grep -q "^${key}=" "$file"; then
+    sed -i "s|^${key}=.*|${key}=${value}|" "$file"
+  else
+    echo "${key}=${value}" >>"$file"
+  fi
 }
 
 expect_env_stage() {
@@ -206,7 +199,7 @@ for svc in talky-opensips talky-asterisk talky-rtpengine; do
 done
 write_timeline "preflight_ok" "primary_services_healthy"
 
-echo "[4/11] Executing staged cutover 0 -> 5 -> 25 -> 50 -> 100..."
+echo "[4/11] Executing dedicated-DID cutover 0 -> 100..."
 if [[ "$GATE_MODE" == "real" ]]; then
   echo "[INFO] WS-O gating mode: real metrics ($REAL_METRICS_URL)"
 else
@@ -214,16 +207,13 @@ else
 fi
 "$STAGE_CONTROLLER" set 0 "$TMP_ENV" \
   --reason "WS-O reset to baseline stage before production-style rollout" \
-  --skip-gates \
   --force \
   --evidence-dir "$EVIDENCE_DIR"
 expect_env_stage "0"
 write_timeline "stage_pass" "target=0"
 
-stage_step "5" "WS-O Stage 1: smoke rollout (5%)"
-stage_step "25" "WS-O Stage 2: controlled load rollout (25%)"
-stage_step "50" "WS-O Stage 3: parity rollout (50%)"
-stage_step "100" "WS-O Stage 4: full cutover (100%)"
+set_kv "OPENSIPS_CANARY_FREEZE" "0" "$TMP_ENV"
+stage_step "100" "WS-O dedicated-DID canary activation (100%)"
 
 echo "[5/11] Running stabilization window checks..."
 write_timeline "stabilization_start" "seconds=${STABILIZATION_SECONDS} interval=${STABILIZATION_INTERVAL_SECONDS}"
@@ -243,44 +233,16 @@ while (( elapsed < STABILIZATION_SECONDS )); do
 done
 write_timeline "stabilization_pass" "duration=${STABILIZATION_SECONDS}s"
 
-echo "[6/11] Validating legacy hot-standby readiness (FreeSWITCH backup)..."
-freeswitch_initial_exists=0
-freeswitch_initial_running=0
-if docker inspect talky-freeswitch >/dev/null 2>&1; then
-  freeswitch_initial_exists=1
-  fs_state="$(docker inspect --format '{{.State.Status}}' talky-freeswitch 2>/dev/null || echo unknown)"
-  if [[ "$fs_state" == "running" ]]; then
-    freeswitch_initial_running=1
-  fi
-fi
-
-restore_backup_baseline() {
-  if [[ "$freeswitch_initial_exists" -eq 0 ]]; then
-    docker rm -f talky-freeswitch >/dev/null 2>&1 || true
-    return 0
-  fi
-  if [[ "$freeswitch_initial_running" -eq 1 ]]; then
-    docker start talky-freeswitch >/dev/null 2>&1 || true
-  else
-    docker stop talky-freeswitch >/dev/null 2>&1 || true
-  fi
-}
-trap 'restore_backup_baseline; cleanup' EXIT
-
-"${compose_backup_cmd[@]}" up -d freeswitch >/dev/null
-wait_for_container_status "talky-freeswitch" 180 healthy running >/dev/null
-fs_status="$(container_status "talky-freeswitch")"
-if [[ "$fs_status" != "healthy" && "$fs_status" != "running" ]]; then
-  echo "[ERROR] FreeSWITCH backup not healthy: status=$fs_status"
-  exit 1
-fi
-if ! wait_for_freeswitch_cli 90; then
-  echo "[ERROR] FreeSWITCH backup CLI did not become ready in time."
-  exit 1
-fi
-docker exec talky-freeswitch fs_cli -x status >"$HOT_STANDBY_LOG"
+echo "[6/11] Validating unproven backup isolation..."
+sh "$SCRIPT_DIR/assert_canary_ingress.sh" all "$TMP_ENV"
+{
+  echo "FreeSWITCH profile: backup (opt-in only)"
+  echo "Inbound dispatcher targets:"
+  awk '!/^[[:space:]]*#/ && NF {print $1, $2}' "$TELEPHONY_ROOT/opensips/conf/dispatcher.list"
+  echo "Automatic fallback: disabled"
+} >"$HOT_STANDBY_LOG"
 probe_signaling
-write_timeline "hot_standby_pass" "freeswitch_backup_ready"
+write_timeline "backup_isolation_pass" "freeswitch_not_in_inbound_dispatcher"
 
 echo "[7/11] Validating cutover decision evidence..."
 if [[ ! -f "$DECISION_FILE" ]]; then
@@ -296,7 +258,7 @@ path = Path(sys.argv[1])
 rows = [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 applied = [r for r in rows if r.get("result") == "applied"]
 targets = {r.get("to_stage_percent") for r in applied}
-required = {0, 5, 25, 50, 100}
+required = {0, 100}
 missing = sorted(required - targets)
 if missing:
     raise SystemExit(f"Missing applied stage decisions for: {missing}")
@@ -318,7 +280,7 @@ payload = {
     "timeline_log": sys.argv[4],
     "gate_mode": sys.argv[5],
     "metrics_url": sys.argv[6] or None,
-    "stages_completed": [0, 5, 25, 50, 100],
+    "stages_completed": [0, 100],
 }
 summary_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY

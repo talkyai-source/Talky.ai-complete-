@@ -14,9 +14,8 @@ The API is OpenAI-compatible, so this mirrors the Groq provider's shape closely
 (circuit breaker, bounded retries, shared concurrency guard) rather than
 inventing a different structure.
 
-THINKING IS DISABLED BY DEFAULT — see ``_reasoning_effort``. This is the whole
-point for a voice agent: reasoning tokens are spent BEFORE the first spoken
-word, so they land directly on time-to-first-token.
+Thinking uses the lowest supported per-model effort — see ``_reasoning_effort``.
+The offered GPT-OSS model cannot disable it; its floor is ``low``.
 
 Docs: https://inference-docs.cerebras.ai/api-reference/chat-completions
 Models are declared in app/domain/models/ai_config.py (CEREBRAS_MODELS).
@@ -24,6 +23,7 @@ Models are declared in app/domain/models/ai_config.py (CEREBRAS_MODELS).
 import asyncio
 import logging
 import os
+from contextlib import aclosing
 from typing import AsyncIterator, Dict, List, Optional
 
 from app.domain.interfaces.llm_provider import LLMProvider
@@ -35,35 +35,73 @@ from app.domain.models.ai_config import (
 from app.domain.models.conversation import Message
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker
+from app.infrastructure.llm.request_profile import record_traditional_request
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
+
+from app.infrastructure.llm.streaming import (
+    LLMStreamStalled, stream_with_timeout, stream_tool_turn, close_stream, execute_tool_call,
+    accumulate_tool_calls as _accumulate_tool_call_frags,
+    finalize_tool_calls as _finalize_tool_calls,
+    assistant_tool_message as _assistant_tool_call_message,
+)
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_LLM_TIMEOUT = 10.0
 _LLM_MAX_RETRIES = 2
+# gpt-oss on Cerebras cannot turn reasoning off (minimum effort "low"), and
+# Cerebras counts reasoning tokens INSIDE max_completion_tokens. A tenant's
+# 90-token answer budget therefore had to pay for the model's thinking first:
+# a 3-token confirmation request returned finish_reason=length with EMPTY text
+# on the live account (2026-09-06 audit, F01), and knowledge-grounded answers
+# were cut or empty ("zero_token_turn"). Groq has had the same reserve since
+# the GPT-OSS rollout (GROQ_THINKING_RESERVE_TOKENS); this mirrors it so the
+# caller's configured reply target has additional shared headroom. This is not
+# a separate visible-token allowance: reasoning can still consume the ceiling.
+_THINKING_RESERVE_TOKENS = int(os.getenv("CEREBRAS_THINKING_RESERVE_TOKENS", "1024"))
 _LLM_RETRY_BASE_DELAY = 0.3  # match Groq — fast first retry inside the voice budget
 
 DEFAULT_CEREBRAS_MODEL = CerebrasModel.GEMMA_4_31B.value
 
 
-def _accumulate_tool_call_frags(sink: Dict[int, dict], frags) -> None:
-    """Reassemble streamed tool-call fragments.
+def _log_cache_stats(usage_obj, model: str, cache_key: Optional[str]) -> None:
+    """Emit the prompt-cache hit rate for one call.
 
-    OpenAI-compatible streaming splits a single tool call across many chunks:
-    the function name arrives once, then ``arguments`` arrives as a series of
-    string slices that must be concatenated in order. Keyed by ``index`` because
-    a model may emit several tool calls in one turn, interleaved.
+    THIS IS THE PROOF, AND TTFT IS NOT. A fast reply can be fast for reasons
+    that have nothing to do with the cache, and a cache that silently stopped
+    working looks exactly like a provider having a slow afternoon. The only
+    honest signal is how many prompt tokens the provider says it served from
+    cache, so it is logged on every call rather than inferred later.
+
+    Expect a LOW ratio on the first call of a campaign and a high one after —
+    the static prefix has to be seen once before it can be reused. A ratio that
+    stays near zero across a busy campaign means something per-call has crept
+    back to the front of the prompt (a name, a timestamp, a call id), which is
+    the exact defect this logging exists to catch.
+
+    Never raises: observability must not be able to break a live call.
     """
-    for frag in frags or []:
-        idx = getattr(frag, "index", 0) or 0
-        slot = sink.setdefault(idx, {"id": None, "name": None, "arguments": ""})
-        if getattr(frag, "id", None):
-            slot["id"] = frag.id
-        fn = getattr(frag, "function", None)
-        if fn is not None:
-            if getattr(fn, "name", None):
-                slot["name"] = fn.name
-            if getattr(fn, "arguments", None):
-                slot["arguments"] += fn.arguments
+    try:
+        details = getattr(usage_obj, "prompt_tokens_details", None)
+        cached = getattr(details, "cached_tokens", None) if details else None
+        if cached is None and isinstance(usage_obj, dict):
+            details = usage_obj.get("prompt_tokens_details") or {}
+            cached = details.get("cached_tokens")
+        cached = int(cached or 0)
+
+        prompt_tokens = getattr(usage_obj, "prompt_tokens", None)
+        if prompt_tokens is None and isinstance(usage_obj, dict):
+            prompt_tokens = usage_obj.get("prompt_tokens")
+        prompt_tokens = int(prompt_tokens or 0)
+
+        ratio = (cached / prompt_tokens) if prompt_tokens else 0.0
+        logger.info(
+            "cerebras_prompt_cache model=%s cache_key=%s prompt_tokens=%d "
+            "cached_tokens=%d hit_ratio=%.2f",
+            model, (cache_key or "-"), prompt_tokens, cached, ratio,
+        )
+    except Exception:  # noqa: BLE001 — see docstring
+        pass
 
 
 class CerebrasLLMProvider(LLMProvider):
@@ -105,6 +143,8 @@ class CerebrasLLMProvider(LLMProvider):
                 "environment or pass api_key in config."
             )
 
+        self._api_key = api_key
+        self._observation_context = dict(config.get("observation_context") or {})
         self._model = config.get("model") or DEFAULT_CEREBRAS_MODEL
         self._temperature = config.get("temperature", 0.6)
         self._max_tokens = config.get("max_tokens", 150)
@@ -154,6 +194,7 @@ class CerebrasLLMProvider(LLMProvider):
         max_tokens: Optional[int],
         model: Optional[str],
         tools: Optional[list],
+        cache_key: Optional[str] = None,
     ) -> dict:
         model = model or self._model
         api_messages: List[dict] = []
@@ -167,21 +208,49 @@ class CerebrasLLMProvider(LLMProvider):
                 continue
             api_messages.append({"role": msg.role.value, "content": msg.content})
 
+        answer_budget = self._max_tokens if max_tokens is None else max_tokens
+        effort = self._reasoning_effort(model)
+        # Reasoning shares the completion ceiling: when the model will think,
+        # add the reserve on top so the visible answer keeps its full budget.
+        completion_budget = (
+            answer_budget + _THINKING_RESERVE_TOKENS
+            if effort not in (None, "none")
+            else answer_budget
+        )
         request: dict = {
             "model": model,
             "messages": api_messages,
             "temperature": (
                 self._temperature if temperature is None else temperature
             ),
-            "max_completion_tokens": (
-                self._max_tokens if max_tokens is None else max_tokens
-            ),
+            "max_completion_tokens": completion_budget,
             "stream": True,
         }
 
-        effort = self._reasoning_effort(model)
         if effort is not None:
             request["reasoning_effort"] = effort
+
+        # ROUTING HINT FOR THE PROMPT CACHE (2026-08-24).
+        #
+        # Cerebras caches by exact prefix and documents prompt_cache_key as the
+        # way to tell the system "these requests share a prefix, keep them on
+        # the same cache". It is free: it does not affect billing or output.
+        #
+        # The right key is the CAMPAIGN, not the call. Every call in a campaign
+        # sends the same ~38k-char static prompt, so keying by campaign lets
+        # them all share one warm cache; keying by call would isolate each one
+        # and throw that sharing away.
+        #
+        # Worth knowing: Cerebras guarantees only a 5-minute TTL (up to an hour
+        # under light load), so a campaign that trickles calls slowly will go
+        # cold between them regardless of this hint.
+        if cache_key:
+            request["prompt_cache_key"] = str(cache_key)[:1024]
+
+        # Ask for the usage block on the final SSE frame. Without this a
+        # streamed response carries no usage at all, so cached_tokens — the only
+        # honest proof that the cache is working — is simply absent.
+        request["stream_options"] = {"include_usage": True}
 
         # clear_thinking is accepted by zai-glm-4.7 only. Without it the model
         # replays previous turns' thinking back into the prompt, so context — and
@@ -213,8 +282,16 @@ class CerebrasLLMProvider(LLMProvider):
             raise ValueError("Cerebras provider not initialized")
 
         model = kwargs.get("model") or self._model
+        effort = kwargs.get("reasoning_effort")
+        if effort is not None and effort != self._reasoning_effort(model):
+            raise ValueError(
+                f"Cerebras voice reasoning_effort is fixed at {self._reasoning_effort(model)!r} for {model}"
+            )
         tools = kwargs.get("tools")
         tool_calls_sink = kwargs.get("tool_calls_sink")
+        # Campaign id when the caller threads one — see _build_request for why
+        # the campaign, and not the call, is the right cache key.
+        cache_key = kwargs.get("prompt_cache_key") or kwargs.get("campaign_id")
 
         request = self._build_request(
             messages=messages,
@@ -223,7 +300,13 @@ class CerebrasLLMProvider(LLMProvider):
             max_tokens=max_tokens,
             model=model,
             tools=tools,
+            cache_key=cache_key,
         )
+
+        if kwargs.get("extra_messages"):
+            request["messages"].extend(kwargs["extra_messages"])
+        if tools:
+            request["tool_choice"] = kwargs.get("tool_choice", "auto")
 
         last_err: Optional[Exception] = None
         tokens_yielded = 0
@@ -232,24 +315,77 @@ class CerebrasLLMProvider(LLMProvider):
             for attempt in range(_LLM_MAX_RETRIES + 1):
                 try:
                     async with self._circuit:
-                        stream = await self._client.chat.completions.create(**request)
-                        tc_acc: Dict[int, dict] = {}
-                        async for chunk in stream:
-                            choices = getattr(chunk, "choices", None)
-                            if not choices:
-                                continue
-                            delta = choices[0].delta
-                            content = getattr(delta, "content", None)
-                            if content:
-                                tokens_yielded += 1
-                                yield content
-                            if tool_calls_sink is not None:
-                                frags = getattr(delta, "tool_calls", None)
-                                if frags:
-                                    _accumulate_tool_call_frags(tc_acc, frags)
-                        if tool_calls_sink is not None and tc_acc:
-                            tool_calls_sink.update(tc_acc)
+                        record_traditional_request(
+                            provider=self.name, request=request, instructions=system_prompt,
+                            configured_temperature=self._temperature if temperature is None else temperature,
+                            configured_max_tokens=self._max_tokens if max_tokens is None else max_tokens,
+                        )
+                        observation = None
+                        try:
+                            if not getattr(self, "_observes_http_attempts", False):
+                                observation = ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None))
+                            stream = await self._client.chat.completions.create(**request)
+                            if getattr(self, "_observes_http_attempts", False):
+                                observation = stream.provider_attempt
+                            observation.accepted()
+                            tc_acc: Dict[int, dict] = {}
+                            terminal_seen = False
+                            try:
+                                async for chunk in stream:
+                                    # The usage block rides the FINAL frame, which has
+                                    # an empty `choices` list — so it has to be read
+                                    # before the skip below, or cache stats are silently
+                                    # thrown away on every call.
+                                    _usage = getattr(chunk, "usage", None)
+                                    if _usage is not None:
+                                        _log_cache_stats(_usage, model, cache_key)
+                                    choices = getattr(chunk, "choices", None)
+                                    if not choices:
+                                        continue
+                                    reason = getattr(choices[0], "finish_reason", None)
+                                    if reason is not None:
+                                        if reason not in {"stop", "tool_calls"}:
+                                            raise LLMStreamStalled(
+                                                f"Cerebras response incomplete: {reason}"
+                                            )
+                                        terminal_seen = True
+                                    delta = choices[0].delta
+                                    content = getattr(delta, "content", None)
+                                    if content:
+                                        tokens_yielded += 1
+                                        if isinstance(content, str) and content.strip():
+                                            observation.first_output()
+                                        yield content
+                                    frags = getattr(delta, "tool_calls", None)
+                                    if frags:
+                                        observation.first_output()
+                                        _accumulate_tool_call_frags(tc_acc, frags)
+                                if not terminal_seen:
+                                    raise LLMStreamStalled(
+                                        "Cerebras stream ended without a terminal reason"
+                                    )
+                            finally:
+                                await close_stream(stream)
+                            finalized_calls = _finalize_tool_calls(tc_acc)
+                            if tool_calls_sink is not None and tc_acc:
+                                if isinstance(tool_calls_sink, list):
+                                    tool_calls_sink.extend(finalized_calls)
+                                else:  # compatibility for direct SDK callers
+                                    tool_calls_sink.update(tc_acc)
+                            if len(finalized_calls) == len(tc_acc) and all(call["arguments_valid"] for call in finalized_calls):
+                                observation.complete()
+                        except BaseException as error:
+                            if observation is not None:
+                                observation.finish(error)
+                            raise
+                        finally:
+                            if observation is not None:
+                                observation.finish()
                     return
+                except LLMStreamStalled:
+                    # An incomplete decision is neither success nor permission
+                    # to request a replacement decision, even before text.
+                    raise
                 except Exception as exc:  # noqa: BLE001 - classified below
                     last_err = exc
                     # Once any token has been emitted the caller has already
@@ -273,119 +409,39 @@ class CerebrasLLMProvider(LLMProvider):
         logger.error("Cerebras LLM streaming failed after retries: %s", last_err)
         raise RuntimeError(f"Cerebras LLM streaming failed: {last_err}")
 
-    async def stream_chat_with_timeout(
-        self,
-        messages: List[Message],
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        """Stream with a hard wall-clock deadline and inter-token stall detection.
+    async def stream_chat_with_tools(self, messages, **kwargs):
+        async with aclosing(stream_tool_turn(self, messages, **kwargs)) as stream:
+            async for token in stream:
+                yield token
 
-        THIS METHOD IS NOT OPTIONAL. The voice pipeline calls
-        ``stream_chat_with_timeout`` — never ``stream_chat`` — on every turn
-        (turn_streamer.py, llm_response.py, confirm_llm.py). It is absent from
-        the ``LLMProvider`` ABC, so a provider that omits it type-checks and
-        imports fine and then raises ``AttributeError`` on the first turn of
-        every call. That is exactly what happened when Cerebras shipped without
-        it: AI Options' "Test" button worked (it calls ``stream_chat``
-        directly) while the campaign Test agent and real calls produced no
-        reply at all.
-
-        Logic mirrors ``GeminiLLMProvider.stream_chat_with_timeout``, which is
-        provider-agnostic — it wraps ``stream_chat`` in per-token asyncio
-        timeouts and adds nothing vendor-specific.
-
-        The exception type matters: the pipeline catches
-        ``app.infrastructure.llm.groq.LLMTimeoutError`` specifically, so we
-        raise that one rather than defining another class it would not catch.
-
-        Raises:
-            LLMTimeoutError: no token arrived before the TTFT deadline.
-        """
-        from app.infrastructure.llm.groq import LLMTimeoutError
-
-        _INTERTOKEN_TIMEOUT = 2.0
-
-        # Budgets ONLY time spent awaiting Cerebras — never consumer-side TTS
-        # playback. See GeminiLLMProvider.stream_chat_with_timeout for the full
-        # explanation: the voice pipeline pulls tokens between real-time-paced
-        # audio sends, so a wall-clock budget charged the caller's own playback
-        # against the LLM allowance and truncated healthy multi-sentence replies
-        # mid-thought with no error and no fallback line. Fixed 2026-08-06.
-        cerebras_wait_accumulated = 0.0
-        tokens_received = 0
-        gen = self.stream_chat(messages, **kwargs)
-        try:
-            while True:
-                remaining = timeout_seconds - cerebras_wait_accumulated
-                if remaining <= 0:
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Cerebras-wait budget expired mid-stream "
-                            "(limit=%.1fs, tokens=%d) — treating as stream end",
-                            timeout_seconds, tokens_received,
-                        )
-                        break
-                    logger.error(
-                        "Cerebras deadline exceeded before first token "
-                        "(limit=%.1fs)", timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                token_timeout = (
-                    remaining if tokens_received == 0
-                    else min(remaining, _INTERTOKEN_TIMEOUT)
-                )
-                _wait_t0 = asyncio.get_event_loop().time()
-                try:
-                    token = await asyncio.wait_for(
-                        gen.__anext__(), timeout=token_timeout
-                    )
-                    # Charge ONLY the measured Cerebras-wait span, then yield.
-                    cerebras_wait_accumulated += (
-                        asyncio.get_event_loop().time() - _wait_t0
-                    )
-                    tokens_received += 1
-                    yield token
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    cerebras_wait_accumulated += (
-                        asyncio.get_event_loop().time() - _wait_t0
-                    )
-                    elapsed = cerebras_wait_accumulated
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Cerebras inter-token stall after %.2fs (tokens=%d) "
-                            "— treating as stream end", elapsed, tokens_received,
-                        )
-                        break
-                    logger.error(
-                        "Cerebras timeout waiting for first token after %.2fs "
-                        "(limit=%.1fs)", elapsed, timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-        finally:
-            # Close the underlying stream so the HTTP connection is released
-            # even when the caller stops iterating early (barge-in does this
-            # on almost every turn).
-            aclose = getattr(gen, "aclose", None)
-            if aclose is not None:
-                try:
-                    await aclose()
-                except Exception:  # noqa: BLE001
-                    pass
+    async def stream_chat_with_timeout(self, messages, timeout_seconds=DEFAULT_LLM_TIMEOUT, **kwargs):
+        """Shared provider-wait budget; playback never consumes this allowance."""
+        async with aclosing(stream_with_timeout(
+            self.stream_chat(messages, **kwargs), timeout_seconds
+        )) as stream:
+            async for token in stream:
+                yield token
 
     async def cleanup(self) -> None:
-        """Release the client reference."""
-        self._client = None
+        """Close the SDK client (its httpx pool) exactly once, then drop it."""
+        client, self._client = self._client, None
+        close = getattr(client, "close", None)
+        if close is None:
+            return
+        try:
+            result = close()
+            if hasattr(result, "__await__"):
+                await result
+        except Exception as exc:  # noqa: BLE001 — teardown must not raise
+            logger.debug("cerebras client close failed: %s", exc)
 
     @property
     def name(self) -> str:
         return "cerebras"
+
+    @property
+    def supports_tools(self) -> bool:
+        return True
 
     @property
     def supports_streaming(self) -> bool:

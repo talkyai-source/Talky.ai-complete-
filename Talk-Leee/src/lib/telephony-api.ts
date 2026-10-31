@@ -12,6 +12,8 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api as sharedApi } from "@/lib/api";
+import { ApiClientError, isApiClientError } from "@/lib/http-client";
+import { z } from "zod";
 
 // ----- Types ----------------------------------------------------------------
 
@@ -25,6 +27,14 @@ export interface TestResult {
     status_code?: number | null;
     account_status?: string | null;
     friendly_name?: string | null;
+    check_scope?: "provider_account" | "sdk_initialization" | null;
+}
+
+export interface ProviderAvailability {
+    activation_allowed: boolean;
+    qualification_only: boolean;
+    reason_code?: string | null;
+    reason: string;
 }
 
 export interface ProviderRow {
@@ -40,6 +50,33 @@ export interface ProviderRow {
 export interface ProvidersListResponse {
     active: ActiveProvider;
     providers: ProviderRow[];
+    availability?: Partial<Record<TelephonyProvider, ProviderAvailability>>;
+}
+
+const providerAvailabilitySchema = z.object({
+    activation_allowed: z.boolean(), qualification_only: z.boolean(),
+    reason_code: z.string().nullable().optional(), reason: z.string(),
+});
+const providerCheckSchema = z.object({
+    ok: z.boolean(), latency_ms: z.number().finite().optional(), error: z.string().nullable().optional(),
+    status_code: z.number().nullable().optional(), account_status: z.string().nullable().optional(),
+    friendly_name: z.string().nullable().optional(),
+    check_scope: z.enum(["provider_account", "sdk_initialization"]).nullable().optional(),
+});
+const providersListSchema = z.object({
+    active: z.enum(["twilio", "vonage", "sip", "none"]),
+    providers: z.array(z.object({
+        provider: z.enum(["twilio", "vonage"]), status: z.enum(["active", "inactive", "failed"]),
+        label: z.string().nullable().optional(), from_number: z.string().nullable().optional(),
+        last_tested_at: z.string().nullable().optional(), last_test_result: providerCheckSchema.nullable().optional(),
+        has_credentials: z.boolean(),
+    })),
+    // Older API responses remain readable, but cannot authorize activation.
+    availability: z.object({ twilio: providerAvailabilitySchema.optional(), vonage: providerAvailabilitySchema.optional() }).optional(),
+});
+
+export function parseProvidersResponse(value: unknown): ProvidersListResponse {
+    return providersListSchema.parse(value);
 }
 
 export interface TwilioCredentials {
@@ -56,6 +93,25 @@ export interface VonageCredentials {
 
 export type ProviderCredentials = TwilioCredentials | VonageCredentials;
 
+/**
+ * One check inside a line test. `key` is "address", "reachability", "credentials"
+ * or "registration" today; `ok: null` means skipped or inconclusive.
+ */
+export interface SipTestStep {
+    key: string;
+    ok: boolean | null;
+    label: string;
+    detail: string;
+    sip_code?: number | string | null;
+}
+
+export type SipTestStatus =
+    | "connected"
+    | "credentials_rejected"
+    | "unreachable"
+    | "not_registered"
+    | "reachable";
+
 export interface SipTrunkTestResult {
     ok: boolean;
     latency_ms?: number;
@@ -63,6 +119,14 @@ export interface SipTrunkTestResult {
     target?: string;
     error?: string | null;
     detail?: string | null;
+    sip_code?: string | number | null;
+    timeout_code?: number | null;
+    inconclusive?: boolean;
+    /** Absent on results saved before the step-by-step test existed. */
+    steps?: SipTestStep[];
+    /** One plain sentence about the outcome; absent on older saved results. */
+    verdict?: string | null;
+    status?: SipTestStatus | null;
 }
 
 export interface SipTrunkRow {
@@ -82,11 +146,103 @@ export interface SipTrunkRow {
     live_registration_status?: string | null;
     live_status_detail?: string | null;
     live_status_checked_at?: string | null;
+    runtime_ready: boolean;
+    /** Missing on older responses; never infer inbound admission from outbound health. */
+    inbound_runtime_ready?: boolean;
+    runtime_status_code: string;
+    runtime_status_detail: string;
     created_at: string;
 }
 
 export interface SipTrunkTestResponse extends SipTrunkTestResult {
     tested_at: string;
+}
+
+/** What DELETE /telephony/sip/trunks/{id} reports. Counts are absent on a replayed or older response. */
+export interface SipTrunkDeleteResult {
+    id: string;
+    deleted: boolean;
+    /** "archived" when call history or inbound bindings are kept; "removed" when nothing referenced the line. */
+    mode?: "removed" | "archived";
+    archived_inbound_numbers?: number;
+    unpinned_campaigns?: number;
+    /** Inbound campaigns paused because the deleted line was the one that answered their number. */
+    paused_inbound_campaigns?: number;
+}
+
+// ----- Reading the server's own explanation of a failure ---------------------
+//
+// The SIP endpoints report failures as RFC 9457 `application/problem+json`
+// ({ title, detail }). The shared HTTP client only parses bodies whose
+// content-type contains "application/json", so for these responses it reports
+// the generic message "Request failed" and keeps the raw JSON text as `details`.
+// That hid WHY a delete, save or test was refused. This puts the server's own
+// `detail` (or the field messages of a 422) back into the error message.
+
+const FIELD_LABELS: Record<string, string> = {
+    sip_domain: "provider address",
+    trunk_name: "line name",
+    auth_username: "username",
+    auth_password: "password",
+    outbound_proxy: "outbound proxy",
+    auth_realm: "auth realm",
+    caller_id: "number to show",
+    register_interval: "register interval",
+    dtmf_mode: "DTMF mode",
+};
+
+function readProblem(details: unknown): string | null {
+    let value = details;
+    if (typeof value === "string") {
+        try {
+            value = JSON.parse(value) as unknown;
+        } catch {
+            return null;
+        }
+    }
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    const { detail, title } = value as { detail?: unknown; title?: unknown };
+    for (const candidate of [detail, title]) {
+        if (typeof candidate === "string" && candidate.trim()) return candidate.trim();
+    }
+    return null;
+}
+
+function readFieldProblems(details: unknown): string | null {
+    if (!Array.isArray(details)) return null;
+    const messages: string[] = [];
+    for (const item of details) {
+        if (!item || typeof item !== "object") continue;
+        const { msg, loc } = item as { msg?: unknown; loc?: unknown };
+        if (typeof msg !== "string" || !msg.trim()) continue;
+        let text = msg.replace(/^Value error,\s*/i, "").trim();
+        for (const [name, label] of Object.entries(FIELD_LABELS)) text = text.replace(new RegExp(`\\b${name}\\b`, "g"), label);
+        const field = Array.isArray(loc) ? FIELD_LABELS[String(loc[loc.length - 1])] : undefined;
+        if (field && !text.toLowerCase().includes(field)) text = `${field}: ${text}`;
+        text = text.charAt(0).toUpperCase() + text.slice(1);
+        if (!messages.includes(text)) messages.push(text);
+    }
+    return messages.length ? messages.slice(0, 3).join(" ") : null;
+}
+
+/**
+ * Returns `err` with the server's explanation as its message when the shared
+ * client could only report "Request failed"; any other value is returned as is.
+ */
+export function surfaceProblemDetail(err: unknown): unknown {
+    if (!isApiClientError(err)) return err;
+    const message = readProblem(err.details) ?? readFieldProblems(err.details);
+    if (!message || message === err.message) return err;
+    return new ApiClientError({
+        status: err.status,
+        code: err.code,
+        message,
+        details: err.details,
+        retryAfterMs: err.retryAfterMs,
+        requestId: err.requestId,
+        url: err.url,
+        method: err.method,
+    });
 }
 
 // ----- Fetch helper ---------------------------------------------------------
@@ -114,7 +270,11 @@ async function api<T>(path: string, init?: ApiInit): Promise<T> {
             body = init.body;
         }
     }
-    return await sharedApi.request<T>({ path, method, body, headers: init?.headers });
+    try {
+        return await sharedApi.request<T>({ path, method, body, headers: init?.headers });
+    } catch (err) {
+        throw surfaceProblemDetail(err);
+    }
 }
 
 // ----- Query keys -----------------------------------------------------------
@@ -129,7 +289,7 @@ export const telephonyKeys = {
 export function useTelephonyProviders() {
     return useQuery({
         queryKey: telephonyKeys.providers,
-        queryFn: () => api<ProvidersListResponse>("/telephony/providers"),
+        queryFn: async () => parseProvidersResponse(await api<unknown>("/telephony/providers")),
     });
 }
 
@@ -206,9 +366,7 @@ export function useSipTrunks() {
         // regardless — the .trunks-on-a-bare-array bug hid EVERY trunk before.
         queryFn: () => api<SipTrunkRow[] | { trunks: SipTrunkRow[] }>("/telephony/sip/trunks"),
         select: (d) => (Array.isArray(d) ? d : (d?.trunks ?? [])),
-        // Auto-refresh so the live registration status (written by the 15s
-        // server updater) stays current on the card without a manual reload.
-        refetchInterval: 15000,
+        refetchInterval: 10000,
     });
 }
 
@@ -263,6 +421,31 @@ export function useUpdateSipTrunk() {
     });
 }
 
+// ----- Where outbound calls really go out from ------------------------------
+
+export interface OutboundRoute {
+    ready: boolean;
+    reason_code: string;
+    reason?: string | null;
+    caller_id?: string | null;
+    trunk_id?: string | null;
+    trunk_name?: string | null;
+}
+
+/**
+ * The line and number the dialer uses now, from the same preflight as campaign
+ * launch. A trunk's stored caller ID is not always the number dialled (the
+ * dialer can fall back to the account's calling-rules number). Keyed under
+ * sipTrunks so every trunk or pool change refreshes it.
+ */
+export function useOutboundRoute() {
+    return useQuery({
+        queryKey: [...telephonyKeys.sipTrunks, "outbound-route"] as const,
+        queryFn: () => api<OutboundRoute>("/telephony/sip/trunks/outbound-route"),
+        refetchInterval: 10000,
+    });
+}
+
 // ----- Shared trunk pool: allot a registered pool account to this tenant ----
 
 export interface PoolTrunkItem {
@@ -270,6 +453,8 @@ export interface PoolTrunkItem {
     label: string;
     caller_id?: string | null;
     registration_status?: string | null;
+    runtime_ready: boolean;
+    runtime_status_detail: string;
 }
 
 export interface PoolAssignment {
@@ -362,8 +547,11 @@ export function useTestSipTrunk() {
 export function useDeleteSipTrunk() {
     const qc = useQueryClient();
     return useMutation({
+        // The server deactivates the line, unpins campaigns and disconnects
+        // inbound numbers itself, so the caller deletes directly. Invalidating
+        // the sipTrunks family also refreshes the outbound-route summary.
         mutationFn: (id: string) =>
-            api<{ ok: boolean }>(`/telephony/sip/trunks/${id}`, { method: "DELETE" }),
+            api<SipTrunkDeleteResult>(`/telephony/sip/trunks/${id}`, { method: "DELETE", headers: { "Idempotency-Key": newIdempotencyKey() } }),
         onSuccess: () => {
             void qc.invalidateQueries({ queryKey: telephonyKeys.sipTrunks });
         },

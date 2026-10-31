@@ -1,0 +1,22 @@
+{
+  "declared": 62,
+  "active": 62,
+  "failures": [],
+  "imports": {
+    "urllib3": {
+      "metadata_version": "2.8.0",
+      "imported_version": "2.8.0",
+      "module_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005\\packages\\urllib3\\__init__.py",
+      "metadata_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005\\packages",
+      "from_expected_target": true
+    },
+    "PyJWT": {
+      "metadata_version": "2.15.1",
+      "imported_version": "2.15.1",
+      "module_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005\\packages\\jwt\\__init__.py",
+      "metadata_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\postgres-matrix-20261005\\tmp\\exact-requirements-20261005\\packages",
+      "from_expected_target": true
+    }
+  },
+  "valid_import_paths": true
+}

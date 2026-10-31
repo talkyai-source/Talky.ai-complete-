@@ -1,0 +1,1160 @@
+{
+  "scope": "Actual candidate AI Options save/reload SQL serialization, campaign/runtime/serializer with fake storage and synthetic WebSocket acknowledgement; no database/RLS, provider API or customer calls.",
+  "source_base_revision": "7c0ffac7",
+  "includes_uncommitted_ag01_changes": true,
+  "limitations": [
+    "Echoes are synthetic, not provider acceptance or account availability proof.",
+    "xAI is hidden opt-in; pinned grok-voice-think-fast-1.0 availability remains unverified.",
+    "Legacy xAI rows using an OpenAI voice require an explicit xAI voice selection.",
+    "No pinned knowledge snapshot is present in these assembly fixtures.",
+    "OpenAI reasoning none means omitted/provider default; temperature is inapplicable."
+  ],
+  "profiles": [
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "marin",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "marin",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "marin",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "cedar",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "cedar",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "cedar",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "alloy",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "alloy",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "alloy",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "ash",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "ash",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "ash",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "ballad",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "ballad",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "ballad",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "coral",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "coral",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "coral",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "sage",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "sage",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "sage",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": true,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "openai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "gpt-realtime-2",
+          "reasoning_effort": "medium"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "gpt-realtime-2",
+          "voice": "verse",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "gpt-realtime-2",
+          "voice": "verse",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "verse",
+          "instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "gpt-4o-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65,
+            "prefix_padding_ms": 300,
+            "silence_duration_ms": 500
+          },
+          "noise_reduction_specified": true,
+          "noise_reduction": {
+            "type": "far_field"
+          },
+          "speed": 1.15,
+          "max_output_tokens": 512,
+          "reasoning_effort": "medium",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "030563a6c83c465b101891cb566cf0c27900f8efb52ae5060cc586b33f0cb237"
+      }
+    },
+    {
+      "offered_in_ui": false,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "xai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "grok-voice-think-fast-1.0",
+          "reasoning_effort": "high"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "grok-voice-think-fast-1.0",
+          "voice": "eve",
+          "instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "grok-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65
+          },
+          "noise_reduction_specified": false,
+          "noise_reduction": null,
+          "speed": 1.1,
+          "max_output_tokens": null,
+          "reasoning_effort": "high",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "grok-voice-think-fast-1.0",
+          "voice": "eve",
+          "instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "grok-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65
+          },
+          "noise_reduction_specified": false,
+          "noise_reduction": null,
+          "speed": 1.1,
+          "max_output_tokens": null,
+          "reasoning_effort": "high",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "eve",
+          "instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "grok-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65
+          },
+          "noise_reduction_specified": false,
+          "noise_reduction": null,
+          "speed": 1.1,
+          "max_output_tokens": null,
+          "reasoning_effort": "high",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37"
+      }
+    },
+    {
+      "offered_in_ui": false,
+      "transport_sample_rate_hz": 8000,
+      "prompt_template": "realtime_voice",
+      "prompt_version": "realtime@5",
+      "profile": {
+        "engine": "native_realtime",
+        "provider": "xai",
+        "agent_selection": false,
+        "temperature": "not_applicable",
+        "prompt_identity": {
+          "template": "realtime_voice",
+          "version": "realtime@5"
+        },
+        "requested_controls": {
+          "model": "grok-voice-think-fast-1.0",
+          "reasoning_effort": "high"
+        },
+        "knowledge_reference": {
+          "status": "unversioned",
+          "snapshot_sha256": null
+        },
+        "requested": {
+          "model": "grok-voice-think-fast-1.0",
+          "voice": "custom-synthetic-voice",
+          "instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "grok-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65
+          },
+          "noise_reduction_specified": false,
+          "noise_reduction": null,
+          "speed": 1.1,
+          "max_output_tokens": null,
+          "reasoning_effort": "high",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "submitted": {
+          "model": "grok-voice-think-fast-1.0",
+          "voice": "custom-synthetic-voice",
+          "instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "grok-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65
+          },
+          "noise_reduction_specified": false,
+          "noise_reduction": null,
+          "speed": 1.1,
+          "max_output_tokens": null,
+          "reasoning_effort": "high",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "acknowledged": {
+          "model": null,
+          "voice": "custom-synthetic-voice",
+          "instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37",
+          "input_format": {
+            "type": "audio/pcmu"
+          },
+          "output_format": {
+            "type": "audio/pcmu"
+          },
+          "transcription_model": "grok-transcribe",
+          "turn_detection": {
+            "type": "server_vad",
+            "threshold": 0.65
+          },
+          "noise_reduction_specified": false,
+          "noise_reduction": null,
+          "speed": 1.1,
+          "max_output_tokens": null,
+          "reasoning_effort": "high",
+          "enabled_tools": [
+            "end_call",
+            "knowledge_lookup",
+            "send_email"
+          ]
+        },
+        "session_update_acknowledged": true,
+        "compatibility_changes": [],
+        "last_submitted_instructions_sha256": "f3f34875885b4ce83f75c9dbfeb7bd15498be31c196b0049dba7a7c3f01f3c37"
+      }
+    }
+  ]
+}

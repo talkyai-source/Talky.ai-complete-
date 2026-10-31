@@ -128,7 +128,7 @@ export function VoiceCloneModal({
 
             {done ? (
                 <div className="flex items-center gap-2 py-3 text-sm text-emerald-700 dark:text-emerald-400">
-                    <CheckCircle2 className="h-5 w-5" /> Voice cloned! It's now in your voice list.
+                    <CheckCircle2 className="h-5 w-5" /> Voice cloned! It&apos;s now in your voice list.
                 </div>
             ) : (
                 <div className="space-y-4">

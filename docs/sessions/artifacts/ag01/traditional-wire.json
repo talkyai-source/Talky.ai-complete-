@@ -1,0 +1,122 @@
+{
+  "as_of": "2026-10-05",
+  "base_commit": "7c0ffac7",
+  "evidence": "Offline actual adapters with synthetic SDK streams and httpx.MockTransport; no external requests, credentials, customer content, or latency/quality claims.",
+  "scope": "Traditional offered models; native Realtime remains separate.",
+  "interpretation": "dispatch_attempt records prepared requests, not provider acceptance or heard speech. Thinking headroom is a shared ceiling, not a guaranteed visible-token allowance. QA seed/temperature does not guarantee deterministic output.",
+  "profiles": [
+    {
+      "event": "traditional_llm_request",
+      "request_state": "dispatch_attempt",
+      "provider": "groq",
+      "model": "openai/gpt-oss-20b",
+      "instructions_sha256": "8af1092337c24266c92d66c7e27547916430fda6fcaba143c998c09b6a30996d",
+      "request_envelope_sha256": "aba5293c0e7fd2b0bd2465848ff1034e51a3cc7d0fdfa2a0f79b42f9e149e642",
+      "digest_status": "complete",
+      "configured_temperature": 0.6,
+      "configured_visible_token_target": 90,
+      "effective_temperature": 0.6,
+      "seed": null,
+      "reasoning_effort": "low",
+      "thinking_level": null,
+      "thinking_budget": null,
+      "wire_token_ceiling": 1114,
+      "tool_names": []
+    },
+    {
+      "event": "traditional_llm_request",
+      "request_state": "dispatch_attempt",
+      "provider": "groq",
+      "model": "openai/gpt-oss-20b",
+      "instructions_sha256": "8af1092337c24266c92d66c7e27547916430fda6fcaba143c998c09b6a30996d",
+      "request_envelope_sha256": "e50a6e67a3eb22628a289504e892124fd729ecdcf1e6a576301f20510ac5e3b5",
+      "digest_status": "complete",
+      "configured_temperature": 0.6,
+      "configured_visible_token_target": 90,
+      "effective_temperature": 0.0,
+      "seed": 42,
+      "reasoning_effort": "low",
+      "thinking_level": null,
+      "thinking_budget": null,
+      "wire_token_ceiling": 1114,
+      "tool_names": []
+    },
+    {
+      "event": "traditional_llm_request",
+      "request_state": "dispatch_attempt",
+      "provider": "cerebras",
+      "model": "gpt-oss-120b",
+      "instructions_sha256": "8af1092337c24266c92d66c7e27547916430fda6fcaba143c998c09b6a30996d",
+      "request_envelope_sha256": "35b234c0b1fbb0559dd29e8159d585f77ac6e658c2693dd5ac247520b9eb0447",
+      "digest_status": "complete",
+      "configured_temperature": 0.6,
+      "configured_visible_token_target": 90,
+      "effective_temperature": 0.6,
+      "seed": null,
+      "reasoning_effort": "low",
+      "thinking_level": null,
+      "thinking_budget": null,
+      "wire_token_ceiling": 1114,
+      "tool_names": []
+    },
+    {
+      "event": "traditional_llm_request",
+      "request_state": "dispatch_attempt",
+      "provider": "gemini",
+      "model": "gemini-3.8-flash",
+      "instructions_sha256": "8af1092337c24266c92d66c7e27547916430fda6fcaba143c998c09b6a30996d",
+      "request_envelope_sha256": "b1747a623900bc36226bf2674446a51c9f3b4dac8ffb3d9e2813fd033880d081",
+      "digest_status": "complete",
+      "configured_temperature": 0.6,
+      "configured_visible_token_target": 90,
+      "effective_temperature": 0.6,
+      "seed": null,
+      "reasoning_effort": null,
+      "thinking_level": "LOW",
+      "thinking_budget": null,
+      "wire_token_ceiling": 1114,
+      "tool_names": []
+    },
+    {
+      "event": "traditional_llm_request",
+      "request_state": "dispatch_attempt",
+      "provider": "openai",
+      "model": "gpt-6-luna",
+      "instructions_sha256": "8af1092337c24266c92d66c7e27547916430fda6fcaba143c998c09b6a30996d",
+      "request_envelope_sha256": "23c2073fb0791dbdce0dbdb7a3f7e7aad454a379080eb16e1dc98bc7cf65a12d",
+      "digest_status": "complete",
+      "configured_temperature": 0.6,
+      "configured_visible_token_target": 90,
+      "effective_temperature": 0.6,
+      "seed": null,
+      "reasoning_effort": "none",
+      "thinking_level": null,
+      "thinking_budget": null,
+      "wire_token_ceiling": 90,
+      "tool_names": []
+    }
+  ],
+  "terminal_reproduction_before": {
+    "failed": 18,
+    "passed": 4,
+    "file": "backend/tests/unit/test_provider_terminal_contracts.py"
+  },
+  "invalid_selection_reproduction_before": {
+    "failed": 13,
+    "passed": 8,
+    "file": "backend/tests/unit/test_traditional_llm_wire_profile.py"
+  },
+  "regression_files": [
+    "backend/tests/unit/test_provider_terminal_contracts.py",
+    "backend/tests/unit/test_traditional_llm_wire_profile.py",
+    "backend/tests/unit/test_traditional_request_profile.py"
+  ],
+  "primary_references": [
+    "https://developers.openai.com/api/docs/models/gpt-6-luna",
+    "https://developers.openai.com/api/docs/guides/deployment-checklist",
+    "https://console.groq.com/docs/reasoning",
+    "https://inference-docs.cerebras.ai/api-reference/chat-completions",
+    "https://ai.google.dev/gemini-api/docs/latest-model",
+    "https://ai.google.dev/api/generate-content#FinishReason"
+  ]
+}

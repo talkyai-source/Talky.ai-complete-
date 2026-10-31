@@ -196,11 +196,14 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
   continued through 2026-07-21 and nobody revisited it. A new engineer following it would debug a SIP
   edge that is not in the call path. **DOC-04 must correct it.**
 
-### 🟡 F-4 · Two systemd directories in the repo
-- `backend/systemd/` (**6** `.service` + **2** `.timer` + `talky.target` + `install-services.sh`) and
-  `backend/deploy/systemd/` (trunk-status `.service` + `.timer` only). Nothing states which is
-  authoritative, and `install-services.sh` reads only the first — so the trunk-status units are
-  invisible to the installer. Noted inline in the script until the two are consolidated.
+### ✅ F-4 · Two systemd directories in the repo — **RESOLVED 2026-08-27**
+- Was: `backend/systemd/` (**6** `.service` + **2** `.timer` + `talky.target` + `install-services.sh`)
+  and `backend/deploy/systemd/` (trunk-status `.service` + `.timer` only), with nothing stating which
+  was authoritative and `install-services.sh` reading only the first.
+- Now: `talky-trunk-status.service` and `.timer` live in `backend/systemd/`, which is the single
+  source of truth. `install-services.sh` globs that one directory and already enables
+  `talky-trunk-status.timer`. `backend/deploy/` retains only `healthwatch.sh` and
+  `prometheus/voice_alerts.yml` — no units.
 
 ### ⚪ F-18 · Committed C++ build artifacts
 - `services/voice-gateway-cpp/build/` **and** `build-asan/` (5.7 MB) are tracked despite being listed
@@ -214,9 +217,11 @@ remembered.* It becomes the DOC-09 deliverable in Sprint 2; until then it accumu
 - `:35` says Python 3.11 (prod 3.12.3); `:89` describes docker-compose networking for the app;
   `:95` describes an OTel/Tempo/Prometheus stack that does not run.
 
-### ⚪ F-8 · Stray scratch files at repo root
+### ✅ F-8 · Stray scratch files at repo root — **RESOLVED 2026-08-27**
 - `dream_*.py` (6 files) committed in `0ffa7fa6`. Verified to contain **no** credentials, unlike the
   `tmp_query*.sh` files in the same commit (F-14).
+- Moved out of the repository root to `scripts/archive/dream/` (kept, not deleted — they are working
+  scratch queries, not product code).
 
 ### ⚪ F-9 · Idle `hello-world` container
 - Left from Docker install verification, 2 months old.

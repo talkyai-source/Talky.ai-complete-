@@ -10,7 +10,8 @@
 # the CTest TIMEOUT properties provide elsewhere).
 #
 # Usage:  bash tests/run_gate.sh
-# Env:    CXX (default g++), GATE_TIMEOUT seconds per test run (default 300).
+# Env:    CXX (default g++), GATE_TIMEOUT seconds per test run (default 300),
+#         VOICE_GATEWAY_BUILD_SHA (default dev; otherwise a full commit SHA).
 #
 set -uo pipefail
 
@@ -22,6 +23,12 @@ WARN="-Wall -Wextra -Wpedantic"
 INC="-Iinclude"
 LIB="src/rtp_packet.cpp src/session.cpp src/session_registry.cpp src/http_server.cpp"
 GATE_TIMEOUT="${GATE_TIMEOUT:-300}"
+BUILD_SHA="${VOICE_GATEWAY_BUILD_SHA:-dev}"
+if [[ ! "$BUILD_SHA" =~ ^(dev|[0-9a-f]{40,64})$ ]]; then
+    echo "VOICE_GATEWAY_BUILD_SHA must be 'dev' or a 40-64 character lowercase hex commit" >&2
+    exit 1
+fi
+BUILD_IDENTITY="-DVOICE_GATEWAY_BUILD_SHA=\"${BUILD_SHA}\""
 OUT="$(mktemp -d)"
 fail=0
 
@@ -34,7 +41,7 @@ build() {
     local out="$1"; shift
     local log="$OUT/build_${name}.log"
     echo "== build:${name} =="
-    if $CXX $STD $WARN $INC "$@" -o "$out" -pthread 2>"$log" && [ ! -s "$log" ]; then
+    if $CXX $STD $WARN $INC "$BUILD_IDENTITY" "$@" -o "$out" -pthread 2>"$log" && [ ! -s "$log" ]; then
         echo "  [OK]"
     else
         echo "  [FAIL] build:${name}"
@@ -88,7 +95,20 @@ build gateway-tsan "$OUT/vg_tsan" $SAN_TSAN $LIB src/main.cpp
 build gateway-asan "$OUT/vg_asan" $SAN_ASAN $LIB src/main.cpp
 
 # Signal-path shutdown smoke under ASan+UBSan: start, probe /health over
-# /dev/tcp, SIGTERM, require a clean (0) orderly-shutdown exit.
+# /dev/tcp, SIGTERM, require a clean (0) orderly-shutdown exit. Use isolated,
+# process-only credentials and a pinned backend origin; the production binary
+# intentionally refuses to bind without the complete security contract.
+GATEWAY_TEST_ENV_HELPER="../../telephony/scripts/gateway_test_env.sh"
+if [ ! -r "$GATEWAY_TEST_ENV_HELPER" ]; then
+    echo "  [FAIL] missing gateway test environment helper"
+    exit 1
+fi
+# shellcheck source=/dev/null
+source "$GATEWAY_TEST_ENV_HELPER"
+if ! provision_voice_gateway_test_env; then
+    echo "  [FAIL] unable to provision gateway test environment"
+    exit 1
+fi
 echo "== run:gateway-asan-shutdown-smoke =="
 ASAN_OPTIONS="abort_on_error=1 detect_leaks=1" UBSAN_OPTIONS="halt_on_error=1 print_stacktrace=1" \
     "$OUT/vg_asan" --host 127.0.0.1 --port 18094 >"$OUT/vg_smoke.log" 2>&1 &

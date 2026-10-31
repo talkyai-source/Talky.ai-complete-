@@ -1,37 +1,57 @@
 """POST /auth/login — credential verification with OWASP-aligned controls."""
 
 import logging
+from contextlib import asynccontextmanager
 import uuid
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.principal import PrincipalUnavailable, load_current_principal
+from app.core.security.credential_issuance import lock_user_credential_issuance
 from app.core.security.lockout import (
     check_account_locked,
     record_login_attempt,
     seconds_until_unlocked,
 )
 from app.core.security.password import rehash_if_needed, verify_password
-from app.core.security.sessions import SESSION_COOKIE_NAME, create_session
+from app.core.security.sessions import create_session
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from ._shared import (
-    COOKIE_MAX_AGE,
     GENERIC_AUTH_ERROR,
     create_jwt,
     get_client_ip,
     get_user_agent,
     issue_cookie_auth,
     limiter,
-    session_cookie_secure,
 )
 from .schemas import LoginRequest
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["auth"])
+
+
+class _LoginRejected(HTTPException):
+    """Known credential rejection whose failure accounting must commit."""
+
+
+@asynccontextmanager
+async def _login_transaction(pool):
+    # Failure counters and lockouts must commit even though the public result
+    # is a rejected login. Unexpected/internal failures still roll back.
+    rejection = None
+    async with acquire_with_tenant(pool, None) as conn:
+        try:
+            yield conn
+        except _LoginRejected as exc:
+            rejection = exc
+    if rejection is not None:
+        raise rejection
 
 
 @router.post("/login")
@@ -59,7 +79,8 @@ async def login(
     ua = get_user_agent(request)
     normalised_email = body.email.lower()
 
-    async with db_client.pool.acquire() as conn:
+    # Authentication starts with an email, before a tenant identity is known.
+    async with _login_transaction(db_client.pool) as conn:
         # --- per-account lockout check -----------------------------------------
         locked_until = await check_account_locked(conn, normalised_email)
         if locked_until is not None:
@@ -84,7 +105,7 @@ async def login(
                 failure_reason="account_locked",
             )
             # OWASP: generic error — do not confirm the account is locked
-            raise HTTPException(
+            raise _LoginRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=GENERIC_AUTH_ERROR,
                 headers={"Retry-After": str(retry_after)},
@@ -132,7 +153,7 @@ async def login(
                 success=False,
                 failure_reason="user_not_found",  # internal only — never sent to client
             )
-            raise HTTPException(
+            raise _LoginRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=GENERIC_AUTH_ERROR,
             )
@@ -149,7 +170,7 @@ async def login(
                 success=False,
                 failure_reason="account_inactive",  # internal only
             )
-            raise HTTPException(
+            raise _LoginRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=GENERIC_AUTH_ERROR,
             )
@@ -165,7 +186,7 @@ async def login(
                 success=False,
                 failure_reason="email_not_verified",  # internal only
             )
-            raise HTTPException(
+            raise _LoginRejected(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Please verify your email before logging in.",
             )
@@ -193,20 +214,42 @@ async def login(
                 success=False,
                 failure_reason="wrong_password",  # internal only
             )
-            raise HTTPException(
+            raise _LoginRejected(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail=GENERIC_AUTH_ERROR,
             )
 
+        try:
+            # Verify expensive password work first, then fence issuance against
+            # formal holds and revalidate the exact password proof under lock.
+            locked = await lock_user_credential_issuance(conn, user_id)
+            if locked["password_hash"] != row["password_hash"]:
+                raise PrincipalUnavailable("credentials_changed")
+            principal = await load_current_principal(conn, user_id)
+        except PrincipalUnavailable as exc:
+            await record_login_attempt(conn,email=normalised_email,user_id=user_id,
+                ip_address=ip,success=False,failure_reason=exc.code)
+            raise _LoginRejected(status_code=401,
+                detail="Account access is unavailable. Contact your account administrator.") from exc
+        row = {**dict(row), **principal}
+
         # --- SUCCESS -----------------------------------------------------------
-        # Record success (resets the effective failure window)
-        await record_login_attempt(
-            conn,
-            email=normalised_email,
-            user_id=user_id,
-            ip_address=ip,
-            success=True,
-        )
+        # Record success (resets the effective failure window). For MFA users
+        # the password is only the first factor: a success row here would zero
+        # the failure counter on every fresh password login and so disable the
+        # lockout that protects TOTP/recovery-code guessing. /auth/mfa/verify
+        # records the success once the second factor is accepted.
+        # MFA may have been enabled while password verification ran. The
+        # profile fence makes this the current, serialized factor decision.
+        mfa_enabled = locked["mfa_enabled"] is True
+        if not mfa_enabled:
+            await record_login_attempt(
+                conn,
+                email=normalised_email,
+                user_id=user_id,
+                ip_address=ip,
+                success=True,
+            )
 
         # Update last_login_at on user profile
         await conn.execute(
@@ -227,7 +270,6 @@ async def login(
         # --- MFA check: if user has MFA enabled, issue a challenge token ------
         # instead of a full JWT.  The client must complete step-2 via
         # POST /auth/mfa/verify to receive the real session + JWT.
-        mfa_enabled = bool(row.get("mfa_enabled", False))
         if mfa_enabled:
             from app.api.v1.endpoints.mfa import create_mfa_challenge
 
@@ -247,10 +289,12 @@ async def login(
                 "access_token": "",
                 "token_type": "bearer",
                 "user_id": user_id,
+                "tenant_id": row["tenant_id"],
                 "email": row["email"],
                 "role": row["role"],
                 "business_name": row["business_name"],
-                "minutes_remaining": 0,
+                "minutes_remaining": None,
+                "minutes_state": "unavailable",
                 "mfa_required": True,
                 "mfa_challenge_token": mfa_challenge_token,
                 "message": "MFA verification required. Use mfa_challenge_token with POST /auth/mfa/verify.",
@@ -269,13 +313,51 @@ async def login(
             return_session_id=True,
         )
 
-    # --- build response --------------------------------------------------------
-    minutes_remaining = max(
-        0,
-        (row["minutes_allocated"] or 0) - (row["minutes_used"] or 0),
-    )
-    tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
-    token = create_jwt(user_id, row["email"], row["role"], tenant_id, session_id)
+        # --- build response --------------------------------------------------------
+        from app.domain.services.minutes_quota import (
+            MeteringUnavailable, compute_minutes_status, unavailable_minutes,
+        )
+
+        meter = unavailable_minutes("allowance_unavailable")
+        if row["tenant_id"]:
+            try:
+                # Reuse the credential transaction's connection (including a
+                # one-slot pool). A failed optional meter query must roll back
+                # its savepoint, not poison atomic session/refresh issuance.
+                async with conn.transaction():
+                    meter = await compute_minutes_status(conn, row["tenant_id"])
+                    meter.require_available()
+            except MeteringUnavailable:
+                pass
+        tenant_id = str(row["tenant_id"]) if row["tenant_id"] else None
+        token = create_jwt(user_id, row["email"], row["role"], tenant_id, session_id)
+
+        resp = JSONResponse(content={
+            "access_token": token,
+            "token_type": "bearer",
+            "user_id": user_id,
+            "tenant_id": tenant_id,
+            "email": row["email"],
+            "role": row["role"],
+            "business_name": row["business_name"],
+            **meter.allowance(),
+            "message": "Login successful.",
+            "mfa_required": False,
+        })
+        from ._shared import set_session_cookie as _set_session_cookie
+        _set_session_cookie(resp, raw_session_token)
+
+        await issue_cookie_auth(
+            resp,
+            conn,
+            user_id=user_id,
+            email=row["email"],
+            role=row["role"],
+            tenant_id=tenant_id,
+            session_id=session_id,
+            ip=ip,
+            user_agent=ua,
+        )
 
     # --- log login event (Day 8) -----------------------------------------------
     await audit_logger.log(
@@ -289,30 +371,4 @@ async def login(
         user_agent=ua,
     )
 
-    resp = JSONResponse(content={
-        "access_token": token,
-        "token_type": "bearer",
-        "user_id": user_id,
-        "email": row["email"],
-        "role": row["role"],
-        "business_name": row["business_name"],
-        "minutes_remaining": minutes_remaining,
-        "message": "Login successful.",
-        "mfa_required": False,
-    })
-    from ._shared import set_session_cookie as _set_session_cookie
-    _set_session_cookie(resp, raw_session_token)
-
-    async with db_client.pool.acquire() as conn:
-        await issue_cookie_auth(
-            resp,
-            conn,
-            user_id=user_id,
-            email=row["email"],
-            role=row["role"],
-            tenant_id=tenant_id,
-            session_id=session_id,
-            ip=ip,
-            user_agent=ua,
-        )
     return resp

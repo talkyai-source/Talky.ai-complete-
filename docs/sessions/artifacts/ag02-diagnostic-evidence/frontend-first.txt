@@ -1,0 +1,153 @@
+✔ read-only knowledge hides every mutation control (728.4869ms)
+✔ a superseded knowledge request cannot replace the current campaign tree (149.0856ms)
+✔ switching campaigns immediately removes already-loaded knowledge while the next request is pending (186.2116ms)
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ question result preserves matched and never displays generated raw-hit phrasing (288.1173ms)
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ question result preserves weak_match and never displays generated raw-hit phrasing (302.9389ms)
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ question result preserves no_match and never displays generated raw-hit phrasing (254.3748ms)
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ absent enrichment and provenance still show original source with explicit unavailable revision (265.1871ms)
+✔ editing the query clears evidence and ignores an older pending result (380.2235ms)
+✔ campaign switch and old request errors cannot replace current diagnostics (208.6795ms)
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ a source mutation clears reviewed evidence and blocks testing until it finishes (410.5823ms)
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to KnowledgePanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ request errors stay errors rather than becoming no-match evidence (224.5035ms)
+✔ actual API preserves shared source evidence and scoped request (123.3494ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[]} (2.6252ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"constructor","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (1.5079ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"no_match","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (1.7862ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[]}} (1.7342ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"Different source","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (1.3568ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":true}]}} (1.5505ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":"1"}]}} (1.9014ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":null}]}} (1.5289ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":2}]}} (2.2597ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":2,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":-1}]}} (1.6308ms)
+✔ malformed diagnostic cannot fall back to raw-hit text: {"query":"Fees","hits":[{"id":"n","summary":"Unapproved summary"}],"evidence":{"status":"matched","text":"- Fees: Original fee is $20.","passages":[{"node_id":"n","source_id":"s","source_version":true,"version":"2026-10-06T00:00:00Z","text":"- Fees: Original fee is $20.","coverage":1}]}} (0.8016ms)
+✔ actual API rejects cross-query and legacy response without evidence (10.8701ms)
+✔ unknown coverage/provenance stays nullable weak evidence (1.6445ms)
+ℹ tests 25
+ℹ suites 0
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 16474.2932

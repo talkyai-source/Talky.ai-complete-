@@ -22,13 +22,28 @@ from app.api.v1.endpoints.assistant_voice_ws import router as assistant_voice_ws
 from app.api.v1.endpoints.assistant_ws import router as assistant_ws_router
 from app.api.v1.endpoints.auth import router as auth_router
 from app.api.v1.endpoints.billing import router as billing_router
+from app.api.v1.endpoints.billing_topups import (
+    admin_router as billing_topups_admin_router,
+    router as billing_topups_router,
+)
 from app.api.v1.endpoints.calls import router as calls_router
+from app.api.v1.endpoints.call_feedback import router as call_feedback_router
+from app.api.v1.endpoints.lead_details import router as lead_details_router
+from app.api.v1.endpoints.conversation_reviews import (
+    admin_router as conversation_reviews_admin_router,
+    router as conversation_reviews_router,
+)
 from app.api.v1.endpoints.campaigns import router as campaigns_router
+from app.api.v1.endpoints.inbound_campaigns import router as inbound_campaigns_router
 from app.api.v1.endpoints.campaign_knowledge import router as campaign_knowledge_router
 from app.api.v1.endpoints.clients import router as clients_router
 from app.api.v1.endpoints.connectors import router as connectors_router
+from app.api.v1.endpoints.salesforce import router as salesforce_router
 from app.api.v1.endpoints.contacts import router as contacts_router
 from app.api.v1.endpoints.contact_lists import router as contact_lists_router
+from app.api.v1.endpoints.contact_enquiries import router as contact_enquiries_router
+from app.api.v1.endpoints.support import admin_router as support_admin_router
+from app.api.v1.endpoints.support import router as support_router
 from app.api.v1.endpoints.dashboard import router as dashboard_router
 from app.api.v1.endpoints.health import router as health_router
 from app.api.v1.endpoints.meetings import router as meetings_router
@@ -55,6 +70,7 @@ from app.api.v1.endpoints.tenant_phone_numbers import router as tenant_phone_num
 from app.api.v1.endpoints.vonage_bridge import router as vonage_bridge_router
 from app.api.v1.endpoints.twilio_bridge import router as twilio_bridge_router
 from app.api.v1.endpoints.webhooks import router as webhooks_router
+from app.api.v1.endpoints.alertmanager import router as alertmanager_router
 from app.api.v1.endpoints.webhooks_secure import router as webhooks_secure_router
 
 # --- Day 8: Audit Logs + Suspension + Secrets endpoints ---
@@ -69,20 +85,39 @@ from app.api.v1.endpoints.emergency_access import router as emergency_access_rou
 # Include all routers
 api_router.include_router(auth_router)
 api_router.include_router(campaigns_router)
+api_router.include_router(inbound_campaigns_router)
 api_router.include_router(campaign_knowledge_router)
 api_router.include_router(contacts_router)
 api_router.include_router(contact_lists_router)
+api_router.include_router(contact_enquiries_router)
+api_router.include_router(support_router)
+api_router.include_router(support_admin_router, tags=["support-admin"])
 api_router.include_router(calls_router)
+api_router.include_router(call_feedback_router)
+# Before calls_router: this one owns literal paths under /calls (e.g.
+# /calls/reviews/options) and FastAPI matches in registration order, so a
+# later /calls/{call_id} must not get first refusal on them.
+api_router.include_router(lead_details_router)
+api_router.include_router(conversation_reviews_router)
+# Own prefix (/reviews), so it cannot collide with /calls/{call_id} whatever
+# the registration order turns out to be.
+api_router.include_router(conversation_reviews_admin_router)
 api_router.include_router(recordings_router)
 api_router.include_router(health_router)
 api_router.include_router(dashboard_router)
 api_router.include_router(analytics_router)
+# Registered BEFORE billing_router so /billing/topups/* is matched by its own
+# routes rather than by any future /billing/{param} pattern.
+api_router.include_router(billing_topups_router)
+api_router.include_router(billing_topups_admin_router)
 api_router.include_router(billing_router)
 api_router.include_router(plans_router)
 api_router.include_router(clients_router)
+api_router.include_router(salesforce_router)
 api_router.include_router(connectors_router)
 api_router.include_router(meetings_router)
 api_router.include_router(webhooks_router)
+api_router.include_router(alertmanager_router)
 api_router.include_router(webhooks_secure_router)
 api_router.include_router(assistant_config_router)
 api_router.include_router(assistant_ws_router)

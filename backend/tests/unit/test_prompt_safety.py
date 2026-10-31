@@ -155,12 +155,13 @@ def test_spoken_email_readback_with_vendor_name_local_is_preserved():
 
 
 def test_protected_values_exempt_a_name_collision_sentence():
-    # a caller named "Llama" — the value passed by the caller must not be scrubbed
-    # from the agent's read-back just because it collides with a vendor name.
-    text = "Great, thanks Llama — I've got your details."
+    # a company called "Llama Cloud" — the value passed by the caller must not be
+    # scrubbed from the agent's sentence even when its wording looks like a
+    # statement about the agent's own stack ("we use Llama ...").
+    text = "Great, I use Llama Cloud for the booking too."
     leaked_default, _ = scan_output_for_leakage(text)
     assert leaked_default is True   # without protection it IS dropped
-    leaked, safe = scan_output_for_leakage(text, protected_values=["Llama"])
+    leaked, safe = scan_output_for_leakage(text, protected_values=["Llama Cloud"])
     assert leaked is False
     assert "Llama" in safe
 

@@ -1,0 +1,52 @@
+{
+  "scope": "Actual internal durable make_call endpoint, Asterisk originate method, local state, one watchdog iteration, on-answer config selection through local registration. Prewarm success/selected session, DB/guard ports, ARI transport, global lease and provider factory are synthetic. Age setup changes only local monotonic started_at; no real waiting/calls/DB/network. Stops at registration before pipeline/audio. Default30s production ring not claimed affected; configured300s demonstrates permitted timing.",
+  "results": [
+    {
+      "simulated_ring_age_seconds": 10,
+      "configured_and_submitted_ari_timeout_seconds": 300,
+      "endpoint_status": 200,
+      "prewarmed_saved_session_published_before_ari": true,
+      "watchdog_saw_provider_channel_live": true,
+      "watchdog_ended_saved_session": [],
+      "warmup_retained_after_sweep": true,
+      "provider_hangup_requests": 0,
+      "answer_factory_configs": [],
+      "answer_local_registration": [
+        {
+          "original_saved_session": true,
+          "pipeline_mode": "realtime",
+          "voice": "ash",
+          "tenant_id": "11111111-1111-4111-8111-111111111111"
+        }
+      ]
+    },
+    {
+      "simulated_ring_age_seconds": 181,
+      "configured_and_submitted_ari_timeout_seconds": 300,
+      "endpoint_status": 200,
+      "prewarmed_saved_session_published_before_ari": true,
+      "watchdog_saw_provider_channel_live": true,
+      "watchdog_ended_saved_session": [
+        true
+      ],
+      "warmup_retained_after_sweep": false,
+      "provider_hangup_requests": 0,
+      "answer_factory_configs": [
+        {
+          "pipeline_mode": "cascaded",
+          "voice": "marin",
+          "tenant_id": null,
+          "llm_model": "gpt-oss-120b"
+        }
+      ],
+      "answer_local_registration": [
+        {
+          "original_saved_session": false,
+          "pipeline_mode": "cascaded",
+          "voice": "marin",
+          "tenant_id": null
+        }
+      ]
+    }
+  ]
+}

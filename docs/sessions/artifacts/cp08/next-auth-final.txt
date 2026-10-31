@@ -1,0 +1,42 @@
+✔ local GET /auth cannot authenticate or mutate legacy identity (25.9773ms)
+✔ local GET /auth/me cannot authenticate or mutate legacy identity (1.7898ms)
+✔ local GET /me cannot authenticate or mutate legacy identity (2.1374ms)
+✔ local POST /auth/register cannot authenticate or mutate legacy identity (1.9828ms)
+✔ local POST /auth/login cannot authenticate or mutate legacy identity (2.5636ms)
+✔ local POST /auth/refresh cannot authenticate or mutate legacy identity (1.3509ms)
+✔ local POST /auth/mfa/verify cannot authenticate or mutate legacy identity (1.2992ms)
+✔ local DELETE /auth/passkeys/synthetic cannot authenticate or mutate legacy identity (1.3015ms)
+✔ local PATCH /auth/profile cannot authenticate or mutate legacy identity (1.8375ms)
+✔ local billing/plans fails before auth, body/idempotency work, or webhook acknowledgment (18.3345ms)
+✔ local billing/subscription fails before auth, body/idempotency work, or webhook acknowledgment (1.9533ms)
+✔ local billing/create-checkout-session fails before auth, body/idempotency work, or webhook acknowledgment (3.2554ms)
+✔ local billing/webhooks/stripe fails before auth, body/idempotency work, or webhook acknowledgment (1.6159ms)
+✔ SSR verifies canonical talky_at cookies with the current backend (25.4576ms)
+✔ SSR verifies canonical talky_sid cookies with the current backend (3.6822ms)
+✔ SSR verifies canonical talky_at cookies with the current backend (2.5308ms)
+✔ SSR does not authenticate from a legacy mirror alone or without configured backend (3.4167ms)
+✔ SSR 401 cannot fall back to another identity authority (1.9636ms)
+✔ SSR 403 cannot fall back to another identity authority (1.7972ms)
+✔ SSR 404 cannot fall back to another identity authority (1.4369ms)
+✔ SSR 503 cannot fall back to another identity authority (1.5962ms)
+✔ SSR successive request scopes see revocation, with no persistent principal cache (3.4175ms)
+✔ SSR failed or malformed principal responses do not grant a principal (7.408ms)
+✔ proxy role lookup is canonical, uncached, and observes a later revocation (20.0862ms)
+✔ proxy does not retry an alternate /me authority or the unconfigured local catchall (3.554ms)
+✔ serves public contact anonymously and with existing auth without role lookup or redirection (18.8423ms)
+✔ does not expand contact permission to the authenticated contacts dashboard (7.0993ms)
+✔ every page route redirects to its trailing-slashed form (2.0274ms)
+✔ page route count matches the app router page count (0.2257ms)
+✔ already-canonical paths are not redirected again (0.319ms)
+✔ api routes are never redirected (0.1991ms)
+✔ build assets and static files are never redirected (0.2184ms)
+✔ a dot in a non-final segment does not exempt the path (0.1838ms)
+✔ non-absolute input is ignored (0.2001ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 51969.0358

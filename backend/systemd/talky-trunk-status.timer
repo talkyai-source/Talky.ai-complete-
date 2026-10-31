@@ -1,0 +1,13 @@
+# Retired compatibility definition. install-services.sh disables this timer;
+# the service owns its loop. Keep the target resolvable during git upgrades
+# so systemctl can remove old enablement symlinks before daemon-reload.
+[Unit]
+Description=Retired Talky trunk status timer (disabled during installation)
+
+[Timer]
+OnBootSec=30
+OnUnitActiveSec=10s
+AccuracySec=1s
+
+[Install]
+WantedBy=timers.target

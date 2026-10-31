@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
@@ -177,7 +178,7 @@ async def list_alerts(
     args.append(limit + 1)
 
     query = "\n".join(sql)
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         rows = await conn.fetch(query, *args)
 
     has_more = len(rows) > limit
@@ -200,7 +201,7 @@ async def ack_alert(
     db_client: Client = Depends(get_db_client),
 ) -> AlertOut:
     """Move an alert from 'open' to 'investigating' and stamp the assignee."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         row = await conn.fetchrow(
             """
             UPDATE security_events
@@ -252,7 +253,7 @@ async def resolve_alert(
     if not body.resolution_notes.strip():
         raise HTTPException(status_code=400, detail="resolution_notes is required")
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         row = await conn.fetchrow(
             """
             UPDATE security_events

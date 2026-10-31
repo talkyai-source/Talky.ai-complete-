@@ -1,0 +1,65 @@
+{
+  "checkpoint_revision": "d26f0ff026c76c1ca53ad710fcee249a7116787a",
+  "application_commits": {
+    "op05_initial": "1d8a261718d6d886a91e4ace206b80aad0ac618d",
+    "op05_migration": "c75380bd5afccc8d2bf9e32d609e42f6f12de218",
+    "op05_followup": "d26f0ff026c76c1ca53ad710fcee249a7116787a",
+    "op07_recording": "84ab5bfbc6f58595487b09ba44fd574f18012ebd",
+    "op11_reporting": "3f43d397e4e0e0c976416a6d12c2b160502b9954",
+    "validation_maintenance": "fec31d4b94d9ad97fc5b26b643aedeaedfd03d64"
+  },
+  "root_media": {
+    "passed": 589,
+    "skipped": 1,
+    "warnings": 242,
+    "command_record": "media-command.json",
+    "limit": "Synthetic provider/transport ports; optional ffmpeg skip. Not audible caller acceptance."
+  },
+  "root_postgres": {
+    "passed": 34,
+    "skipped": 0,
+    "warnings": 22,
+    "command_record": "postgres-command.json",
+    "schema": "public0060 plus seven legacy action-receipt cases in isolated canonical-column schema",
+    "limit": "Precedes separate durable-due/reaper follow-up. That follow-up has its own 20 PG controls."
+  },
+  "frontend": {
+    "baseline_revision": "842517a164b0403921b2f99020f2218a020cbe85",
+    "baseline_command": "node --test --test-concurrency=4 --import tsx --import ./src/test-utils/setup.ts \"src/**/*.test.ts\" \"src/**/*.test.tsx\" \"test/**/*.test.mjs\" \"tests/**/*.test.mjs\"",
+    "baseline": {
+      "passed": 773,
+      "failed": 1,
+      "skipped": 2,
+      "duration_ms": 546286.8829
+    },
+    "failure": "Readiness test selected an obsolete Row actions/menu surface absent from the current campaign table.",
+    "correction": "Only the test changed: current selection and details Resume controls remain disabled and cannot invoke the callback for an unavailable route. Initial hydration frames are settled before interaction.",
+    "focused_command": "node --test --import tsx --import ./src/test-utils/setup.ts src/components/campaigns/campaign-readiness.test.tsx",
+    "focused": {
+      "passed": 6,
+      "failed": 0,
+      "skipped": 0
+    },
+    "lint_command": "npm run lint",
+    "lint": {
+      "exit_code": 0,
+      "errors": 0,
+      "warnings": 3
+    },
+    "lint_fix": "Global ignore for gitignored, untracked tmp validation probes; no app source/rule/dependency exclusion.",
+    "typecheck_command": "npm run typecheck",
+    "typecheck_exit_code": 0,
+    "focused_lint_command": "node node_modules/eslint/bin/eslint.js eslint.config.mjs src/components/campaigns/campaign-readiness.test.tsx",
+    "focused_lint_exit_code": 0,
+    "limit": "Focused corrected run overlaps the baseline. No second full-suite pass, browser, live trunk or deployed acceptance is claimed. Two legacy DB tests lacked their dedicated configured database."
+  },
+  "ci": "Added two OP05 PG modules to the existing migrated-database step. Remote CI was not run.",
+  "package_closure": false,
+  "provider_effects": false,
+  "pushed": false,
+  "validation_source_sha256_lf": {
+    "Talk-Leee/eslint.config.mjs": "62a2953fb4fedf27a391609f26ac3a8df1c8479c2af2d3ba10b0b96127109032",
+    "Talk-Leee/src/components/campaigns/campaign-readiness.test.tsx": "ae98e6916b19ef701ce968d19a5ad69188793075f29d2f6483cb63873d777042",
+    ".github/workflows/ci.yml": "f2be0d2c8369d9329b137fee0626ce5bdf489f80e2782428334d22957b66d207"
+  }
+}

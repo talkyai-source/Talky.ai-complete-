@@ -13,6 +13,7 @@ Reference:
 - https://googleapis.github.io/python-genai/
 """
 import os
+from contextlib import aclosing
 import asyncio
 import logging
 from typing import AsyncIterator, List, Optional
@@ -20,6 +21,12 @@ from typing import AsyncIterator, List, Optional
 from app.domain.interfaces.llm_provider import LLMProvider
 from app.domain.models.conversation import Message, MessageRole
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
+from app.infrastructure.llm.request_profile import record_traditional_request
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
+
+from app.infrastructure.llm.streaming import (
+    LLMStreamStalled, stream_with_timeout, close_stream, execute_tool_call,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -36,14 +43,14 @@ _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budg
 # thinking can't be fully disabled (3.x "minimal" floor) a tight cap gets eaten
 # by thinking and the model yields zero text → a silent agent. So we reserve
 # room for thinking ON TOP of the caller's answer budget: max_output_tokens =
-# thinking_reserve + ai_config.max_tokens. The configured max_tokens then caps
-# the ANSWER, untouched by thinking. Pad is generous because "minimal" thinking
-# length is non-deterministic; env-tunable for operators.
+# thinking_reserve + ai_config.max_tokens. This is shared headroom, not a
+# separate visible-token cap or a guarantee against truncation. The reserve
+# is env-tunable for operators.
 _THINKING_RESERVE_TOKENS = int(os.getenv("GEMINI_THINKING_RESERVE_TOKENS", "1024"))
 
 # Imported for the base class below, aliased so the name `LLMTimeoutError`
 # still refers to Gemini's own subclass throughout this module.
-from app.infrastructure.llm.groq import (  # noqa: E402
+from app.infrastructure.llm.streaming import (  # noqa: E402
     LLMTimeoutError as _GroqLLMTimeoutError,
 )
 
@@ -126,6 +133,7 @@ class GeminiLLMProvider(LLMProvider):
         Accepts api_key from `config["api_key"]` or `GEMINI_API_KEY` env.
         """
         self._config = config
+        self._observation_context = dict(config.get("observation_context") or {})
         api_key = config.get("api_key") or os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError(
@@ -140,6 +148,8 @@ class GeminiLLMProvider(LLMProvider):
                 "google-genai package is not installed. "
                 "Run: pip install google-genai"
             ) from exc
+
+        self._api_key = api_key
 
         # genai.Client is sync to construct; the .aio sub-client is async.
         self._client = genai.Client(api_key=api_key)
@@ -185,14 +195,23 @@ class GeminiLLMProvider(LLMProvider):
             warm_tc = self._build_thinking_config(self._model, self._thinking_budget)
             if warm_tc is not None:
                 warm_cfg_kwargs["thinking_config"] = warm_tc
-            await asyncio.wait_for(
-                self._client.aio.models.generate_content(
-                    model=self._model,
-                    contents="hi",
-                    config=genai_types.GenerateContentConfig(**warm_cfg_kwargs),
-                ),
-                timeout=2.0,
-            )
+            with ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                response = await asyncio.wait_for(
+                    self._client.aio.models.generate_content(
+                        model=self._model,
+                        contents="hi",
+                        config=genai_types.GenerateContentConfig(**warm_cfg_kwargs),
+                    ),
+                    timeout=2.0,
+                )
+                observation.accepted()
+                text = getattr(response, "text", None)
+                if (isinstance(text, str) and text.strip()) or getattr(response, "function_calls", None):
+                    observation.first_output()
+                candidate = (getattr(response, "candidates", None) or [None])[0]
+                reason = getattr(candidate, "finish_reason", None)
+                if getattr(reason, "value", reason) == "STOP":
+                    observation.complete()
             elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
             logger.info(
                 "gemini_warmup_ok model=%s warmup_ms=%.0f",
@@ -203,8 +222,18 @@ class GeminiLLMProvider(LLMProvider):
             logger.warning("gemini_warmup_failed model=%s: %s", self._model, exc)
 
     async def cleanup(self) -> None:
-        """Release client reference for GC."""
-        self._client = None
+        """Release both SDK transports, including when async closure fails."""
+        client, self._client = self._client, None
+        if client is None:
+            return
+        async_close = getattr(getattr(client, "aio", None), "aclose", None)
+        sync_close = getattr(client, "close", None)
+        try:
+            if callable(async_close):
+                await async_close()
+        finally:
+            if callable(sync_close):
+                sync_close()
 
     @staticmethod
     def _is_gemini_3(model: str) -> bool:
@@ -215,6 +244,13 @@ class GeminiLLMProvider(LLMProvider):
         return m.startswith("gemini-3") or m in {
             "gemini-flash-latest", "gemini-pro-latest",
         }
+
+    @staticmethod
+    def _rejects_minimal_thinking(model: str) -> bool:
+        """Gemini 3.8 answers 400 "Thinking level MINIMAL is not supported for
+        this model" (browser test cb1b28c3, 2026-09-30: every turn failed over
+        to Groq). Its lowest level is "low" -- verified from the prod host."""
+        return (model or "").lower().startswith("gemini-3.8")
 
     @classmethod
     def _build_thinking_config(cls, model: str, thinking_budget: Optional[int]):
@@ -240,6 +276,8 @@ class GeminiLLMProvider(LLMProvider):
             # thinking_budget is ignored on 3.x — map intent to thinking_level.
             # 0 / unset -> "minimal" (lowest latency, what voice wants).
             level = "low" if (thinking_budget or 0) > 0 else "minimal"
+            if level == "minimal" and cls._rejects_minimal_thinking(model):
+                level = "low"
             try:
                 return genai_types.ThinkingConfig(thinking_level=level)
             except Exception:  # noqa: BLE001 — SDK predates thinking_level
@@ -253,11 +291,11 @@ class GeminiLLMProvider(LLMProvider):
     def _effective_max_output_tokens(
         cls, model: str, thinking_budget: Optional[int], max_tokens: int
     ) -> int:
-        """max_output_tokens that keeps the ANSWER budget intact under thinking.
+        """Shared max_output_tokens ceiling with headroom for thinking.
 
         Gemini's single ceiling is shared by thinking + answer, so we send
-        ``thinking_reserve + max_tokens`` whenever thinking is on, leaving the
-        caller's ``max_tokens`` entirely for the visible reply:
+        ``thinking_reserve + max_tokens`` whenever thinking is on. This does
+        not reserve a guaranteed visible-token allowance:
           - thinking OFF (2.5, budget 0)          -> no reserve, answer gets it all
           - thinking BUDGETED (2.5, budget N>0)   -> reserve exactly N
           - thinking FLOORED (3.x 'minimal')      -> reserve a fixed pad
@@ -275,6 +313,25 @@ class GeminiLLMProvider(LLMProvider):
     # ------------------------------------------------------------------
     # Streaming
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _validate_reasoning_kwargs(kwargs) -> None:
+        if kwargs.get("reasoning_effort") is not None:
+            raise ValueError(
+                "Gemini does not support reasoning_effort; use its thinking_budget control"
+            )
+
+    @staticmethod
+    def _completed_chunk(chunk) -> bool:
+        """Validate the decision before exposing its text or function calls."""
+        candidate = (getattr(chunk, "candidates", None) or [None])[0]
+        reason = getattr(candidate, "finish_reason", None)
+        if reason is None:
+            return False
+        reason = getattr(reason, "value", reason)
+        if reason != "STOP":
+            raise LLMStreamStalled(f"Gemini response incomplete: {reason}")
+        return True
 
     async def stream_chat(
         self,
@@ -304,6 +361,7 @@ class GeminiLLMProvider(LLMProvider):
         if not self._client:
             raise RuntimeError("Gemini client not initialized. Call initialize() first.")
 
+        self._validate_reasoning_kwargs(kwargs)
         from google.genai import types as genai_types
 
         temperature = temperature if temperature is not None else self._temperature
@@ -360,8 +418,8 @@ class GeminiLLMProvider(LLMProvider):
         # Per-call thinking budget override, falling back to the provider default.
         thinking_budget = kwargs.get("thinking_budget", self._thinking_budget)
 
-        # Reserve thinking headroom on top of the answer budget so thinking can
-        # never starve the reply to empty (see _effective_max_output_tokens).
+        # Add shared thinking headroom to the reply target. Terminal-status
+        # checks still reject empty or partial responses cut by this ceiling.
         eff_max_output_tokens = self._effective_max_output_tokens(
             model, thinking_budget, max_tokens
         )
@@ -389,38 +447,55 @@ class GeminiLLMProvider(LLMProvider):
         # Retry only before the first token arrives — once the caller has
         # received tokens, retrying would produce garbled / doubled output.
         import random as _rand
-        last_err = None
         tokens_yielded = 0
         for _attempt in range(_LLM_MAX_RETRIES + 1):
             try:
                 async with self._circuit:
-                    stream = await self._client.aio.models.generate_content_stream(
-                        model=model,
-                        contents=contents,
-                        config=gen_config,
+                    record_traditional_request(
+                        provider=self.name,
+                        request={"model": model, "contents": contents, "config": gen_config},
+                        instructions=system_prompt, configured_temperature=temperature,
+                        configured_max_tokens=max_tokens,
                     )
-
-                    async for chunk in stream:
-                        # chunk.text may be None for safety-flag chunks or
-                        # response-metadata chunks that carry no content.
-                        text = getattr(chunk, "text", None)
-                        if text:
-                            tokens_yielded += 1
-                            yield text
-
-                    logger.debug(
-                        "Gemini stream completed, yielded %d chunks", tokens_yielded
-                    )
-                    if tokens_yielded == 0:
-                        logger.warning("Zero text chunks received from Gemini")
+                    with ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                        stream = await self._client.aio.models.generate_content_stream(
+                            model=model,
+                            contents=contents,
+                            config=gen_config,
+                        )
+                        observation.accepted()
+                        terminal_seen = False
+                        try:
+                            async for chunk in stream:
+                                terminal_seen = self._completed_chunk(chunk) or terminal_seen
+                                # chunk.text may be None for safety-flag chunks or
+                                # response-metadata chunks that carry no content.
+                                text = getattr(chunk, "text", None)
+                                if text:
+                                    tokens_yielded += 1
+                                    if isinstance(text, str) and text.strip():
+                                        observation.first_output()
+                                    yield text
+                            if not terminal_seen:
+                                raise LLMStreamStalled(
+                                    "Gemini stream ended without a terminal reason"
+                                )
+                        finally:
+                            await close_stream(stream)
+                        logger.debug(
+                            "Gemini stream completed, yielded %d chunks", tokens_yielded
+                        )
+                        if tokens_yielded == 0:
+                            logger.warning("Zero text chunks received from Gemini")
+                        observation.complete()
                 # Success — break out of retry loop.
                 break
 
             except CircuitOpenError:
                 raise
-
+            except LLMStreamStalled:
+                raise
             except Exception as e:  # noqa: BLE001 — broad on purpose, mirrors Groq
-                last_err = e
                 if tokens_yielded > 0:
                     # Mid-stream failure: do not retry, would corrupt output.
                     logger.error(
@@ -453,6 +528,10 @@ class GeminiLLMProvider(LLMProvider):
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
+        require_tool_result_before_content: bool = False,
+        max_tool_rounds: int = 1,
+        read_only_tools=(),
+        navigation_round_allowed=None,
         **kwargs,
     ) -> AsyncIterator[str]:
         """Stream a turn that MAY call a function tool, using Gemini function
@@ -460,23 +539,26 @@ class GeminiLLMProvider(LLMProvider):
         pipeline drives on-demand KB on either provider through the same
         str-yield contract.
 
-        Round 0: offer the tool and stream. If the model answers directly it
-        streams immediately (the common, fast path). If it emits a function_call
-        instead, Round 1: run ``tool_runner`` for the fact(s), feed the
-        function_response back, and stream the grounded answer with NO tools (so
-        it cannot loop). ``tool_runner`` is async ``(name, args_dict) -> str``.
-        With no tools/runner this degrades to the normal timeout-guarded stream.
+        The default remains one tool decision then a tool-less answer. Live
+        section navigation can opt into three ordinary decisions plus at most
+        four verified advancing catalog decisions. Native model
+        parts (including thought signatures) are preserved in every continuation.
+        Repeated writes share a receipt; read-only tools rerun to refresh evidence.
         """
+        from app.infrastructure.llm.streaming import ToolRoundBudget, ends_turn
+        budget = ToolRoundBudget(max_tool_rounds, navigation_round_allowed)
         if not tools or tool_runner is None:
-            async for tok in self.stream_chat_with_timeout(
+            async with aclosing(self.stream_chat_with_timeout(
                 messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
                 temperature=temperature, max_tokens=max_tokens, **kwargs,
-            ):
-                yield tok
+            )) as stream:
+                async for tok in stream:
+                    yield tok
             return
 
         if not self._client:
             raise RuntimeError("Gemini client not initialized. Call initialize() first.")
+        self._validate_reasoning_kwargs(kwargs)
         from google.genai import types as genai_types
 
         temperature = temperature if temperature is not None else self._temperature
@@ -524,197 +606,135 @@ class GeminiLLMProvider(LLMProvider):
             try:
                 cand = (chunk.candidates or [None])[0]
                 parts = getattr(getattr(cand, "content", None), "parts", None) or []
-                txt = "".join(p.text for p in parts if getattr(p, "text", None))
+                txt = "".join(p.text for p in parts if getattr(p, "text", None) and not getattr(p, "thought", False))
                 return txt or None
             except Exception:
                 return None
 
-        async def _stream(cfg, fcalls_out):
-            t0 = asyncio.get_event_loop().time()
-            ntok = 0
-            async with self._circuit:
+        async def _stream(cfg, fcalls_out, model_parts):
+            observation = None
+            async def chunks():
+                nonlocal observation
+                record_traditional_request(
+                    provider=self.name,
+                    request={"model": model, "contents": contents, "config": cfg},
+                    instructions=system_prompt, configured_temperature=temperature,
+                    configured_max_tokens=max_tokens,
+                )
+                observation = ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None))
                 stream = await self._client.aio.models.generate_content_stream(
                     model=model, contents=contents, config=cfg)
-                agen = stream.__aiter__()
-                while True:
-                    remaining = timeout_seconds - (asyncio.get_event_loop().time() - t0)
-                    if remaining <= 0:
-                        if ntok == 0:
-                            raise LLMTimeoutError(
-                                f"Gemini tool turn timed out after {timeout_seconds}s")
-                        break
-                    tt = remaining if ntok == 0 else min(remaining, 2.0)
-                    try:
-                        chunk = await asyncio.wait_for(agen.__anext__(), timeout=tt)
-                    except StopAsyncIteration:
-                        break
-                    except asyncio.TimeoutError:
-                        if ntok == 0:
-                            raise LLMTimeoutError(
-                                f"Gemini tool turn timed out after {timeout_seconds}s")
-                        break
-                    txt = _chunk_text(chunk)
-                    if txt:
-                        ntok += 1
-                        yield txt
-                    try:
-                        for fc in (chunk.function_calls or []):
+                observation.accepted()
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    await close_stream(stream)
+
+            try:
+                terminal_seen = False
+                valid_function_calls = True
+                async with self._circuit, aclosing(stream_with_timeout(chunks(), timeout_seconds, timeout_error=LLMTimeoutError)) as stream:
+                    async for chunk in stream:
+                        terminal_seen = self._completed_chunk(chunk) or terminal_seen
+                        candidate = (getattr(chunk, "candidates", None) or [None])[0]
+                        parts = getattr(getattr(candidate, "content", None), "parts", None) or []
+                        # Keep provider-returned parts intact (including thought signatures).
+                        # Rebuilding Part(function_call=...) silently discards their metadata.
+                        model_parts.extend(parts)
+                        txt = _chunk_text(chunk)
+                        if txt:
+                            if txt.strip():
+                                observation.first_output()
+                            yield txt
+                        for fc in (getattr(chunk, "function_calls", None) or []):
+                            args = getattr(fc, "args", None)
+                            if not fc or not getattr(fc, "name", None) or (args is not None and not isinstance(args, dict)):
+                                valid_function_calls = False
                             if fc and fc.name:
+                                observation.first_output()
                                 fcalls_out.append(fc)
-                    except Exception:
-                        pass
+                    if not terminal_seen:
+                        raise LLMStreamStalled(
+                            "Gemini stream ended without a terminal reason"
+                        )
+                    if valid_function_calls:
+                        observation.complete()
+            except BaseException as error:
+                if observation is not None:
+                    observation.finish(error)
+                raise
+            finally:
+                if observation is not None:
+                    observation.finish()
 
-        # Round 0 — offer the tool; the model answers directly or calls it.
-        round0_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
-        fcalls: list = []
-        produced = False
-        async for tok in _stream(round0_cfg, fcalls):
-            produced = True
-            yield tok
+        decision_cfg = genai_types.GenerateContentConfig(tools=gemini_tools, **base_cfg)
+        tool_results = {}
+        while budget.remaining:
+            # A new list per response avoids mutating already-sent signed parts.
+            model_parts, fcalls, decision_tokens = [], [], []
+            async with aclosing(_stream(decision_cfg, fcalls, model_parts)) as stream:
+                async for tok in stream:
+                    decision_tokens.append(tok)
+                    if not require_tool_result_before_content:
+                        yield tok
+            if not fcalls:
+                if require_tool_result_before_content and decision_tokens:
+                    yield "".join(decision_tokens)
+                return
 
-        # Answered directly, or nothing to look up → done.
-        if produced or not fcalls:
-            return
-
-        # Round 1 — execute the tool(s), feed responses back (role="user", as the
-        # SDK's own auto-FC path does), stream the grounded answer with no tools.
-        model_parts = []
-        resp_parts = []
-        for fc in fcalls:
-            model_parts.append(genai_types.Part(function_call=fc))
-            try:
-                args = dict(fc.args) if fc.args else {}
-            except Exception:
-                args = {}
-            try:
-                result = await tool_runner(fc.name, args)
-            except Exception as exc:  # never let a tool failure stall the turn
-                logger.warning("gemini tool_runner failed name=%s: %s", fc.name, exc)
-                result = "No specific information found."
-            resp_parts.append(genai_types.Part.from_function_response(
-                name=fc.name,
-                response={"result": result or "No specific information found."},
-            ))
-        contents.append(genai_types.Content(role="model", parts=model_parts))
-        contents.append(genai_types.Content(role="user", parts=resp_parts))
+            resp_parts = []
+            round_results = []
+            for fc in fcalls:
+                if not any(getattr(p, "function_call", None) == fc for p in model_parts):
+                    model_parts.append(genai_types.Part(function_call=fc))
+                try:
+                    args = dict(fc.args) if fc.args else {}
+                except Exception:
+                    args = {}
+                try:
+                    import json
+                    key = (fc.name, json.dumps(args, sort_keys=True))
+                    if key not in tool_results or fc.name in read_only_tools:
+                        tool_results[key] = await execute_tool_call({"name": fc.name, "arguments": args}, tools, tool_runner)
+                    result = tool_results[key]
+                except Exception as exc:  # never let a tool failure stall the turn
+                    logger.warning("gemini tool_runner failed name=%s: %s", fc.name, exc)
+                    result = "No specific information found."
+                resp_parts.append(genai_types.Part.from_function_response(
+                    name=fc.name,
+                    response={"result": result or "No specific information found."},
+                ))
+                round_results.append(({"name": fc.name, "arguments": args}, result))
+            contents.append(genai_types.Content(role="model", parts=model_parts))
+            contents.append(genai_types.Content(role="user", parts=resp_parts))
+            budget.finish_round(round_results)
+            # Same rule as stream_tool_turn: words spoken with an end_call were
+            # the closing, so another round would only repeat the goodbye.
+            if (not require_tool_result_before_content and "".join(decision_tokens).strip()
+                    and any(ends_turn(result) for _, result in round_results)):
+                return
 
         round1_cfg = genai_types.GenerateContentConfig(**base_cfg)  # no tools
-        async for tok in _stream(round1_cfg, []):
-            yield tok
+        if require_tool_result_before_content:
+            grounded_tokens: list[str] = []
+            async with aclosing(_stream(round1_cfg, [], [])) as stream:
+                async for tok in stream:
+                    grounded_tokens.append(tok)
+            if grounded_tokens:
+                yield "".join(grounded_tokens)
+        else:
+            async with aclosing(_stream(round1_cfg, [], [])) as stream:
+                async for tok in stream:
+                    yield tok
 
-    async def stream_chat_with_timeout(
-        self,
-        messages: List[Message],
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        """
-        Stream with a hard deadline on provider wait time + stall detection.
-
-        Mirrors GroqLLMProvider.stream_chat_with_timeout so the voice pipeline
-        can call either provider through the same interface. Logic is
-        provider-agnostic — wraps `stream_chat` in per-token asyncio timeouts.
-
-        ``timeout_seconds`` budgets ONLY the time spent *awaiting Gemini*, not
-        wall-clock from stream start. This matters because the voice pipeline
-        is a pull consumer: ``turn_streamer`` awaits ``synthesize_and_send_audio``
-        — which paces playback in REAL TIME — between token pulls. A wall-clock
-        budget therefore charged the caller's own audio playback against the
-        LLM's allowance, so a healthy multi-sentence reply hit "remaining <= 0"
-        partway through and took the ``break`` below: the reply was truncated
-        mid-thought, logged only as "treating as stream end", with no error and
-        no fallback line. The caller simply heard the agent stop talking.
-
-        Telephony sessions allow up to 5 sentences per turn
-        (``telephony_session_config``), each paced at real-time speech rate, so
-        several seconds of playback per turn were being deducted from a 10s
-        budget. Groq already accounted for this correctly; Gemini and Cerebras
-        did not. Fixed 2026-08-06.
-
-        Raises:
-            LLMTimeoutError: no token arrived before the TTFT deadline.
-        """
-        _INTERTOKEN_TIMEOUT = 2.0
-
-        # Time spent INSIDE the awaits that fetch the next token from Gemini.
-        # The gap between yielding a token and being asked for the next one
-        # (consumer-side TTS/playback) is NOT added here, so downstream pacing
-        # can never consume the LLM budget.
-        gemini_wait_accumulated = 0.0
-        t_first_token_start = asyncio.get_event_loop().time()
-        tokens_received = 0
-        gen = self.stream_chat(messages, **kwargs)
-        try:
-            while True:
-                remaining = timeout_seconds - gemini_wait_accumulated
-                if remaining <= 0:
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Gemini-wait budget expired mid-stream "
-                            "(limit=%.1fs, tokens=%d) — treating as stream end",
-                            timeout_seconds, tokens_received,
-                        )
-                        break
-                    logger.error(
-                        "Gemini deadline exceeded before first token (limit=%.1fs)",
-                        timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                token_timeout = (
-                    remaining if tokens_received == 0
-                    else min(remaining, _INTERTOKEN_TIMEOUT)
-                )
-                _wait_t0 = asyncio.get_event_loop().time()
-                try:
-                    token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    # Only the Gemini wait counts — a full `token_timeout` elapsed.
-                    gemini_wait_accumulated += (
-                        asyncio.get_event_loop().time() - _wait_t0
-                    )
-                    if tokens_received > 0:
-                        logger.warning(
-                            "Gemini inter-token stall (gemini_wait=%.2fs, tokens=%d) "
-                            "— treating as stream end",
-                            gemini_wait_accumulated, tokens_received,
-                        )
-                        break
-                    logger.error(
-                        "Gemini timeout waiting for first token after %.2fs "
-                        "(limit=%.1fs)",
-                        gemini_wait_accumulated, timeout_seconds,
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                # Success: charge ONLY the just-measured Gemini-wait span, then
-                # yield. Whatever time the consumer spends before pulling again
-                # lands OUTSIDE this measured span.
-                gemini_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                if tokens_received == 0:
-                    ttft_ms = (
-                        asyncio.get_event_loop().time() - t_first_token_start
-                    ) * 1000
-                    if ttft_ms > 800:
-                        logger.warning(
-                            "High Gemini TTFT: %.0fms — may indicate cold start "
-                            "or rate limiting.", ttft_ms,
-                        )
-                tokens_received += 1
+    async def stream_chat_with_timeout(self, messages, timeout_seconds=DEFAULT_LLM_TIMEOUT, **kwargs):
+        """Shared provider-wait budget; playback never consumes this allowance."""
+        async with aclosing(stream_with_timeout(
+            self.stream_chat(messages, **kwargs), timeout_seconds, timeout_error=LLMTimeoutError
+        )) as stream:
+            async for token in stream:
                 yield token
-        finally:
-            # Ensure the underlying stream generator is closed so the HTTP
-            # connection is released even if the caller stops iterating early.
-            aclose = getattr(gen, "aclose", None)
-            if aclose is not None:
-                try:
-                    await aclose()
-                except Exception:  # noqa: BLE001
-                    pass
 
     # ------------------------------------------------------------------
     # Identity
@@ -723,6 +743,10 @@ class GeminiLLMProvider(LLMProvider):
     @property
     def name(self) -> str:
         return "gemini"
+
+    @property
+    def supports_tools(self) -> bool:
+        return True
 
     @property
     def supports_streaming(self) -> bool:

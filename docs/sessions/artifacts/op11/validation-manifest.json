@@ -1,0 +1,154 @@
+{
+  "package": "OP11",
+  "status": "local_reporting_repair_operational_acceptance_open",
+  "base_commit": "28004d3a",
+  "branch": "codex/production-ready-op11-20261005",
+  "runtime": {
+    "python": "3.12.12",
+    "node": "v25.8.1",
+    "vite": "7.3.6",
+    "pytest": "7.4.4"
+  },
+  "runs": [
+    {
+      "artifact": "usage-initial.txt",
+      "result": {
+        "failed": 10,
+        "passed": 1
+      },
+      "scope": "Initial actual endpoint methods, synthetic DB rows; before reporting repair."
+    },
+    {
+      "artifact": "date-boundary-initial.txt",
+      "result": {
+        "failed": 11,
+        "deselected": 23
+      },
+      "scope": "Before separately approved UTC date-boundary repair."
+    },
+    {
+      "artifact": "period-order-initial.txt",
+      "result": {
+        "failed": 2,
+        "passed": 0
+      },
+      "scope": "Actual tenant report callback/effect code using synthetic hooks/deferred API promises; old success replaced current rows/failure before generation repair."
+    },
+    {
+      "artifact": "backend-date-final.txt",
+      "cwd": ".",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "pytest",
+        "backend/tests/unit/test_op11_usage_truth.py",
+        "backend/tests/unit/test_admin_usage_currency_scope.py",
+        "backend/tests/unit/test_provider_cost_ledger.py",
+        "-q"
+      ],
+      "result": {
+        "passed": 48,
+        "failed": 0,
+        "skipped": 0,
+        "warnings": 1,
+        "seconds": 9.98
+      },
+      "scope": "Final actual endpoint-method, recorded-money/currency/date/failure controls and existing telemetry tests; synthetic DB, no SQL/RLS proof."
+    },
+    {
+      "artifact": "admin-tests-final-23.txt",
+      "cwd": "Admin/frontend",
+      "argv": [
+        "npm",
+        "test"
+      ],
+      "result": {
+        "passed": 23,
+        "failed": 0,
+        "skipped": 0
+      },
+      "scope": "13 existing helpers +7 server-render/format controls +3 actual tenant-component delayed-result controls with a synthetic hook scheduler. No browser/provider acceptance."
+    },
+    {
+      "artifact": "admin-lint-period-final.txt",
+      "cwd": "Admin/frontend",
+      "argv": [
+        "node",
+        "node_modules/eslint/bin/eslint.js",
+        "src/components/UsageBreakdownCard.tsx",
+        "src/components/QuotaUsage.tsx",
+        "src/pages/UsageCostPage.tsx",
+        "src/lib/api.ts",
+        "src/lib/usage-evidence.ts",
+        "tests/usage-truth.test.mjs",
+        "tests/usage-period-order.test.mjs"
+      ],
+      "exit_code": 0
+    },
+    {
+      "artifact": "admin-typecheck-period-final.txt",
+      "cwd": "Admin/frontend",
+      "argv": [
+        "node",
+        "node_modules/typescript/bin/tsc",
+        "-p",
+        "tsconfig.app.json",
+        "--tsBuildInfoFile",
+        "./tmp/op11-app.tsbuildinfo"
+      ],
+      "exit_code": 0
+    },
+    {
+      "artifact": "admin-build-period-final.txt",
+      "cwd": "Admin/frontend",
+      "argv": [
+        "node",
+        "node_modules/vite/bin/vite.js",
+        "build"
+      ],
+      "exit_code": 0,
+      "seconds": 12.69
+    },
+    {
+      "artifact": "backend-ruff.txt",
+      "cwd": ".",
+      "argv": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "backend/app/api/v1/endpoints/admin/usage.py",
+        "backend/app/domain/services/provider_cost_ledger.py",
+        "backend/tests/unit/test_op11_usage_truth.py",
+        "backend/tests/unit/test_admin_usage_currency_scope.py"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "limits": [
+    "No actual PostgreSQL, live provider, supplier statement or financial mutation.",
+    "Empty or unwired telemetry and all-row legacy coverage never establish supplier completeness.",
+    "Coordinated API/Admin promotion required; old unknown-to-zero clients are incompatible with truthful nullable display.",
+    "Service accounts/hardening are checked-in inventory only; no deployed host check or unit mutation.",
+    "No new pricing service, ledger, vendor, customer billing/meter/admission policy or schema.",
+    "Dependencies accessed through ignored junction to existing exact-lock Admin node_modules; no npm install. Typecheck cache/build outputs stay isolated."
+  ],
+  "source_files": [
+    "backend/app/api/v1/endpoints/admin/usage.py",
+    "backend/app/domain/services/provider_cost_ledger.py",
+    "backend/tests/unit/test_admin_usage_currency_scope.py",
+    "backend/tests/unit/test_op11_usage_truth.py",
+    "Admin/frontend/src/components/QuotaUsage.tsx",
+    "Admin/frontend/src/components/UsageBreakdownCard.tsx",
+    "Admin/frontend/src/pages/UsageCostPage.tsx",
+    "Admin/frontend/src/lib/api.ts",
+    "Admin/frontend/src/lib/usage-evidence.ts",
+    "Admin/frontend/tests/usage-truth.test.mjs",
+    "Admin/frontend/tests/usage-period-order.test.mjs"
+  ],
+  "independent_review": "Root read-only backend/Admin/telemetry review found no material defect. LLM identified the tenant-table period race; after reproduction and repair, its final read review confirmed success/error/finally and resolved-query fencing, with no additional material defect. No independent suite/browser count claimed.",
+  "application_commit": "95b54dc37f3fc9956c7d632d36e558b6e78ba0a1",
+  "artifact_normalization": "Trailing line whitespace and final blank lines in text logs normalized; test results and failure contents retained."
+}

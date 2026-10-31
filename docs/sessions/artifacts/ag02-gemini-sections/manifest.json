@@ -1,0 +1,29 @@
+{
+  "source_commit": "0754382629dd8760dc8a5317efab665b9a68779b",
+  "report": "docs/sessions/2026-10-07-ag02-gemini-sections.md",
+  "artifact_lf_sha256": {
+    "docs/sessions/artifacts/ag02-gemini-sections/baseline-test.py": "091756e67cbb5b9491ab93ce943dbf2ec83f9d0f7884686ab0e724a69394d884",
+    "docs/sessions/artifacts/ag02-gemini-sections/baseline.txt": "75f1d46ed70bb3367c2ca30ed9f3a14f47e6f8fc67241dc060d2d186ce8efe29",
+    "docs/sessions/artifacts/ag02-gemini-sections/commands.json": "bd2ee274ffbf76fdbc173374e7aeb9a9c1e1217145ca2571a7d95fa98b7e81cc",
+    "docs/sessions/artifacts/ag02-gemini-sections/final.txt": "e9e87f5fa07e4c9190634045a0ad0ebef231cc8422301f65403f87eae8dfd81c",
+    "docs/sessions/artifacts/ag02-gemini-sections/first-fixture-test.py": "c7eb562d692eba59cf3d9bb31405dfd63459d7dc3b1abe6415b774d9c3f96d90",
+    "docs/sessions/artifacts/ag02-gemini-sections/first-fixture.txt": "c715e40e4ce469c4554f7cbc328b7f0d909ba45d7f2450b48e04df5d516e1a10",
+    "docs/sessions/artifacts/ag02-gemini-sections/focused.txt": "14f3d0dea5878a8dd52dbb8893c5e7f2004e61dd6e83f11841d73652d9324e8d",
+    "docs/sessions/artifacts/ag02-gemini-sections/lint-comparison.json": "a129e38ef4b22ca2f1c9f3816fc78dd04c6141918bb5f492bb3fee31dcf6c27e",
+    "docs/sessions/artifacts/ag02-gemini-sections/source-binding.json": "de497a3c189d14a32d85e6cd19155ae5dc9f85db701d1dca966776146f1013bd",
+    "docs/sessions/artifacts/ag02-gemini-sections/source-hashes.json": "f5db9e898bd71bc929d57a3ea0c87c2d389a00fbbeb574e11e025ec610b2a8b5",
+    "docs/sessions/artifacts/ag02-gemini-sections/unit-final-result.json": "5ac43f7fe3194364e0f845dd560c804426aef9de7d35e020f46ca4f9925e38f2",
+    "docs/sessions/artifacts/ag02-gemini-sections/unit_probe.py": "5a7800d9831e3f324958e99643913c3fe88bf82d29d3bf7806ae0a99be3daed6",
+    "docs/sessions/2026-10-07-ag02-gemini-sections.md": "607d43c8ce03ce06870a7de55b467849dfd735aaf1abd37ed145cd4d34b81af5"
+  },
+  "binding": {
+    "source_commit": "0754382629dd8760dc8a5317efab665b9a68779b",
+    "tested_base": "f44af7d6fb6e6b10133fb631b21f10f1693e63d3",
+    "tracked_exact_lf_matches": 14,
+    "comment_only_test_file": "backend/tests/unit/test_gemini_tools.py",
+    "tested_snapshot": "baseline-test.py",
+    "tested_snapshot_matches_final_input_hash": true,
+    "ast_equal_excluding_docstrings": true,
+    "reason": "Reviewer requested restoration of original UTF-8 comments/docstring after final owner run. No behavior/test logic changed; no owner rerun claimed."
+  }
+}

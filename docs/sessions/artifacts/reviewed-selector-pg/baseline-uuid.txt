@@ -1,0 +1,18 @@
+{
+  "baseline": true,
+  "native_row": {
+    "id_type": "asyncpg.pgproto.pgproto.UUID",
+    "id_is_string": false,
+    "id_is_uuid": true,
+    "created_at_type": "datetime"
+  },
+  "selection": {
+    "success": false,
+    "error": "The current authorization cannot be established. Reconnect and review.",
+    "cause": "missing authorization row"
+  },
+  "public_unchanged": true,
+  "source_unchanged": true,
+  "schema_removed": true,
+  "role_removed": true
+}

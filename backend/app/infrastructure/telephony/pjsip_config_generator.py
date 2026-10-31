@@ -28,10 +28,10 @@ logs only the path + byte length. Newlines are rejected in every rendered
 value to prevent config-object injection via a crafted credential.
 
 File permissions: the generated file is written 0640 (owner rw, GROUP read).
-Asterisk runs as user ``asterisk`` while the backend runs as ``admins``, so
-the file must be GROUP-readable by the asterisk process — a 0600 file the
-backend writes is unreadable by asterisk, the ``#include`` silently skips it,
-and the trunk never loads (a reload still reports "success"). Proven live.
+The configured backend runtime identity and Asterisk reader may differ.
+The shared group must let Asterisk read the generated files; command reload
+acknowledgement alone does not prove that Asterisk could read/load them.
+Do not infer the installed service identity or permissions from this module.
 
 One-time base-config / deployment prerequisites (ops):
   (a) ``pjsip.conf`` contains ``#include pjsip.d/*.conf`` and defines the
@@ -39,28 +39,53 @@ One-time base-config / deployment prerequisites (ops):
       the generated endpoints reference.
   (b) ``/etc/asterisk/pjsip.d`` is owned ``asterisk:asterisk`` mode ``2770``
       (setgid) so files created inside inherit group ``asterisk``.
-  (c) the backend service user (``admins``) is a member of the ``asterisk``
-      group — combined with (b) + the 0640 mode, asterisk can read the files
-      the backend creates.
-  (d) if ``TELEPHONY_PJSIP_AUTO_RELOAD=on``, a sudoers rule lets the backend
-      user run ``asterisk -rx 'pjsip reload'`` (otherwise reload stays a
-      logged hook an operator runs by hand).
+  (c) the configured backend runtime identity has reviewed membership in the
+      shared ``asterisk`` group — combined with (b) + the 0640 mode, it can
+      write the managed directory and Asterisk can read the resulting files.
+      Provision and verify these identities/permissions explicitly; this
+      module and the unit installer do not establish group membership.
+  (d) if ``TELEPHONY_PJSIP_AUTO_RELOAD=on``, that runtime identity must be
+      authorized to execute the actual direct command
+      ``asterisk -rx 'pjsip reload'`` and access its Asterisk control socket.
+      This module does not invoke ``sudo``: a sudoers entry alone does not
+      authorize its direct invocation. Operations must review and exercise
+      the supported privilege boundary, without blanket privileged commands.
+      With auto-reload off, reload is disabled; enabling it without the
+      required access produces a failure, not an automatic privilege change.
+      Operators may use the controlled deployment/reconciliation path.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_PJSIP_D_DIR = "/etc/asterisk/pjsip.d"
 _DEFAULT_REGISTER_INTERVAL = 3600
+_REGISTER_RETRY_INTERVAL_MAX = 60
 _ALLOWED_TRANSPORTS = {"udp", "tcp", "tls"}
+
+
+@dataclass(frozen=True)
+class PJSIPReloadResult:
+    status: Literal["executed", "coalesced", "disabled", "failed"]
+    detail: str
+
+    @property
+    def accepted(self) -> bool:
+        """Whether Asterisk acknowledged this request's reload command."""
+        return self.status == "executed"
+
+
+class PJSIPReloadError(RuntimeError):
+    """Raised when a caller requires live application but reload is unproven."""
 
 
 # ---------------------------------------------------------------------------
@@ -85,6 +110,8 @@ class TrunkConfigInput:
     dtmf_mode: Optional[str] = None
     source_host: Optional[str] = None     # identify match; defaults to sip_domain
     auth_realm: Optional[str] = None      # digest realm; defaults to "asterisk" to mirror the working primary
+    outbound_proxy: Optional[str] = None  # validated host[:port], rendered as loose-route SIP URI
+    srtp: bool = False                    # SDES SRTP media encryption
 
 
 def _reject_newlines(field: str, value: str) -> str:
@@ -92,6 +119,15 @@ def _reject_newlines(field: str, value: str) -> str:
     if "\n" in value or "\r" in value:
         raise ValueError(f"{field} must not contain newlines")
     return value
+
+
+def _escape_semicolons(value: str) -> str:
+    """Escape ';' so Asterisk's parser keeps it instead of starting a comment.
+
+    An unescaped ';' truncates the value ("pa;ss" is read as "pa"). A ';'
+    already preceded by a backslash is left alone (no double escaping).
+    """
+    return re.sub(r"(?<!\\);", r"\\;", value)
 
 
 def _norm_transport(transport: Optional[str]) -> str:
@@ -146,7 +182,11 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
     lines.append(f"[{ep}]")
     lines.append("type=endpoint")
     lines.append(f"transport={transport_obj}")
-    lines.append(f"context=from-tenant-{tenant}")
+    # Every inbound endpoint enters the same context deliberately. Multiple
+    # registrations can share one carrier source host, so identify matching
+    # cannot prove which endpoint received an INVITE. The reconciler renders
+    # exact Request-URI account routes from active same-tenant DID assignments.
+    lines.append("context=from-talky-inbound")
     lines.append("disallow=all")
     lines.append("allow=ulaw,alaw")
     if has_auth:
@@ -172,6 +212,13 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         }.get(_dm_raw, _dm_raw)
         if _dm in {"rfc4733", "inband", "info", "auto", "auto_info"}:
             lines.append(f"dtmf_mode={_reject_newlines('dtmf_mode', _dm)}")
+    if inp.outbound_proxy:
+        proxy = _reject_newlines("outbound_proxy", inp.outbound_proxy.strip())
+        # Asterisk's pjsip.conf parser needs the URI semicolon escaped.
+        lines.append(f"outbound_proxy=sip:{proxy}\\;lr")
+    if inp.srtp:
+        lines.append("media_encryption=sdes")
+        lines.append("media_encryption_optimistic=no")
     lines.append("direct_media=no")
     # NAT / symmetric-RTP — mirror the working primary so audio flows through the
     # carrier's NAT and the Contact is rewritten to the public address.
@@ -185,21 +232,23 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         lines.append(f"[{ep}-auth]")
         lines.append("type=auth")
         lines.append("auth_type=userpass")
-        lines.append(f"username={_reject_newlines('auth_username', inp.auth_username.strip())}")
-        lines.append(f"password={_reject_newlines('auth_password', inp.auth_password)}")
+        lines.append(f"username={_escape_semicolons(_reject_newlines('auth_username', inp.auth_username.strip()))}")
+        lines.append(f"password={_escape_semicolons(_reject_newlines('auth_password', inp.auth_password))}")
         # Digest realm — the working primary sets realm=asterisk; a missing/wrong
         # realm is a classic 403-on-REGISTER cause. Default to "asterisk", override
         # via the trunk's Advanced auth_realm.
         realm = _reject_newlines("auth_realm", (inp.auth_realm or "asterisk").strip())
         if realm:
-            lines.append(f"realm={realm}")
+            lines.append(f"realm={_escape_semicolons(realm)}")
         lines.append("")
 
     # --- aor ---
     lines.append(f"[{ep}-aor]")
     lines.append("type=aor")
     lines.append(f"contact=sip:{domain}:{port}")
-    lines.append("qualify_frequency=60")
+    # Platform-managed OPTIONS health checks; independent of REGISTER expiry.
+    lines.append("qualify_frequency=10")
+    lines.append("qualify_timeout=3.0")
     lines.append("")
 
     # --- registration (only when register enabled + auth present) ---
@@ -212,11 +261,19 @@ def render_trunk_conf(inp: TrunkConfigInput) -> str:
         lines.append(f"transport={transport_obj}")
         lines.append(f"outbound_auth={ep}-auth")
         lines.append(f"server_uri=sip:{domain}:{port}")
+        if inp.outbound_proxy:
+            proxy = _reject_newlines("outbound_proxy", inp.outbound_proxy.strip())
+            lines.append(f"outbound_proxy=sip:{proxy}\\;lr")
         # Register the NUMBER as the identity (client_uri + contact_user), auth
         # with the SIP login — exactly how the working primary registers.
         lines.append(f"client_uri=sip:{reg_identity}@{domain}")
         lines.append(f"contact_user={reg_identity}")
-        lines.append(f"retry_interval={interval}")
+        # retry_interval is how long PJSIP waits before re-sending a REGISTER
+        # that failed (timeout / 5xx). It used to equal ``expiration`` (3600 by
+        # default, up to 86400), so ONE dropped REGISTER left the trunk
+        # unregistered for an hour or more. Retry within a minute; the
+        # registration lifetime (expiration) is unchanged.
+        lines.append(f"retry_interval={min(interval, _REGISTER_RETRY_INTERVAL_MAX)}")
         lines.append(f"expiration={interval}")
         # Registration resilience (telephony-audit #4, 2026-07-02). PJSIP
         # defaults (max_retries=10, auth_rejection_permanent=yes) let a
@@ -277,6 +334,8 @@ def build_trunk_config_input(row: Any, *, decrypted_password: Optional[str]) -> 
         dtmf_mode=(md.get("dtmf_mode") or None),
         source_host=(md.get("source_host") or None),
         auth_realm=(md.get("auth_realm") or None),
+        outbound_proxy=(md.get("outbound_proxy") or None),
+        srtp=bool(md.get("srtp", False)),
     )
 
 
@@ -352,11 +411,11 @@ def remove_trunk_file(trunk_id: str, *, base_dir: Optional[Path] = None) -> bool
         return False
 
 
-# --- reload hook (debounced; does NOT execute asterisk unless opted in) ----
+# --- reload hook (serialized; executes Asterisk only when configured) --------
 
 _reload_lock = asyncio.Lock()
-_reload_pending = False
 _RELOAD_DEBOUNCE_S = float(os.getenv("TELEPHONY_PJSIP_RELOAD_DEBOUNCE_S", "2.0"))
+_RELOAD_TIMEOUT_S = 10.0
 
 
 def pjsip_reload_command() -> str:
@@ -370,13 +429,14 @@ def _auto_reload_enabled() -> bool:
     }
 
 
-async def request_pjsip_reload(*, execute: Optional[bool] = None) -> bool:
+async def request_pjsip_reload(*, execute: Optional[bool] = None) -> PJSIPReloadResult:
     """Hook invoked after any config file change.
 
-    Default (``execute`` unset and ``TELEPHONY_PJSIP_AUTO_RELOAD`` off): logs
-    the command for an operator to run and returns False — this module never
-    touches live Asterisk on its own. When enabled, coalesces rapid changes
-    within a debounce window and runs ``asterisk -rx 'pjsip reload'`` once.
+    With ``TELEPHONY_PJSIP_AUTO_RELOAD`` disabled, returns a structured
+    ``disabled`` result after logging the operator command. When enabled,
+    serializes commands and waits for each acknowledgement. A pending request
+    cannot acknowledge another request. Production Asterisk lifecycle endpoints
+    require an accepted result before committing; runtime health stays separate.
     """
     if execute is None:
         execute = _auto_reload_enabled()
@@ -386,43 +446,99 @@ async def request_pjsip_reload(*, execute: Optional[bool] = None) -> bool:
             "pjsip_reload_needed — run on the Asterisk host: %s",
             pjsip_reload_command(),
         )
-        return False
+        return PJSIPReloadResult(
+            "disabled",
+            "Automatic PJSIP reload is disabled; configuration was not applied live.",
+        )
 
-    global _reload_pending
     async with _reload_lock:
-        if _reload_pending:
-            return False
-        _reload_pending = True
-    try:
-        await asyncio.sleep(_RELOAD_DEBOUNCE_S)  # debounce: coalesce a burst
-    finally:
-        async with _reload_lock:
-            _reload_pending = False
+        await asyncio.sleep(_RELOAD_DEBOUNCE_S)
+        return await _execute_pjsip_reload()
 
+
+async def _stop_reload_process(proc: Any, communication: asyncio.Task) -> None:
+    """Keep command ownership until the stopped child is drained and reaped."""
+    async def drain() -> None:
+        try:
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+        finally:
+            # Even a denied kill or broken pipe does not establish child exit.
+            try:
+                await communication
+            finally:
+                await proc.wait()
+
+    cleanup = asyncio.create_task(drain())
+    cancelled = False
+    while not cleanup.done():
+        try:
+            await asyncio.shield(cleanup)
+        except asyncio.CancelledError:
+            # A repeated caller cancellation must not free the serialization
+            # lock while its subprocess still owns a live reload command.
+            cancelled = True
+        except Exception:
+            break  # Cleanup completed with an error; inspect it after fencing cancellation.
+    try:
+        cleanup.result()
+    except Exception:
+        if not cancelled:
+            raise
+    if cancelled:
+        raise asyncio.CancelledError
+
+
+async def _execute_pjsip_reload() -> PJSIPReloadResult:
     try:
         proc = await asyncio.create_subprocess_exec(
             "asterisk", "-rx", "pjsip reload",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
-        out, err = await proc.communicate()
+        communication = asyncio.create_task(proc.communicate())
+        try:
+            out, err = await asyncio.wait_for(
+                asyncio.shield(communication), timeout=_RELOAD_TIMEOUT_S,
+            )
+        except asyncio.CancelledError as cancelled:
+            try:
+                await _stop_reload_process(proc, communication)
+            except Exception as exc:
+                logger.error("pjsip_reload_cancel_cleanup_error err_type=%s", type(exc).__name__)
+            raise cancelled
+        except asyncio.TimeoutError:
+            await _stop_reload_process(proc, communication)
+            logger.error("pjsip_reload_timeout timeout_s=%s", _RELOAD_TIMEOUT_S)
+            return PJSIPReloadResult(
+                "failed", "Asterisk reload acknowledgement timed out; live state is unconfirmed.",
+            )
+        except Exception:
+            await _stop_reload_process(proc, communication)
+            raise
         if proc.returncode != 0:
             logger.error(
                 "pjsip_reload_failed rc=%s err=%s", proc.returncode,
                 (err or b"").decode(errors="replace")[:300],
             )
-            return False
+            return PJSIPReloadResult(
+                "failed",
+                f"Asterisk rejected pjsip reload with exit code {proc.returncode}.",
+            )
         logger.info("pjsip_reload_ok out=%s", (out or b"").decode(errors="replace")[:200])
-        return True
+        return PJSIPReloadResult("executed", "Asterisk accepted pjsip reload.")
     except FileNotFoundError:
         logger.warning(
             "pjsip_reload_skipped: asterisk binary not found — run manually: %s",
             pjsip_reload_command(),
         )
-        return False
+        return PJSIPReloadResult("failed", "Asterisk binary was not found.")
     except Exception as exc:  # noqa: BLE001
         logger.error("pjsip_reload_error err=%s", exc)
-        return False
+        return PJSIPReloadResult("failed", f"PJSIP reload failed: {type(exc).__name__}.")
 
 
 # ---------------------------------------------------------------------------
@@ -435,18 +551,23 @@ async def apply_trunk_config(
     decrypted_password: Optional[str],
     base_dir: Optional[Path] = None,
     reload: bool = True,
+    require_reload: bool = False,
 ) -> Path:
     """Render + atomically write the trunk file, then request a reload.
 
     ``decrypted_password`` is the plaintext (decrypted by the caller via the
     encryption service). Raises on a render/write error so the caller can
-    log + swallow (fail-soft) without persisting a broken file.
+    compensate safely or fail the database transaction.
     """
     inp = build_trunk_config_input(row, decrypted_password=decrypted_password)
     content = render_trunk_conf(inp)
     path = write_trunk_file(inp.trunk_id, content, base_dir=base_dir)
     if reload:
-        await request_pjsip_reload()
+        result = await request_pjsip_reload()
+        if require_reload and not result.accepted:
+            raise PJSIPReloadError(result.detail)
+    elif require_reload:
+        raise PJSIPReloadError("Live PJSIP reload was required but not requested.")
     return path
 
 
@@ -455,9 +576,14 @@ async def remove_trunk_config(
     *,
     base_dir: Optional[Path] = None,
     reload: bool = True,
+    require_reload: bool = False,
 ) -> bool:
     """Remove the trunk file (deactivate/delete) then request a reload."""
     removed = remove_trunk_file(trunk_id, base_dir=base_dir)
     if reload:
-        await request_pjsip_reload()
+        result = await request_pjsip_reload()
+        if require_reload and not result.accepted:
+            raise PJSIPReloadError(result.detail)
+    elif require_reload:
+        raise PJSIPReloadError("Live PJSIP reload was required but not requested.")
     return removed

@@ -1,0 +1,40 @@
+{
+  "head": "259b8789436cf74977c2c1d90ee185f778a93f4a",
+  "hash_algorithm": "SHA256 of read_bytes().replace(CRLF,LF)",
+  "files": {
+    "backend/app/api/v1/endpoints/telephony_bridge.py": "0a70113f05c9735155a0f1cae19c09a48d99a6996f76b00bba90e2346c15f43e",
+    "backend/deploy/infra/nginx/api.talkleeai.com.conf": "261b285ef51ef17e41c132ee4ea33b56e04995b6c0e768df8696c72bed877af9",
+    "backend/tests/unit/test_api_process_split.py": "1ff40d3b07c2929caf62718e00118d4af83785548a91bc3c0996ce45494b41ce",
+    "backend/tests/unit/test_api_process_role_admission.py": "01d5ac491fb5487e19f3be282264c952f39cdd1ae90ccab9f59a51800184c9bb"
+  },
+  "initial": {
+    "failed": 6,
+    "passed": 42,
+    "blocked_network_attempts": 0
+  },
+  "final": {
+    "passed": 175,
+    "skipped": 0,
+    "warnings": 51,
+    "seconds": 11.18,
+    "blocked_network_attempts": 0
+  },
+  "command": {
+    "cwd": "backend",
+    "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "argv": [
+      "tmp/release-backend-check.py",
+      "-q",
+      "--tb=short",
+      "tests/unit/test_api_process_role_admission.py",
+      "tests/unit/test_api_process_split.py",
+      "tests/unit/test_telephony_start_ownership.py",
+      "tests/unit/test_telephony_bridge_auth.py",
+      "tests/unit/test_dialer_origination_durability.py",
+      "tests/unit/test_outbound_campaign_boundaries.py",
+      "tests/unit/test_core_infra_resources.py",
+      "tests/unit/test_production_migration_deploy_contract.py"
+    ],
+    "environment": "Same synthetic environment/exact dependency overlay recorded in ../release-langgraph-security/commands.json"
+  }
+}

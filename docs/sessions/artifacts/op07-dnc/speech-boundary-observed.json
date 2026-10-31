@@ -1,0 +1,13 @@
+{
+  "scope": "Actual native event pump, existing shared response guards and playback; synthetic provider candidate/audio/transport/DNC failure only",
+  "input": "Do not call me again. Goodbye.",
+  "provider_candidate": "I've removed your number from our calling list. Goodbye.",
+  "dnc_attempts": 1,
+  "dnc_acknowledged": false,
+  "submitted_audio_chunks": 1,
+  "submitted_audio_bytes": 640,
+  "hangup_callback_count": 1,
+  "repair_requested": false,
+  "confirmation_language_fenced": false,
+  "limits": "No provider request or real audio/phone/DB call. Synthetic gateway completion is not human-hearing proof. This probes wiring, not model frequency or semantic accuracy."
+}

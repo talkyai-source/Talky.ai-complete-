@@ -1,0 +1,2 @@
+Verification record: final Admin app TypeScript command in validation-manifest.json.
+Exit code: 0. No stdout/stderr was emitted. The sequential command explicitly stopped on a nonzero typecheck result before running the successful Vite build.

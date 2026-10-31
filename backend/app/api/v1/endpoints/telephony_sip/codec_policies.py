@@ -1,4 +1,5 @@
 """Codec policy endpoints — list / create / update / activate / deactivate."""
+
 from __future__ import annotations
 
 import logging
@@ -11,6 +12,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.core.db_utils import acquire_with_tenant
 
 from ._shared import (
     _claim_idempotency,
@@ -34,6 +36,7 @@ router = APIRouter(tags=["Telephony SIP"])
 
 
 # --- helpers (codec-policy-specific) ----------------------------------
+
 
 def _codec_row_to_response(row: asyncpg.Record) -> CodecPolicyResponse:
     return CodecPolicyResponse(
@@ -85,6 +88,7 @@ async def _get_tenant_codec_policy(
 
 # --- endpoints --------------------------------------------------------
 
+
 @router.get("/codec-policies", response_model=list[CodecPolicyResponse])
 async def list_codec_policies(
     request: Request,
@@ -95,8 +99,18 @@ async def list_codec_policies(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         rows = await conn.fetch(
             """
             SELECT
@@ -149,8 +163,18 @@ async def create_codec_policy(
     request_hash = _stable_hash(canonical_payload)
     operation = "codec_policies:create"
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_response, cached_code = await _claim_idempotency(
                 conn,
@@ -304,8 +328,18 @@ async def update_codec_policy(
     request_hash = _stable_hash(patch_payload)
     operation = f"codec_policies:update:{policy_id}"
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_response, cached_code = await _claim_idempotency(
                 conn,
@@ -492,8 +526,18 @@ async def _set_codec_policy_active_state(
     )
     request_hash = _stable_hash({"policy_id": str(policy_id), "active_state": active_state})
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         async with conn.transaction():
             state, cached_response, cached_code = await _claim_idempotency(
                 conn,
@@ -527,7 +571,9 @@ async def _set_codec_policy_active_state(
                 tenant_id=current_user.tenant_id,
                 user_id=current_user.id,
                 policy_scope="api_mutation",
-                metric_key="codec_policies:activate" if active_state else "codec_policies:deactivate",
+                metric_key=(
+                    "codec_policies:activate" if active_state else "codec_policies:deactivate"
+                ),
                 request_id=request_id,
             )
             if quota_problem:

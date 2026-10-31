@@ -1,0 +1,16 @@
+Environment: PYTHONUTF8=1; PYTHONDONTWRITEBYTECODE=1; ENVIRONMENT=test; PYTHONPATH=<owner-worktree>/backend
+Interpreter: C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe
+Working directory: C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-dialogue-cleanup-20261007
+
+Final aggregate:
+python -B -m pytest backend/tests/unit/test_dialogue_cleanup.py backend/tests/unit/test_silence_action.py backend/tests/unit/test_audio_ingest_caller_first_silence.py backend/tests/unit/test_regreet_ladder_over_open_caller_turn.py backend/tests/unit/test_opening_nudge_words_without_start_of_turn.py backend/tests/unit/test_voice_pipeline_service.py backend/tests/unit/test_caller_authorized_end_call.py backend/tests/unit/voice_pipeline/test_identity_disposition.py backend/tests/unit/test_phantom_goodbye_recovery.py backend/tests/unit/test_behavioral_fixes.py backend/tests/unit/test_ag03_caller_dispatch_order.py backend/tests/unit/test_op02_lifecycle_ownership.py backend/tests/unit/test_tenant_profile_admission.py -q --disable-warnings -k "not test_pricing_questions_get_extended_sentence_budget_for_custom_prompt_sessions and not test_non_pricing_questions_keep_default_sentence_budget and not test_streamed_response_strips_reasoning_and_keeps_grounded_pricing"
+
+After two DNC assertions moved outside the fake provider generator (no app edits):
+python -B -m pytest backend/tests/unit/test_dialogue_cleanup.py -q --disable-warnings
+
+Lint: python -B -m ruff check --select F <changed surviving app/test files>
+Diff: git diff --check
+
+Expanded final lint argv:
+["C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe", "-B", "-m", "ruff", "check", "--select", "F", "backend/app/domain/services/telephony/modes/agent_first.py", "backend/app/domain/services/telephony/prewarm.py", "backend/app/domain/services/voice_pipeline/audio_ingest.py", "backend/app/domain/services/voice_pipeline/end_call.py", "backend/app/domain/services/voice_pipeline/identity_disposition.py", "backend/app/domain/services/voice_pipeline/transcript_handler.py", "backend/app/domain/services/voice_pipeline/turn_ender.py", "backend/app/domain/services/voice_pipeline/turn_runner.py", "backend/app/domain/services/voice_pipeline_service.py", "backend/tests/unit/test_ag03_caller_dispatch_order.py", "backend/tests/unit/test_audio_ingest_caller_first_silence.py", "backend/tests/unit/test_behavioral_fixes.py", "backend/tests/unit/test_caller_authorized_end_call.py", "backend/tests/unit/test_dialogue_cleanup.py", "backend/tests/unit/test_op02_lifecycle_ownership.py", "backend/tests/unit/test_opening_nudge_words_without_start_of_turn.py", "backend/tests/unit/test_phantom_goodbye_recovery.py", "backend/tests/unit/test_regreet_ladder_over_open_caller_turn.py", "backend/tests/unit/test_silence_action.py", "backend/tests/unit/test_tenant_profile_admission.py", "backend/tests/unit/test_voice_pipeline_service.py", "backend/tests/unit/voice_pipeline/test_identity_disposition.py"]
+Python: 3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]

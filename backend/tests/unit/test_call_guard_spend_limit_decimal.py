@@ -39,7 +39,11 @@ from app.domain.services.call_guard import (
 
 
 def _guard() -> CallGuard:
-    return CallGuard(db_pool=object(), redis_client=None)
+    # The spend check now reads the month meter (nothing accrues
+    # monthly_spend_used), so it needs a pool that answers it: zero usage here.
+    from tests.unit.test_op01_metering_unavailable import Meter, Pool
+
+    return CallGuard(db_pool=Pool(Meter(allocated=0, plan_minutes=0, used=0)), redis_client=None)
 
 
 # ── _check_spend_limit: correctness with Decimal-typed inputs ──────────────
@@ -56,7 +60,7 @@ async def test_spend_under_cap_allows_even_with_decimal_inputs():
     )
 
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=60,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=60,
     )
 
     assert result.check == GuardCheck.SPEND_LIMIT
@@ -74,7 +78,7 @@ async def test_spend_over_cap_blocks_even_with_decimal_inputs():
     )
 
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=600,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=600,
     )
 
     assert result.passed is False
@@ -92,7 +96,7 @@ async def test_spend_check_never_raises_typeerror_with_mixed_decimal_float():
     )
     # Should simply return a CheckResult, not raise TypeError.
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=30,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=30,
     )
     assert result.passed is True
 
@@ -105,7 +109,7 @@ async def test_spend_check_plain_float_inputs_still_work():
     limits = TenantCallLimits(monthly_spend_cap=100.0, monthly_spend_used=99.99)
 
     result = await guard._check_spend_limit(
-        tenant_id="t1", tenant_limits=limits, estimated_duration_seconds=120,
+        tenant_id="11111111-1111-4111-8111-111111111111", tenant_limits=limits, estimated_duration_seconds=120,
     )
 
     assert result.passed is False  # 99.99 + 0.10 > 100.0
@@ -124,6 +128,12 @@ class _FakeConn:
 
     async def fetchrow(self, *a, **k):
         return self._row
+
+    def transaction(self):
+        return _FakeAcquireCtx(self)
+
+    async def execute(self, *_args, **_kwargs):
+        return "SET"
 
 
 class _FakeAcquireCtx:
@@ -201,7 +211,7 @@ async def test_get_tenant_limits_coerces_decimal_to_float():
     redis = _FakeRedis()
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=redis)
 
-    limits = await guard._get_tenant_limits("t1")
+    limits = await guard._get_tenant_limits("00000000-0000-0000-0000-000000000001")
 
     assert isinstance(limits.monthly_spend_cap, float)
     assert isinstance(limits.monthly_spend_used, float)
@@ -219,7 +229,7 @@ async def test_get_tenant_limits_cache_write_succeeds_with_nonzero_decimal_spend
     redis = _FakeRedis()
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=redis)
 
-    await guard._get_tenant_limits("t1")
+    await guard._get_tenant_limits("00000000-0000-0000-0000-000000000001")
 
     assert redis.setex_succeeded is True, (
         "the tenant-limits cache write must succeed even when the DB row "
@@ -236,7 +246,7 @@ async def test_get_tenant_limits_handles_null_spend_cap():
     redis = _FakeRedis()
     guard = CallGuard(db_pool=_FakePool(conn), redis_client=redis)
 
-    limits = await guard._get_tenant_limits("t1")
+    limits = await guard._get_tenant_limits("00000000-0000-0000-0000-000000000001")
 
     assert limits.monthly_spend_cap is None
     assert limits.monthly_spend_used == 0.0
@@ -258,6 +268,9 @@ async def test_evaluate_blocks_when_spend_check_raises_unexpectedly():
     async def _pass(check, **kwargs):
         return CheckResult(check=check, passed=True)
 
+    guard._check_platform_calls_enabled = lambda **kw: _pass(
+        GuardCheck.PLATFORM_CALLS_ENABLED, **kw
+    )
     guard._check_tenant_active = lambda **kw: _pass(GuardCheck.TENANT_ACTIVE, **kw)
     guard._check_partner_active = lambda **kw: _pass(GuardCheck.PARTNER_ACTIVE, **kw)
     guard._check_subscription = lambda **kw: _pass(GuardCheck.SUBSCRIPTION_VALID, **kw)

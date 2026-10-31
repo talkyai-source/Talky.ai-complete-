@@ -3,13 +3,13 @@ import {
     DollarSign,
     TrendingUp,
     Phone,
-    MessageSquare,
-    Mic,
-    Brain,
-    RefreshCw
+    RefreshCw,
+    Info,
 } from 'lucide-react';
 import { api } from '../lib/api';
 import type { UsageSummaryResponse } from '../lib/api';
+import { formatLegacyEstimate, formatRecordedCount } from '../lib/usage-evidence';
+import { useAuthGeneration } from '../lib/use-auth-generation';
 
 interface UsageBreakdownCardProps {
     tenantId?: string;
@@ -17,46 +17,33 @@ interface UsageBreakdownCardProps {
     toDate?: string;
 }
 
-const providerConfig: Record<string, { icon: React.ReactNode; label: string; color: string }> = {
-    deepgram: { icon: <Mic size={16} />, label: 'Deepgram (STT/TTS)', color: '#4ade80' },
-    groq: { icon: <Brain size={16} />, label: 'Groq (LLM)', color: '#60a5fa' },
-    twilio: { icon: <Phone size={16} />, label: 'Twilio', color: '#f472b6' },
-    openai: { icon: <Brain size={16} />, label: 'OpenAI', color: '#a78bfa' },
-};
-
-const usageTypeLabels: Record<string, string> = {
-    stt_tts: 'Speech Processing',
-    llm: 'AI/Language Model',
-    voice: 'Voice Calls',
-    sms: 'SMS Messages',
-};
-
 export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdownCardProps) {
-    const [summary, setSummary] = useState<UsageSummaryResponse | null>(null);
-    const [loading, setLoading] = useState(true);
-
+    const generation = useAuthGeneration();
+    const requestKey = JSON.stringify([generation, tenantId, fromDate, toDate]);
+    const [result, setResult] = useState<{
+        key: string; summary: UsageSummaryResponse | null; error: string | null;
+    } | null>(null);
+    const loading = result?.key !== requestKey;
+    const summary = loading ? null : result?.summary;
+    const error = loading ? null : result?.error;
     useEffect(() => {
-        fetchUsage();
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [tenantId, fromDate, toDate]);
-
-    const fetchUsage = async () => {
-        setLoading(true);
-        try {
-            const response = await api.getUsageSummary({
-                tenant_id: tenantId,
-                from_date: fromDate,
-                to_date: toDate,
+        let cancelled = false;
+        void api.getUsageSummary({ tenant_id: tenantId, from_date: fromDate, to_date: toDate })
+            .then((response) => {
+                if (cancelled || generation !== api.getAuthGeneration()) return;
+                const data = response.data;
+                const unavailable = Boolean(response.error || !data
+                    || typeof data.period_start !== 'string' || typeof data.period_end !== 'string'
+                    || typeof data.monetary_note !== 'string');
+                setResult({ key: requestKey, summary: unavailable ? null : response.data ?? null,
+                    error: unavailable ? 'Usage data is unavailable. Please retry.' : null });
+            })
+            .catch(() => {
+                if (!cancelled && generation === api.getAuthGeneration()) setResult({ key: requestKey, summary: null,
+                    error: 'Usage data is unavailable. Please retry.' });
             });
-            if (response.data) {
-                setSummary(response.data);
-            }
-        } catch (error) {
-            console.error('Failed to fetch usage:', error);
-        } finally {
-            setLoading(false);
-        }
-    };
+        return () => { cancelled = true; };
+    }, [tenantId, fromDate, toDate, requestKey, generation]);
 
     if (loading) {
         return (
@@ -83,13 +70,17 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
                 <div className="card-body">
                     <div className="empty-state">
                         <DollarSign size={32} />
-                        <p>No usage data available</p>
+                        <p role="alert">{error || 'Usage data is unavailable. Please retry.'}</p>
                     </div>
                 </div>
             </div>
         );
     }
 
+    return <UsageSummaryView summary={summary} />;
+}
+
+export function UsageSummaryView({ summary }: { summary: UsageSummaryResponse }) {
     return (
         <div className="card usage-card">
             <div className="card-header">
@@ -109,8 +100,10 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
                             <DollarSign size={20} />
                         </div>
                         <div className="stat-content">
-                            <span className="stat-value">${summary.total_cost.toFixed(2)}</span>
-                            <span className="stat-label">Total Cost</span>
+                            <span className="stat-value">
+                                Unavailable
+                            </span>
+                            <span className="stat-label">Supplier cost</span>
                         </div>
                     </div>
                     <div className="usage-stat">
@@ -118,8 +111,8 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
                             <Phone size={20} />
                         </div>
                         <div className="stat-content">
-                            <span className="stat-value">{summary.total_call_minutes.toLocaleString()}</span>
-                            <span className="stat-label">Call Minutes</span>
+                            <span className="stat-value">{formatRecordedCount(summary.total_call_minutes)}</span>
+                            <span className="stat-label">Recorded call minutes</span>
                         </div>
                     </div>
                     <div className="usage-stat">
@@ -127,61 +120,21 @@ export function UsageBreakdownCard({ tenantId, fromDate, toDate }: UsageBreakdow
                             <TrendingUp size={20} />
                         </div>
                         <div className="stat-content">
-                            <span className="stat-value">{summary.total_api_calls.toLocaleString()}</span>
-                            <span className="stat-label">API Calls</span>
+                            <span className="stat-value">{formatRecordedCount(summary.total_action_records)}</span>
+                            <span className="stat-label">Action records</span>
                         </div>
                     </div>
                 </div>
 
-                {/* Provider Breakdown */}
-                {summary.providers.length > 0 && (
-                    <div className="provider-breakdown">
-                        <h4 className="breakdown-title">By Provider</h4>
-                        <div className="breakdown-list">
-                            {summary.providers.map((item, index) => {
-                                const config = providerConfig[item.provider] || {
-                                    icon: <MessageSquare size={16} />,
-                                    label: item.provider,
-                                    color: '#9ca3af'
-                                };
-                                const percentage = summary.total_cost > 0
-                                    ? (item.estimated_cost / summary.total_cost) * 100
-                                    : 0;
-
-                                return (
-                                    <div key={index} className="breakdown-item">
-                                        <div className="breakdown-header">
-                                            <div className="provider-info" style={{ color: config.color }}>
-                                                {config.icon}
-                                                <span className="provider-name">{config.label}</span>
-                                            </div>
-                                            <span className="provider-cost">
-                                                ${item.estimated_cost.toFixed(2)}
-                                            </span>
-                                        </div>
-                                        <div className="breakdown-bar-container">
-                                            <div
-                                                className="breakdown-bar"
-                                                style={{
-                                                    width: `${percentage}%`,
-                                                    backgroundColor: config.color
-                                                }}
-                                            />
-                                        </div>
-                                        <div className="breakdown-details">
-                                            <span className="usage-type">
-                                                {usageTypeLabels[item.usage_type] || item.usage_type}
-                                            </span>
-                                            <span className="tenant-count">
-                                                {item.tenant_count} tenant{item.tenant_count !== 1 ? 's' : ''}
-                                            </span>
-                                        </div>
-                                    </div>
-                                );
-                            })}
-                        </div>
-                    </div>
-                )}
+                <div className="provider-breakdown">
+                    <h4 className="breakdown-title">Provider attribution unavailable</h4>
+                    <p>Recorded calls and action records do not establish provider usage or supplier charges.</p>
+                    <p>Legacy outbound USD estimate: {formatLegacyEstimate(summary.legacy_outbound_estimate)}</p>
+                </div>
+                <div className="usage-disclaimer">
+                    <Info size={15} />
+                    <span>{summary.monetary_note}</span>
+                </div>
             </div>
         </div>
     );

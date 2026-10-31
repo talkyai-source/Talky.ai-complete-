@@ -1,0 +1,52 @@
+................................................................F....... [ 69%]
+...........................x....                                         [100%]
+================================== FAILURES ===================================
+_____ test_streamed_response_strips_reasoning_and_keeps_grounded_pricing ______
+
+    @pytest.mark.asyncio
+    async def test_streamed_response_strips_reasoning_and_keeps_grounded_pricing():
+        service = VoicePipelineService(
+            stt_provider=MagicMock(),
+            llm_provider=_StreamingLLMProvider([
+                "<think>I should outline the pricing plan first.</think>",
+                "\n### Plans\n",
+                "1. **Basic** is $29 per month. ",
+                "2. **Professional** is $79 per month. ",
+                "3. **Enterprise** is custom pricing.",
+            ]),
+            tts_provider=AsyncMock(),
+            media_gateway=AsyncMock(),
+        )
+        service.latency_tracker = MagicMock()
+
+        session = _make_session()
+        session.system_prompt = "Use plain spoken text only."
+        session.conversation_history = [
+            Message(role=MessageRole.USER, content="What are your packages and pricing?")
+        ]
+
+        session.system_prompt += (
+            "\n<company_knowledge>Basic is $29 per month. Professional is $79 per month. "
+            "Enterprise is custom pricing.</company_knowledge>"
+        )
+        session.turn_id = 3
+        session.knowledge_mode = "inline"
+        service.synthesize_and_send_audio = AsyncMock(return_value=False)
+        service._barge_in_events[session.call_id] = session.barge_in_event
+        response, _, _ = await service._stream_llm_and_tts(session)
+        submitted = " ".join(c.args[1] for c in service.synthesize_and_send_audio.await_args_list)
+        assert response == submitted
+
+        assert "<think>" not in response
+        assert "**" not in response
+        assert "#" not in response
+>       assert "1." not in response
+E       AssertionError: assert '1.' not in 'Plans 1. Ba...tom pricing.'
+E         '1.' is contained here:
+E           Plans 1. Basic is $29 per month. 2. Professional is $79 per month. 3. Enterprise is custom pricing.
+E         ?       ++
+
+tests\unit\test_voice_pipeline_service.py:139: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_voice_pipeline_service.py::test_streamed_response_strips_reasoning_and_keeps_grounded_pricing
+1 failed, 102 passed, 1 xfailed, 253 warnings in 5.95s

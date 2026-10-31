@@ -6,11 +6,12 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.errors import ServerErrorMiddleware
 
 from app.api.v1.endpoints.auth import limiter
 from app.core.api_security_middleware import APISecurityMiddleware
 from app.core.config import get_settings
-from app.core.error_handlers import register_error_handlers
+from app.core.error_handlers import register_error_handlers, unhandled_exception_handler
 from app.core.request_id_middleware import (
     CallIdLogFilter,
     RequestIdLogFilter,
@@ -73,11 +74,23 @@ def configure_logging() -> None:
 
 
 def configure_middleware(app: FastAPI) -> None:
-    """Register middleware in the required outermost-first order."""
+    """Keep response wrappers outside every application security decision.
+
+    Starlette prepends each added middleware, so registration is inside-out.
+    The guard execution order remains API -> session -> tenant -> CSRF.
+    """
     settings = get_settings()
 
-    app.add_middleware(RequestIdMiddleware)
-    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(CSRFMiddleware, allowed_origins=settings.allowed_origins)
+    app.add_middleware(TenantMiddleware)
+    app.add_middleware(SessionSecurityMiddleware)
+    app.add_middleware(APISecurityMiddleware)
+    # FastAPI's outermost error handler runs after request context is reset and
+    # cannot pass its response back through CORS/security/correlation wrappers.
+    # Render unexpected failures inside those wrappers using the same handler;
+    # Starlette still re-raises for server reporting and never replaces a
+    # response that has already started.
+    app.add_middleware(ServerErrorMiddleware, handler=unhandled_exception_handler)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.allowed_origins,
@@ -90,13 +103,13 @@ def configure_middleware(app: FastAPI) -> None:
             "Idempotency-Key",
             "X-Request-ID",
             "X-CSRF-Token",
+            "X-Talky-Expected-User",
+            "X-Talky-Expected-Tenant",
         ],
         expose_headers=["X-Request-ID"],
     )
-    app.add_middleware(CSRFMiddleware, allowed_origins=settings.allowed_origins)
-    app.add_middleware(TenantMiddleware)
-    app.add_middleware(SessionSecurityMiddleware)
-    app.add_middleware(APISecurityMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
+    app.add_middleware(RequestIdMiddleware)
 
     app.state.limiter = limiter
     # Standardized error envelope + Retry-After on 429

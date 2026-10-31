@@ -1,0 +1,18 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+___________ test_previous_window_cannot_replay_after_clock_advances ___________
+
+clock = <class 'tests.security.test_cp08_totp_steps.clock.<locals>.Clock'>
+
+    def test_previous_window_cannot_replay_after_clock_advances(clock):
+        secret = pyotp.random_base32()
+        accepted = datetime.fromtimestamp(clock.current.timestamp() - 30, timezone.utc)
+        code = pyotp.TOTP(secret).at(accepted.timestamp())
+        accepted_again = totp.verify_totp_code(secret, code, last_used_at=accepted)
+>       assert accepted_again is False
+E       assert True is False
+
+tests\security\test_cp08_totp_steps.py:29: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/security/test_cp08_totp_steps.py::test_previous_window_cannot_replay_after_clock_advances
+1 failed, 4 deselected in 1.15s

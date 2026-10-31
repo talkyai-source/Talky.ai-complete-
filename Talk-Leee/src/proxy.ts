@@ -1,0 +1,435 @@
+import { NextResponse, type NextRequest } from "next/server";
+import { authTokenCookieName } from "./lib/auth-token";
+
+const INTERNAL_BYPASS_HEADER = "x-talklee-mw-internal";
+const WHITE_LABEL_ADMIN_ROLE = "white_label_admin";
+const PARTNER_ADMIN_ROLE = "partner_admin";
+const WHITE_LABEL_DASHBOARD_PATH = "/white-label/dashboard";
+
+function setSecurityHeaders(res: NextResponse, input: { csp: string; inProd: boolean; https: boolean }) {
+    res.headers.set("Content-Security-Policy", input.csp);
+    res.headers.set("X-Content-Type-Options", "nosniff");
+    res.headers.set("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.headers.set("X-Frame-Options", "DENY");
+    res.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+    res.headers.set("Cross-Origin-Resource-Policy", "same-origin");
+    res.headers.set("X-DNS-Prefetch-Control", "on");
+    res.headers.set("X-Permitted-Cross-Domain-Policies", "none");
+    if (input.inProd && input.https) res.headers.set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload");
+}
+
+function devBypassAuth() {
+    if (process.env.NODE_ENV === "production") return false;
+    return process.env.TALKLEE_REQUIRE_AUTH !== "1";
+}
+
+function isHttps(req: NextRequest) {
+    const forwarded = req.headers.get("x-forwarded-proto");
+    if (forwarded) return forwarded.split(",")[0]!.trim().toLowerCase() === "https";
+    return req.nextUrl.protocol === "https:";
+}
+
+function redirectToHttps(req: NextRequest) {
+    const url = req.nextUrl.clone();
+    url.protocol = "https:";
+    const host = req.headers.get("host");
+    if (host) url.host = host;
+    return NextResponse.redirect(url, 308);
+}
+
+function isLocalHost(req: NextRequest) {
+    const hostHeader = req.headers.get("host") ?? "";
+    const host = hostHeader.split(":")[0]?.trim().toLowerCase() || req.nextUrl.hostname.toLowerCase();
+    return host === "localhost" || host === "127.0.0.1" || host === "[::1]";
+}
+
+function base64Nonce() {
+    const bytes = new Uint8Array(16);
+    crypto.getRandomValues(bytes);
+    if (typeof btoa === "function") {
+        let s = "";
+        for (const b of bytes) s += String.fromCharCode(b);
+        return btoa(s);
+    }
+    const BufferCtor = (globalThis as unknown as { Buffer?: { from: (data: Uint8Array) => { toString: (enc: string) => string } } }).Buffer;
+    if (BufferCtor) return BufferCtor.from(bytes).toString("base64");
+    return Array.from(bytes)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("");
+}
+
+function originFromUrl(raw: string | undefined) {
+    if (!raw) return undefined;
+    try {
+        return new URL(raw).origin;
+    } catch {
+        return undefined;
+    }
+}
+
+function sentryOriginFromDsn(raw: string | undefined) {
+    if (!raw) return undefined;
+    try {
+        return new URL(raw).origin;
+    } catch {
+        return undefined;
+    }
+}
+
+function isPublicContactPath(pathname: string) {
+    return pathname === "/contact" || pathname === "/contact/" ||
+        pathname === "/api/contact-enquiries" || pathname === "/api/contact-enquiries/";
+}
+
+function isPublicPath(pathname: string) {
+    if (pathname === "/") return true;
+    if (isPublicContactPath(pathname)) return true;
+    if (pathname.startsWith("/auth/")) return true;
+    if (pathname === "/auth") return true;
+    if (pathname.startsWith("/connectors/callback")) return true;
+    if (pathname.startsWith("/_next/")) return true;
+    if (pathname === "/ai-voice-dialer" || pathname.startsWith("/ai-voice-dialer/")) return true;
+    if (pathname === "/ai-assist" || pathname.startsWith("/ai-assist/")) return true;
+    if (pathname === "/ai-voice-agent" || pathname.startsWith("/ai-voice-agent/")) return true;
+    if (pathname === "/products" || pathname.startsWith("/products/")) return true;
+    if (pathname === "/pricing" || pathname.startsWith("/pricing/")) return true;
+    if (pathname === "/docs" || pathname.startsWith("/docs/")) return true;
+    if (pathname.startsWith("/use-cases")) return true;
+    if (pathname.startsWith("/industries")) return true;
+    return false;
+}
+
+function isWhiteLabelPath(pathname: string) {
+    return pathname === "/white-label" || pathname.startsWith("/white-label/");
+}
+
+function isWhiteLabelAdminPath(pathname: string) {
+    return pathname === WHITE_LABEL_DASHBOARD_PATH || pathname.startsWith(WHITE_LABEL_DASHBOARD_PATH + "/") || pathname === "/white-label";
+}
+
+function isApiPath(pathname: string) {
+    return pathname === "/api" || pathname.startsWith("/api/");
+}
+
+/**
+ * Canonical form of a page URL is trailing-slashed. Returns the path to
+ * redirect to, or null when the request is already canonical or must be left
+ * alone.
+ *
+ * Exclusions, in order:
+ *  - /api/*   route handlers. next.config.ts sets skipTrailingSlashRedirect so
+ *             Next never issues its own 308 here; external callers that treat a
+ *             3xx as a failed delivery (Stripe webhooks) must reach the handler
+ *             directly, at either spelling.
+ *  - /_next/* build assets.
+ *  - any path whose last segment has a dot (/favicon.ico, /openapi.json,
+ *    /site.webmanifest) - files, not pages.
+ */
+export function trailingSlashRedirectPath(pathname: string): string | null {
+    if (!pathname.startsWith("/")) return null;
+    if (pathname.endsWith("/")) return null;
+    if (isApiPath(pathname)) return null;
+    if (pathname.startsWith("/_next/")) return null;
+    const lastSegment = pathname.slice(pathname.lastIndexOf("/") + 1);
+    if (lastSegment.includes(".")) return null;
+    return pathname + "/";
+}
+
+function isConnectorCallbackPath(pathname: string) {
+    return pathname.startsWith("/connectors/callback");
+}
+
+function isAdminOrInfrastructurePath(pathname: string) {
+    if (pathname === "/admin" || pathname.startsWith("/admin/")) return true;
+    if (pathname === "/super-admin" || pathname.startsWith("/super-admin/")) return true;
+    if (pathname === "/system" || pathname.startsWith("/system/")) return true;
+    if (pathname === "/infrastructure" || pathname.startsWith("/infrastructure/")) return true;
+    if (pathname === "/internal" || pathname.startsWith("/internal/")) return true;
+    if (pathname === "/ops" || pathname.startsWith("/ops/")) return true;
+    if (pathname === "/platform" || pathname.startsWith("/platform/")) return true;
+    return false;
+}
+
+async function fetchUserContextFromBackend(input: { cookieHeader: string }): Promise<{ role: string; partnerId: string | null } | null> {
+    const configured = process.env.NEXT_PUBLIC_API_BASE_URL?.trim();
+    if (!configured) return null;
+    try {
+        const res = await fetch(`${configured.replace(/\/+$/, "")}/auth/me`, {
+            method: "GET",
+            headers: {
+                // Forward the full incoming cookie header so the
+                // backend sees BOTH the new httpOnly `talky_at`
+                // access cookie (Phase A) and any legacy cookies.
+                cookie: input.cookieHeader,
+                accept: "application/json",
+                [INTERNAL_BYPASS_HEADER]: "1",
+            },
+            cache: "no-store",
+        });
+        if (!res.ok) return null;
+        const data = (await res.json().catch(() => null)) as unknown;
+        if (!data || typeof data !== "object") return null;
+        const role = (data as { role?: unknown }).role;
+        if (typeof role !== "string" || role.trim().length === 0) return null;
+        const partnerId =
+            (data as { partner_id?: unknown }).partner_id ?? (data as { partnerId?: unknown }).partnerId ?? (data as { partner?: unknown }).partner;
+        return { role, partnerId: typeof partnerId === "string" && partnerId.trim().length > 0 ? partnerId : null };
+    } catch {
+        return null;
+    }
+}
+
+function whiteLabelPartnerFromPath(pathname: string): string | null {
+    const m = pathname.match(/^\/white-label\/([^/]+)(?:\/|$)/);
+    if (!m) return null;
+    const seg = (m[1] ?? "").trim();
+    if (!seg) return null;
+    if (seg.toLowerCase() === "dashboard") return null;
+    return seg;
+}
+
+function readCookieFromHeader(req: NextRequest, name: string) {
+    const raw = req.headers.get("cookie");
+    if (!raw) return undefined;
+    const parts = raw.split(";").map((p) => p.trim());
+    for (const part of parts) {
+        if (!part) continue;
+        const eq = part.indexOf("=");
+        if (eq <= 0) continue;
+        const k = part.slice(0, eq).trim();
+        if (k !== name) continue;
+        const v = part.slice(eq + 1).trim();
+        try {
+            return decodeURIComponent(v);
+        } catch {
+            return v;
+        }
+    }
+    return undefined;
+}
+
+export async function proxy(req: NextRequest) {
+    const { pathname } = req.nextUrl;
+
+    const inProd = process.env.NODE_ENV === "production";
+    const https = isHttps(req);
+
+    if (req.headers.get(INTERNAL_BYPASS_HEADER) === "1") {
+        return NextResponse.next();
+    }
+
+    if (inProd && !https && !isLocalHost(req)) {
+        const res = redirectToHttps(req);
+        setSecurityHeaders(res, { csp: "default-src 'self'", inProd, https });
+        return res;
+    }
+
+    const slashedPath = trailingSlashRedirectPath(pathname);
+    if (slashedPath) {
+        // Build a plain URL, NOT req.nextUrl.clone(). NextURL re-normalizes its
+        // pathname against the trailingSlash config on serialization and strips
+        // the slash straight back off, which turns this into a redirect to
+        // itself and an infinite loop.
+        const url = new URL(req.url);
+        url.pathname = slashedPath;
+        const host = req.headers.get("host");
+        if (host) url.host = host;
+        const res = NextResponse.redirect(url, 308);
+        setSecurityHeaders(res, { csp: "default-src 'self'", inProd, https });
+        return res;
+    }
+
+    const nonce = base64Nonce();
+    const isDev = !inProd;
+
+    const apiOrigin = originFromUrl(process.env.NEXT_PUBLIC_API_BASE_URL);
+    const sentryOrigin = sentryOriginFromDsn(process.env.NEXT_PUBLIC_SENTRY_DSN);
+
+    const connectSrc = [
+        "'self'",
+        apiOrigin,
+        sentryOrigin,
+        "https:",
+        "wss:",
+        isDev ? "http:" : undefined,
+        isDev ? "ws:" : undefined,
+    ]
+        .filter(Boolean)
+        .join(" ");
+
+    const cspParts = [
+        "default-src 'self'",
+        `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src " + connectSrc,
+        // media-src needs:
+        //  - the backend origin (api.talkleeai.com) so an <audio src> pointed
+        //    straight at a remote MP3 (e.g. ElevenLabs voice previews) loads, and
+        //  - blob: because call recordings are fetched via requestRaw and played
+        //    from a URL.createObjectURL(blob) — blob: is its OWN scheme and is
+        //    NOT covered by 'self' or the https: token. Without blob: the browser
+        //    blocks <audio src="blob:..."> with a CSP violation; the fetch still
+        //    succeeds (blob is created) so the network tab looks fine, but
+        //    playback is blocked and the UI shows "Failed to load audio".
+        //    (img-src above already allows blob: for the same reason.)
+        "media-src " + connectSrc + " blob:",
+        "worker-src 'self' blob:",
+        "object-src 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+        "frame-ancestors 'none'",
+        ...(https ? ["upgrade-insecure-requests", "block-all-mixed-content"] : []),
+    ];
+    const csp = cspParts.join("; ");
+
+    const requestHeaders = new Headers(req.headers);
+    requestHeaders.set("content-security-policy", csp);
+    requestHeaders.set("x-nonce", nonce);
+
+    // Auth signal: any of the cookies that indicate the user is logged
+    // in. Phase B adds `talky_at` (the new httpOnly access cookie) as
+    // the canonical signal alongside the legacy non-httpOnly mirror
+    // cookie and `talky_sid` legacy server-side session cookie.
+    const legacyToken = readCookieFromHeader(req, authTokenCookieName());
+    const accessCookie = readCookieFromHeader(req, "talky_at");
+    const legacySession = readCookieFromHeader(req, "talky_sid");
+    const hasAuthSignal =
+        (accessCookie && accessCookie.trim().length > 0) ||
+        (legacyToken && legacyToken.trim().length > 0) ||
+        (legacySession && legacySession.trim().length > 0);
+    const cookieHeader = req.headers.get("cookie") ?? "";
+    if (hasAuthSignal) {
+        const shouldCheckRole =
+            !isApiPath(pathname) &&
+            !isPublicContactPath(pathname) &&
+            !pathname.startsWith("/_next/") &&
+            !pathname.startsWith("/favicon") &&
+            !pathname.startsWith("/site.webmanifest");
+
+        if (shouldCheckRole) {
+            const ctx = await fetchUserContextFromBackend({ cookieHeader });
+            const role = ctx?.role ?? null;
+            const partnerId = ctx?.partnerId ?? null;
+
+            if (role === WHITE_LABEL_ADMIN_ROLE) {
+                const isAllowed =
+                    isWhiteLabelPath(pathname) ||
+                    isConnectorCallbackPath(pathname) ||
+                    pathname === "/403" ||
+                    pathname === WHITE_LABEL_DASHBOARD_PATH;
+
+                if (!isAllowed) {
+                    const url = req.nextUrl.clone();
+                    url.pathname = WHITE_LABEL_DASHBOARD_PATH + "/";
+                    url.search = "";
+                    const res = NextResponse.redirect(url);
+                    setSecurityHeaders(res, { csp, inProd, https });
+                    return res;
+                }
+            } else if (role && role !== WHITE_LABEL_ADMIN_ROLE) {
+                if (isWhiteLabelAdminPath(pathname)) {
+                    const url = req.nextUrl.clone();
+                    url.pathname = "/403/";
+                    url.search = "";
+                    const res = NextResponse.redirect(url);
+                    setSecurityHeaders(res, { csp, inProd, https });
+                    return res;
+                }
+
+                if (role === PARTNER_ADMIN_ROLE && partnerId && isWhiteLabelPath(pathname)) {
+                    if (pathname === "/white-label" || pathname === "/white-label/") {
+                        const url = req.nextUrl.clone();
+                        url.pathname = `/white-label/${encodeURIComponent(partnerId)}/dashboard/`;
+                        url.search = "";
+                        const res = NextResponse.redirect(url);
+                        setSecurityHeaders(res, { csp, inProd, https });
+                        return res;
+                    }
+
+                    const wlPartner = whiteLabelPartnerFromPath(pathname);
+                    if (wlPartner && wlPartner.toLowerCase() !== partnerId.toLowerCase()) {
+                        const url = req.nextUrl.clone();
+                        url.pathname = "/403/";
+                        url.search = "";
+                        const res = NextResponse.redirect(url);
+                        setSecurityHeaders(res, { csp, inProd, https });
+                        return res;
+                    }
+                }
+            } else {
+                if (isWhiteLabelAdminPath(pathname) || isAdminOrInfrastructurePath(pathname)) {
+                    const url = req.nextUrl.clone();
+                    url.pathname = "/403/";
+                    url.search = "";
+                    const res = NextResponse.redirect(url);
+                    setSecurityHeaders(res, { csp, inProd, https });
+                    return res;
+                }
+            }
+        }
+
+        const res = NextResponse.next({ request: { headers: requestHeaders } });
+        setSecurityHeaders(res, { csp, inProd, https });
+        return res;
+    }
+
+    if (isLocalHost(req)) {
+        const res = NextResponse.next({ request: { headers: requestHeaders } });
+        setSecurityHeaders(res, { csp, inProd, https });
+        return res;
+    }
+
+    if (devBypassAuth()) {
+        const res = NextResponse.next({ request: { headers: requestHeaders } });
+        res.cookies.set({
+            name: authTokenCookieName(),
+            value: "dev-token",
+            path: "/",
+            sameSite: "lax",
+            httpOnly: false,
+            secure: false,
+            maxAge: 60 * 60 * 24 * 7,
+        });
+        setSecurityHeaders(res, { csp, inProd, https });
+        return res;
+    }
+
+    if (isPublicPath(pathname)) {
+        const res = NextResponse.next({ request: { headers: requestHeaders } });
+        setSecurityHeaders(res, { csp, inProd, https });
+        return res;
+    }
+
+    // Fail-open during the parent-domain cookie migration window.
+    //
+    // We re-enabled fail-closed earlier today after shipping
+    // AUTH_COOKIE_DOMAIN=talkleeai.com on the backend. That works for
+    // sessions CREATED after the env change — their talky_at cookie
+    // is parent-domain scoped and the middleware sees it.
+    //
+    // But existing pre-migration sessions still hold a host-only
+    // cookie on api.talkleeai.com that this middleware will NEVER
+    // see. Bouncing them to /auth/login was correct in principle but
+    // they couldn't get past it (their refresh-token rotation
+    // happens on the api domain too, so the new cookies never get
+    // issued through the middleware path).
+    //
+    // The right behaviour during migration is fail-open: let the
+    // request through, the client-side AuthContext + DashboardLayout
+    // make the redirect call after /auth/me returns. New logins
+    // immediately get parent-domain cookies; old sessions migrate
+    // naturally on their next /auth/refresh (within 15 min).
+    //
+    // Once existing sessions have drained (after the access-token
+    // TTL is twice elapsed, i.e. ~30 min after deploy), we can
+    // re-enable fail-closed safely.
+    const res = NextResponse.next({ request: { headers: requestHeaders } });
+    setSecurityHeaders(res, { csp, inProd, https });
+    return res;
+}
+
+export const config = {
+    matcher: ["/", "/((?!.*\\..*).*)"],
+};

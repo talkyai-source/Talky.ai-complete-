@@ -1,0 +1,18 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_failed_binding_cleanup_cannot_overwrite_competing_action_phase[cancelled-gmail] _
+tests\unit\test_reviewed_account_identity.py:366: in test_failed_binding_cleanup_cannot_overwrite_competing_action_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'cancelled'
+E     - cancelled
+E     + failed
+_ test_failed_binding_cleanup_cannot_overwrite_competing_action_phase[running-gmail] _
+tests\unit\test_reviewed_account_identity.py:366: in test_failed_binding_cleanup_cannot_overwrite_competing_action_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'running'
+E     - running
+E     + failed
+=========================== short test summary info ===========================
+FAILED tests/unit/test_reviewed_account_identity.py::test_failed_binding_cleanup_cannot_overwrite_competing_action_phase[cancelled-gmail]
+FAILED tests/unit/test_reviewed_account_identity.py::test_failed_binding_cleanup_cannot_overwrite_competing_action_phase[running-gmail]
+2 failed, 80 deselected in 4.71s

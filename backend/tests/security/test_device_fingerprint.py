@@ -32,11 +32,18 @@ from app.core.security.device_fingerprint import (
 class TestGenerateDeviceFingerprint:
     """Device fingerprint generation from request headers."""
 
-    def test_returns_hex_sha256(self, mock_request):
+    def test_returns_versioned_hex_sha256(self, mock_request):
+        # 2026-09-07: fingerprints are versioned ("v2:" + SHA-256 hex) so the
+        # session validator can re-bind legacy values once instead of flagging
+        # them forever after the stable-signal change.
+        from app.core.security.device_fingerprint import FINGERPRINT_VERSION_PREFIX
+
         fp = generate_device_fingerprint(mock_request)
         assert isinstance(fp, str)
-        assert len(fp) == 64  # SHA-256 hex digest
-        assert all(c in "0123456789abcdef" for c in fp)
+        assert fp.startswith(FINGERPRINT_VERSION_PREFIX)
+        digest = fp[len(FINGERPRINT_VERSION_PREFIX):]
+        assert len(digest) == 64  # SHA-256 hex digest
+        assert all(c in "0123456789abcdef" for c in digest)
 
     def test_same_request_same_fingerprint(self, mock_request):
         fp1 = generate_device_fingerprint(mock_request)

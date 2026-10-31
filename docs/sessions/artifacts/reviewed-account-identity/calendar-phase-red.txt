@@ -1,0 +1,76 @@
+FFFFFFFFFFFF                                                             [100%]
+================================== FAILURES ===================================
+_ test_calendar_finalization_preserves_competing_phase[False-cancelled-create-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:447: in test_calendar_finalization_preserves_competing_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'cancelled'
+E     - cancelled
+E     + failed
+_ test_calendar_finalization_preserves_competing_phase[False-cancelled-update-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:447: in test_calendar_finalization_preserves_competing_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'cancelled'
+E     - cancelled
+E     + failed
+_ test_calendar_finalization_preserves_competing_phase[False-cancelled-cancel-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:447: in test_calendar_finalization_preserves_competing_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'cancelled'
+E     - cancelled
+E     + failed
+_ test_calendar_finalization_preserves_competing_phase[False-completed-create-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:447: in test_calendar_finalization_preserves_competing_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'completed'
+E     - completed
+E     + failed
+_ test_calendar_finalization_preserves_competing_phase[False-completed-update-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:447: in test_calendar_finalization_preserves_competing_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'completed'
+E     - completed
+E     + failed
+_ test_calendar_finalization_preserves_competing_phase[False-completed-cancel-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:447: in test_calendar_finalization_preserves_competing_phase
+    assert c.db.rows["assistant_actions"][-1]["status"] == competing_status
+E   AssertionError: assert 'failed' == 'completed'
+E     - completed
+E     + failed
+_ test_calendar_finalization_preserves_competing_phase[True-cancelled-create-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:445: in test_calendar_finalization_preserves_competing_phase
+    assert result["success"] is False and result["confirmation_allowed"] is False
+E   assert (True is False)
+_ test_calendar_finalization_preserves_competing_phase[True-cancelled-update-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:445: in test_calendar_finalization_preserves_competing_phase
+    assert result["success"] is False and result["confirmation_allowed"] is False
+E   assert (True is False)
+_ test_calendar_finalization_preserves_competing_phase[True-cancelled-cancel-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:445: in test_calendar_finalization_preserves_competing_phase
+    assert result["success"] is False and result["confirmation_allowed"] is False
+E   assert (True is False)
+_ test_calendar_finalization_preserves_competing_phase[True-completed-create-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:445: in test_calendar_finalization_preserves_competing_phase
+    assert result["success"] is False and result["confirmation_allowed"] is False
+E   assert (True is False)
+_ test_calendar_finalization_preserves_competing_phase[True-completed-update-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:445: in test_calendar_finalization_preserves_competing_phase
+    assert result["success"] is False and result["confirmation_allowed"] is False
+E   assert (True is False)
+_ test_calendar_finalization_preserves_competing_phase[True-completed-cancel-google_calendar] _
+tests\unit\test_reviewed_account_identity.py:445: in test_calendar_finalization_preserves_competing_phase
+    assert result["success"] is False and result["confirmation_allowed"] is False
+E   assert (True is False)
+=========================== short test summary info ===========================
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[False-cancelled-create-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[False-cancelled-update-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[False-cancelled-cancel-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[False-completed-create-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[False-completed-update-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[False-completed-cancel-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[True-cancelled-create-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[True-cancelled-update-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[True-cancelled-cancel-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[True-completed-create-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[True-completed-update-google_calendar]
+FAILED tests/unit/test_reviewed_account_identity.py::test_calendar_finalization_preserves_competing_phase[True-completed-cancel-google_calendar]
+12 failed, 85 deselected in 5.09s

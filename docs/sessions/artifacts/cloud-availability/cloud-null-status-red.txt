@@ -1,0 +1,104 @@
+✖ a failed account timeout with null HTTP status does not hide saved settings (1076.9652ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6937.66
+
+✖ failing tests:
+
+test at src\components\settings\telephony-providers-section.test.tsx:2:5841
+✖ a failed account timeout with null HTTP status does not hide saved settings (1076.9652ms)
+  Error: Unable to find role="heading" and name "Twilio"
+  
+  Ignored nodes: comments, script, style
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"rounded-xl border border-gray-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-gray-900 dark:text-white shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 dark:hover:bg-slate-800 hover:shadow-md dark:hover:shadow-lg"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"p-6 py-10 text-center"[39m
+        [36m>[39m
+          [36m<svg[39m
+            [33maria-hidden[39m=[32m"true"[39m
+            [33mclass[39m=[32m"lucide lucide-circle-alert mx-auto h-6 w-6 text-red-500"[39m
+            [33mfill[39m=[32m"none"[39m
+            [33mheight[39m=[32m"24"[39m
+            [33mstroke[39m=[32m"currentColor"[39m
+            [33mstroke-linecap[39m=[32m"round"[39m
+            [33mstroke-linejoin[39m=[32m"round"[39m
+            [33mstroke-width[39m=[32m"2"[39m
+            [33mviewBox[39m=[32m"0 0 24 24"[39m
+            [33mwidth[39m=[32m"24"[39m
+            [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+          [36m>[39m
+            [36m<circle[39m
+              [33mcx[39m=[32m"12"[39m
+              [33mcy[39m=[32m"12"[39m
+              [33mr[39m=[32m"10"[39m
+            [36m/>[39m
+            [36m<line[39m
+              [33mx1[39m=[32m"12"[39m
+              [33mx2[39m=[32m"12"[39m
+              [33my1[39m=[32m"8"[39m
+              [33my2[39m=[32m"12"[39m
+            [36m/>[39m
+            [36m<line[39m
+              [33mx1[39m=[32m"12"[39m
+              [33mx2[39m=[32m"12.01"[39m
+              [33my1[39m=[32m"16"[39m
+              [33my2[39m=[32m"16"[39m
+            [36m/>[39m
+          [36m</svg>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-2 text-sm font-semibold text-foreground"[39m
+          [36m>[39m
+            [0mFailed to load telephony settings[0m
+          [36m</div>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"mt-1 text-xs text-muted-foreground"[39m
+          [36m>[39m
+            [0m[
+    {
+      "code": "invalid_type",
+      "expected": "number",
+      "received": "null",
+      "path": [
+        "providers",
+        0,
+        "last_test_result",
+        "status_code"
+      ],
+      "message": "Expected number, received null"
+    },
+    {
+      "code": "invalid_type",
+      "expected": "number",
+      "received": "null",
+      "path": [
+        "providers",
+        1,
+        "last_test_result",
+        "status_code"
+      ],
+      "message": "Expected number, received null"
+    }
+  ][0m
+          [36m</div>[39m
+        [36m</div>[39m
+      [36m</div>[39m
+    [36m</div>[39m
+  [36m</body>[39m
+      at waitForWrapper (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\wait-for.js:163:27)
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:86:33
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\cloud-availability-20261005\Talk-Leee\src\components\settings\telephony-providers-section.test.tsx:89:18)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.start (node:internal/test_runner/test:1096:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:385:17) {
+    name: 'TestingLibraryElementError'
+  }

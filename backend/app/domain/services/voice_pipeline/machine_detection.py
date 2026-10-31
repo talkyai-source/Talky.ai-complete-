@@ -96,6 +96,34 @@ _ALWAYS_MACHINE_PHRASES = (
 )
 
 
+_GENERIC_SCREENING_MESSAGE = "We'll try again another time. Thank you, goodbye."
+
+
+def build_screening_message(session) -> str:
+    """One short callback line built only from data the call already has.
+
+    Agent first name + company (+ the campaign's call_reason when short).
+    Missing identity falls back to a generic line; nothing is invented.
+    """
+    cfg = getattr(session, "agent_config", None)
+    agent = " ".join(str(getattr(cfg, "agent_name", "") or "").split())
+    company = " ".join(str(getattr(cfg, "company_name", "") or "").split())
+    reason = " ".join(str(getattr(cfg, "call_reason", "") or "").split()).rstrip(" .")
+    agent = agent.split(" ")[0] if agent else ""
+    if not agent and not company:
+        return _GENERIC_SCREENING_MESSAGE
+    if agent and company:
+        who = f"this is {agent} from {company}"
+    elif agent:
+        who = f"this is {agent}"
+    else:
+        who = f"this is {company}"
+    why = ""
+    if reason and len(reason) <= 60:
+        why = f", calling {reason}" if reason.lower().startswith("to ") else f", calling about {reason}"
+    return f"Thanks, {who}{why}. We'll try again another time. Goodbye."
+
+
 def assess_machine_text(
     text: str,
     *,
@@ -132,7 +160,8 @@ def assess_machine_text(
 
 
 async def handle_machine_interim(
-    call_id: str, session, text: str, media_gateway=None
+    call_id: str, session, text: str, media_gateway=None,
+    pipeline=None, websocket=None,
 ) -> bool:
     """Run machine detection for one caller transcript (interim or final).
 
@@ -150,9 +179,27 @@ async def handle_machine_interim(
     pipeline session id to the PBX channel, which is the reliable hangup
     route from this layer. Falls back to the bridge adapter.
 
+    ``pipeline`` / ``websocket`` — when given, a ``machine_end`` that follows an
+    armed screening bot speaks ONE short callback message and ends the call via
+    the pipeline's shared end-of-call path (``_shutdown_session_for_end_action``:
+    plays the line, waits for playback, hangs up). Spoken at most once; if that
+    path fails, the plain hangup below still runs.
+
     Fail-soft: any error returns False and never disturbs a live call.
     """
     try:
+        raw_direction = getattr(session, "_call_direction", None)
+        if raw_direction is None:
+            raw_direction = getattr(session, "direction", None)
+        direction = str(
+            getattr(raw_direction, "value", raw_direction) or "outbound"
+        ).strip().lower()
+        if direction == "inbound":
+            # AMD classifies the remote party that *answered an outbound
+            # dial*. On a true inbound call the speaker is our caller; phrases
+            # such as "I'd like to leave a message" are ordinary intent, not a
+            # remote answering-machine greeting.
+            return False
         verdict = assess_machine_text(
             text,
             turn_index=getattr(session, "turn_id", 0) or 0,
@@ -193,6 +240,47 @@ async def handle_machine_interim(
         except Exception:
             pass
 
+        # Owner decision 2026-10-21: after an ARMED screening bot says the person
+        # is unavailable, leave one short message instead of hanging up silently.
+        # Same condition as the hangup (machine_end + screening already heard);
+        # mailbox/IVR menu wording keeps the silent hangup.
+        if (
+            verdict == "machine_end"
+            and pipeline is not None
+            and getattr(session, "_machine_screening", False)
+            and not any(
+                p in " ".join(text.lower().split()) for p in _ALWAYS_MACHINE_PHRASES
+            )
+        ):
+            if getattr(session, "_screening_message_started", False):
+                return True  # already speaking / ended — never repeat
+            try:
+                session._screening_message_started = True
+            except Exception:
+                pass
+            message = build_screening_message(session)
+            logger.info(
+                "screening_message_leaving call=%s msg=%r", str(call_id)[:12], message
+            )
+            try:
+                # Stop any reply still speaking ("I'll hold...") so the message
+                # does not overlap it, as teardown does before hanging up.
+                cancel = getattr(pipeline, "cancel_active_turn", None)
+                if callable(cancel):
+                    try:
+                        await cancel(getattr(session, "call_id", call_id))
+                    except Exception:
+                        pass
+                await pipeline._shutdown_session_for_end_action(
+                    session, websocket, "screening_message", message
+                )
+                return True
+            except Exception as msg_exc:
+                logger.warning(
+                    "screening_message_failed call=%s err=%s — plain hangup",
+                    str(call_id)[:12], msg_exc,
+                )
+
         hung_up = False
         if media_gateway is not None and hasattr(media_gateway, "hangup_call"):
             try:
@@ -208,11 +296,33 @@ async def handle_machine_interim(
                 )
         if not hung_up:
             try:
-                from app.domain.services.telephony.lifecycle import _bridge
-                adapter = _bridge()._adapter
-                if adapter is not None:
-                    await adapter.hangup(str(call_id))
-                    hung_up = True
+                from app.domain.services.telephony.adapter_registry import (
+                    get_adapter,
+                )
+                from app.domain.services.dialer.opt_out import (
+                    locate_live_voice_session,
+                )
+
+                # The bridge adapter addresses the PBX channel, not the pipeline
+                # UUID: a DELETE for the UUID returns 404, which the adapter
+                # treats as "already gone", so the call stayed up while this
+                # path reported success. Use the registry key, and count it as
+                # hung up only when the adapter can confirm it.
+                pbx_channel, _vs = locate_live_voice_session(str(call_id), session)
+                adapter = get_adapter()
+                if adapter is not None and pbx_channel:
+                    confirmed = getattr(adapter, "hangup_confirmed", None)
+                    if callable(confirmed):
+                        hung_up = bool(await confirmed(pbx_channel))
+                    else:
+                        await adapter.hangup(pbx_channel)
+                        hung_up = True
+                elif adapter is not None:
+                    logger.warning(
+                        "machine_hangup_no_pbx_channel call=%s — no live telephony "
+                        "session resolved for the fallback hangup",
+                        str(call_id)[:12],
+                    )
                 else:
                     logger.warning(
                         "machine_hangup_no_adapter call=%s — no bridge adapter "

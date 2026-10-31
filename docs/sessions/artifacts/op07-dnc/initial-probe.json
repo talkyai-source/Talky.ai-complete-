@@ -1,0 +1,20 @@
+{
+  "native_opt_out_with_continued_question": {
+    "opt_out_flag": true,
+    "durable_dnc_write_attempts": 0,
+    "hangup_attempts": 0,
+    "termination_task_armed": false
+  },
+  "shared_partial_purge": {
+    "dnc_receipt_success": true,
+    "cleanup_attempts_failed": [
+      "dialer_jobs",
+      "leads"
+    ],
+    "full_purge_marker": true,
+    "second_call_success": true,
+    "second_dnc_attempt_delta": 0,
+    "second_cleanup_attempt_delta": 0
+  },
+  "limits": "Actual bridge event pump and shared purge helper; synthetic DNC/client/state only. No DB/network/provider calls. DNC success does block future contact; the marker defect skips ancillary cleanup retry."
+}

@@ -12,10 +12,13 @@ Called from `app.main.lifespan` before the service container starts.
 """
 from __future__ import annotations
 
-import importlib.util
+import ipaddress
 import logging
 import os
 from dataclasses import dataclass
+from urllib.parse import urlsplit
+
+from app.domain.services.billing_mode import get_billing_mode
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +67,11 @@ def enforce_production_gate() -> None:
 
     violations: list[GateViolation] = []
     violations.extend(_check_guard_bypass_flags())
+    violations.extend(_check_staging_only_flags())
     violations.extend(_check_pbx_default_credentials())
     violations.extend(_check_required_secrets())
     violations.extend(_check_caller_id_enforcement())
+    violations.extend(_check_inbound_strict_routing())
 
     if not violations:
         logger.info("prod_gate_passed — all production-mandatory checks ok")
@@ -121,6 +126,76 @@ def _check_caller_id_enforcement() -> list[GateViolation]:
     return []
 
 
+def _check_inbound_strict_routing() -> list[GateViolation]:
+    """Reject legacy configuration that claims strict DID routing is off.
+
+    The router itself is now unconditionally strict.  Refusing contradictory
+    production configuration prevents an operator from believing a fallback
+    route is enabled and makes rollback/config drift visible at startup.
+    """
+
+    false_values = {"0", "false", "no", "off", "disabled"}
+    violations: list[GateViolation] = []
+    for name in (
+        "TELEPHONY_INBOUND_REQUIRE_TENANT",
+        "INBOUND_STRICT_ROUTING",
+        "TELEPHONY_STRICT_INBOUND_ROUTING",
+    ):
+        raw = (os.getenv(name, "") or "").strip().lower()
+        if raw in false_values:
+            violations.append(
+                GateViolation(
+                    rule="inbound_strict_routing_disabled",
+                    detail=(
+                        f"{name}={raw!r} contradicts mandatory production "
+                        "DID-to-tenant routing. Remove it or set it to true."
+                    ),
+                )
+            )
+    return violations
+
+
+def _check_staging_only_flags() -> list[GateViolation]:
+    """Refuse proof-only controls when a process identifies as production."""
+
+    violations: list[GateViolation] = []
+    for name in ("TWILIO_BRIDGE_ENABLED", "VONAGE_BRIDGE_ENABLED"):
+        if os.getenv(name, "").strip().lower() in {"1", "true", "yes", "on"}:
+            violations.append(
+                GateViolation(
+                    rule="legacy_cloud_bridge_in_prod",
+                    detail=(
+                        f"{name} is for nonproduction qualification only: legacy "
+                        "cloud callbacks lack canonical outbound tenant/campaign "
+                        "ownership. Unset it or set it to false in production."
+                    ),
+                )
+            )
+    raw = (os.getenv("INBOUND_TRANSFER_STAGING_PROOF_ENABLED", "") or "").strip().lower()
+    if raw and raw not in {"0", "false", "no", "off", "disabled"}:
+        violations.append(
+            GateViolation(
+                rule="staging_proof_flag_in_prod",
+                detail=(
+                    "INBOUND_TRANSFER_STAGING_PROOF_ENABLED is staging-only and "
+                    "must be unset or false when ENVIRONMENT=production"
+                ),
+            )
+        )
+    for name in (
+        "INBOUND_TRANSFER_STAGING_PROOF_TENANT_ID",
+        "INBOUND_TRANSFER_STAGING_PROOF_CONFIG_ID",
+    ):
+        if (os.getenv(name, "") or "").strip():
+            violations.append(
+                GateViolation(
+                    rule="staging_proof_scope_in_prod",
+                    detail=f"{name} is staging-only and must be unset in production",
+                )
+            )
+    return violations
+
+
 def _check_pbx_default_credentials() -> list[GateViolation]:
     """T0.3 — refuse to connect against default PBX creds. Only enforced
     when the matching adapter is actually selected."""
@@ -159,10 +234,21 @@ def _check_pbx_default_credentials() -> list[GateViolation]:
     return violations
 
 
+def _acknowledged_test_mode(stripe_key: str) -> bool:
+    """A real Stripe test key plus an explicit production opt-in, never a default."""
+    flag = os.getenv("STRIPE_TEST_MODE_IN_PRODUCTION", "").strip().lower()
+    return (
+        flag in {"1", "true", "yes", "on"}
+        and stripe_key.startswith("sk_test_")
+        and len(stripe_key) > len("sk_test_")
+    )
+
+
 def _check_required_secrets() -> list[GateViolation]:
     """T0.3 — secrets that MUST be set in production. JWT controls auth;
-    TELEPHONY_METRICS_TOKEN gates the /metrics endpoint; STRIPE_SECRET_KEY
-    stops billing from silently falling back to mock mode;
+    TELEPHONY_METRICS_TOKEN gates the /metrics endpoint;
+    INTERNAL_SERVICE_TOKEN authenticates private gateway/worker callbacks;
+    Stripe configuration must enable real, signed payment processing;
     SECRETS_MASTER_KEY is the KEK every stored secret is encrypted under.
     """
     violations: list[GateViolation] = []
@@ -195,6 +281,106 @@ def _check_required_secrets() -> list[GateViolation]:
             )
         )
 
+    internal_token = (os.getenv("INTERNAL_SERVICE_TOKEN", "") or "").strip()
+    if not internal_token:
+        violations.append(
+            GateViolation(
+                rule="missing_secret",
+                detail=(
+                    "INTERNAL_SERVICE_TOKEN is not set — private worker and "
+                    "voice-gateway callbacks would all be rejected, and no "
+                    "authenticated gateway deployment can be proven"
+                ),
+            )
+        )
+    elif len(internal_token) < 32:
+        violations.append(
+            GateViolation(
+                rule="weak_secret",
+                detail="INTERNAL_SERVICE_TOKEN must contain at least 32 characters",
+            )
+        )
+
+    gateway_auth_token = (os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "") or "").strip()
+    if not gateway_auth_token:
+        violations.append(
+            GateViolation(
+                rule="missing_secret",
+                detail=(
+                    "VOICE_GATEWAY_AUTH_TOKEN is not set — the local media "
+                    "gateway control plane would accept unauthenticated session controls"
+                ),
+            )
+        )
+    elif len(gateway_auth_token) < 32:
+        violations.append(
+            GateViolation(
+                rule="weak_secret",
+                detail="VOICE_GATEWAY_AUTH_TOKEN must contain at least 32 characters",
+            )
+        )
+    elif internal_token and gateway_auth_token == internal_token:
+        violations.append(
+            GateViolation(
+                rule="secret_reuse",
+                detail=(
+                    "VOICE_GATEWAY_AUTH_TOKEN must be distinct from "
+                    "INTERNAL_SERVICE_TOKEN so a control-plane disclosure cannot "
+                    "authenticate caller-audio callbacks"
+                ),
+            )
+        )
+
+    callback_host = (os.getenv("VOICE_GATEWAY_CALLBACK_HOST", "") or "").strip()
+    callback_host_valid = False
+    if callback_host:
+        try:
+            callback_ip = ipaddress.ip_address(callback_host)
+            callback_host_valid = callback_ip.version == 4 and callback_ip.is_loopback
+        except ValueError:
+            callback_host_valid = False
+    if not callback_host_valid:
+        violations.append(
+            GateViolation(
+                rule="gateway_callback_host_unpinned",
+                detail=(
+                    "VOICE_GATEWAY_CALLBACK_HOST must be one explicit numeric loopback IPv4 "
+                    "address; an empty or broad callback target could exfiltrate "
+                    "INTERNAL_SERVICE_TOKEN and caller audio"
+                ),
+            )
+        )
+
+    backend_internal_url = (
+        os.getenv("BACKEND_INTERNAL_URL", "http://127.0.0.1:8000") or ""
+    ).strip()
+    try:
+        parsed_backend_url = urlsplit(backend_internal_url)
+        backend_port = parsed_backend_url.port
+        backend_url_valid = (
+            parsed_backend_url.scheme == "http"
+            and parsed_backend_url.hostname == callback_host
+            and backend_port is not None
+            and 1 <= backend_port <= 65535
+            and parsed_backend_url.username is None
+            and parsed_backend_url.password is None
+            and parsed_backend_url.path in {"", "/"}
+            and not parsed_backend_url.query
+            and not parsed_backend_url.fragment
+        )
+    except ValueError:
+        backend_url_valid = False
+    if not backend_url_valid:
+        violations.append(
+            GateViolation(
+                rule="gateway_callback_url_mismatch",
+                detail=(
+                    "BACKEND_INTERNAL_URL must be a plain http://<pinned IPv4>:<port> "
+                    "origin whose host exactly equals VOICE_GATEWAY_CALLBACK_HOST"
+                ),
+            )
+        )
+
     # SECRETS_MASTER_KEY is the key-encryption key (KEK) that wraps every DEK
     # in the secrets table — tenant credentials, provider keys, connector
     # tokens. When it is unset the local KMS backend mints a RANDOM EPHEMERAL
@@ -220,25 +406,43 @@ def _check_required_secrets() -> list[GateViolation]:
             )
         )
 
-    # Stripe: refuse mock-mode billing in prod. If the product is intentionally
-    # non-billed (self-hosted open-source), set STRIPE_BILLING_DISABLED=1 to
-    # acknowledge that and skip the check.
-    billing_disabled = (os.getenv("STRIPE_BILLING_DISABLED", "") or "").strip().lower() in {
-        "1", "true", "yes"
-    }
+    # Explicit non-billed deployments do not need Stripe configuration. Every
+    # active paid deployment must agree with the service's effective mode.
+    billing_mode = get_billing_mode()
+    if billing_mode == "disabled":
+        return violations
+
     stripe_key = (os.getenv("STRIPE_SECRET_KEY", "") or "").strip()
-    if not stripe_key and not billing_disabled:
+    if billing_mode == "mock":
+        violations.append(
+            GateViolation(
+                rule="STRIPE_MOCK_MODE",
+                detail=(
+                    "STRIPE_MOCK_MODE is enabled — simulated checkout is not "
+                    "permitted in production. Disable mock mode and configure "
+                    "live billing, or explicitly disable billing."
+                ),
+            )
+        )
+    if not stripe_key:
         violations.append(
             GateViolation(
                 rule="missing_secret",
                 detail=(
-                    "STRIPE_SECRET_KEY is not set — billing would silently fall "
-                    "back to mock mode. Set the key, or set "
+                    "STRIPE_SECRET_KEY is not set — paid billing is unavailable. "
+                    "Set the key, or set "
                     "STRIPE_BILLING_DISABLED=1 to acknowledge running without billing."
                 ),
             )
         )
-    elif stripe_key and not stripe_key.startswith("sk_live_"):
+    elif _acknowledged_test_mode(stripe_key):
+        # The owner chose to run production on Stripe test mode until live keys
+        # exist (2026-10-27). Checkout shows "Test billing" and takes no money.
+        logger.warning(
+            "prod_gate_stripe_test_mode — production billing uses Stripe TEST "
+            "mode (STRIPE_TEST_MODE_IN_PRODUCTION); no real payment is taken"
+        )
+    elif not stripe_key.startswith("sk_live_") or len(stripe_key) <= len("sk_live_"):
         # A set-but-non-live key (test/restricted-test 'sk_test_...' or a
         # malformed value) means the operator believes billing is live when
         # it is actually charging against Stripe's test ledger — or not at
@@ -247,26 +451,35 @@ def _check_required_secrets() -> list[GateViolation]:
             GateViolation(
                 rule="STRIPE_LIVE_KEY",
                 detail=(
-                    f"STRIPE_SECRET_KEY is set but is not a live key "
-                    f"({stripe_key[:8]}…) — production billing would run "
-                    "against Stripe's test mode. Use an 'sk_live_' key."
+                    "STRIPE_SECRET_KEY is not a supported live key — production "
+                    "billing requires a configured 'sk_live_' key."
                 ),
             )
         )
 
-    if stripe_key and importlib.util.find_spec("stripe") is None:
-        # A key is configured but the SDK that would actually call Stripe
-        # isn't installed — billing_service falls back to mock mode
-        # silently in that case, so the operator believes billing is live
-        # (key is set) while every charge is actually simulated.
+    if billing_mode == "unconfigured" and any(
+        stripe_key.startswith(prefix) and len(stripe_key) > len(prefix)
+        for prefix in ("sk_live_", "sk_test_")
+    ):
         violations.append(
             GateViolation(
                 rule="STRIPE_SDK_MISSING",
                 detail=(
-                    "STRIPE_SECRET_KEY is set but the 'stripe' package is not "
-                    "installed — billing would silently run in mock mode "
-                    "despite the operator believing it is live. Install the "
-                    "stripe SDK or unset STRIPE_SECRET_KEY."
+                    "STRIPE_SECRET_KEY is set but the Stripe SDK is unavailable "
+                    "or cannot be imported. Restore the SDK; missing dependencies "
+                    "must not be treated as mock mode."
+                ),
+            )
+        )
+
+    if not (os.getenv("STRIPE_WEBHOOK_SECRET", "") or "").strip():
+        violations.append(
+            GateViolation(
+                rule="STRIPE_WEBHOOK_SECRET",
+                detail=(
+                    "STRIPE_WEBHOOK_SECRET is not set — signed billing events "
+                    "cannot be verified. Configure the signing secret for the "
+                    "deployed webhook endpoint before enabling paid billing."
                 ),
             )
         )

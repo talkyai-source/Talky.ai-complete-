@@ -1,0 +1,103 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+____ test_contact_projection_prefers_latest_manual_edit_even_on_older_call ____
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002EBD6D84500>, pool=<asyncpg.pool.Pool object at 0x0000...ces.lead_capture_service.LeadCaptureService object at 0x000002EBD6B9F4A0>, migration_head='0057_transcript_save_state')
+
+    async def test_contact_projection_prefers_latest_manual_edit_even_on_older_call(lead_db):
+        newer_call = uuid4()
+        lead_db.calls.append(newer_call)
+        await lead_db.admin.execute("UPDATE calls SET created_at=NOW()-INTERVAL '1 day' WHERE id=$1", lead_db.calls[0])
+        await lead_db.admin.execute(
+            """INSERT INTO calls(id,tenant_id,campaign_id,lead_id,phone_number,status)
+            VALUES($1,$2,$3,$4,'+15550001001','answered')""",
+            newer_call, lead_db.tenants[0], lead_db.campaigns[0], lead_db.leads[0],
+        )
+        user = SimpleNamespace(tenant_id=str(lead_db.tenants[0]))
+>       await api.correct_lead_detail(str(newer_call), "identified_need",
+            api.ManualEdit(value="Earlier operator review", field_type="notes"), user)
+
+tests\integration\test_ag05_lead_evidence.py:733:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\api\v1\endpoints\lead_details.py:382: in correct_lead_detail
+    written = await _service().capture(
+app\domain\services\lead_capture_service.py:286: in capture
+    row = await conn.fetchrow(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:749: in fetchrow
+    data = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.AmbiguousParameterError: inconsistent types deduced for parameter $13
+E   DETAIL:  text versus character varying
+
+asyncpg\protocol\protocol.pyx:166: AmbiguousParameterError
+__ test_finalizer_retries_contact_after_transcript_commit_recovers_database ___
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x000002EBD6D85C70>, pool=<asyncpg.pool.Pool object at 0x0000...ces.lead_capture_service.LeadCaptureService object at 0x000002EBD6D7B020>, migration_head='0057_transcript_save_state')
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002EBD6DA0710>
+
+    async def test_finalizer_retries_contact_after_transcript_commit_recovers_database(lead_db, monkeypatch):
+        state = session()
+        svc = TranscriptService()
+        buffer_id = str(uuid4())
+        svc.accumulate_turn(buffer_id, "user", "Synthetic confirmed first@example.org", turn_index=1)
+        voice = SimpleNamespace(
+            call_id=buffer_id, _dialer_call_id=str(lead_db.calls[0]),
+            _dialer_tenant_id=str(lead_db.tenants[0]), _dialer_campaign_id=str(lead_db.campaigns[0]),
+            _dialer_lead_id=str(lead_db.leads[0]), call_session=state,
+        )
+        original = LeadCaptureService.capture
+        first = True
+
+        async def one_actual_sql_failure(self, **kwargs):
+            nonlocal first
+            if kwargs.get("field_key") == "email" and first:
+                first = False
+                await lead_db.admin.execute(f'REVOKE INSERT ON call_lead_details FROM "{lead_db.role}"')
+                try:
+                    return await original(self, **kwargs)
+                finally:
+                    await lead_db.admin.execute(f'GRANT INSERT ON call_lead_details TO "{lead_db.role}"')
+            return await original(self, **kwargs)
+
+        monkeypatch.setattr(LeadCaptureService, "capture", one_actual_sql_failure)
+        monkeypatch.setattr(persister, "_schedule_call_summary", lambda *args: None)
+        try:
+            assert await persister.save_call_transcript_on_hangup(
+                voice_session=voice, transcript_service=svc, db_pool=lead_db.pool,
+            )
+            response = await details(lead_db)
+            assert response["transcript_save_state"] == "complete"
+>           assert len(response["details"]) == 1
+E           assert 0 == 1
+E            +  where 0 = len([])
+
+tests\integration\test_ag05_lead_evidence.py:778: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.lead_slot_capture:lead_slot_capture.py:610 lead_slot_capture_write_failed call=2ee11080 field=email err=inconsistent types deduced for parameter $13
+DETAIL:  text versus character varying
+WARNING  app.domain.services.voice_pipeline.lead_slot_capture:lead_slot_capture.py:730 contact_capture_outcome_failed call=2ee11080 err=inconsistent types deduced for parameter $13
+DETAIL:  text versus character varying
+WARNING  app.domain.services.voice_pipeline.lead_slot_capture:lead_slot_capture.py:610 lead_slot_capture_write_failed call=2ee11080 field=email err=inconsistent types deduced for parameter $13
+DETAIL:  text versus character varying
+WARNING  app.domain.services.voice_pipeline.lead_slot_capture:lead_slot_capture.py:730 contact_capture_outcome_failed call=2ee11080 err=inconsistent types deduced for parameter $13
+DETAIL:  text versus character varying
+============================== warnings summary ===============================
+tests/integration/test_ag05_lead_evidence.py::test_finalizer_retries_contact_after_transcript_commit_recovers_database
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:369: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/integration/test_ag05_lead_evidence.py::test_contact_projection_prefers_latest_manual_edit_even_on_older_call
+FAILED tests/integration/test_ag05_lead_evidence.py::test_finalizer_retries_contact_after_transcript_commit_recovers_database
+2 failed, 1 warning in 2.33s

@@ -15,6 +15,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from app.domain.services.credential_resolver import ResolvedCredential
 
 from app.domain.services.voice_orchestrator import (
     VoiceOrchestrator,
@@ -28,11 +29,11 @@ def orch():
 
 
 def _resolver_returning(value: str | None):
-    """Build a CredentialResolver-shaped fake whose .resolve() yields
-    a known string. Records the kwargs each call site used so we can
+    """Build a CredentialResolver-shaped fake whose .resolve_with_metadata() yields
+    a known credential. Records the kwargs each call site used so we can
     assert tenant_id and provider were passed."""
     fake = MagicMock()
-    fake.resolve = AsyncMock(return_value=value)
+    fake.resolve_with_metadata = AsyncMock(side_effect=lambda _provider, **kw: ResolvedCredential(value, source="platform", tenant_id=kw.get("tenant_id")) if value else None)
     return fake
 
 
@@ -44,7 +45,7 @@ def _resolver_returning(value: str | None):
 async def test_llm_provider_uses_resolver_with_tenant(orch):
     cfg = VoiceSessionConfig(
         llm_provider_type="groq",
-        llm_model="llama-3.1-8b-instant",
+        llm_model="openai/gpt-oss-20b",
         tenant_id="tenant-A",
     )
     fake_resolver = _resolver_returning("tenant-A-key")
@@ -59,9 +60,9 @@ async def test_llm_provider_uses_resolver_with_tenant(orch):
     ):
         await orch._create_llm_provider(cfg)
 
-    fake_resolver.resolve.assert_awaited_once()
-    call_kwargs = fake_resolver.resolve.await_args.kwargs
-    pos_args = fake_resolver.resolve.await_args.args
+    fake_resolver.resolve_with_metadata.assert_awaited_once()
+    call_kwargs = fake_resolver.resolve_with_metadata.await_args.kwargs
+    pos_args = fake_resolver.resolve_with_metadata.await_args.args
     # First positional is the provider type
     assert pos_args[0] == "groq"
     assert call_kwargs["tenant_id"] == "tenant-A"
@@ -69,6 +70,7 @@ async def test_llm_provider_uses_resolver_with_tenant(orch):
 
     init_kwargs = fake_provider.initialize.await_args.args[0]
     assert init_kwargs["api_key"] == "tenant-A-key"
+    assert init_kwargs["observation_context"] == {"source": "platform", "tenant_id": "tenant-A", "credential_id": None}
 
 
 @pytest.mark.asyncio
@@ -88,7 +90,7 @@ async def test_llm_provider_falls_back_to_env_when_no_tenant(orch, monkeypatch):
     ):
         await orch._create_llm_provider(cfg)
 
-    call_kwargs = fake_resolver.resolve.await_args.kwargs
+    call_kwargs = fake_resolver.resolve_with_metadata.await_args.kwargs
     assert call_kwargs["tenant_id"] is None
     assert call_kwargs["env_var"] == "GEMINI_API_KEY"
 
@@ -118,10 +120,11 @@ async def test_tts_cartesia_uses_resolver_with_tenant(orch):
     ):
         await orch._create_tts_provider(cfg)
 
-    call_kwargs = fake_resolver.resolve.await_args.kwargs
+    call_kwargs = fake_resolver.resolve_with_metadata.await_args.kwargs
     assert call_kwargs["tenant_id"] == "tenant-B"
     init_kwargs = fake_instance.initialize.await_args.args[0]
     assert init_kwargs["api_key"] == "cartesia-tenant-key"
+    assert init_kwargs["observation_context"]["tenant_id"] == "tenant-B"
 
 
 @pytest.mark.asyncio
@@ -135,7 +138,7 @@ async def test_tts_elevenlabs_uses_resolver(orch):
     fake_instance = MagicMock(initialize=AsyncMock())
     fake_provider_cls = MagicMock(return_value=fake_instance)
 
-    with patch(
+    with patch("app.domain.services.voice_eligibility.require_elevenlabs_voice_eligible", AsyncMock()) as eligible, patch(
         "app.domain.services.credential_resolver.get_credential_resolver",
         return_value=fake_resolver,
     ), patch(
@@ -144,7 +147,8 @@ async def test_tts_elevenlabs_uses_resolver(orch):
     ):
         await orch._create_tts_provider(cfg)
 
-    call_args = fake_resolver.resolve.await_args
+    eligible.assert_awaited_once_with(None, "tenant-C", "voice-1")
+    call_args = fake_resolver.resolve_with_metadata.await_args
     assert call_args.args[0] == "elevenlabs"
     assert call_args.kwargs["tenant_id"] == "tenant-C"
 
@@ -169,7 +173,7 @@ async def test_stt_uses_resolver_with_tenant(orch):
     ):
         await orch._create_stt_provider(cfg)
 
-    call_args = fake_resolver.resolve.await_args
+    call_args = fake_resolver.resolve_with_metadata.await_args
     assert call_args.args[0] == "deepgram"
     assert call_args.kwargs["tenant_id"] == "tenant-D"
 

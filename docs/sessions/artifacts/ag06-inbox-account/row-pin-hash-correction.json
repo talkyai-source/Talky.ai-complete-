@@ -1,0 +1,58 @@
+{
+  "source_commit": "0f69c0f736ec0080ef68a575ccb13e9a6dbe1384",
+  "historical_evidence_commit": "8141266afe40e86b14cd3d56655edd69c6e0b5b9",
+  "historical_manifest_path": "docs/sessions/artifacts/ag06-inbox-account/row-pin-manifest.json",
+  "historical_manifest_git_sha256": "ccdc51e57dee76c69a8f3d44cfadcacb36e58bcf28e8aba70489e39eee6a77e5",
+  "historical_manifest_unchanged": true,
+  "interpreter": {
+    "preferred_encoding": "cp1252",
+    "utf8_mode": 0,
+    "platform": "win32"
+  },
+  "cause": "Path.read_text() used Windows CP1252 while str.encode() used UTF-8. Non-ASCII UTF-8 punctuation changed the hashed representation; no source content changed.",
+  "all_recorded_hashes_reproduced_from_exact_committed_source": true,
+  "files": [
+    {
+      "path": "backend/app/infrastructure/assistant/tools/inbox.py",
+      "recorded_sha256": "cd93b1fbcf3a4e7bf765baf67804a18904f1a3e99277b26bcb6727ceb038156b",
+      "committed_git_bytes_sha256": "9c9c6b84dded9db52336e5a6388ffb6ba58a84de5e036425b812e590f7a98820",
+      "explicit_utf8_lf_sha256": "9c9c6b84dded9db52336e5a6388ffb6ba58a84de5e036425b812e590f7a98820",
+      "cp1252_decode_then_utf8_encode_sha256": "cd93b1fbcf3a4e7bf765baf67804a18904f1a3e99277b26bcb6727ceb038156b",
+      "recorded_matches_legacy_algorithm": true,
+      "recorded_matches_explicit_utf8": false,
+      "non_ascii_bytes": 6
+    },
+    {
+      "path": "backend/app/services/connector_resolver.py",
+      "recorded_sha256": "4b9e790fd9a622e6fcb5d48483f83bbcffbe1ae4a393ea5fa6dec2e3b1725727",
+      "committed_git_bytes_sha256": "afdcc8625cebbb3183e957982dd6cd42aedb8103c78fbb4f459284af02ecb5b0",
+      "explicit_utf8_lf_sha256": "afdcc8625cebbb3183e957982dd6cd42aedb8103c78fbb4f459284af02ecb5b0",
+      "cp1252_decode_then_utf8_encode_sha256": "4b9e790fd9a622e6fcb5d48483f83bbcffbe1ae4a393ea5fa6dec2e3b1725727",
+      "recorded_matches_legacy_algorithm": true,
+      "recorded_matches_explicit_utf8": false,
+      "non_ascii_bytes": 9
+    },
+    {
+      "path": "backend/tests/unit/test_inbox_original_account.py",
+      "recorded_sha256": "4cdd55e81c490ecb06b7854ad9adcb869d36c3916d1fa830d752b262f8dbdcc5",
+      "committed_git_bytes_sha256": "4cdd55e81c490ecb06b7854ad9adcb869d36c3916d1fa830d752b262f8dbdcc5",
+      "explicit_utf8_lf_sha256": "4cdd55e81c490ecb06b7854ad9adcb869d36c3916d1fa830d752b262f8dbdcc5",
+      "cp1252_decode_then_utf8_encode_sha256": "4cdd55e81c490ecb06b7854ad9adcb869d36c3916d1fa830d752b262f8dbdcc5",
+      "recorded_matches_legacy_algorithm": true,
+      "recorded_matches_explicit_utf8": true,
+      "non_ascii_bytes": 0
+    },
+    {
+      "path": "backend/tests/unit/test_connector_health.py",
+      "recorded_sha256": "b6de5278a094a388c5868f10d6f943697869a58c558bcd310600e94311af8a81",
+      "committed_git_bytes_sha256": "b6de5278a094a388c5868f10d6f943697869a58c558bcd310600e94311af8a81",
+      "explicit_utf8_lf_sha256": "b6de5278a094a388c5868f10d6f943697869a58c558bcd310600e94311af8a81",
+      "cp1252_decode_then_utf8_encode_sha256": "b6de5278a094a388c5868f10d6f943697869a58c558bcd310600e94311af8a81",
+      "recorded_matches_legacy_algorithm": true,
+      "recorded_matches_explicit_utf8": true,
+      "non_ascii_bytes": 0
+    }
+  ],
+  "additional_source_test_run": false,
+  "rerun_reason": "No post-test source delta indicated: all four recorded hashes exactly reproduce from the committed source under the historical encoding algorithm. This command validates fingerprints, not runtime behavior."
+}

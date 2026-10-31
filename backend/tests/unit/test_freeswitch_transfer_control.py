@@ -5,13 +5,16 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import app.infrastructure.telephony.freeswitch_esl as freeswitch_esl_module
 from app.infrastructure.telephony.freeswitch_esl import (
+    ESLConfig,
     FreeSwitchESL,
     TransferRequest,
     TransferMode,
     TransferLeg,
     TransferStatus,
+    _ESLConnection,
 )
 from app.infrastructure.telephony.adapter_factory import AdapterRegistry
+from app.infrastructure.telephony.freeswitch_adapter import FreeSwitchAdapter
 
 
 class FreeSwitchTransferControlTests(unittest.IsolatedAsyncioTestCase):
@@ -22,6 +25,95 @@ class FreeSwitchTransferControlTests(unittest.IsolatedAsyncioTestCase):
             TransferRequest(uuid="abc", destination="").validate()
         with self.assertRaises(ValueError):
             TransferRequest(uuid="abc", destination="1001", timeout_seconds=0).validate()
+
+    def test_transfer_request_rejects_command_argument_injection(self) -> None:
+        rejected = (
+            TransferRequest(uuid="call-1\napi status", destination="1001"),
+            TransferRequest(uuid="call-1", destination="1001\n\napi status"),
+            TransferRequest(uuid="call-1", destination="1001 XML public"),
+            TransferRequest(uuid="call-1", destination="1001", context="inline"),
+            TransferRequest(uuid="call-1", destination="1001", context="public\r\napi"),
+            TransferRequest(
+                uuid="call-1",
+                destination="1001",
+                mode=TransferMode.ATTENDED,
+                attended_cancel_key="*\n",
+            ),
+            TransferRequest(
+                uuid="call-1",
+                destination="1001",
+                mode=TransferMode.ATTENDED,
+                attended_cancel_key="#",
+                attended_complete_key="#",
+            ),
+        )
+        for request in rejected:
+            with self.subTest(request=request):
+                with self.assertRaises(ValueError):
+                    request.validate()
+
+    def test_deflect_accepts_only_strict_sip_uri(self) -> None:
+        valid = TransferRequest(
+            uuid="call-1",
+            destination="sip:+14155550123@example.com:5060;transport=tcp",
+            mode=TransferMode.DEFLECT,
+        )
+        valid.validate()
+        self.assertEqual(
+            valid.destination,
+            "sip:+14155550123@example.com:5060;transport=tcp",
+        )
+
+        for destination in (
+            "+14155550123",
+            "sip:1001@example.com?X-Test=bad",
+            "sip:1001@example.com%0aapi",
+            "sip:1001@example.com:99999",
+        ):
+            with self.subTest(destination=destination):
+                with self.assertRaises(ValueError):
+                    TransferRequest(
+                        uuid="call-1",
+                        destination=destination,
+                        mode=TransferMode.DEFLECT,
+                    ).validate()
+
+    async def test_esl_send_rejects_protocol_framing(self) -> None:
+        connection = _ESLConnection(
+            ESLConfig(password="not-the-default"),
+            name="test",
+        )
+        writer = MagicMock()
+        writer.drain = AsyncMock()
+        connection._writer = writer
+
+        for command in (
+            "api status\n\napi reloadxml",
+            "api status\r\n",
+            "api status\x00ignored",
+        ):
+            with self.subTest(command=command):
+                with self.assertRaises(ValueError):
+                    await connection.send(command)
+        writer.write.assert_not_called()
+        writer.drain.assert_not_awaited()
+
+    async def test_direct_adapter_validates_before_esl(self) -> None:
+        adapter = FreeSwitchAdapter(esl_password="not-the-default")
+        adapter._esl = MagicMock()
+        adapter._esl.request_transfer = AsyncMock()
+
+        with self.assertRaises(ValueError):
+            await adapter.transfer(
+                "call-1",
+                "1001\n\napi uuid_kill call-1",
+                "blind",
+            )
+        adapter._esl.request_transfer.assert_not_awaited()
+
+        with self.assertRaises(ValueError):
+            await adapter.transfer("call-1", "1001", "unknown")
+        adapter._esl.request_transfer.assert_not_awaited()
 
     async def test_build_blind_transfer_command(self) -> None:
         esl = FreeSwitchESL()
@@ -66,7 +158,7 @@ class FreeSwitchTransferControlTests(unittest.IsolatedAsyncioTestCase):
         esl = FreeSwitchESL()
         commands = []
 
-        async def fake_api(command: str) -> str:
+        async def fake_api(command: str, **_kwargs) -> str:
             commands.append(command)
             return "+OK accepted"
 
@@ -106,7 +198,9 @@ class FreeSwitchTransferControlTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_api_reconnects_and_retries_after_transport_failure(self) -> None:
         class FakeConnection:
-            def __init__(self, name: str, *, send_failure: Optional[Exception] = None, response: str = "+OK"):
+            def __init__(
+                self, name: str, *, send_failure: Optional[Exception] = None, response: str = "+OK"
+            ):
                 self.name = name
                 self.send_failure = send_failure
                 self.response = response
@@ -149,7 +243,9 @@ class FreeSwitchTransferControlTests(unittest.IsolatedAsyncioTestCase):
 
         esl = FreeSwitchESL()
 
-        with patch.object(freeswitch_esl_module, "_ESLConnection", side_effect=fake_connection_factory):
+        with patch.object(
+            freeswitch_esl_module, "_ESLConnection", side_effect=fake_connection_factory
+        ):
             self.assertTrue(await esl.connect())
             response = await esl.api("status")
             self.assertEqual(response, "+OK recovered")
@@ -159,6 +255,34 @@ class FreeSwitchTransferControlTests(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(failing_api_conn.closed)
             self.assertTrue(esl.connected)
             await esl.disconnect()
+
+    async def test_mutating_api_command_is_never_replayed(self) -> None:
+        class FailingConnection:
+            def __init__(self):
+                self.sent = []
+
+            @property
+            def is_connected(self) -> bool:
+                return True
+
+            async def send(self, command: str) -> None:
+                self.sent.append(command)
+                raise BrokenPipeError("ambiguous failure after write")
+
+        esl = FreeSwitchESL(ESLConfig(password="not-the-default"))
+        connection = FailingConnection()
+        esl._api_conn = connection
+
+        with self.assertRaises(BrokenPipeError):
+            await esl._execute_api_command(
+                "api",
+                "uuid_transfer call-1 1001 XML default",
+                retry_safe=False,
+            )
+        self.assertEqual(
+            connection.sent,
+            ["api uuid_transfer call-1 1001 XML default"],
+        )
 
 
 class AdapterRegistryTests(unittest.IsolatedAsyncioTestCase):
@@ -248,7 +372,7 @@ class AdapterRegistryTests(unittest.IsolatedAsyncioTestCase):
         adapter_a.disconnect = AsyncMock()
 
         adapter_b = MagicMock()
-        adapter_b.connected = False   # Already disconnected — disconnect NOT called.
+        adapter_b.connected = False  # Already disconnected — disconnect NOT called.
         adapter_b.name = "asterisk"
         adapter_b.disconnect = AsyncMock()
 

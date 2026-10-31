@@ -1,0 +1,99 @@
+{
+  "scope": "Live provider adapter + wrapper test using synthetic generated PCM. No telephone, speaker, browser, customer, DB mutation, or failover fault injection.",
+  "tts": {
+    "provider": "cartesia",
+    "model": "sonic-3",
+    "voice_id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",
+    "api_encoding": "pcm_s16le",
+    "adapter_encoding": "f32le",
+    "stt_input_conversion": "candidate pcm_float32_to_int16 (same function as TelephonyMediaGateway)",
+    "sample_rate": 16000
+  },
+  "stt": {
+    "provider": "deepgram",
+    "model": "flux-general-en",
+    "encoding": "linear16",
+    "sample_rate": 16000,
+    "chunk_ms": 40,
+    "eot_threshold": 0.7,
+    "eot_timeout_ms": 500,
+    "eager_eot_threshold": null
+  },
+  "results": [
+    {
+      "fixture": "Hello. The warranty lasts two years and excludes water damage.",
+      "turn": 1,
+      "tts_status": "completed",
+      "tts_first_audio_ms": 205,
+      "tts_total_ms": 1131,
+      "tts_chunks": 31,
+      "pcm_bytes": 178330,
+      "pcm_duration_ms": 5573,
+      "pcm_sha256": "ca154c07da973a30be1f11a7b34cd958e11e083d4ad16def03ec46d1d07cbdca",
+      "cartesia_done_count": 1,
+      "pcm_peak": 15144,
+      "pcm_rms": 1633,
+      "stt_status": "completed",
+      "stt_total_ms": 8473,
+      "partial_events": 16,
+      "final_transcripts": [
+        "Hello.",
+        "The warranty lasts two years and excludes water damage."
+      ],
+      "wire_event_counts": {
+        "Connected:None": 1,
+        "TurnInfo:Update": 36,
+        "TurnInfo:StartOfTurn": 2,
+        "TurnInfo:EndOfTurn": 2
+      },
+      "wire_nonempty_transcript_events": 18,
+      "yield_types": {
+        "TranscriptChunk": 18,
+        "BargeInSignal": 2
+      },
+      "status": "passed"
+    },
+    {
+      "fixture": "Please note my email: anna dot support at example dot com.",
+      "turn": 2,
+      "tts_status": "completed",
+      "tts_first_audio_ms": 169,
+      "tts_total_ms": 1073,
+      "tts_chunks": 31,
+      "pcm_bytes": 173872,
+      "pcm_duration_ms": 5434,
+      "pcm_sha256": "14d2aed876e64532f7473156ce42b4bdea080d7609f2a2b8a22ec99075645917",
+      "cartesia_done_count": 1,
+      "pcm_peak": 14409,
+      "pcm_rms": 1704,
+      "stt_status": "completed",
+      "stt_total_ms": 8350,
+      "partial_events": 18,
+      "final_transcripts": [
+        "Please note my email Anna dot support at example dot com."
+      ],
+      "wire_event_counts": {
+        "Connected:None": 1,
+        "TurnInfo:Update": 31,
+        "TurnInfo:StartOfTurn": 1,
+        "TurnInfo:EndOfTurn": 1
+      },
+      "wire_nonempty_transcript_events": 19,
+      "yield_types": {
+        "TranscriptChunk": 19,
+        "BargeInSignal": 1
+      },
+      "status": "passed"
+    }
+  ],
+  "cartesia_distinct_done_contexts": 2,
+  "status": "passed",
+  "probe_correction": "Initial diagnostic incorrectly fed internal Cartesia float32 samples to Flux as int16. The final probe uses the candidate production gateway conversion before STT. Initial failure is a harness-format error, not evidence of a provider outage.",
+  "candidate_source_hashes": {
+    "backend/app/domain/services/resilient_tts.py": "039f2a553c7df40230fc02cecdc95ac4350b8cf37b9d5b6e5dbb11bd27bb711b",
+    "backend/app/domain/services/resilient_stt.py": "c878b7d7df4741e215980675f03ce13e45ebe07fabfc3cd1eaaf41a9e79ce6c7",
+    "backend/app/utils/audio_utils.py": "592434c93e01f6abd74d17e0f3bf468fc817a625a1ec9fdec678f4f3332e8606",
+    "backend/app/infrastructure/tts/cartesia.py": "bec99af064563b7926708376ceab24b43e3800eef84c7f45a17282ab5a3e1e25",
+    "backend/app/infrastructure/stt/deepgram_flux.py": "db0759929a5e16ea1c2d6842b10f0ad51c77b501cd22310c4912c1661f8b5834"
+  }
+}

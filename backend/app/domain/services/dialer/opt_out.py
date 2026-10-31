@@ -7,7 +7,7 @@ when the live agent flagged an opt-out (``session._caller_opted_out``):
 
   1. **DNC** the number (permanent ``caller_opt_out`` entry) so CallGuard
      blocks every future origination to it, across the tenant.
-  2. **Cancel** every active/scheduled dialer job for the lead, so a
+  2. **Cancel** not-yet-originated dialer jobs for the lead, so a
      retry already sitting in the queue can never fire. (Belt-and-braces
      with #1 — CallGuard would block it anyway, but a cancelled job is
      honest in the history and frees the slot.)
@@ -19,18 +19,20 @@ but a job left queued) is exactly the compliance gap we're closing. The
 whole thing is idempotent — re-running on an already-purged lead is a
 no-op.
 
-Two DB handles are needed because the codebase has two adapters:
-``db_pool`` (asyncpg) for :class:`DNCService`, and the Supabase-style
-``db_client`` for the dialer-job / lead writes (matching the rest of the
-dialer lifecycle helpers).
+All writes use the tenant-scoped asyncpg pool so bounded in-call persistence
+does not block audio on the synchronous compatibility adapter. ``db_client``
+remains an accepted keyword for existing callers. Processing/calling jobs
+retain ownership until normal, provider-proven final settlement.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any, Optional
 
 from app.domain.services.dnc_service import DNCService
-from app.domain.services.dialer.job_lifecycle import cancel_active_jobs_for_lead
+from app.core.db_utils import acquire_with_tenant
+from app.domain.services.dialer.job_lifecycle import NOT_ORIGINATED_JOB_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +56,8 @@ async def purge_lead_on_opt_out(
     teardown path must not be torpedoed by a compliance side effect, and
     the individual failures are logged for follow-up.
     """
-    result = {"dnc_added": False, "jobs_cancelled": 0, "lead_marked": False}
+    result = {"dnc_added": False, "jobs_cancelled": 0, "lead_marked": False,
+              "jobs_cleanup_complete": not bool(lead_id), "purge_complete": False}
 
     # 1. DNC the number (blocks all future origination via CallGuard).
     if phone_number and tenant_id and db_pool is not None:
@@ -69,12 +72,23 @@ async def purge_lead_on_opt_out(
                 tenant_id, phone_number, exc,
             )
 
-    # 2. Cancel every active/scheduled job for the lead.
-    if lead_id and db_client is not None:
+    # 2. Cancel future work, retaining live attempt ownership. An empty UPDATE
+    # is a successful queue cleanup; it is distinct from a failed DB request.
+    if lead_id and tenant_id and db_pool is not None:
         try:
-            result["jobs_cancelled"] = cancel_active_jobs_for_lead(
-                db_client, str(lead_id), reason=OPT_OUT_REASON,
-            )
+            async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
+                status = await conn.execute(
+                    """UPDATE dialer_jobs SET status='cancelled',
+                           failure_reason=$3, last_error=$3
+                       WHERE tenant_id=$1::uuid AND lead_id=$2::uuid
+                         AND status = ANY($4::text[])""",
+                    str(tenant_id), str(lead_id), OPT_OUT_REASON,
+                    list(NOT_ORIGINATED_JOB_STATUSES),
+                )
+            if not isinstance(status, str) or not status.startswith("UPDATE "):
+                raise RuntimeError("Job cleanup returned no update acknowledgement")
+            result["jobs_cancelled"] = int(status.split()[-1])
+            result["jobs_cleanup_complete"] = True
         except Exception as exc:
             logger.warning(
                 "opt_out_purge: job cancel failed lead=%s err=%s", lead_id, exc,
@@ -82,19 +96,257 @@ async def purge_lead_on_opt_out(
 
         # 3. Mark the lead do-not-call.
         try:
-            db_client.table("leads").update({
-                "status": "dnc",
-                "last_call_result": OPT_OUT_REASON,
-            }).eq("id", str(lead_id)).execute()
-            result["lead_marked"] = True
+            async with acquire_with_tenant(db_pool, str(tenant_id)) as conn:
+                row = await conn.fetchrow(
+                    """UPDATE leads SET status='dnc', last_call_result=$3
+                       WHERE tenant_id=$1::uuid AND id=$2::uuid RETURNING id""",
+                    str(tenant_id), str(lead_id), OPT_OUT_REASON,
+                )
+            result["lead_marked"] = row is not None
         except Exception as exc:
             logger.warning(
                 "opt_out_purge: lead DNC mark failed lead=%s err=%s", lead_id, exc,
             )
 
+    result["purge_complete"] = bool(result["dnc_added"] and
+        result["jobs_cleanup_complete"] and (not lead_id or result["lead_marked"]))
     logger.info(
         "opt_out_purge done lead=%s number=%s dnc=%s jobs_cancelled=%d lead_marked=%s",
         lead_id, phone_number, result["dnc_added"],
         result["jobs_cancelled"], result["lead_marked"],
     )
     return result
+
+
+def record_purge_result(voice_session, result: dict) -> bool:
+    """Remember acknowledged DNC separately from all applicable cleanup.
+
+    A failed or cancelled attempt cannot create proof. Prior acknowledged DNC
+    remains true while ancillary work is retried. This is process-local receipt
+    state, not a durable recovery queue or a claim about caller hearing.
+    """
+    if result.get("dnc_added") is True:
+        voice_session._opt_out_dnc_written = True
+    if result.get("purge_complete") is True:
+        voice_session._opt_out_purged = True
+    return bool(getattr(voice_session, "_opt_out_dnc_written", False))
+
+
+# Teardown is the last chance to honour an in-call opt-out whose inline write
+# did not land, so a busy pool must not lose it: bounded retries, short backoff.
+TEARDOWN_PURGE_ATTEMPTS = 3
+TEARDOWN_PURGE_TIMEOUT_S = 2.5
+TEARDOWN_PURGE_BACKOFF_S = (0.25, 0.75)
+
+
+def _mask_phone(phone: Any) -> str:
+    digits = "".join(ch for ch in str(phone or "") if ch.isdigit())
+    return f"***{digits[-4:]}" if digits else "-"
+
+
+async def purge_lead_on_opt_out_with_retry(
+    *,
+    db_pool: Any,
+    db_client: Any,
+    tenant_id: Optional[str],
+    lead_id: Optional[str],
+    phone_number: Optional[str],
+    call_id: Optional[str] = None,
+    voice_session: Any = None,
+    call_ref: Optional[str] = None,
+    attempts: int = TEARDOWN_PURGE_ATTEMPTS,
+    timeout_s: float = TEARDOWN_PURGE_TIMEOUT_S,
+    backoff_s: tuple = TEARDOWN_PURGE_BACKOFF_S,
+) -> dict:
+    """:func:`purge_lead_on_opt_out` under a per-attempt timeout, retried until
+    the DNC row is acknowledged or ``attempts`` are spent.
+
+    The DNC write is what the caller was promised and what CallGuard enforces,
+    so it alone ends the retries; lead/job cleanup that stays incomplete after
+    an acknowledged DNC is reported in the returned result (the caller logs it),
+    exactly as with a single attempt.
+
+    Each attempt's result is recorded on ``voice_session`` (monotonic, so an
+    acknowledged DNC survives a later timeout). Returns the last real result.
+    When the DNC row is still unconfirmed after the last attempt an ERROR names
+    the call and tenant (phone masked). With no tenant/phone/pool another
+    attempt cannot help, so there is exactly one. Cancellation propagates.
+    """
+    writable = bool(tenant_id and phone_number and db_pool is not None)
+    total = max(1, int(attempts)) if writable else 1
+    last: Optional[dict] = None
+    for attempt in range(1, total + 1):
+        try:
+            last = await asyncio.wait_for(purge_lead_on_opt_out(
+                db_pool=db_pool, db_client=db_client, tenant_id=tenant_id,
+                lead_id=lead_id, phone_number=phone_number, call_id=call_id,
+            ), timeout=timeout_s)
+            if voice_session is not None:
+                record_purge_result(voice_session, last)
+            if last.get("dnc_added") is True:
+                return last
+        except Exception as exc:  # noqa: BLE001 - includes TimeoutError
+            logger.warning(
+                "opt_out_teardown_attempt_failed call=%s attempt=%d/%d err=%r",
+                call_ref or call_id or "-", attempt, total, exc,
+            )
+        if attempt < total and backoff_s:
+            await asyncio.sleep(backoff_s[min(attempt - 1, len(backoff_s) - 1)])
+    final = last if isinstance(last, dict) else {
+        "dnc_added": False, "jobs_cancelled": 0, "lead_marked": False,
+        "jobs_cleanup_complete": False, "purge_complete": False,
+    }
+    # An earlier write (the in-call purge) may already have acknowledged the
+    # DNC row; then only lead/job cleanup is outstanding, which the caller
+    # reports. Only a DNC row that was never confirmed is an ERROR.
+    already_written = bool(getattr(voice_session, "_opt_out_dnc_written", False))
+    if final.get("dnc_added") is not True and not already_written:
+        logger.error(
+            "opt_out_teardown_unconfirmed call=%s dialer_call=%s tenant=%s number=%s "
+            "attempts=%d — caller asked not to be called again and the DNC row was "
+            "NOT confirmed written",
+            call_ref or "-", call_id or "-", tenant_id or "-",
+            _mask_phone(phone_number), total,
+        )
+    return final
+
+
+def locate_live_voice_session(call_id: Any, session: Any = None) -> tuple:
+    """Find the live telephony ``VoiceSession`` for a call: ``(registry_key, vs)``.
+
+    The telephony registry is keyed by the PBX channel id (lifecycle
+    ``set_voice_session(call_id, ...)``), but the pipeline, the realtime bridge
+    and the ``CallSession`` carry the pipeline UUID. A UUID lookup therefore
+    misses on every Asterisk call, so resolve in this order:
+
+      1. direct lookup (``call_id`` already is the registry key),
+      2. a registry scan: the entry whose ``call_session`` IS ``session``, else
+         the entry whose own ``call_id`` equals ``call_id``,
+      3. ``session._voice_session_ref`` (set by ``create_voice_session``).
+
+    Returns ``(None, None)`` when nothing matches. Never raises. A match needs
+    this exact session object or this exact call id, so one call can never
+    resolve to another call's (or tenant's) session.
+    """
+    call_id = str(call_id or "")
+    try:
+        from app.domain.services.telephony.lifecycle import _state
+
+        state = _state()
+        if call_id:
+            found = state.get_voice_session(call_id)
+            if found is not None:
+                return call_id, found
+        by_call_id = None
+        for key, candidate in state.iter_voice_session_items():
+            if session is not None and getattr(candidate, "call_session", None) is session:
+                return str(key), candidate
+            if (by_call_id is None and call_id
+                    and str(getattr(candidate, "call_id", "") or "") == call_id):
+                by_call_id = (str(key), candidate)
+        if by_call_id is not None:
+            return by_call_id
+    except Exception as exc:  # noqa: BLE001 - registry unavailable or a stub
+        logger.debug("live_voice_session_registry_lookup_failed call=%s err=%r", call_id[:12], exc)
+    ref = getattr(session, "_voice_session_ref", None) if session is not None else None
+    return (None, ref) if ref is not None else (None, None)
+
+
+def resolve_live_voice_session(call_id: Any, session: Any = None) -> Optional[object]:
+    """The live ``VoiceSession`` for ``call_id``/``session``, or None."""
+    return locate_live_voice_session(call_id, session)[1]
+
+
+# Spoken when the caller asked to be removed but the DNC write did not
+# succeed in time. It commits to nothing the system has not done; the
+# teardown retries the purge, and the transcript shows what was actually said.
+OPT_OUT_UNCONFIRMED_FAREWELL = (
+    "Understood — I've noted that and won't keep you. Goodbye."
+)
+
+
+async def purge_opt_out_before_farewell(session, *, timeout_s: float = 2.5) -> bool:
+    """Write the opt-out before the agent says it has; see the helper below.
+
+    On success the live session is marked ``_opt_out_recorded`` so a spoken
+    "you've been removed" is allowed (speech_guard.py); otherwise it is not.
+    One in-call attempt per call: after a failure, later in-call callers get
+    False at once instead of another 2.5 s of dead air each; the teardown
+    purge (lifecycle.py) retries the write.
+    """
+    # No early return on success: a written DNC row with incomplete cleanup
+    # (queued jobs, lead status) must be retried by the next caller.
+    if getattr(session, "_opt_out_inline_failed", False) is True:
+        return False
+    recorded = await _purge_opt_out_before_farewell(session, timeout_s=timeout_s)
+    try:
+        if recorded:
+            session._opt_out_recorded = True
+        else:
+            session._opt_out_inline_failed = True
+    except Exception:  # noqa: BLE001 - foreign session doubles
+        pass
+    return recorded
+
+
+async def _purge_opt_out_before_farewell(session, *, timeout_s: float = 2.5) -> bool:
+    """Write the opt-out BEFORE the agent says it has.
+
+    Called from the end-action shutdown path with the live ``CallSession``.
+    Resolves the owning voice session (which carries the dialer's tenant /
+    lead / phone), runs :func:`purge_lead_on_opt_out` under a short timeout
+    so the caller is not left in silence. Only full acknowledged cleanup marks
+    ``_opt_out_purged``; otherwise teardown retries the incomplete work.
+
+    Returns True only when the DNC row was actually written (or already
+    had been). False means the spoken farewell must not claim removal.
+    Never raises.
+    """
+    call_id = str(getattr(session, "call_id", "") or "")
+    # ``call_id`` is the pipeline UUID; the registry is keyed by the PBX channel.
+    voice_session = resolve_live_voice_session(call_id, session)
+    if voice_session is None:
+        logger.warning(
+            "opt_out_pre_farewell: no live voice session call=%s — inline DNC write "
+            "skipped; teardown retries", call_id[:12],
+        )
+        return False
+    if getattr(voice_session, "_opt_out_purged", False):
+        return True
+
+    tenant_id = getattr(voice_session, "_dialer_tenant_id", None)
+    phone = getattr(voice_session, "_dialer_phone", None)
+    if not (tenant_id and phone):
+        logger.warning(
+            "opt_out_pre_farewell: missing tenant/phone call=%s tenant=%s phone=%s",
+            call_id[:12], bool(tenant_id), bool(phone),
+        )
+        return False
+
+    try:
+        from app.core.container import get_container
+
+        container = get_container()
+        if not container.is_initialized:
+            return False
+
+        result = await asyncio.wait_for(
+            purge_lead_on_opt_out(
+                db_pool=container.db_pool,
+                db_client=container.db_client,
+                tenant_id=str(tenant_id),
+                lead_id=getattr(voice_session, "_dialer_lead_id", None),
+                phone_number=str(phone),
+                call_id=getattr(voice_session, "_dialer_call_id", None),
+            ),
+            timeout=timeout_s,
+        )
+    except Exception as exc:  # noqa: BLE001 — includes TimeoutError
+        logger.error(
+            "opt_out_pre_farewell_failed call=%s err=%r — farewell will not claim removal; "
+            "teardown retries",
+            call_id[:12], exc,
+        )
+        return bool(getattr(voice_session, "_opt_out_dnc_written", False))
+
+    return record_purge_result(voice_session, result)

@@ -6,9 +6,10 @@ running for another minute until the silence timer fired. The agent had no
 real way to end a call, so wrong numbers, "not interested", and detected
 voicemails all dragged on, burning minutes and sounding unprofessional.
 
-Mechanism: a text sentinel, not tool-calling. The prompt (see
-:func:`call_control_rules`) tells the model to end its FINAL sentence with
-the exact token ``[[END_CALL]]`` when the conversation is over.
+Mechanism: supported provider/action turns use the deterministic ``end_call``
+function tool. The text sentinel remains the compatibility fallback for a
+provider or turn where tools are unavailable. The prompt (see
+:func:`call_control_rules`) tells the model which control is present.
 
 2026-07-13 root-cause fix: the sentinel used to be read in
 ``synthesize_and_send_audio`` — AFTER ``turn_streamer`` had already run every
@@ -28,6 +29,8 @@ extraction and the session flag-set, so the two never drift apart.
 Pure helpers — no I/O — so the stripping logic is unit-testable.
 """
 from __future__ import annotations
+
+from app.services.scripts.prompts.policies import load_policy
 
 import re
 
@@ -55,8 +58,9 @@ def extract_end_call(text: str) -> tuple[str, bool]:
 
 def strip_and_flag(session, text: str) -> str:
     """Extract the END_CALL sentinel from RAW model text and, if present,
-    flag ``session`` so the turn finisher hangs up once this reply's audio
-    has played. Returns the sentinel-free text.
+    flag ``session`` only with independent caller/call-state authorization.
+    The turn finisher rechecks before hanging up after this reply's audio.
+    Returns the sentinel-free text even when the request is rejected.
 
     Callers MUST invoke this on text as soon as it leaves the model —
     before any TTS-directed cleaning (audio-tag stripping etc.) touches it.
@@ -73,12 +77,37 @@ def strip_and_flag(session, text: str) -> str:
     unchanged and never clears a flag a prior slice already set.
     """
     clean, requested = extract_end_call(text)
-    if requested:
+    if requested and model_end_call_allowed(session):
         try:
             session._end_call_requested = True
         except Exception:
             pass
     return clean
+
+
+def model_end_call_allowed(session, user_text=None) -> bool:
+    """Bind every model hangup request to caller or deterministic call evidence."""
+    from app.domain.services.end_session_action import caller_signaled_end, repeated_decline_allows_end, previous_assistant_turn
+    from app.domain.services.caller_assertions import continuation_after
+
+    if user_text is None:
+        user_text = next((
+            getattr(message, "content", "")
+            for message in reversed(getattr(session, "conversation_history", ()) or ())
+            if getattr(getattr(message, "role", None), "value", getattr(message, "role", None)) == "user"
+        ), "")
+    previous = previous_assistant_turn(getattr(session, "conversation_history", ()))
+    # Set only from caller evidence (phrase floor or a verified quote).
+    if getattr(session, "_caller_opted_out", False) is True:
+        return True
+    if caller_signaled_end(user_text, previous_assistant_text=previous):
+        return True
+    if continuation_after(user_text):
+        return False
+    if getattr(session, "_amd_voicemail", False) is True or getattr(session, "_machine_screening", False) is True:
+        return True
+    declined = getattr(getattr(session, "captured_slots", None), "declined_count", 0)
+    return repeated_decline_allows_end(user_text, declined, previous_assistant_text=previous)
 
 
 # Appended by the prompt composer for every campaign (before the compliance
@@ -116,33 +145,14 @@ def strip_and_flag(session, text: str) -> str:
 # exists to prevent. Now scoped to the first real reply and deferred to LIVE
 # STATE. The lesson generalises: any sentence in this file that describes a
 # SPECIFIC TURN must name which turn, or recency makes it describe every turn.
-CALL_CONTROL_RULES = f"""\
-## ENDING THE CALL (your one real control)
-- Call genuinely over — a clear goodbye, a WRONG BUSINESS (they've never heard
-  of the company, it's a private residence, or plainly not a business line), or
-  a voicemail/answering machine — say at most ONE short warm closing line, then
-  end that reply with the exact token {END_CALL_TOKEN} . The system hangs up.
-- WRONG PERSON is NOT this: if the business is right but your contact isn't
-  here / isn't available / "no one by that name", do NOT end — that's a pivot,
-  see WRONG PERSON / GATEKEEPER below. Only a wrong DESTINATION ends the call.
-- The token is invisible to the caller; rely on it alone — words like
-  "hangs up" do nothing.
-- Voicemail/answering machine: reply with {END_CALL_TOKEN} alone — we call
-  back another time instead of leaving a recording.
-
-## HOW YOU SELL
-- ONCE they have spoken back, your first real reply introduces you and the
-  company in one short line, then asks ONE question. If you have already
-  introduced yourself, never do it again — LIVE STATE tells you which.
-  A few words is usually the whole turn — earn the next line by letting
-  them talk.
-- Discover before you pitch: learn how they handle it today before mentioning
-  what we offer.
-- Drive to ONE concrete next step — their email for a sample, or a callback
-  at a time THEY pick — and confirm it back before closing.
-"""
+CALL_CONTROL_RULES = load_policy("ending_the_call").format(end_call_token=END_CALL_TOKEN)
 
 
-def call_control_rules() -> str:
-    """The composed-prompt block granting END_CALL + conversation craft."""
+INBOUND_CALL_CONTROL_RULES = load_policy("ending_the_call_inbound").format(end_call_token=END_CALL_TOKEN)
+
+
+def call_control_rules(*, direction: str = "outbound") -> str:
+    """Call ending stays shared; outbound sales behavior does not enter inbound."""
+    if direction == "inbound":
+        return INBOUND_CALL_CONTROL_RULES
     return CALL_CONTROL_RULES

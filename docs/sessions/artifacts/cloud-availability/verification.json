@@ -1,0 +1,263 @@
+{
+  "scope": "Offline production cloud-selection containment. Synthetic DB/queue/provider ports and Node DOM rendering; no provider/network/real call/PostgreSQL/account changes; no cloud route or production acceptance claim.",
+  "baseline": "add699c4f7bf1fbf603f078e862f7229a04406c8",
+  "source_commit": "8f5d7731bd4f1b919109130f442381e8d17d5bf4",
+  "source_files_sha256_git_blob": {
+    "Talk-Leee/src/components/settings/telephony-providers-section.test.tsx": "f317e8dfd96134e277f4edf43cd17cf7d08175c4e5ac3d67ef5e96db3faafc7b",
+    "Talk-Leee/src/components/settings/telephony-providers-section.tsx": "b0fc91e39045d953c80d93fde9c7cc4a393eb68a585e46c41824b36733efe659",
+    "Talk-Leee/src/lib/telephony-api.ts": "f3b81122a41fe7e61ec2c5120716fb5e14ecd82c5637fc2a027b8ef925081d31",
+    "backend/app/api/v1/endpoints/telephony_bridge.py": "82b7410d6c12850b98fb5510e18023b0cda0fa4ca32d44ee8900b81f8bf09f9f",
+    "backend/app/api/v1/endpoints/telephony_providers.py": "0a6ae75a4262a86e082dec95a2d16fea3fa3d455a9a734ade94fe4fda86a76d1",
+    "backend/app/domain/services/campaign_service.py": "483675d463b858ddb0877a45131c4ab9fc99573454cb55749a659b18f955cbca",
+    "backend/app/domain/services/telephony/outbound_readiness.py": "553aeafe6a46c09092bc7414e9f412d86f86f3770795537a85dafad87e0fc53a",
+    "backend/app/domain/services/telephony/provider_availability.py": "5122a8f6d8983cbb3e294326bdf14764bf024d2eaa25c9b0177689511bfebab5",
+    "backend/app/workers/dialer_worker.py": "e76dd78b8b9fbab919beadf8abce3f76c6ead5207cb92a3ef6fcac50a5455990",
+    "backend/app/workers/retry_policy.py": "a3515b52e5d08655b9057752974594bb9a3d255682ddd42fa611cd6aa3ac4fbc",
+    "backend/tests/unit/test_cloud_telephony_availability.py": "b256209c50abd4285869a5c394199ce08ee47a95776954b0ddb0318e83282a8f",
+    "backend/tests/unit/test_outbound_campaign_boundaries.py": "b58c4a1bb0031336cfd080cbeb75b897b692909a0e8555730ad787ed143353dd"
+  },
+  "environment": {
+    "ENVIRONMENT": "test (individual cases explicitly select production/nonproduction)",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps",
+    "python": "3.12.12",
+    "urllib3": "2.8.0",
+    "PyJWT": "2.15.1",
+    "node": "v25.8.1",
+    "next": "16.3.8",
+    "react": "19.2.1"
+  },
+  "commands": [
+    {
+      "cwd": "backend",
+      "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "pytest",
+        "tests/unit/test_cloud_telephony_availability.py",
+        "tests/unit/test_outbound_campaign_boundaries.py",
+        "tests/unit/test_op01_metering_unavailable.py",
+        "tests/unit/test_campaign_telephony_readiness.py",
+        "tests/unit/test_call_redial_service.py",
+        "tests/unit/test_campaign_start_dispatch_truth.py",
+        "tests/unit/test_dialer_worker_guard_ordering.py",
+        "tests/unit/test_dialer_worker_block_visibility.py",
+        "tests/unit/test_legacy_cloud_production_boundary.py",
+        "-q",
+        "--no-cov"
+      ],
+      "log": "cloud-backend-final.txt",
+      "exit_code": 0,
+      "passed": 202,
+      "skipped": 0,
+      "warnings": 97
+    },
+    {
+      "cwd": "backend",
+      "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "pytest",
+        "tests/unit/test_sip_trunk_call_readiness.py",
+        "tests/unit/test_telephony_bridge_auth.py",
+        "-q",
+        "--no-cov"
+      ],
+      "log": "cloud-sip-auth-compatibility.txt",
+      "exit_code": 0,
+      "passed": 66,
+      "skipped": 0,
+      "warnings": 3
+    },
+    {
+      "cwd": "Talk-Leee",
+      "executable": "node",
+      "args": [
+        "--test",
+        "--import",
+        "tsx",
+        "--import",
+        "./src/test-utils/setup.ts",
+        "src/components/settings/telephony-providers-section.test.tsx",
+        "src/components/settings/sip-trunks-list.test.tsx"
+      ],
+      "log": "cloud-frontend-final.txt",
+      "exit_code": 0,
+      "passed": 16,
+      "skipped": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "executable": "./node_modules/.bin/eslint.cmd",
+      "args": [
+        "src/lib/telephony-api.ts",
+        "src/components/settings/telephony-providers-section.tsx",
+        "src/components/settings/telephony-providers-section.test.tsx"
+      ],
+      "log": "cloud-frontend-lint.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": "Talk-Leee",
+      "executable": "npm",
+      "args": [
+        "run",
+        "typecheck"
+      ],
+      "log": "cloud-frontend-typecheck.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": "backend",
+      "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "--ignore",
+        "F401,F841",
+        "app/api/v1/endpoints/telephony_bridge.py",
+        "app/api/v1/endpoints/telephony_providers.py",
+        "app/domain/services/campaign_service.py",
+        "app/domain/services/telephony/outbound_readiness.py",
+        "app/domain/services/telephony/provider_availability.py",
+        "app/workers/dialer_worker.py",
+        "app/workers/retry_policy.py",
+        "tests/unit/test_cloud_telephony_availability.py",
+        "tests/unit/test_outbound_campaign_boundaries.py"
+      ],
+      "log": "cloud-backend-ci-lint.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": "backend",
+      "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+      "args": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "app/domain/services/telephony/provider_availability.py",
+        "tests/unit/test_cloud_telephony_availability.py"
+      ],
+      "log": "cloud-backend-new-lint.txt",
+      "exit_code": 0
+    }
+  ],
+  "artifacts": {
+    "cloud-availability-before.json": {
+      "bytes": 2140,
+      "sha256_working_tree": "f10c221f0d049704ef5c537e9a03de717bb89ec0ad20b48789c22d5dd83d978a",
+      "sha256_lf_normalized": "fac5be3449793e19cf4f948a991b9ee99fef3ace98aefe63136693295606cafb"
+    },
+    "cloud-availability-before.py": {
+      "bytes": 6452,
+      "sha256_working_tree": "75226ef4241830dac1bdf46fc66f7f9b45397a42229e4fe8d3e2d08742554f3d",
+      "sha256_lf_normalized": "75226ef4241830dac1bdf46fc66f7f9b45397a42229e4fe8d3e2d08742554f3d"
+    },
+    "cloud-availability-before.txt": {
+      "bytes": 3318,
+      "sha256_working_tree": "4f24979ac33efb176894f8761bd45b2cf6bfb4b4ceea86581327284731da4778",
+      "sha256_lf_normalized": "1daddbd6c47d9f13e0c724e980aa76f40d4e0ae3f961cf556a6e7150c9fd33e0"
+    },
+    "cloud-backend-ci-lint.txt": {
+      "bytes": 20,
+      "sha256_working_tree": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf_normalized": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "cloud-backend-final.txt": {
+      "bytes": 4500,
+      "sha256_working_tree": "965513dadcefe849266ba53352e73a3837a2536d56acd3b0ec6fc37586921eff",
+      "sha256_lf_normalized": "05a49034dc8c62347f8ce2bd1bfe38663eb1a9dd1ab9f4160017f4fd452f227b"
+    },
+    "cloud-backend-lint.txt": {
+      "bytes": 4150,
+      "sha256_working_tree": "a78d807247347006e6bad76265ada9ab50ded25706c929d9f55d201e30b9a0c7",
+      "sha256_lf_normalized": "730dd81a870296eb98370cb9b09424dcb731ba8ee2a650e5a4dafe9941f02d5f"
+    },
+    "cloud-backend-new-lint.txt": {
+      "bytes": 20,
+      "sha256_working_tree": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf_normalized": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "cloud-config-retry-red.txt": {
+      "bytes": 8440,
+      "sha256_working_tree": "87d4461a5f200bef5471d7adbb2ab843fa1e36a606f1f88d76a2e40f1688c010",
+      "sha256_lf_normalized": "e768aff6f203c2d9e73507699fc3dd72078e894e199d43358c4cc83c2729078d"
+    },
+    "cloud-frontend-final.txt": {
+      "bytes": 1568,
+      "sha256_working_tree": "e15f305558ebe8deca0f82743e998ff3e4893fd356da6c7344a97ca00b6d7431",
+      "sha256_lf_normalized": "6d0c797c29b1ae8e740d4a0cd2f751a1c9e485489372ed30abac04e7fe8ad05d"
+    },
+    "cloud-frontend-lint.txt": {
+      "bytes": 0,
+      "sha256_working_tree": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "sha256_lf_normalized": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    "cloud-frontend-red.txt": {
+      "bytes": 30730,
+      "sha256_working_tree": "4684976b32f5251de94d052472d9cddd348b466f51fc6e9a0afe1270af3eeec6",
+      "sha256_lf_normalized": "65a0ecdfddbf0efcaf83fdc4ccea9fb6f54addc426e6c4077c30220808a56afd"
+    },
+    "cloud-frontend-typecheck.txt": {
+      "bytes": 65,
+      "sha256_working_tree": "0d7ae42daba03c2fe8054db032a54bd4cd53c93ff90467519cc7b20b7ba882f8",
+      "sha256_lf_normalized": "49fa35a9273f9da77f027b6f1eaa8a7b25708171fe58f9b9f9af6c1dcde116ae"
+    },
+    "cloud-lint-baseline-comparison.json": {
+      "bytes": 1591,
+      "sha256_working_tree": "1dd4d6bd60026e142d20c1240932ff604a4a97356f51f5982f7e33331feb6804",
+      "sha256_lf_normalized": "358edf7bec1411d055267d29897ba0c548b26d04efaf6170ec8d83a94c92c84e"
+    },
+    "cloud-null-status-red.txt": {
+      "bytes": 4246,
+      "sha256_working_tree": "4f889cdb87d52611756752497481527c453fb29b9aedf05a834187eb6cb0d911",
+      "sha256_lf_normalized": "683d1562bad8b513c778e7e9a461c39befeafcde29e78eeb1e569d31ee070fca"
+    },
+    "cloud-sip-auth-compatibility.txt": {
+      "bytes": 1588,
+      "sha256_working_tree": "8bb2ab65dd0db610e9aa7b5db6161931f21fa8f54a53746b5ca48417bb89ce62",
+      "sha256_lf_normalized": "b0e9a548cb4d9de2cb0cc355f40d7796a65a4894b784e17ad2164db96b8649cc"
+    },
+    "cloud-start-status-red.txt": {
+      "bytes": 2042,
+      "sha256_working_tree": "1132f6615665b7b9a7ff3a4848e4632743f8c5158271db966c02bdda3a3132a9",
+      "sha256_lf_normalized": "91de9dfcdb76d26c51dff86cbd8f583c945301a8cf6bb7896d0962488fb6af69"
+    },
+    "cloud-tests-red.txt": {
+      "bytes": 20217,
+      "sha256_working_tree": "8d8ef4646ac8a8e77db08b82bbae7d880577a1699841934574038950dee876ee",
+      "sha256_lf_normalized": "acbcf666be81874251fd1e22ae5b456e7348c53737e3b367a4da6721b1a3e1cd"
+    },
+    "cloud-worker-red.txt": {
+      "bytes": 8258,
+      "sha256_working_tree": "d94b1979fe1724b5bd94c2a2510f86d6a105c3dd7eacde84a1d515f65eb3cf03",
+      "sha256_lf_normalized": "42dc8af9c69beff822ba8c3c8ae793aeee7de44978b0e3ecd50e3eda7153bbfe"
+    }
+  },
+  "red_evidence": {
+    "cloud-availability-before.txt": "Expected8 failures plus direct-user403 preservation control; original actual-method synthetic probe",
+    "cloud-tests-red.txt": "16failed6passed before source repair",
+    "cloud-worker-red.txt": "2failed selection503 wrong retry path",
+    "cloud-config-retry-red.txt": "2failed knownunsupportedcloud auto retry",
+    "cloud-frontend-red.txt": "6failed currentSettings expectations",
+    "cloud-start-status-red.txt": "1failed start503 became500;1passed adaptertimeout",
+    "cloud-null-status-red.txt": "1failed validnullHTTPstatus rejected by newDTO"
+  },
+  "review": [
+    "Root final read clear",
+    "llm_audit backend read clear; no rerun",
+    "audio_audit API/frontend read clear; no rerun"
+  ],
+  "limits": [
+    "Current admission read is not atomic with remote origination; later config changes cannot undo a call.",
+    "Production unavailable; explicit nonproduction bridge activation is qualification only.",
+    "Typed lookup503 retains same attempt; known422 needs operator config correction and explicit campaign start.",
+    "FullF touchedexistingfiles has9 baseline-identicalF401/F841 findings; CI excludes those; newfiles fullF clean.",
+    "Only helper explanatory docstring indentation changed after final backend batch; executable behavior unchanged.",
+    "No fullNext production build, PostgreSQL, liveprovider, browser, acoustic or humanqualification claim."
+  ]
+}

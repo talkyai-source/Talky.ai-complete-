@@ -24,6 +24,8 @@ from app.domain.models.ai_config import (
     GOOGLE_CHIRP3_VOICES,
 )
 
+from app.realtime.catalog import REALTIME_VOICES
+
 # Global configuration - applies to all voice interactions
 _global_config: Optional[AIProviderConfig] = None
 
@@ -165,6 +167,10 @@ def resolve_voice_gender(voice_id: Optional[str]) -> Optional[str]:
     """
     if not voice_id:
         return None
+    for voice in REALTIME_VOICES:
+        if voice["id"] == voice_id:
+            gender = voice.get("gender")
+            return gender if gender in ("male", "female") else None
     try:
         from app.infrastructure.tts.elevenlabs_catalog import _elevenlabs_voices_cache
         el_voices = list(_elevenlabs_voices_cache) if _elevenlabs_voices_cache else []

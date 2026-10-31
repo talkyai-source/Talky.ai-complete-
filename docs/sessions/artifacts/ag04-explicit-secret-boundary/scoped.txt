@@ -1,0 +1,23 @@
+........................................................................ [ 16%]
+........................................................................ [ 32%]
+........................................................................ [ 48%]
+........................................................................ [ 65%]
+........................................................................ [ 81%]
+..........................................F............................. [ 97%]
+...........                                                              [100%]
+================================== FAILURES ===================================
+___ test_default_outbound_prompt_stays_compact_without_duplicate_turn_shape ___
+
+    def test_default_outbound_prompt_stays_compact_without_duplicate_turn_shape():
+        document = _document()
+>       assert len(document.system_prompt.split()) <= 1800
+E       assert 1816 <= 1800
+E        +  where 1816 = len(['##', 'HARD', 'RULES', '�', 'these', 'override', ...])
+E        +    where ['##', 'HARD', 'RULES', '�', 'these', 'override', ...] = <built-in method split of str object at 0x0000021668BEBEF0>()
+E        +      where <built-in method split of str object at 0x0000021668BEBEF0> = '## HARD RULES � these override campaign scripts and examples\nYou are Ava, an AI assistant for Northwind Systems. Kee...treat it as "Northwind Systems" and always say and spell it correctly � never repeat a mis-heard version back to them.'.split
+E        +        where '## HARD RULES � these override campaign scripts and examples\nYou are Ava, an AI assistant for Northwind Systems. Kee...treat it as "Northwind Systems" and always say and spell it correctly � never repeat a mis-heard version back to them.' = PromptDocument(system_prompt='## HARD RULES � these override campaign scripts and examples\nYou are Ava, an AI assista...at it as "Northwind Systems" and always say and spell it correctly � never repeat a mis-heard version back to them.'))).system_prompt
+
+tests\unit\test_core_prompt_contract.py:19: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_core_prompt_contract.py::test_default_outbound_prompt_stays_compact_without_duplicate_turn_shape
+1 failed, 442 passed, 2467 warnings in 8.75s

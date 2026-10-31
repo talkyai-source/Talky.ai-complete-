@@ -1,0 +1,27 @@
+{
+  "candidate_revision": "e5cfff12773b259db516ab76ad53d417c3f5edc0",
+  "command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_op06_transfer_capabilities.py",
+    "tests/unit/test_voice_action_execution.py",
+    "tests/unit/test_voice_action_contract.py",
+    "tests/unit/test_voice_action_spoken_confirmation.py",
+    "tests/unit/test_live_capability_offers.py",
+    "tests/unit/test_inbound_transfer_controls.py",
+    "tests/unit/test_inbound_transfer_billing.py",
+    "tests/unit/test_inbound_campaign_service.py",
+    "-q"
+  ],
+  "source_before": {
+    "backend/app/domain/services/voice_pipeline/action_execution.py": "48da757626c6d3a05345022601eb529644bfe7adf5b6c29bbc904e14ff23a75e",
+    "backend/tests/unit/test_op06_transfer_capabilities.py": "2e981d3c8f4fa10387414d0a2f564c186ffcc9cddd5c8e3c0cd2d78a850e3d72",
+    "backend/tests/unit/test_inbound_campaign_service.py": "cf1c4b7792254d9f2de07b8e9b18566f78aff1d8d05bcde6a46e3f93df603e9e",
+    "Talk-Leee/src/app/ai-voice-agent/page.tsx": "0d42de3707264f7dbefcd3587112fad48578452c4a9441d8a100fbbecf659d73",
+    "Talk-Leee/src/app/use-cases/customer-services-support/page.tsx": "b6a3cc1b1dc8596c0fa8352d91a4bf801b44afe3f7d83bc0e80285bedad769f2",
+    "Talk-Leee/src/app/use-cases/automated-lead-qualification/page.tsx": "4eb684bc868714b47221a002acdd08a14e6cc0f6dabccd4c56621b53c9ba085f"
+  },
+  "exit_code": 0,
+  "source_unchanged": true
+}

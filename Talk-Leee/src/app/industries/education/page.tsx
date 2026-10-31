@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { Button } from "@/components/ui/button";
 import { Video } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Talk-Lee AI | AI That Transforms Education",
+  title: "AI for Education | Student Support & Automation",
   description:
-    "Boost engagement and streamline school operations with Talk-Lee AI. Automate calls, admissions, and student support effortlessly!",
+    "Looking for AI for education? Automate student support, admissions, call handling, scheduling, and e-learning assistance 24/7. Book a Demo Today.",
 };
 
 export default function EducationIndustryPage() {
@@ -19,157 +20,543 @@ export default function EducationIndustryPage() {
     backgroundRepeat: "no-repeat",
   } as const;
 
-  const admissionsCards = [
+  const eyebrowClassName =
+    "text-xs sm:text-sm font-semibold uppercase tracking-[0.2em] text-blue-600 dark:text-blue-400";
+  const headingClassName = "text-2xl md:text-3xl font-semibold text-primary dark:text-foreground";
+  const subHeadingClassName = "text-xl md:text-2xl font-semibold text-primary dark:text-foreground";
+  const cardTitleClassName = "text-lg md:text-xl font-semibold text-primary dark:text-foreground";
+  const bodyClassName =
+    "mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const cardBodyClassName = "mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed";
+  const listClassName = "mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground";
+  const pillClassName =
+    "rounded-full border border-border/70 bg-background/60 dark:bg-white/5 backdrop-blur-sm px-4 py-2 text-xs sm:text-sm font-medium text-gray-700 dark:text-muted-foreground";
+  const primaryButtonClassName =
+    "rounded-full min-h-12 h-auto whitespace-normal text-center max-w-full px-8 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400";
+  const outlineButtonClassName =
+    "rounded-full min-h-12 h-auto whitespace-normal text-center max-w-full px-8 bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900";
+  const centeredCtaClassName = "mt-10 flex justify-center";
+  const ctaPairClassName = "mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4";
+
+  const whyItMattersPoints = [
+    "Student enquiry intake",
+    "24/7 availability",
+    "Faster admission responses",
+    "Automated follow-ups",
+    "Smart call routing",
+    "Reduced administrative workload",
+  ];
+
+  const heroStats = [
+    { value: "Enquiry", label: "Intake" },
+    { value: "Configured", label: "Hours" },
+    { value: "Call", label: "Records" },
+  ];
+
+  const whatWeDo = [
     {
-      title: "AI admission inquiry handling",
-      description: "Respond instantly to student questions and collect details automatically.",
+      title: "AI Student Support",
+      description:
+        "Use approved information to answer routine questions about admissions, programs, schedules, fees and campus services.",
     },
     {
-      title: "AI admission follow-up calls",
-      description: "Proactively follow up with prospects to increase enrollment.",
+      title: "AI Virtual Assistant for Schools",
+      description:
+        "Use approved information to answer routine student questions and collect requests for staff review.",
     },
     {
-      title: "AI scheduling for institutes",
-      description: "Automate bookings for tours, interviews, and counseling sessions with reminders.",
+      title: "AI Call Automation for Education",
+      description:
+        "Automate inbound and outbound calls for admissions, reminders, student inquiries, notifications, and routine communication.",
     },
-  ] as const;
+    {
+      title: "AI Admission Inquiry Handling",
+      description:
+        "Answer prospective students’ questions about programs, eligibility, tuition, application requirements, deadlines, and enrollment.",
+    },
+    {
+      title: "AI Appointment Scheduling for Institutes",
+      description:
+        "Let students schedule appointments with admissions counselors, academic advisors, faculty, and student services based on real-time availability.",
+    },
+    {
+      title: "AI E-Learning Support Automation",
+      description:
+        "Help online learners with course navigation, platform questions, account assistance, and common learning support requests.",
+    },
+    {
+      title: "AI Student Engagement Platform",
+      description:
+        "Keep students connected with timely reminders, announcements, follow-ups, personalized communication, and helpful conversations throughout their journey.",
+    },
+    {
+      title: "AI Admission Follow-Up Calls",
+      description:
+        "Automatically reconnect with prospective students after inquiries, provide additional information, and encourage them to take the next step toward enrollment.",
+    },
+    {
+      title: "AI Student Call Routing",
+      description:
+        "Understand why a student is calling and direct them to admissions, finance, academics, student services, or the appropriate team.",
+    },
+  ];
+
+  const businessImpact = [
+    {
+      title: "Capture More Leads",
+      description: "Collect prospective students’ enquiries and contact details for your admissions team to review.",
+    },
+    {
+      title: "Reduce Admin Work",
+      description: "Automate routine calls, questions, scheduling, reminders, and follow-ups for your team.",
+    },
+    {
+      title: "Respond Faster",
+      description: "Use your approved information for routine student and parent enquiries.",
+    },
+    {
+      title: "Boost Engagement",
+      description: "Keep students informed and connected with timely, personalized communication.",
+    },
+    {
+      title: "Handle Peak Demand",
+      description: "Manage busy admission periods and high inquiry volumes without adding extra staff.",
+    },
+    {
+      title: "Support 24/7",
+      description: "Provide reliable student support around the clock, including nights, weekends, and holidays.",
+    },
+  ];
+
+  const whyChooseTalkLee = [
+    {
+      title: "Natural Conversations",
+      description: "Students and parents can ask questions in everyday language without navigating complicated menus.",
+    },
+    {
+      title: "Configured Calling Hours",
+      description:
+        "Provide reliable support 24/7, regardless of office hours, weekends, holidays, or peak admission periods.",
+    },
+    {
+      title: "Easy to Scale",
+      description:
+        "Handle growing student inquiries and call volumes without increasing administrative workload at the same pace.",
+    },
+    {
+      title: "Works With Your Team",
+      description:
+        "AI can collect routine enquiries and requests for staff review. Live human transfer is not currently available.",
+    },
+  ];
+
+  const howItWorks = [
+    {
+      title: "Answer Fast",
+      description: "Configure call intake for student and parent enquiries within your hours and service limits.",
+    },
+    {
+      title: "Understand Needs",
+      description: "AI quickly identifies what the caller needs, from admissions to appointments and student support.",
+    },
+    {
+      title: "Take Action",
+      description: "Use approved answers and enabled actions, or collect a request for your team to review.",
+    },
+    {
+      title: "Stay Connected",
+      description: "Automated reminders, confirmations, and updates keep students informed throughout their journey.",
+    },
+  ];
+
+  const capabilities = [
+    {
+      title: "24/7 AI Call Answering",
+      description: "Answer student and parent calls around the clock with fast, natural conversations.",
+    },
+    {
+      title: "Admission Support",
+      description:
+        "Use approved information about programs, fees, eligibility, deadlines and enrollment requirements.",
+    },
+    {
+      title: "Appointment Management",
+      description: "Schedule and manage appointments with admissions teams, counselors, advisors, and faculty.",
+    },
+    {
+      title: "Multilingual Support",
+      description: "Communicate naturally with students and parents in multiple languages.",
+    },
+    {
+      title: "Virtual Receptionist",
+      description:
+        "Give your institution an always-available front desk that answers questions, routes calls, and assists students.",
+    },
+  ];
+
+  const educationBusinesses = [
+    {
+      title: "Schools",
+      description: "Support students and parents, automate inquiries, and simplify daily communication.",
+    },
+    {
+      title: "Colleges & Universities",
+      description: "Manage admissions, appointments, student support, and follow-ups across departments.",
+    },
+    {
+      title: "Training Institutes",
+      description: "Automate course inquiries, enrollment communication, scheduling, and student assistance.",
+    },
+    {
+      title: "E-Learning Platforms",
+      description: "Support learners with course information, platform assistance, reminders, and ongoing engagement.",
+    },
+  ];
+
+  const plans = [
+    {
+      name: "Starter",
+      price: "Free / 14-Day Trial",
+      blurb: "For small schools and institutes exploring AI.",
+      features: [
+        "One phone line",
+        "AI student support",
+        "Call answering & routing",
+        "Admission inquiry handling",
+        "Email support",
+      ],
+      ctaLabel: "Start Free",
+      ctaHref: "/auth/register",
+      ctaVariant: "primary" as const,
+      ctaIcon: false,
+    },
+    {
+      name: "Growth",
+      price: "Custom Pricing",
+      blurb: "For growing education providers with higher inquiry volumes.",
+      features: [
+        "Multiple phone lines",
+        "Admission follow-up automation",
+        "Appointment scheduling",
+        "Advanced student workflows",
+        "Priority support",
+      ],
+      ctaLabel: "Book a Demo",
+      ctaHref: "/#contact",
+      ctaVariant: "outline" as const,
+      ctaIcon: true,
+    },
+    {
+      name: "Enterprise",
+      price: "Let’s Talk",
+      blurb: "For universities, education groups, and large institutions.",
+      features: [
+        "Configured calling limits",
+        "Advanced education workflows",
+        "CRM & calendar integrations",
+        "Custom AI automation",
+        "Dedicated success manager",
+      ],
+      ctaLabel: "Talk to an Expert",
+      ctaHref: "/#contact",
+      ctaVariant: "outline" as const,
+      ctaIcon: false,
+    },
+  ];
+
+  const faqs = [
+    {
+      question: "What is AI for education?",
+      answer:
+        "AI for education helps institutions automate student communication, admissions, calls, scheduling, follow-ups, and routine support.",
+    },
+    {
+      question: "Can AI handle admission inquiries?",
+      answer:
+        "Yes. AI can answer questions about programs, fees, eligibility, deadlines, application requirements, and enrollment.",
+    },
+    {
+      question: "Can students schedule appointments with AI?",
+      answer:
+        "Yes. Students can book appointments with admissions counselors, advisors, faculty, and other departments through AI-powered conversations.",
+    },
+    {
+      question: "Can AI route student calls?",
+      answer:
+        "Live human transfer is not currently available. The agent can collect the reason for a call for staff review; this does not arrange a callback.",
+    },
+    {
+      question: "Can AI support students after office hours?",
+      answer: "Yes. AI provides 24/7 support, including evenings, weekends, and holidays.",
+    },
+    {
+      question: "Can AI work alongside our staff?",
+      answer:
+        "Absolutely. We handle repetitive interactions while your team focuses on complex requests and meaningful student relationships.",
+    },
+    {
+      question: "How quickly can we get started?",
+      answer:
+        "Most institutions can launch within days. Our team handles the setup so you can start automating student communication quickly.",
+    },
+  ];
 
   return (
-    <main className="home-navbar-offset bg-cyan-100 dark:bg-background">
+    <main className="home-navbar-offset bg-cyan-50 dark:bg-black">
       <Navbar />
       <div className="mx-auto w-full max-w-6xl px-4 md:px-6 lg:px-8 py-16 md:py-20">
         <header className="text-center">
           <h1 className="text-3xl sm:text-4xl md:text-5xl font-bold tracking-tight text-primary dark:text-foreground">
-            Smarter AI for Education Institutions
+            AI for Education
           </h1>
+          <p className="mt-4 text-base sm:text-lg md:text-xl font-semibold text-primary dark:text-foreground">
+            Configure Calling Workflows for Student Enquiries.
+          </p>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Deliver faster, smarter, and more personalized support to students, parents, and staff with Talk-Lee AI, the intelligent platform
-            designed specifically for AI for education. From admissions to daily operations, our AI automates key workflows, improving efficiency
-            and student satisfaction.
+            Talk-Lee AI helps schools, colleges, universities, and institutes automate student communication,
+            admissions, scheduling, and support with intelligent AI available 24/7.
+          </p>
+          <div className={ctaPairClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
+                Start Free &mdash; 2 Minutes
+              </Link>
+            </Button>
+            <Button asChild size="lg" className={outlineButtonClassName}>
+              <Link href="/#contact">
+                See How It Works
+              </Link>
+            </Button>
+          </div>
+          <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
+            No credit card needed. Go live with AI support in days.
           </p>
         </header>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            AI Student Support Anytime, Anywhere
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            With AI student support, your institution can provide 24/7 assistance across calls, chats, and email. Students get instant answers to
-            questions about:
+          <p className={eyebrowClassName}>Why It Matters</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Collect Student Enquiries for Review</h2>
+          <p className={bodyClassName}>
+            Admissions teams handle countless calls and questions about programs, fees, eligibility, deadlines, courses,
+            and appointments. When staff are busy, unanswered inquiries can quickly become missed enrollment
+            opportunities.
           </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Courses and schedules</li>
-            <li>• Fees and payments</li>
-            <li>• Academic policies and deadlines</li>
+          <p className={bodyClassName}>
+            Talk-Lee AI uses your approved information to handle routine student and parent enquiries and provide an
+            answer or collect a request for staff review.
+          </p>
+          <ul className={listClassName}>
+            {whyItMattersPoints.map((point) => (
+              <li key={point}>&bull; {point}</li>
+            ))}
           </ul>
-          <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            This ensures no inquiry goes unanswered, enhancing engagement while reducing staff workload.
-          </p>
+          <div className="mt-8 flex flex-wrap items-center gap-2 sm:gap-3">
+            {heroStats.map((stat) => (
+              <span key={stat.label} className={pillClassName}>
+                <span className="font-semibold text-primary dark:text-foreground">{stat.value}</span> {stat.label}
+              </span>
+            ))}
+          </div>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">AI Virtual Assistant for Schools</h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Talk-Lee AI serves as a smart AI virtual assistant for schools, capable of:
+          <p className={eyebrowClassName}>What We Do</p>
+          <h2 className={`mt-3 ${headingClassName}`}>AI-Powered Support for Modern Education</h2>
+          <p className={bodyClassName}>
+            From the first admission inquiry to ongoing student support, Talk-Lee AI helps education teams deliver
+            faster, more personalized experiences.
           </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Handling routine queries</li>
-            <li>• Routing students to the right department</li>
-            <li>• Collecting contact information for admissions</li>
-            <li>• Escalating complex cases seamlessly</li>
-          </ul>
-          <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Students experience quick, accurate, and consistent responses every time.
-          </p>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">
-            AI Call Automation for Education
-          </h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Manage all inbound and outbound calls efficiently with AI call automation for education. Automate appointment confirmations, reminders,
-            follow-ups, and routine inquiries to:
-          </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Reduce call handling time</li>
-            <li>• Ensure no student call is missed</li>
-            <li>• Improve conversion for admissions</li>
-          </ul>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Seamless Admissions with AI</h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Simplify your admissions process with smart automation:
-          </p>
-          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-            {admissionsCards.map((item) => (
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {whatWeDo.map((item) => (
               <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
-                <h3 className="text-lg md:text-xl font-semibold text-primary dark:text-foreground">{item.title}</h3>
-                <p className="mt-3 text-sm sm:text-base text-gray-700 dark:text-muted-foreground leading-relaxed">{item.description}</p>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+          <div className={centeredCtaClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
+                Start Free &mdash; 2 Minutes
+              </Link>
+            </Button>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>The Business Impact</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Faster Support. Happier Students. More Enrollment.</h2>
+          <p className={bodyClassName}>
+            Automate repetitive communication while giving your team more time to focus on students who need personal
+            attention.
+          </p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {businessImpact.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
               </div>
             ))}
           </div>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Engage Students Smarter</h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Enhance retention and student satisfaction with a dedicated AI student engagement platform:
+          <p className={eyebrowClassName}>Beyond Admissions</p>
+          <h2 className={`mt-3 ${headingClassName}`}>Support Students at Every Stage</h2>
+          <p className={bodyClassName}>
+            Student communication doesn&rsquo;t end after enrollment. Talk-Lee AI helps institutions stay connected
+            throughout the complete student journey.
           </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Personalized reminders for deadlines, assignments, and events</li>
-            <li>• Academic check-ins and guidance</li>
-            <li>• Proactive updates tailored to each student</li>
-          </ul>
-        </section>
-
-        <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Automate Education Workflows</h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Streamline repetitive administrative tasks with AI education workflow automation:
-          </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• AI student call routing</li>
-            <li>• AI virtual receptionist for schools</li>
-            <li>• AI education customer service</li>
-          </ul>
-          <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Staff focus on high-priority tasks while AI handles routine work.
+          <p className={bodyClassName}>
+            From admissions and onboarding to academic support and everyday questions, AI handles routine interactions
+            while your staff focuses on meaningful student relationships.
           </p>
         </section>
 
         <section className="mt-14">
-          <h2 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Why Choose Talk-Lee AI?</h2>
-          <p className="mt-4 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed">
-            Institutions using Talk-Lee AI see measurable results:
+          <h2 className={headingClassName}>Why Choose Talk-Lee AI</h2>
+          <p className={bodyClassName}>
+            Built for modern educational institutions that want to improve communication without adding unnecessary
+            workload.
           </p>
-          <ul className="mt-6 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
-            <li>• Faster student response times</li>
-            <li>• Increased admissions and follow-up efficiency</li>
-            <li>• Reduced operational costs</li>
-            <li>• Higher student engagement and satisfaction</li>
-          </ul>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {whyChooseTalkLee.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>AI Education Workflow Automation</h2>
+          <p className={bodyClassName}>
+            Connect admissions, calls, scheduling, follow-ups, student support, and notifications into streamlined
+            workflows.
+          </p>
+          <p className={bodyClassName}>
+            Talk-Lee AI handles repetitive tasks automatically, helping your institution save time, improve response
+            speed, and deliver a more consistent student experience.
+          </p>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>How It Works</h2>
+          <p className={bodyClassName}>
+            From the first call to ongoing support, AI handles every student interaction quickly and smoothly.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {howItWorks.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+          <div className={centeredCtaClassName}>
+            <Button asChild size="lg" className={outlineButtonClassName}>
+              <Link href="/#contact">
+                <Video aria-hidden />
+                Book a Demo
+              </Link>
+            </Button>
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <p className={eyebrowClassName}>AI Education Capabilities</p>
+          <h2 className={`mt-3 ${headingClassName}`}>One Intelligent Platform for Every Student Interaction</h2>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {capabilities.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Built for Every Education Business</h2>
+          <p className={bodyClassName}>
+            From schools to universities and e-learning platforms, Talk-Lee AI adapts to your institution&rsquo;s unique
+            communication and support needs.
+          </p>
+          <div className="mt-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {educationBusinesses.map((item) => (
+              <div key={item.title} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{item.title}</h3>
+                <p className={cardBodyClassName}>{item.description}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Flexible Plans for Every Institution</h2>
+          <p className={bodyClassName}>
+            Designed to support schools, institutes, colleges, universities, and growing education businesses.
+          </p>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+            {plans.map((plan) => (
+              <div key={plan.name} className={`${accentCardClassName} flex flex-col`} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{plan.name}</h3>
+                <p className="mt-3 text-2xl md:text-3xl font-bold tracking-tight text-primary dark:text-foreground">
+                  {plan.price}
+                </p>
+                <p className={cardBodyClassName}>{plan.blurb}</p>
+                <ul className="mt-4 space-y-2 text-sm sm:text-base text-gray-700 dark:text-muted-foreground">
+                  {plan.features.map((feature) => (
+                    <li key={feature}>&bull; {feature}</li>
+                  ))}
+                </ul>
+                <div className="mt-8 flex flex-1 items-end justify-center">
+                  <Button
+                    asChild
+                    size="lg"
+                    className={plan.ctaVariant === "primary" ? primaryButtonClassName : outlineButtonClassName}
+                  >
+                    <Link href={plan.ctaHref}>
+                      {plan.ctaIcon ? <Video aria-hidden /> : null}
+                      {plan.ctaLabel}
+                    </Link>
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="mt-14">
+          <h2 className={headingClassName}>Frequently Asked Questions</h2>
+          <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4">
+            {faqs.map((faq) => (
+              <div key={faq.question} className={accentCardClassName} style={accentCardStyle}>
+                <h3 className={cardTitleClassName}>{faq.question}</h3>
+                <p className={cardBodyClassName}>{faq.answer}</p>
+              </div>
+            ))}
+          </div>
         </section>
 
         <section className="mt-14 rounded-3xl border border-border/70 bg-background/70 dark:bg-white/5 backdrop-blur-sm p-8 md:p-12 text-center">
-          <h3 className="text-2xl md:text-3xl font-semibold text-primary dark:text-foreground">Get Started with Talk-Lee AI Today</h3>
+          <h3 className={subHeadingClassName}>Stop Losing Students to Missed Calls</h3>
           <p className="mt-6 text-sm sm:text-base md:text-lg text-gray-700 dark:text-muted-foreground leading-relaxed max-w-4xl mx-auto">
-            Transform your school with intelligent AI solutions. Automate admissions, support, appointments, and engagement with Talk-Lee AI; the
-            complete platform for AI for education.
+            Turn every inquiry into an enrollment opportunity with AI-powered student support, scheduling, and 24/7
+            assistance.
           </p>
-          <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
-            <Button type="button" size="lg" className="rounded-full px-8 bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400">
-              <Video aria-hidden />
-              Request a Demo
+          <div className={ctaPairClassName}>
+            <Button asChild size="lg" className={primaryButtonClassName}>
+              <Link href="/auth/register">
+                Start Free
+              </Link>
             </Button>
-            <Button
-              type="button"
-              size="lg"
-              className="rounded-full px-8 bg-blue-950 hover:bg-blue-950 text-white hover:text-white border-blue-950 hover:border-blue-950 dark:bg-blue-900 dark:hover:bg-blue-900 dark:text-white dark:hover:text-white dark:border-blue-900 dark:hover:border-blue-900"
-            >
-              Start Free Trial
+            <Button asChild size="lg" className={outlineButtonClassName}>
+              <Link href="/#contact">
+                <Video aria-hidden />
+                Book a Live Demo
+              </Link>
             </Button>
           </div>
         </section>

@@ -1,4 +1,5 @@
 """POST /telephony/sip/runtime/compile/preview — deterministic compile."""
+
 from __future__ import annotations
 
 import asyncpg
@@ -6,6 +7,7 @@ from fastapi import APIRouter, Depends, Request
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.telephony_runtime_policy import (
     PolicyCompilationError,
     compile_tenant_runtime_policy,
@@ -27,8 +29,18 @@ async def preview_runtime_policy(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         snapshot = await _load_active_snapshot(conn, current_user.tenant_id)
 
     try:

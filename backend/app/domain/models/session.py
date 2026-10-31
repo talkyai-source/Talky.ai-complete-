@@ -83,8 +83,20 @@ class CallSession(BaseModel):
     llm_model: Optional[str] = Field(None, description="LLM model override for this session")
     llm_temperature: Optional[float] = Field(None, description="LLM temperature override for this session")
     llm_max_tokens: Optional[int] = Field(None, ge=1, description="LLM max tokens override for this session")
+    stt_language: Optional[str] = Field(None, description="BCP-47 language sent to the STT stream (AI Options stt_language)")
     voice_id: str = Field(..., description="TTS voice identifier")
     language: str = Field(default="en", description="Language code")
+    contact_phone_region: Optional[str] = Field(
+        None,
+        description=(
+            "Explicit ISO-3166 region for caller-stated phone capture. None "
+            "means non-E.164 numbers must ask for country context; never US by default."
+        ),
+    )
+    tts_pronunciations: List[tuple[str, str]] = Field(
+        default_factory=list,
+        description="Campaign (written, spoken) pairs applied only to the text sent to the voice",
+    )
     
     # ========== Conversation State (Day 5) ==========
     conversation_state: ConversationState = Field(

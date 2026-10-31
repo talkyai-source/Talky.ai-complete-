@@ -12,7 +12,11 @@ Design
 ------
 - **Numbers are stored in E.164 after normalisation.** Whatever the
   UI sends, we normalise once before insert — guards against the
-  obvious case of "+1 415-555-1234" vs "+14155551234".
+  obvious case of "+1 415-555-1234" vs "+14155551234". The stored
+  form is `normalize_e164`, which is the SAME function CallGuard
+  normalises with before querying this table; anything else and the
+  row silently never matches. Non-E.164 output is rejected outright
+  rather than stored (a "+" row blocks nothing but looks like it does).
 - **Source taxonomy:** `caller_opt_out`, `manual_admin`,
   `ftc_national`, `regulator_complaint`, `bulk_import`. Free-text
   in the DB but constants listed here so call sites stay
@@ -30,6 +34,14 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
+
+from asyncpg import InsufficientPrivilegeError
+
+from app.core.db_utils import acquire_with_tenant
+from app.domain.services.phone_number_normalizer import (
+    is_strict_e164,
+    normalize_e164_digits,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -63,27 +75,39 @@ class DNCEntry:
 
 
 def normalize_e164(raw: str) -> str:
-    """Strip cosmetic characters and return in E.164 form. Uses
-    libphonenumber when available (installed for T1.5); falls back
-    to digit-only stripping otherwise.
+    """THE canonical form of ``dnc_entries.normalized_number``.
+
+    Thin wrapper over ``phone_number_normalizer.normalize_e164_digits`` --
+    deliberately the EXACT function ``CallGuard._normalize_phone_number``
+    uses to look the row up.  A DNC row that is not byte-identical to the
+    guard's lookup key is a row that never blocks anything, which is how
+    "(415) 555-1234" used to be stored as ``+4155551234`` and queried as
+    ``+14155551234``.
+
+    Never raises (falsy -> ``""``), so it can also be used on read paths.
+    It CAN return non-E.164 junk (``"+"`` for ``"abc"``); every write path
+    gates on :func:`app.domain.services.phone_number_normalizer.is_strict_e164`
+    before persisting.
     """
-    if not raw:
-        return ""
-    text = raw.strip()
-    try:
-        import phonenumbers
-        parsed = phonenumbers.parse(text, None)
-        if phonenumbers.is_valid_number(parsed):
-            return phonenumbers.format_number(
-                parsed, phonenumbers.PhoneNumberFormat.E164,
-            )
-    except Exception:
-        pass
-    # Fallback: strip everything except digits and a leading +.
-    cleaned = "".join(c for c in text if c.isdigit() or c == "+")
-    if cleaned and not cleaned.startswith("+"):
-        cleaned = "+" + cleaned
-    return cleaned
+    return normalize_e164_digits(raw)
+
+
+def normalize_e164_for_storage(raw: str) -> str:
+    """Normalise and REJECT anything that is not strict E.164.
+
+    The gate every ``dnc_entries`` writer shares. Raises ``ValueError`` with
+    a message safe to surface to an API caller.
+    """
+    normalized = normalize_e164(raw)
+    if not normalized:
+        raise ValueError("DNC entry requires a valid phone number")
+    if not is_strict_e164(normalized):
+        raise ValueError(
+            f"DNC entry requires a valid E.164 phone number "
+            f"(got {raw!r} -> {normalized!r}); include the country code, "
+            f"e.g. +14155551234"
+        )
+    return normalized
 
 
 class DNCService:
@@ -107,20 +131,25 @@ class DNCService:
         expires_at: Optional[datetime] = None,
         added_by: Optional[str] = None,
     ) -> DNCEntry:
-        """Add or replace a DNC entry. Idempotent — same number + same
-        tenant just refreshes the row (updated_at changes)."""
-        normalized = normalize_e164(e164)
-        if not normalized:
-            raise ValueError("DNC entry requires a valid phone number")
+        """Add or refresh the same tenant/number/source suppression.
+
+        Different sources remain independent. Caller opt-out is permanent,
+        including a refresh of an older expiring caller-opt-out entry.
+        """
+        normalized = normalize_e164_for_storage(e164)
+        if source == SOURCE_CALLER_OPT_OUT:
+            expires_at = None
         if source not in KNOWN_SOURCES:
             logger.info("dnc_unknown_source source=%s — accepted but not taxonomised", source)
 
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(
+            self._db, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 """
                 INSERT INTO dnc_entries
-                    (tenant_id, normalized_number, source, reason, added_by, expires_at)
-                VALUES ($1, $2, $3, $4, $5, $6)
+                    (tenant_id, phone_number, normalized_number, source, reason, added_by, expires_at)
+                VALUES ($1, $2, $2, $3, $4, $5, $6)
                 ON CONFLICT DO NOTHING
                 RETURNING id, tenant_id, normalized_number, source, reason,
                           expires_at, created_at
@@ -133,13 +162,20 @@ class DNCService:
                 expires_at,
             )
             if row is None:
-                # Already existed — refresh and return the existing row.
+                # Already existed — refresh and return the existing row. The
+                # request's expiry applies (none = permanent) and never weakens
+                # a permanent entry: COALESCE kept an expired date (the number
+                # stayed dialable after a 201) and let a dated re-add turn a
+                # permanent suppression temporary.
                 row = await conn.fetchrow(
                     """
                     UPDATE dnc_entries
                     SET updated_at = NOW(),
                         reason = COALESCE($4, reason),
-                        expires_at = COALESCE($5, expires_at)
+                        expires_at = CASE WHEN source = 'caller_opt_out'
+                                            OR $5::timestamptz IS NULL
+                                            OR expires_at IS NULL THEN NULL
+                                          ELSE GREATEST(expires_at, $5::timestamptz) END
                     WHERE (tenant_id = $1 OR (tenant_id IS NULL AND $1 IS NULL))
                       AND normalized_number = $2
                       AND source = $3
@@ -183,34 +219,59 @@ class DNCService:
         source: str,
         reason: Optional[str] = None,
     ) -> dict:
-        """Insert many at once. Returns a per-row result dict so the
-        caller can show "accepted / skipped / invalid" counts."""
+        """Acknowledge active suppressions, not attempted INSERT statements.
+
+        New rows have no expiry. Existing caller opt-outs become permanent;
+        other sources retain their recorded expiry, so an expired same-source
+        row is skipped rather than silently extended or reported as active.
+        Active duplicates count as accepted, not as newly created rows.
+        """
         if source not in KNOWN_SOURCES:
             logger.info("dnc_bulk_unknown_source source=%s", source)
         accepted: list[str] = []
         skipped: list[str] = []
         invalid: list[str] = []
 
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(
+            self._db, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             for raw in numbers:
-                normalized = normalize_e164(raw)
-                if not normalized:
+                try:
+                    normalized = normalize_e164_for_storage(raw)
+                except ValueError:
                     invalid.append(raw)
                     continue
                 try:
-                    await conn.execute(
-                        """
-                        INSERT INTO dnc_entries
-                            (tenant_id, normalized_number, source, reason)
-                        VALUES ($1, $2, $3, $4)
-                        ON CONFLICT DO NOTHING
-                        """,
-                        tenant_id,
-                        normalized,
-                        source,
-                        reason,
-                    )
-                    accepted.append(normalized)
+                    # A row error rolls back only this row, not the surrounding
+                    # tenant-scoped transaction or subsequent valid entries.
+                    async with conn.transaction():
+                        row = await conn.fetchrow(
+                            """INSERT INTO dnc_entries
+                                   (tenant_id, phone_number, normalized_number, source, reason)
+                               VALUES ($1, $2, $2, $3, $4)
+                               ON CONFLICT DO NOTHING RETURNING id""",
+                            tenant_id, normalized, source, reason,
+                        )
+                        if row is None:
+                            row = await conn.fetchrow(
+                                """UPDATE dnc_entries SET updated_at=NOW(),
+                                       reason=COALESCE($4,reason),
+                                       expires_at=CASE WHEN source='caller_opt_out' THEN NULL ELSE expires_at END
+                                   WHERE (tenant_id=$1 OR (tenant_id IS NULL AND $1 IS NULL))
+                                     AND normalized_number=$2 AND source=$3
+                                     AND (source='caller_opt_out' OR expires_at IS NULL OR expires_at>NOW())
+                                   RETURNING id""",
+                                tenant_id, normalized, source, reason,
+                            )
+                        if row is None or not row["id"]:
+                            skipped.append(normalized)
+                        else:
+                            accepted.append(normalized)
+                except InsufficientPrivilegeError:
+                    # Authorization/RLS failure is a batch failure, not a bad
+                    # input row. The outer transaction rolls back any earlier
+                    # entries and the caller receives no success receipt.
+                    raise
                 except Exception as exc:
                     logger.warning(
                         "dnc_bulk_import_row_failed number=%s err=%s",
@@ -228,7 +289,7 @@ class DNCService:
     async def remove(self, *, tenant_id: str, entry_id: str) -> bool:
         """Delete an entry owned by this tenant. Returns True if a row
         was actually deleted (absent rows return False — idempotent)."""
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(self._db, str(tenant_id)) as conn:
             result = await conn.execute(
                 "DELETE FROM dnc_entries WHERE tenant_id = $1 AND id = $2",
                 tenant_id,
@@ -258,7 +319,11 @@ class DNCService:
         """.format(
             global_clause="OR tenant_id IS NULL" if include_global else "",
         )
-        async with self._db.acquire() as conn:
+        # Global DNC rows require platform visibility; the SQL remains explicitly
+        # restricted to this tenant plus tenant_id IS NULL.
+        async with acquire_with_tenant(
+            self._db, None if include_global else str(tenant_id)
+        ) as conn:
             rows = await conn.fetch(sql, tenant_id, limit)
         return [_row_to_entry(r) for r in rows]
 
@@ -274,7 +339,8 @@ class DNCService:
         normalized = normalize_e164(e164)
         if not normalized:
             return False
-        async with self._db.acquire() as conn:
+        # Global suppressions must be visible alongside this tenant's rows.
+        async with acquire_with_tenant(self._db, None) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT 1 FROM dnc_entries

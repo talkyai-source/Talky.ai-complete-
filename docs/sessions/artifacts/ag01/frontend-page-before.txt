@@ -1,0 +1,54 @@
+✖ view and save preserve profile when saved voice is available (331.1701ms)
+✖ view and save preserve profile when saved voice is missing from catalog (171.6726ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 0
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 304333.1448
+
+✖ failing tests:
+
+test at src\app\ai-options\page.test.tsx:2:2038
+✖ view and save preserve profile when saved voice is available (331.1701ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  24000 !== 16000
+  
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\ai-options\page.test.tsx:57:20)
+      at runNextTicks (node:internal/process/task_queues:65:5)
+      at listOnTimeout (node:internal/timers:567:9)
+      at process.processTimers (node:internal/timers:541:7)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 24000,
+    expected: 16000,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at src\app\ai-options\page.test.tsx:2:2038
+✖ view and save preserve profile when saved voice is missing from catalog (171.6726ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'different-voice'
+  - 'saved-voice'
+  
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\app\ai-options\page.test.tsx:55:20)
+      at runNextTicks (node:internal/process/task_queues:65:5)
+      at listOnTimeout (node:internal/timers:567:9)
+      at process.processTimers (node:internal/timers:541:7)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'different-voice',
+    expected: 'saved-voice',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

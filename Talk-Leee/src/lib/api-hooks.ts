@@ -1,13 +1,19 @@
 "use client";
 
+import { useSyncExternalStore } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { backendApi, type AdminResourceListInput, type AuditLogsListInput, type SecurityEventsListInput } from "@/lib/backend-api";
-import { dashboardApi, type Call } from "@/lib/dashboard-api";
+import { backendApi, type AdminPartnerListInput, type AdminResourceListInput, type AuditLogsListInput, type SecurityEventsListInput } from "@/lib/backend-api";
+import { dashboardApi, type Call, type CallListFilters } from "@/lib/dashboard-api";
+import { isActiveCallStatus } from "@/lib/call-history-workflow";
+import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi } from "@/lib/extended-api";
-import type { AssistantRun, CalendarEvent, Connector, PartnerSummary, Reminder, TenantSummary } from "@/lib/models";
+import type { AssistantRun, AssistantRunStatus, CalendarEvent, Connector, Reminder } from "@/lib/models";
 import { emailAuditStore } from "@/lib/email-audit";
 import { notificationsStore } from "@/lib/notifications";
+import { useNotificationMutation } from "@/lib/notification-mutations";
 import { captureException } from "@/lib/monitoring";
+import { useAuth } from "@/lib/auth-context";
+import { getRequestIdentityGeneration, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 
 function randomId() {
     if (typeof crypto !== "undefined" && "randomUUID" in crypto) return crypto.randomUUID();
@@ -18,12 +24,12 @@ export const queryKeys = {
     health: () => ["health"] as const,
     connectors: () => ["connectors"] as const,
     connectorStatuses: () => ["connectorStatuses"] as const,
+    salesforceSettings: () => ["salesforceSettings"] as const,
     connectorAccounts: (connectorId?: string) => ["connectorAccounts", connectorId ?? "all"] as const,
     meetings: () => ["meetings"] as const,
     calendarEvents: () => ["calendarEvents"] as const,
     reminders: () => ["reminders"] as const,
     emailTemplates: () => ["emailTemplates"] as const,
-    assistantActions: () => ["assistantActions"] as const,
     assistantRuns: (key: string) => ["assistantRuns", key] as const,
     auditLogs: (key: string) => ["auditLogs", key] as const,
     securityEvents: (key: string) => ["securityEvents", key] as const,
@@ -34,7 +40,7 @@ export const queryKeys = {
     campaign: (id: string) => ["campaign", id] as const,
     campaignStats: (id: string) => ["campaignStats", id] as const,
     campaignContacts: (campaignId: string, page: number, pageSize: number) => ["campaignContacts", campaignId, page, pageSize] as const,
-    calls: (page: number, pageSize: number) => ["calls", page, pageSize] as const,
+    calls: (page: number, pageSize: number, filters?: CallListFilters) => ["calls", page, pageSize, filters?.direction ?? "all", filters?.inboundCampaignId ?? "all"] as const,
     call: (id: string) => ["call", id] as const,
     callTranscript: (id: string, format: "json" | "text") => ["callTranscript", id, format] as const,
     callSummary: (id: string) => ["callSummary", id] as const,
@@ -76,8 +82,87 @@ export function useConnectorStatuses(options?: { enabled?: boolean }) {
     });
 }
 
+export function useSalesforceSettings(options?: { enabled?: boolean }) {
+    return useQuery({
+        queryKey: queryKeys.salesforceSettings(),
+        queryFn: ({ signal }) => backendApi.salesforce.settings(signal),
+        enabled: options?.enabled ?? true,
+        staleTime: 5_000,
+        retry: 1,
+    });
+}
+
+export function useUpdateSalesforceSettings() {
+    const qc = useQueryClient();
+    return useNotificationMutation({
+        mutationFn: backendApi.salesforce.updateSettings,
+        onSuccess: (data) => {
+            qc.setQueryData(queryKeys.salesforceSettings(), data);
+            notificationsStore.create({ type: "success", title: "Salesforce settings saved", message: "Sync and callback settings updated." });
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Could not save Salesforce settings", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useRevealSalesforceWebhookToken() {
+    const qc = useQueryClient();
+    return useNotificationMutation({
+        mutationFn: backendApi.salesforce.revealWebhookToken,
+        onSuccess: (data) => {
+            qc.setQueryData(queryKeys.salesforceSettings(), data);
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Could not reveal webhook token", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useRotateSalesforceWebhookToken() {
+    const qc = useQueryClient();
+    return useNotificationMutation({
+        mutationFn: backendApi.salesforce.rotateWebhookToken,
+        onSuccess: (data) => {
+            qc.setQueryData(queryKeys.salesforceSettings(), data);
+            notificationsStore.create({ type: "success", title: "Webhook token rotated", message: "Update the URL in your Salesforce Flow / Outbound Message." });
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Could not rotate webhook token", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useTestSalesforceConnection() {
+    return useNotificationMutation({
+        mutationFn: backendApi.salesforce.test,
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Salesforce test failed", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
+export function useImportSalesforcePeople() {
+    const qc = useQueryClient();
+    return useNotificationMutation({
+        mutationFn: backendApi.salesforce.importPeople,
+        onSuccess: (data) => {
+            void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
+            void qc.invalidateQueries({ queryKey: queryKeys.campaign(data.campaign_id) });
+            notificationsStore.create({
+                type: "success",
+                title: "Salesforce import finished",
+                message: `${data.imported} imported, ${data.revived} revived, ${data.duplicates_skipped} already present, ${data.invalid} invalid.`,
+            });
+        },
+        onError: (err) => {
+            notificationsStore.create({ type: "error", title: "Salesforce import failed", message: err instanceof Error ? err.message : "Request failed" });
+        },
+    });
+}
+
 export function useAuthorizeConnector() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.connectors.authorize,
         retry: (failureCount, err) => {
             if (failureCount >= 2) return false;
@@ -95,7 +180,7 @@ export function useAuthorizeConnector() {
 
 export function useDisconnectConnector() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.connectors.disconnect,
         onError: () => {
             notificationsStore.create({ type: "error", title: "Disconnect failed", message: "Could not disconnect. Please try again." });
@@ -111,7 +196,7 @@ export function useDisconnectConnector() {
 
 export function useCreateConnector() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.connectors.create,
         onMutate: async (input) => {
             await qc.cancelQueries({ queryKey: queryKeys.connectors() });
@@ -158,7 +243,7 @@ export function useCalendarEvents(options?: { enabled?: boolean }) {
 
 export function useCreateCalendarEvent() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.calendarEvents.create,
         onMutate: async (input) => {
             await qc.cancelQueries({ queryKey: queryKeys.calendarEvents() });
@@ -193,7 +278,7 @@ export function useCreateCalendarEvent() {
 
 export function useCancelCalendarEvent() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.calendarEvents.cancel,
         onMutate: async (id) => {
             await qc.cancelQueries({ queryKey: queryKeys.calendarEvents() });
@@ -238,7 +323,7 @@ export function useEmailTemplates(options?: { enabled?: boolean }) {
 }
 
 export function useSendEmail() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.email.send,
         onMutate: async (input) => {
             const auditId = emailAuditStore.createAttempt({ to: input.to, templateId: input.templateId, subject: input.subject });
@@ -258,7 +343,7 @@ export function useSendEmail() {
 
 export function useCreateReminder() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.reminders.create,
         onMutate: async (input) => {
             await qc.cancelQueries({ queryKey: queryKeys.reminders() });
@@ -311,7 +396,7 @@ export function useCreateReminder() {
 
 export function useCancelReminder() {
     const qc = useQueryClient();
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: backendApi.reminders.cancel,
         onMutate: async (id) => {
             await qc.cancelQueries({ queryKey: queryKeys.reminders() });
@@ -350,22 +435,15 @@ export function useCancelReminder() {
     });
 }
 
-export function useAssistantActions() {
-    return useQuery({
-        queryKey: queryKeys.assistantActions(),
-        queryFn: ({ signal }) => backendApi.assistantActions.list(signal),
-    });
-}
-
 export type AssistantRunsQuery = {
     page: number;
     pageSize: number;
-    statuses: Array<"pending" | "in_progress" | "completed" | "failed">;
+    statuses: AssistantRunStatus[];
     actionType?: string;
     leadId?: string;
     from?: string;
     to?: string;
-    sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType" | "source" | "leadId";
+    sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType";
     sortDir?: "asc" | "desc";
 };
 
@@ -377,215 +455,108 @@ function assistantRunsKey(q: AssistantRunsQuery) {
     return JSON.stringify(stable);
 }
 
-function stableListKey<T extends object>(input: T) {
-    return JSON.stringify(input);
-}
-
-export function useAssistantRuns(q: AssistantRunsQuery) {
+export function useAssistantRuns(q: AssistantRunsQuery, options?: { enabled?: boolean }) {
     return useQuery({
         queryKey: queryKeys.assistantRuns(assistantRunsKey(q)),
+        enabled: options?.enabled ?? true,
         queryFn: ({ signal }) => backendApi.assistantRuns.list(q, signal),
         placeholderData: keepPreviousData,
         refetchInterval: (query) => {
             const data = query.state.data as { items: AssistantRun[] } | undefined;
-            const needs = data?.items?.some((r) => r.status === "pending" || r.status === "in_progress");
+            const needs = data?.items?.some((r) => ["pending", "running", "in_progress", "scheduled"].includes(r.status));
             return needs ? 3000 : false;
         },
     });
 }
 
-export function useAssistantExecute() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: backendApi.assistant.execute,
-        onMutate: async (input) => {
-            const optimistic: AssistantRun = {
-                id: randomId(),
-                actionType: input.actionType,
-                source: input.source ?? "dashboard",
-                leadId: input.leadId,
-                status: "pending",
-                createdAt: new Date().toISOString(),
-                result: undefined,
-                requestPayload: { action_type: input.actionType, source: input.source ?? "dashboard", lead_id: input.leadId, context: input.context ?? {} },
-                responsePayload: undefined,
-                error: undefined,
-            };
-
-            const queries = qc.getQueriesData({ queryKey: ["assistantRuns"] });
-            const touched: Array<{ key: unknown[]; prev: unknown }> = [];
-            for (const [key, prev] of queries) {
-                if (!Array.isArray(key)) continue;
-                touched.push({ key, prev });
-                qc.setQueryData(key, (cur: unknown) => {
-                    if (!cur || typeof cur !== "object") return cur;
-                    const obj = cur as { items?: AssistantRun[]; total?: number };
-                    const items = Array.isArray(obj.items) ? obj.items : [];
-                    const nextItems = [optimistic, ...items].slice(0, 50);
-                    const total = typeof obj.total === "number" ? obj.total + 1 : obj.total;
-                    return { ...obj, items: nextItems, total };
-                });
-            }
-            return { touched };
-        },
-        onError: (_err, _input, ctx) => {
-            for (const t of ctx?.touched ?? []) {
-                qc.setQueryData(t.key, t.prev);
-            }
-            notificationsStore.create({ type: "error", title: "Execution failed", message: "Could not start the action." });
-        },
-        onSuccess: () => {
-            notificationsStore.create({ type: "success", title: "Action started", message: "The action has been queued." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["assistantRuns"] });
-        },
-    });
-}
-
-export function useAssistantPlan() {
-    return useMutation({
-        mutationFn: backendApi.assistant.plan,
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Planning failed", message: "Could not generate a plan." });
-        },
-    });
-}
-
-export function useAssistantRunRetry() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: backendApi.assistantRuns.retry,
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Retry failed", message: "Could not retry. Please try again." });
-        },
-        onSuccess: () => {
-            notificationsStore.create({ type: "success", title: "Retry started", message: "A new run was created." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["assistantRuns"] });
-        },
-    });
+export function useAdminEventReadScope() {
+    const { user, loading } = useAuth();
+    const generation = useSyncExternalStore(subscribeRequestIdentityGeneration, getRequestIdentityGeneration, () => 0);
+    return {
+        key: JSON.stringify([user?.id ?? null, user?.role ?? null, user?.tenant_id ?? null, user?.partner_id ?? null, generation, loading ? "checking" : "ready"]),
+        ready: Boolean(user) && !loading,
+    };
 }
 
 export function useAuditLogs(q: AuditLogsListInput, options?: { enabled?: boolean }) {
+    const scope = useAdminEventReadScope();
     return useQuery({
-        queryKey: queryKeys.auditLogs(stableListKey(q)),
+        queryKey: queryKeys.auditLogs(JSON.stringify([scope.key, q])),
         queryFn: ({ signal }) => backendApi.admin.auditLogs.list(q, signal),
-        placeholderData: keepPreviousData,
-        enabled: options?.enabled ?? true,
+        enabled: scope.ready && (options?.enabled ?? true),
     });
 }
 
 export function useSecurityEvents(q: SecurityEventsListInput, options?: { enabled?: boolean }) {
+    const scope = useAdminEventReadScope();
     return useQuery({
-        queryKey: queryKeys.securityEvents(stableListKey(q)),
+        queryKey: queryKeys.securityEvents(JSON.stringify([scope.key, q])),
         queryFn: ({ signal }) => backendApi.admin.securityEvents.list(q, signal),
-        placeholderData: keepPreviousData,
-        enabled: options?.enabled ?? true,
+        enabled: scope.ready && (options?.enabled ?? true),
     });
 }
 
-export function useAdminPartners(q: AdminResourceListInput, options?: { enabled?: boolean }) {
+export function useAdminPartners(q: AdminPartnerListInput, options?: { enabled?: boolean }) {
+    const scope = useAdminEventReadScope();
     return useQuery({
-        queryKey: queryKeys.adminPartners(stableListKey(q)),
+        queryKey: queryKeys.adminPartners(JSON.stringify([scope.key, q])),
         queryFn: ({ signal }) => backendApi.admin.partners.list(q, signal),
-        placeholderData: keepPreviousData,
-        enabled: options?.enabled ?? true,
+        enabled: scope.ready && (options?.enabled ?? true),
     });
 }
 
 export function useAdminTenants(q: AdminResourceListInput, options?: { enabled?: boolean }) {
+    const scope = useAdminEventReadScope();
     return useQuery({
-        queryKey: queryKeys.adminTenants(stableListKey(q)),
+        queryKey: queryKeys.adminTenants(JSON.stringify([scope.key, q])),
         queryFn: ({ signal }) => backendApi.admin.tenants.list(q, signal),
-        placeholderData: keepPreviousData,
-        enabled: options?.enabled ?? true,
+        enabled: scope.ready && (options?.enabled ?? true),
     });
 }
 
-export function useSuspendPartner() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: backendApi.admin.partners.suspend,
-        onSuccess: (updated) => {
-            qc.setQueriesData<{ items: PartnerSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminPartners"] }, (cur) => {
-                if (!cur) return cur;
-                return { ...cur, items: cur.items.map((item) => (item.id === updated.id ? updated : item)) };
-            });
-            notificationsStore.create({ type: "success", title: "Partner suspended", message: `${updated.name} is now suspended.` });
-        },
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Suspension failed", message: "Could not suspend this partner." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["adminPartners"] });
-            void qc.invalidateQueries({ queryKey: ["auditLogs"] });
-        },
-    });
-}
+type TenantSubscriptionMutationInput = Parameters<typeof backendApi.admin.tenants.suspend>[0] & {
+    // Local completion ownership only; neither value is sent to the API.
+    ownsOperation: () => boolean;
+    queryKey: ReturnType<typeof queryKeys.adminTenants>;
+};
 
-export function useReactivatePartner() {
+function useTenantSubscriptionMutation(kind: "suspend" | "reactivate") {
     const qc = useQueryClient();
     return useMutation({
-        mutationFn: backendApi.admin.partners.reactivate,
-        onSuccess: (updated) => {
-            qc.setQueriesData<{ items: PartnerSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminPartners"] }, (cur) => {
-                if (!cur) return cur;
-                return { ...cur, items: cur.items.map((item) => (item.id === updated.id ? updated : item)) };
-            });
-            notificationsStore.create({ type: "success", title: "Partner reactivated", message: `${updated.name} has been restored.` });
+        // Platform admins may have no tenant notification scope. Business
+        // completion belongs to the review; optional notifications keep their
+        // own captured identity fence.
+        onMutate: () => notificationsStore.capture(),
+        mutationFn: ({ tenantId, expectedUpdatedAt, reason, ownsOperation }: TenantSubscriptionMutationInput) => {
+            if (!ownsOperation()) throw new Error("The tenant review is no longer current. Review the subscription again.");
+            return backendApi.admin.tenants[kind]({ tenantId, expectedUpdatedAt, reason });
         },
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Reactivation failed", message: "Could not reactivate this partner." });
+        onSuccess: (updated, variables, notifier) => {
+            if (!variables.ownsOperation()) return;
+            notifier?.create({ type: "success", title: kind === "suspend" ? "Tenant subscription suspended" : "Tenant subscription active",
+                message: `Subscription ${updated.id} is ${updated.status}. Separate account and formal restrictions still apply.` });
         },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["adminPartners"] });
-            void qc.invalidateQueries({ queryKey: ["auditLogs"] });
+        onError: (_error, variables, notifier) => {
+            if (!variables.ownsOperation()) return;
+            notifier?.create({ type: "error", title: "Tenant subscription change not confirmed", message: "Refresh and review the subscription before retrying." });
+        },
+        onSettled: (_data, _error, variables) => {
+            if (!variables.ownsOperation()) return;
+            // Other cached pages become stale, without publishing a receipt
+            // into their values. Refetch only the initiating current query.
+            void qc.invalidateQueries({ queryKey: ["adminTenants"], refetchType: "none" }).catch(() => {});
+            void qc.invalidateQueries({ queryKey: variables.queryKey, exact: true }).catch(() => {});
+            void qc.invalidateQueries({ queryKey: ["auditLogs"], refetchType: "none" }).catch(() => {});
         },
     });
 }
 
 export function useSuspendTenant() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: backendApi.admin.tenants.suspend,
-        onSuccess: (updated) => {
-            qc.setQueriesData<{ items: TenantSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminTenants"] }, (cur) => {
-                if (!cur) return cur;
-                return { ...cur, items: cur.items.map((item) => (item.id === updated.id ? updated : item)) };
-            });
-            notificationsStore.create({ type: "success", title: "Tenant suspended", message: `${updated.name} is now suspended.` });
-        },
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Suspension failed", message: "Could not suspend this tenant." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["adminTenants"] });
-            void qc.invalidateQueries({ queryKey: ["auditLogs"] });
-        },
-    });
+    return useTenantSubscriptionMutation("suspend");
 }
 
 export function useReactivateTenant() {
-    const qc = useQueryClient();
-    return useMutation({
-        mutationFn: backendApi.admin.tenants.reactivate,
-        onSuccess: (updated) => {
-            qc.setQueriesData<{ items: TenantSummary[]; total?: number; page?: number; page_size?: number }>({ queryKey: ["adminTenants"] }, (cur) => {
-                if (!cur) return cur;
-                return { ...cur, items: cur.items.map((item) => (item.id === updated.id ? updated : item)) };
-            });
-            notificationsStore.create({ type: "success", title: "Tenant reactivated", message: `${updated.name} has been restored.` });
-        },
-        onError: () => {
-            notificationsStore.create({ type: "error", title: "Reactivation failed", message: "Could not reactivate this tenant." });
-        },
-        onSettled: () => {
-            void qc.invalidateQueries({ queryKey: ["adminTenants"] });
-            void qc.invalidateQueries({ queryKey: ["auditLogs"] });
-        },
-    });
+    return useTenantSubscriptionMutation("reactivate");
 }
 
 export function useDashboardSummary() {
@@ -602,6 +573,19 @@ export function useCampaigns() {
             const data = await dashboardApi.listCampaigns();
             return data.campaigns;
         },
+    });
+}
+
+/** Outbound-only view of the campaign list. Inbound campaigns are managed
+ *  on /inbound-campaigns; the outbound endpoints 409 on them. */
+export function useOutboundCampaigns() {
+    return useQuery({
+        queryKey: queryKeys.campaigns(),
+        queryFn: async () => {
+            const data = await dashboardApi.listCampaigns();
+            return data.campaigns;
+        },
+        select: outboundCampaignsOnly,
     });
 }
 
@@ -639,11 +623,19 @@ export function useCampaignContacts(campaignId: string | undefined, page: number
     });
 }
 
-export function useCalls(page: number, pageSize: number) {
+export function useCalls(page: number, pageSize: number, filters: CallListFilters = {}) {
     return useQuery<{ calls: Call[]; total: number }>({
-        queryKey: queryKeys.calls(page, pageSize),
-        queryFn: () => dashboardApi.listCalls(page, pageSize),
+        queryKey: queryKeys.calls(page, pageSize, filters),
+        queryFn: () => dashboardApi.listCalls(page, pageSize, filters),
         placeholderData: keepPreviousData,
+        // Keep the history live only while a call is actually changing state.
+        // This lets the page raise its one-time review prompt immediately after
+        // an active call ends without polling settled history forever.
+        refetchInterval: (query) => {
+            const data = query.state.data as { calls: Call[]; total: number } | undefined;
+            const hasActiveCall = data?.calls.some((call) => isActiveCallStatus(call.status));
+            return hasActiveCall ? 3_000 : false;
+        },
     });
 }
 
@@ -698,7 +690,7 @@ export function useRecordings(page: number, pageSize: number) {
 }
 
 export function useUploadContactsCsv() {
-    return useMutation({
+    return useNotificationMutation({
         mutationFn: (payload: { campaignId: string; file: File; skipDuplicates?: boolean }) =>
             extendedApi.uploadCSV(payload.campaignId, payload.file, payload.skipDuplicates ?? true),
         onError: () => {

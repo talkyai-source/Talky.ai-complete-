@@ -1,0 +1,486 @@
+"""Minute top-ups — buy call minutes outside the plan cycle (goals.md §9).
+
+    GET  /billing/topups/packages   the approved catalogue
+    POST /billing/topups/checkout   start a purchase, get a payment URL
+    GET  /billing/topups/orders     what this tenant has bought, and its state
+    GET  /billing/topups/balance    minutes: allocated, used, remaining, bought
+    GET  /billing/topups/ledger     every signed movement, for reconciliation
+
+THERE IS NO WEBHOOK ENDPOINT HERE — DELIBERATELY
+-------------------------------------------------
+Stripe delivers subscription events and top-up events down the SAME endpoint,
+``POST /billing/webhooks``. Adding a second URL would mean a second signing
+secret to configure and a second thing to get wrong at the exact moment money
+is involved. ``BillingService.handle_webhook`` routes on the ``purpose`` stamped
+into the session metadata instead, so signature verification and event-id
+idempotency stay in one place.
+
+WHAT THE CLIENT IS ALLOWED TO SEND
+-----------------------------------
+A package code. Not minutes, not a price. An endpoint that accepts an amount
+from the browser sells 10,000 minutes for a penny the first time somebody edits
+a request, and the fact that the UI only ever sends good values is not a control
+— it is a hope.
+"""
+from __future__ import annotations
+
+import csv
+import io
+import logging
+import os
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
+
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_current_user,
+    get_db_client,
+    require_platform_admin,
+)
+from app.core.container import get_container
+from app.core.db_utils import acquire_with_tenant
+from app.core.security.rbac import Permission, require_permission
+from app.domain.services.billing_catalog import _EXPONENTS
+from app.domain.services.billing_checkout import CheckoutError, billing_return_urls
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.billing_service import BillingService
+from app.domain.services.minutes_quota import compute_minutes_status
+from app.domain.services.payg import PurchaseRefused, tenant_purchase_audience
+from app.domain.services.topup_service import TopupError, TopupService, public_ledger_entry
+from app.domain.services.topup_usage import topup_minutes_left
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/billing/topups", tags=["billing"])
+
+
+def _tenant(user) -> str:
+    tid = getattr(user, "tenant_id", None)
+    if not tid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not associated with a tenant",
+        )
+    return str(tid)
+
+
+async def _purchase_audience(tenant_id: str) -> str:
+    """Which bundles this account may buy: ``subscriber`` top-ups for a paid
+    plan in good standing, ``payg`` bundles for any other account that may
+    place calls (owner decision 2026-10-31). Refused accounts get a 409."""
+    async with acquire_with_tenant(get_container().db_pool, tenant_id) as conn:
+        try:
+            return await tenant_purchase_audience(conn, tenant_id)
+        except PurchaseRefused as exc:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
+
+
+def _service() -> TopupService:
+    c = get_container()
+    if not c.is_initialized:
+        raise HTTPException(status_code=503, detail="Backend not ready")
+    return TopupService(c.db_pool)
+
+
+def _live_topups_enabled() -> bool:
+    """BILLING_TOPUPS_LIVE_ENABLED, default off (same truthy set as the other flags).
+
+    Top-up minutes used to recur every month inside ``minutes_allocated``.
+    Since 2026-10-27 they are used once and carry over until used
+    (``topup_usage``, owner decision), and this stays the operator's switch.
+    Read from the process environment on each request (no cached setting), so
+    the switch is the service environment plus a restart.
+    """
+    return os.getenv("BILLING_TOPUPS_LIVE_ENABLED", "false").strip().lower() in {
+        "1", "true", "yes", "on",
+    }
+
+
+# ── models ──────────────────────────────────────────────────────────────────
+
+class PackageOut(BaseModel):
+    code: str
+    name: str
+    minutes: int
+    price_cents: int
+    currency: str
+    currency_exponent: Optional[int] = None
+    expires_days: Optional[int] = None
+    # "subscriber" top-ups add to a paid plan; "payg" bundles need no plan.
+    audience: str = "subscriber"
+    # Shown so the larger bundle can justify itself. Computed here rather than
+    # in the browser so every surface quotes the same number.
+    price_per_minute_cents: float
+
+
+class CheckoutIn(BaseModel):
+    # Package code only. Return URLs are NOT accepted from the client: where a
+    # paid customer lands is decided by the configured, allow-listed frontend
+    # origin (billing_return_urls). Unknown fields, including any legacy
+    # success_url/cancel_url, are ignored.
+    package_code: str = Field(..., max_length=64)
+
+
+class CheckoutOut(BaseModel):
+    order_id: str
+    session_id: str
+    checkout_url: str
+    minutes: int
+    price_cents: int
+    currency: str
+    mock_mode: bool = False
+    message: Optional[str] = None
+
+
+class BalanceOut(BaseModel):
+    allocated: int
+    used_minutes: int
+    remaining_minutes: int
+    unlimited: bool
+    exhausted: bool
+    purchased_minutes: int
+    # Bought minutes still unused; they carry over until used (topup_usage).
+    topup_minutes_left: int = 0
+
+
+# ── catalogue ───────────────────────────────────────────────────────────────
+
+@router.get(
+    "/packages",
+    response_model=list[PackageOut],
+    dependencies=[Depends(require_permission(Permission.BILLING_READ))],
+)
+async def list_packages(current_user: CurrentUser = Depends(get_current_user)):
+    try:
+        audience = await _purchase_audience(_tenant(current_user))
+    except HTTPException as exc:
+        if exc.status_code != status.HTTP_409_CONFLICT:
+            raise
+        return []  # an account that cannot buy minutes is offered none
+    rows = await _service().packages(audience)
+    return [
+        PackageOut(
+            **r,
+            currency_exponent=_EXPONENTS.get(str(r["currency"]).lower()),
+            price_per_minute_cents=round(r["price_cents"] / r["minutes"], 2),
+        )
+        for r in rows
+    ]
+
+
+# ── balance ─────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/balance",
+    response_model=BalanceOut,
+    dependencies=[Depends(require_permission(Permission.BILLING_READ))],
+)
+async def get_balance(current_user: CurrentUser = Depends(get_current_user)):
+    """The same computation the dialler gates on.
+
+    Reading from ``minutes_quota`` rather than re-deriving it is the point: a
+    balance screen that disagrees with the thing that blocks calls is worse
+    than no balance screen, because it is believed.
+    """
+    tenant_id = _tenant(current_user)
+    svc = _service()
+    c = get_container()
+    try:
+        async with acquire_with_tenant(c.db_pool, tenant_id) as conn:
+            st = (await compute_minutes_status(conn, tenant_id)).require_available()
+            left = 0 if st.unlimited else await topup_minutes_left(conn, tenant_id, st.used_minutes)
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail={"code": "usage_unavailable", "message": "Minute allowance is temporarily unavailable."}) from exc
+    return BalanceOut(**st.as_dict(), purchased_minutes=await svc.purchased_total(tenant_id),
+                      topup_minutes_left=left)
+
+
+# ── purchase ────────────────────────────────────────────────────────────────
+
+@router.post(
+    "/checkout",
+    response_model=CheckoutOut,
+    dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))],
+)
+async def create_topup_checkout(
+    body: CheckoutIn,
+    request: Request,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client=Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+):
+    """Create the order, then the payment session, then link them.
+
+    ORDER FIRST, ALWAYS. The order row is what the webhook matches a payment
+    against; creating the Stripe session first opens a window where a customer
+    can pay for something we have no record of.
+
+    If the link-back fails after the session exists, this returns 500 and the
+    customer sees an error — but the order is still there, unlinked and
+    pending, and the failure is logged with both ids so it can be matched by
+    hand. The alternative (swallowing it) is a payment that credits nothing.
+    """
+    tenant_id = _tenant(current_user)
+
+    # Fail-closed containment (bughunt billing-money-credentials-4): with a real
+    # provider mode (live, test, or an unavailable one) top-ups are sold only
+    # when BILLING_TOPUPS_LIVE_ENABLED is true. Refused BEFORE an order row or a
+    # payment session exists. Webhook crediting of sessions already paid is a
+    # different path and is not gated here.
+    billing = BillingService(db_client, audit_logger=audit_logger)
+    if billing.mock_mode is not True and not _live_topups_enabled():
+        logger.warning(
+            "topup_checkout_refused tenant=%s billing_mode=%s: BILLING_TOPUPS_LIVE_ENABLED is off",
+            tenant_id[:8], billing.billing_mode,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Minute top-ups are not available yet",
+        )
+
+    from app.api.v1.endpoints.billing import _require_checkout_permitted_in_test_mode
+    _require_checkout_permitted_in_test_mode(current_user)
+
+    svc = _service()
+
+    # Subscribers buy top-ups; any other account that may place calls buys pay
+    # as you go (owner decision 2026-10-31). Refused before any order or session.
+    audience = await _purchase_audience(tenant_id)
+
+    # Resolved before the order exists so a missing/invalid destination cannot
+    # leave an orphan pending order. Neither the body nor the Origin header can
+    # choose the redirect target.
+    try:
+        billing_base = billing_return_urls()
+    except CheckoutError as e:
+        raise HTTPException(status_code=e.status_code, detail=str(e))
+    success_url = f"{billing_base}?topup=success"
+    cancel_url = f"{billing_base}?topup=cancelled"
+
+    try:
+        order = await svc.create_order(
+            tenant_id=tenant_id,
+            user_id=getattr(current_user, "id", None),
+            package_code=body.package_code,
+            audience=audience,
+        )
+    except TopupError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+
+    try:
+        session = await billing.create_topup_checkout_session(
+            tenant_id=tenant_id,
+            email=getattr(current_user, "email", "") or "",
+            order_id=str(order["id"]),
+            minutes=order["minutes"],
+            price_cents=order["price_cents"],
+            currency=order["currency"],
+            product_name=f"Talky.ai — {order['name']}",
+            success_url=success_url,
+            cancel_url=cancel_url,
+            business_name=getattr(current_user, "business_name", None),
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.error(
+            "topup_checkout_failed order=%s tenant=%s: %s",
+            str(order["id"])[:8], tenant_id[:8], e,
+        )
+        # A failed response does not prove the provider did not create a session.
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Could not confirm checkout with the payment provider. Check your purchase history before trying again.",
+        )
+
+    try:
+        await svc.attach_session(str(order["id"]), session["session_id"])
+    except TopupError as e:
+        logger.error(
+            "topup_session_orphaned order=%s session=%s — a payment on this "
+            "session cannot be matched to its order: %s",
+            str(order["id"])[:8], session["session_id"], e,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not link this checkout to your purchase. Contact billing support with the order reference before trying again.",
+        )
+
+    await audit_logger.log(
+        event_type=AuditEvent.BILLING_UPDATED,
+        actor_id=getattr(current_user, "id", None),
+        actor_type="user",
+        tenant_id=tenant_id,
+        action="topup_checkout_created",
+        description=f"Started a {order['minutes']}-minute top-up",
+        metadata={
+            "order_id": str(order["id"]),
+            "package_code": order["package_code"],
+            "minutes": order["minutes"],
+            "price_cents": order["price_cents"],
+            "mock_mode": session.get("mock_mode", False),
+        },
+        ip_address=request.client.host if request.client else None,
+        user_agent=request.headers.get("user-agent"),
+    )
+
+    return CheckoutOut(
+        order_id=str(order["id"]),
+        session_id=session["session_id"],
+        checkout_url=session["checkout_url"],
+        minutes=order["minutes"],
+        price_cents=order["price_cents"],
+        currency=order["currency"],
+        mock_mode=session.get("mock_mode", False),
+        message=session.get("message"),
+    )
+
+
+# ── history ─────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/orders",
+    dependencies=[Depends(require_permission(Permission.BILLING_READ))],
+)
+async def list_orders(
+    limit: int = 25,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    rows = await _service().history(_tenant(current_user), min(max(limit, 1), 100))
+    return {"orders": [
+        {
+            "id": str(r["id"]),
+            "package_code": r["package_code"],
+            "minutes": r["minutes"],
+            "price_cents": r["price_cents"],
+            "currency": r["currency"],
+            "currency_exponent": _EXPONENTS.get(str(r["currency"]).lower()),
+            "status": r["status"],
+            "provider_payment_id": r["provider_payment_id"],
+            "refund_details": r["refund_details"],
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "paid_at": r["paid_at"].isoformat() if r["paid_at"] else None,
+        }
+        for r in rows
+    ]}
+
+
+@router.get(
+    "/ledger",
+    dependencies=[Depends(require_permission(Permission.BILLING_READ))],
+)
+async def list_ledger(
+    limit: int = 100,
+    current_user: CurrentUser = Depends(get_current_user),
+):
+    """Signed movements. A refund shows as its own negative line rather than
+    the original purchase disappearing, which is what makes this answerable
+    when a customer asks what they were charged for."""
+    rows = await _service().ledger(_tenant(current_user), min(max(limit, 1), 500))
+    return {"entries": [public_ledger_entry(row) for row in rows]}
+
+
+# ── admin reconciliation (§9) ───────────────────────────────────────────────
+#
+# require_platform_admin, not a tenant permission: this reads across every
+# tenant on purpose, which is the whole point of a reconciliation view. It has
+# to be the ledger rather than the orders — an order can sit in a state that
+# never became money, and reconciling against intent instead of record is
+# exactly how a set of books stops matching the payment provider's.
+
+admin_router = APIRouter(prefix="/admin/billing", tags=["billing", "admin"])
+
+
+@admin_router.get("/reconciliation")
+async def reconciliation(
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = 5000,
+    fmt: str = "json",
+    _admin=Depends(require_platform_admin),
+):
+    """Every minute movement, with the payment that caused it.
+
+    ``fmt=csv`` returns the same rows as a download for a spreadsheet
+    reconciliation against the provider's own export.
+    """
+    bounded_limit = min(max(limit, 1), 50_000)
+    rows = await _service().reconciliation(
+        since=since, until=until, limit=bounded_limit + 1,
+    )
+    truncated = len(rows) > bounded_limit
+    rows = rows[:bounded_limit]
+
+    records = [
+        {
+            "created_at": r["created_at"].isoformat() if r["created_at"] else "",
+            "tenant_id": str(r["tenant_id"]),
+            "business_name": r["business_name"] or "",
+            "kind": r["kind"],
+            "minutes_delta": r["minutes_delta"],
+            "amount_cents": r["amount_cents"],
+            "currency": r["currency"] or "",
+            "package_code": r["package_code"] or "",
+            "provider_event_id": r["provider_event_id"] or "",
+            "provider_payment_id": r["provider_payment_id"] or "",
+            "order_status": r["order_status"] or "",
+            "note": r["note"] or "",
+        }
+        for r in rows
+    ]
+
+    if fmt.lower() == "csv":
+        buf = io.StringIO()
+        writer = csv.DictWriter(buf, fieldnames=list(records[0].keys()) if records
+                                else ["created_at", "tenant_id", "business_name",
+                                      "kind", "minutes_delta", "amount_cents",
+                                      "currency", "package_code",
+                                      "provider_event_id", "provider_payment_id",
+                                      "order_status", "note"])
+        writer.writeheader()
+        writer.writerows(records)
+        return StreamingResponse(
+            iter([buf.getvalue()]),
+            media_type="text/csv",
+            headers={
+                "Content-Disposition":
+                'attachment; filename="talky-minute-reconciliation.csv"',
+                "X-Result-Truncated": str(truncated).lower(),
+                "X-Totals-Scope": "returned_rows",
+            },
+        )
+
+    # Signed accounting totals are grouped by currency and cover only the
+    # returned sample. A reversal is not evidence of cash reaching a bank.
+    currencies = {}
+    for record in records:
+        if record["kind"] == "adjustment" and not record["amount_cents"]:
+            continue  # usage rows move minutes, not money
+        currency = (record["currency"] or "").lower() or None
+        totals = currencies.setdefault(currency, {
+            "currency": currency, "currency_exponent": _EXPONENTS.get(currency),
+            "gross_cents": 0, "reversed_cents": 0, "net_cents": 0,
+        })
+        amount = record["amount_cents"]
+        totals["gross_cents"] += max(0, amount)
+        totals["reversed_cents"] += max(0, -amount)
+        totals["net_cents"] += amount
+    return {
+        "entries": records,
+        "truncated": truncated,
+        "limit": bounded_limit,
+        "totals": {
+            "scope": "returned_rows",
+            "rows": len(records),
+            "minutes_sold": sum(r["minutes_delta"] for r in records
+                                if r["kind"] == "topup" and r["minutes_delta"] > 0),
+            # Refunds and disputes only; monthly usage rows are not reversals.
+            "minutes_reversed": sum(-r["minutes_delta"] for r in records
+                                    if r["kind"] in ("refund", "dispute")),
+            "minutes_used": sum(-r["minutes_delta"] for r in records
+                                if r["kind"] == "adjustment" and r["minutes_delta"] < 0),
+            "by_currency": list(currencies.values()),
+        },
+    }

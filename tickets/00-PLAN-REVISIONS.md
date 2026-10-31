@@ -42,7 +42,7 @@ is identical — and removes the single largest source of rework in the plan.
 - `.github/workflows/deploy.yml` — builds a backend image, pushes to GHCR, SCPs `docker-compose.yml`
   to `secrets.DEPLOY_HOST`, rewrites the `backend.image` tag and runs `docker compose up -d`.
   It is triggered by `workflow_run` **automatically after CI passes on `main`**.
-- `HANDOFF-NEXT-AGENT.md:25` — *"Services (systemd, NOT docker-compose — the fix doc is wrong about this)"*.
+- `docs/sessions/worklogs/HANDOFF-NEXT-AGENT.md:25` — *"Services (systemd, NOT docker-compose — the fix doc is wrong about this)"*.
 
 These describe two different production systems. One of them is wrong, and the wrong one has an
 automatic trigger on every push to `main`.
@@ -108,7 +108,7 @@ handles, which is active vs standby."*
 - `setup-asterisk.sh` provisions **bare-metal Asterisk** via `apt install asterisk`, writing
   `/etc/asterisk/{http,ari,rtp,pjsip,extensions}.conf` with a direct PJSIP trunk to
   `sip3.blazedigitel.com`. It does not use the `telephony/asterisk/Dockerfile`.
-- `HANDOFF-NEXT-AGENT.md` lists no OpenSIPS / Kamailio / RTPengine / FreeSWITCH process.
+- `docs/sessions/worklogs/HANDOFF-NEXT-AGENT.md` lists no OpenSIPS / Kamailio / RTPengine / FreeSWITCH process.
 - `telephony/freeswitch/conf/**` is almost entirely `.gitkeep` placeholders.
 - `telephony/modules/*` is entirely `.gitkeep` — no custom modules exist.
 

@@ -1,0 +1,36 @@
+..................FF                                                     [100%]
+================================== FAILURES ===================================
+____________ test_discovered_runtime_boundaries[dnc_with_question] ____________
+tests\unit\test_ag04_traditional_qualification.py:70: in test_discovered_runtime_boundaries
+    assert all(check["pass"] for check in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': 'No runner exception; errors=[]', 'id': 'runner_completed', 'pass': True}, {'detail': 'Synthetic gateway h...ory equals successful synthetic TTS submissions; neither proves hearing.', 'id': 'history_submission:0', 'pass': True}]
+E   assert False
+E    +  where False = all(<generator object test_discovered_runtime_boundaries.<locals>.<genexpr> at 0x00000254AEE33440>)
+____________ test_discovered_runtime_boundaries[unsupported_price] ____________
+tests\unit\test_ag04_traditional_qualification.py:70: in test_discovered_runtime_boundaries
+    assert all(check["pass"] for check in row["findings"]["control"]), row["findings"]["control"]
+E   AssertionError: [{'detail': 'No runner exception; errors=[]', 'id': 'runner_completed', 'pass': True}, {'detail': 'Synthetic gateway h...', 'pass': True}, {'detail': 'Explicit fixture safety prohibition.', 'id': 'forbidden_speech:999', 'pass': False}, ...]
+E   assert False
+E    +  where False = all(<generator object test_discovered_runtime_boundaries.<locals>.<genexpr> at 0x00000254AEE33920>)
+============================== warnings summary ===============================
+tests/unit/test_ag04_traditional_qualification.py: 194 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_ag04_traditional_qualification.py: 106 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\transcript_handler.py:142: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag04_traditional_qualification.py: 261 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_ag04_traditional_qualification.py: 53 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\voice_pipeline\turn_ender.py:557: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_discovered_runtime_boundaries[dnc_with_question]
+FAILED tests/unit/test_ag04_traditional_qualification.py::test_discovered_runtime_boundaries[unsupported_price]
+2 failed, 18 passed, 614 warnings in 10.51s

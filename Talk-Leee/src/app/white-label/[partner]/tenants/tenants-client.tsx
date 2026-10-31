@@ -49,7 +49,7 @@ function normalizePartnerId(partnerId: string) {
     return partnerId.trim().toLowerCase();
 }
 
-function getPartnerLimits(_partnerId: string): PartnerLimits {
+function getPartnerLimits(): PartnerLimits {
     // Real partner limits are persisted server-side per partner row; this
     // client-only widget no longer fabricates them. The form lets the
     // operator configure the actual limit and persists locally until the
@@ -57,7 +57,7 @@ function getPartnerLimits(_partnerId: string): PartnerLimits {
     return { maxMinutes: 0, maxConcurrency: 0 };
 }
 
-function initialTenantsForPartner(_partnerId: string): Tenant[] {
+function initialTenantsForPartner(): Tenant[] {
     // Previously seeded with hardcoded "Clinic AI", "Dental Bot",
     // "Salon Assistant" rows for demo partners. Removed — empty state
     // is the honest default until the backend exposes
@@ -101,8 +101,10 @@ function clampMinZero(n: number) {
 }
 
 export function PartnerTenantsClient({ partnerId, partnerDisplayName }: { partnerId: string; partnerDisplayName: string }) {
-    const limits = useMemo(() => getPartnerLimits(partnerId), [partnerId]);
-    const [tenants, setTenants] = useState<Tenant[]>(() => initialTenantsForPartner(partnerId));
+    // Limits no longer vary by partner client-side (see getPartnerLimits) —
+    // the memo just keeps a stable object identity for the deps below.
+    const limits = useMemo(() => getPartnerLimits(), []);
+    const [tenants, setTenants] = useState<Tenant[]>(() => initialTenantsForPartner());
     const [loaded, setLoaded] = useState(false);
 
     const [formOpen, setFormOpen] = useState(false);
@@ -114,6 +116,10 @@ export function PartnerTenantsClient({ partnerId, partnerDisplayName }: { partne
 
     useEffect(() => {
         const key = storageKeyForPartner(partnerId);
+        // Resets the "loaded" flag when the partner changes, before the
+        // synchronous localStorage read below repopulates it — this hydrates
+        // from an external store keyed on `partnerId`, not derived render state.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets loading flag when partnerId changes, ahead of the localStorage hydration read
         setLoaded(false);
         try {
             const raw = globalThis.localStorage?.getItem(key) ?? null;
@@ -144,13 +150,13 @@ export function PartnerTenantsClient({ partnerId, partnerDisplayName }: { partne
                         .filter(Boolean) as Tenant[];
                     setTenants(safe);
                 } else {
-                    setTenants(initialTenantsForPartner(partnerId));
+                    setTenants(initialTenantsForPartner());
                 }
             } else {
-                setTenants(initialTenantsForPartner(partnerId));
+                setTenants(initialTenantsForPartner());
             }
         } catch {
-            setTenants(initialTenantsForPartner(partnerId));
+            setTenants(initialTenantsForPartner());
         } finally {
             setLoaded(true);
         }
@@ -358,7 +364,15 @@ function TenantTable({
     onSuspend: (tenant: Tenant) => void;
     onResume: (tenant: Tenant) => void;
 }) {
-    const gridCols = "md:grid-cols-[minmax(0,1fr)_170px_150px_140px_200px]";
+    // One grid at every size (campaigns-table pattern, see
+    // campaign-performance-table.tsx): a 10rem floor on the flexible name
+    // column so tenant names can never be crushed to zero width. Tracks
+    // 10rem (160px) + 130px + 120px + 120px + 200px = 730px, + 4 gap-2
+    // gutters (32px) + the row's px-4 inset (32px) = 794px = 49.625rem.
+    // Narrower viewports scroll the grid sideways inside the card instead
+    // of clipping the Edit/Suspend buttons.
+    const gridCols = "grid-cols-[minmax(10rem,1fr)_130px_120px_120px_200px]";
+    const gridMinWidth = "min-w-[49.625rem]";
 
     if (loading) {
         return (
@@ -380,54 +394,49 @@ function TenantTable({
 
     return (
         <div className="mt-6 overflow-hidden rounded-2xl border border-border bg-background/60">
-            <div className={`hidden md:grid ${gridCols} items-center gap-2 border-b border-border bg-background/70 px-4 py-3 text-xs font-semibold text-muted-foreground`}>
-                <div>Tenant Name</div>
-                <div className="text-right">Allocated Minutes</div>
-                <div className="text-right">Concurrency</div>
-                <div>Status</div>
-                <div className="text-right">Actions</div>
-            </div>
+            {/* max-lg:mr-6: below 1024px the fixed chat launcher overlaps this
+                table's right edge; ending the scroll viewport before its lane
+                keeps every action button tappable (Group C, 2026-10). */}
+            <div className="relative overflow-x-auto max-lg:mr-12">
+                <div className={`grid ${gridCols} ${gridMinWidth} items-center gap-2 border-b border-border bg-background/70 px-4 py-3 text-xs font-semibold text-muted-foreground`}>
+                    <div>Tenant Name</div>
+                    <div className="text-right">Allocated Minutes</div>
+                    <div className="text-right">Concurrency</div>
+                    <div>Status</div>
+                    <div className="text-right">Actions</div>
+                </div>
 
-            <div role="rowgroup" className="divide-y divide-border">
-                {items.map((t) => (
-                    <div key={t.id} role="row" className={`grid grid-cols-1 ${gridCols} gap-3 px-4 py-4 text-sm text-foreground`}>
-                        <div className="min-w-0">
-                            <div className="flex items-center justify-between gap-3 md:block">
-                                <div className="min-w-0">
-                                    <div className="truncate font-semibold">{t.tenantName}</div>
-                                    <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground md:hidden">
-                                        <span className="tabular-nums">{t.allocatedMinutes.toLocaleString()} min</span>
-                                        <span className="text-border">•</span>
-                                        <span className="tabular-nums">{t.subConcurrency.toLocaleString()} concurrent</span>
-                                    </div>
-                                </div>
-                                <div className="md:hidden">{tenantStatusPill(t.status)}</div>
+                <div role="rowgroup" className="divide-y divide-border">
+                    {items.map((t) => (
+                        <div key={t.id} role="row" className={`grid ${gridCols} ${gridMinWidth} gap-2 px-4 py-4 text-sm text-foreground`}>
+                            <div className="min-w-0">
+                                <div className="truncate font-semibold">{t.tenantName}</div>
+                            </div>
+                            <div className="text-right tabular-nums">{t.allocatedMinutes.toLocaleString()}</div>
+                            <div className="text-right tabular-nums">{t.subConcurrency.toLocaleString()}</div>
+                            <div>{tenantStatusPill(t.status)}</div>
+                            <div className="flex flex-wrap items-center justify-end gap-2">
+                                <Button type="button" variant="secondary" size="sm" asChild>
+                                    <Link href={`/white-label/${encodeURIComponent(partnerId)}/tenants/${encodeURIComponent(t.id)}/agent-settings`}>
+                                        Agent Settings
+                                    </Link>
+                                </Button>
+                                <Button type="button" variant="outline" size="sm" onClick={() => onEdit(t)}>
+                                    Edit
+                                </Button>
+                                {t.status === "active" ? (
+                                    <Button type="button" variant="destructive" size="sm" onClick={() => onSuspend(t)}>
+                                        Suspend
+                                    </Button>
+                                ) : (
+                                    <Button type="button" variant="secondary" size="sm" onClick={() => onResume(t)}>
+                                        Resume
+                                    </Button>
+                                )}
                             </div>
                         </div>
-                        <div className="hidden text-right tabular-nums md:block">{t.allocatedMinutes.toLocaleString()}</div>
-                        <div className="hidden text-right tabular-nums md:block">{t.subConcurrency.toLocaleString()}</div>
-                        <div className="hidden md:block">{tenantStatusPill(t.status)}</div>
-                        <div className="flex flex-wrap items-center justify-start gap-2 md:justify-end">
-                            <Button type="button" variant="secondary" size="sm" asChild>
-                                <Link href={`/white-label/${encodeURIComponent(partnerId)}/tenants/${encodeURIComponent(t.id)}/agent-settings`}>
-                                    Agent Settings
-                                </Link>
-                            </Button>
-                            <Button type="button" variant="outline" size="sm" onClick={() => onEdit(t)}>
-                                Edit
-                            </Button>
-                            {t.status === "active" ? (
-                                <Button type="button" variant="destructive" size="sm" onClick={() => onSuspend(t)}>
-                                    Suspend
-                                </Button>
-                            ) : (
-                                <Button type="button" variant="secondary" size="sm" onClick={() => onResume(t)}>
-                                    Resume
-                                </Button>
-                            )}
-                        </div>
-                    </div>
-                ))}
+                    ))}
+                </div>
             </div>
         </div>
     );
@@ -462,6 +471,11 @@ function TenantFormModal({
 
     useEffect(() => {
         if (!open) return;
+        // Reseeds the draft from the parent-supplied initial values every
+        // time the modal opens (create vs. edit, or a different tenant to
+        // edit) — a reset-on-open pattern, not state derivable from props
+        // at render time since the user goes on to freely edit `draft`.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reseeds the form draft each time the modal opens
         setDraft(initialDraft);
     }, [initialDraft, open]);
 

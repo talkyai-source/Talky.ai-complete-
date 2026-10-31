@@ -16,8 +16,14 @@ from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_current_user,
+    get_db_pool,
+    require_admin_tenant,
+)
 from app.core.container import get_container
+from app.core.db_utils import acquire_with_tenant
 from app.core.tenant_rls import apply_tenant_rls_context
 from app.domain.services.telephony_concurrency_limiter import (
     LeaseKind,
@@ -27,6 +33,11 @@ from app.domain.services.telephony_concurrency_limiter import (
 router = APIRouter(prefix="/telephony/sip/runtime/concurrency", tags=["Telephony SIP Runtime"])
 
 PROBLEM_BASE = "https://talky.ai/problems"
+
+# The lease mutations (acquire/release/heartbeat/expire) count toward the
+# tenant's CallGuard concurrency check, so a non-admin member who can write
+# them can block every real outbound call. They are tenant administration:
+# gated with require_admin_tenant. GET /status stays readable by any member.
 
 
 class LeaseAcquireRequest(BaseModel):
@@ -136,7 +147,7 @@ async def acquire_concurrency_lease(
     payload: LeaseAcquireRequest,
     request: Request,
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
     limiter: TelephonyConcurrencyLimiter = Depends(_get_concurrency_limiter),
 ):
@@ -144,8 +155,12 @@ async def acquire_concurrency_lease(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             decision = await limiter.acquire_lease(
                 conn,
@@ -177,7 +192,7 @@ async def release_concurrency_lease(
     payload: LeaseReleaseRequest,
     request: Request,
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
     limiter: TelephonyConcurrencyLimiter = Depends(_get_concurrency_limiter),
 ):
@@ -185,8 +200,12 @@ async def release_concurrency_lease(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             released = await limiter.release_lease(
                 conn,
@@ -218,7 +237,7 @@ async def heartbeat_concurrency_lease(
     lease_id: UUID,
     request: Request,
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
     limiter: TelephonyConcurrencyLimiter = Depends(_get_concurrency_limiter),
 ):
@@ -226,8 +245,12 @@ async def heartbeat_concurrency_lease(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             updated = await limiter.heartbeat_lease(
                 conn,
@@ -256,7 +279,7 @@ async def heartbeat_concurrency_lease(
 async def expire_stale_concurrency_leases(
     request: Request,
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
-    current_user: CurrentUser = Depends(get_current_user),
+    current_user: CurrentUser = Depends(require_admin_tenant),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
     limiter: TelephonyConcurrencyLimiter = Depends(_get_concurrency_limiter),
 ):
@@ -264,8 +287,12 @@ async def expire_stale_concurrency_leases(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=x_request_id)
+    async with acquire_with_tenant(
+        db_pool, current_user.tenant_id, user_id=current_user.id, request_id=x_request_id
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn, current_user.tenant_id, current_user.id, request_id=x_request_id
+        )
         async with conn.transaction():
             expired = await limiter.expire_stale_leases(
                 conn,
@@ -292,8 +319,18 @@ async def get_concurrency_status(
     if tenant_problem:
         return tenant_problem
 
-    async with db_pool.acquire() as conn:
-        await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id, request_id=request.headers.get("x-request-id"))
+    async with acquire_with_tenant(
+        db_pool,
+        current_user.tenant_id,
+        user_id=current_user.id,
+        request_id=request.headers.get("x-request-id"),
+    ) as conn:
+        await apply_tenant_rls_context(
+            conn,
+            current_user.tenant_id,
+            current_user.id,
+            request_id=request.headers.get("x-request-id"),
+        )
         status = await limiter.get_status(conn, tenant_id=current_user.tenant_id)
 
     return ConcurrencyStatusResponse(

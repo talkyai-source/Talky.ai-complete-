@@ -1,0 +1,13 @@
+{
+  "source": "c9d3f87e6dd7c9011008f886419e17888a1a6825",
+  "extracted_function_sha256": "6f2dd3f2ed7590db97538be4c364f61297e4a5eef7ac4406bf6ed9d5249f2af7",
+  "scope": "Actual baseline expiry function; synthetic markers/tasks; no calls, database or providers.",
+  "before_old_timer_cancel": {
+    "in_flight": true,
+    "logically_completed": true
+  },
+  "after_old_timer_cancel": {
+    "in_flight": false,
+    "logically_completed": false
+  }
+}

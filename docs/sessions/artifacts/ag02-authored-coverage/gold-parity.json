@@ -1,0 +1,11 @@
+{
+  "raw_sha256": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+  "lf_sha256": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+  "canonical_crlf_sha256": "48014c077165609663d74c775bf0439a1e769bdd15ed07052b74a6e40252cb8d",
+  "main_raw_sha256": "48014c077165609663d74c775bf0439a1e769bdd15ed07052b74a6e40252cb8d",
+  "main_lf_sha256": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+  "worktree_git_blob": "9ebd8349df7ec96f4142d046da3c3838c9e278f5",
+  "base_git_blob": "9ebd8349df7ec96f4142d046da3c3838c9e278f5",
+  "unchanged_git_blob": true,
+  "note": "New checkout has LF; historical raw hash is CRLF. Logical LF bytes and Git blob match. No matrix edits; evaluator records actual on-disk bytes."
+}

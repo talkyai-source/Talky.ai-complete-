@@ -31,7 +31,12 @@ import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
+
+from app.domain.services.campaign_direction_guard import (
+    OutboundCampaignDirectionConflict,
+    raise_for_outbound_direction_guard,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +62,18 @@ class LeadRecord:
     # migration — the leads table already has custom_fields), and later
     # threaded into the outbound agent's "who you're calling" prompt block.
     company: Optional[str] = None
+    # Expanded contact fields (goals.md §11). ``phone_raw`` remains the
+    # canonical dial number; mobile/business are additional numbers and never
+    # silently replace it.
+    mobile_number: Optional[str] = None
+    business_number: Optional[str] = None
+    company_name: Optional[str] = None
+    job_title: Optional[str] = None
+    best_time_to_call: Optional[str] = None
+    timezone: Optional[str] = None
+    calling_notes: Optional[str] = None
+    preferred_contact_method: Optional[str] = None
+    do_not_call: Optional[bool] = None
     custom_fields: dict = field(default_factory=dict)
     source_row: Optional[int] = None
 
@@ -93,7 +110,30 @@ def _custom_fields_with_company(rec: "LeadRecord") -> dict:
     company = (rec.company or "").strip()
     if company:
         fields["company"] = company
+    mobile = (rec.mobile_number or "").strip()
+    if mobile:
+        fields["mobile_number"] = mobile
     return fields
+
+
+def _expanded_lead_columns(rec: "LeadRecord") -> dict:
+    """Database-backed expanded fields, omitting absent values.
+
+    Omission matters for backward compatibility: a legacy CSV with four
+    columns still produces the same insert payload aside from fields it
+    actually supplied, while a richer sample sheet persists every value.
+    """
+    values = {
+        "business_number": rec.business_number,
+        "company_name": rec.company_name or rec.company,
+        "job_title": rec.job_title,
+        "best_time_to_call": rec.best_time_to_call,
+        "timezone": rec.timezone,
+        "calling_notes": rec.calling_notes,
+        "preferred_contact_method": rec.preferred_contact_method,
+        "do_not_call": rec.do_not_call,
+    }
+    return {key: value for key, value in values.items() if value is not None}
 
 
 def parse_pasted_numbers(text: str) -> list[str]:
@@ -109,7 +149,9 @@ def parse_pasted_numbers(text: str) -> list[str]:
     return [tok.strip() for tok in _PASTE_SPLIT.split(text) if tok and tok.strip()]
 
 
-def _load_existing(db_client, campaign_id: str) -> tuple[set, dict]:
+def _load_existing(
+    db_client, campaign_id: str, tenant_id: Optional[str]
+) -> tuple[set, dict]:
     """Return (live_phones, deleted_lead_by_phone) for the campaign.
 
     Always loaded so we never create a second live row for a phone and so
@@ -121,8 +163,11 @@ def _load_existing(db_client, campaign_id: str) -> tuple[set, dict]:
         db_client.table("leads")
         .select("id, phone_number, status, is_lead")
         .eq("campaign_id", campaign_id)
+        .eq("tenant_id", tenant_id)
         .execute()
     )
+    if getattr(resp, "error", None):
+        raise RuntimeError("existing lead lookup failed")
     for row in (getattr(resp, "data", None) or []):
         if row.get("status") == "deleted":
             prev = deleted_by_phone.get(row["phone_number"])
@@ -157,7 +202,9 @@ def ingest_lead_records(
     old one.
     """
     result = IngestResult(total=len(records))
-    live_phones, deleted_by_phone = _load_existing(db_client, campaign_id)
+    live_phones, deleted_by_phone = _load_existing(
+        db_client, campaign_id, tenant_id
+    )
 
     seen: set[str] = set()
     to_insert: list[dict] = []
@@ -189,6 +236,7 @@ def ingest_lead_records(
                 "last_name": rec.last_name,
                 "email": rec.email,
                 "custom_fields": _custom_fields_with_company(rec),
+                **_expanded_lead_columns(rec),
             })
             live_phones.add(phone)
             continue
@@ -202,6 +250,7 @@ def ingest_lead_records(
             "last_name": rec.last_name,
             "email": rec.email,
             "custom_fields": _custom_fields_with_company(rec),
+            **_expanded_lead_columns(rec),
             "status": "pending",
             "last_call_result": "pending",
             "call_attempts": 0,
@@ -219,8 +268,15 @@ def ingest_lead_records(
     for i in range(0, len(to_insert), chunk_size):
         chunk = to_insert[i:i + chunk_size]
         try:
-            db_client.table("leads").insert(chunk).execute()
+            write_response = db_client.table("leads").insert(chunk).execute()
+            if getattr(write_response, "error", None):
+                raise_for_outbound_direction_guard(write_response.error, campaign_id)
+                raise RuntimeError(str(write_response.error))
+            if not getattr(write_response, "data", None):
+                raise RuntimeError("database insert affected no rows")
             result.imported += len(chunk)
+        except OutboundCampaignDirectionConflict:
+            raise
         except Exception as e:
             logger.error("bulk_ingest insert chunk %d-%d failed: %s", i, i + len(chunk), e)
             for lead in chunk:
@@ -237,13 +293,32 @@ def ingest_lead_records(
                 "last_name": rev["last_name"],
                 "email": rev["email"],
                 "custom_fields": rev["custom_fields"],
+                **{
+                    key: value
+                    for key, value in rev.items()
+                    if key not in {"id", "first_name", "last_name", "email", "custom_fields"}
+                },
             }
             # Move a revived lead into the list it was just re-uploaded under.
             if list_id is not None:
                 revive_payload["list_id"] = list_id
-            db_client.table("leads").update(revive_payload).eq("id", rev["id"]).execute()
+            write_response = (
+                db_client.table("leads")
+                .update(revive_payload)
+                .eq("id", rev["id"])
+                .eq("campaign_id", campaign_id)
+                .eq("tenant_id", tenant_id)
+                .execute()
+            )
+            if getattr(write_response, "error", None):
+                raise_for_outbound_direction_guard(write_response.error, campaign_id)
+                raise RuntimeError(str(write_response.error))
+            if not getattr(write_response, "data", None):
+                raise RuntimeError("database revive affected no rows")
             result.revived += 1
             result.imported += 1
+        except OutboundCampaignDirectionConflict:
+            raise
         except Exception as e:
             logger.error("bulk_ingest revive %s failed: %s", rev["id"], e)
             result.errors.append(IngestError(None, f"Revive failed: {e}", None))

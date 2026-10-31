@@ -13,8 +13,11 @@ import stat
 
 import pytest
 
+import app.infrastructure.telephony.pjsip_config_generator as pjsip_module
+
 from app.infrastructure.telephony.pjsip_config_generator import (
     TrunkConfigInput,
+    PJSIPReloadError,
     apply_trunk_config,
     build_trunk_config_input,
     remove_trunk_config,
@@ -52,7 +55,7 @@ def test_render_produces_namespaced_objects():
     assert f"[trunk-{TRUNK_ID}-identify]" in conf
     # endpoint wiring
     assert "type=endpoint" in conf
-    assert f"context=from-tenant-{TENANT_ID}" in conf
+    assert "context=from-talky-inbound" in conf
     assert f"outbound_auth=trunk-{TRUNK_ID}-auth" in conf
     assert f"aors=trunk-{TRUNK_ID}-aor" in conf
     assert "transport=transport-udp" in conf
@@ -80,7 +83,7 @@ def test_render_with_register_includes_registration_object():
     assert "type=registration" in conf
     assert "server_uri=sip:sip.acme.example:5060" in conf
     assert "client_uri=sip:acmeuser@sip.acme.example" in conf
-    assert "retry_interval=1800" in conf
+    assert "expiration=1800" in conf
 
 
 def test_render_register_block_has_resilience_params():
@@ -91,9 +94,33 @@ def test_render_register_block_has_resilience_params():
     assert "max_retries=10000" in conf
     assert "fatal_retry_interval=30" in conf
     assert "forbidden_retry_interval=60" in conf
-    # retry_interval + expiration still track the configured interval.
-    assert "retry_interval=1800" in conf
-    assert "expiration=1800" in conf
+    # expiration still tracks the configured interval; the retry after a failed
+    # REGISTER does NOT (it was 3600 s by default, so one dropped REGISTER left a
+    # trunk unregistered for an hour). Retry in 60 s regardless of expiration.
+    lines = conf.splitlines()
+    assert "retry_interval=60" in lines
+    assert "expiration=1800" in lines
+    assert "retry_interval=1800" not in lines
+
+
+@pytest.mark.parametrize("interval", [60, 300, 3600, 86400])
+def test_render_retry_interval_is_capped_at_60_and_expiration_is_unchanged(interval):
+    lines = render_trunk_conf(_input(register=True, register_interval=interval)).splitlines()
+    assert "retry_interval=60" in lines
+    assert f"expiration={interval}" in lines
+    if interval != 60:
+        assert f"retry_interval={interval}" not in lines
+
+
+def test_render_default_interval_retries_every_60s_not_every_hour():
+    # Default (and out-of-range) intervals fall back to 3600 for expiration.
+    for interval in (None, 0, 5, 999999):
+        lines = render_trunk_conf(
+            _input(register=True, register_interval=interval)
+        ).splitlines()
+        assert "expiration=3600" in lines
+        assert "retry_interval=60" in lines
+        assert "retry_interval=3600" not in lines
 
 
 def test_render_caller_id_and_source_host_overrides():
@@ -102,6 +129,12 @@ def test_render_caller_id_and_source_host_overrides():
     )
     assert "callerid=<+15551234567>" in conf
     assert "match=203.0.113.9" in conf  # identify uses the explicit source host
+
+
+def test_render_never_puts_account_to_did_mapping_on_an_endpoint():
+    conf = render_trunk_conf(_input())
+    assert "context=from-talky-inbound" in conf
+    assert "set_var=TALKY_INBOUND_DID" not in conf
 
 
 def test_render_dtmf_rfc2833_maps_to_valid_pjsip_rfc4733():
@@ -133,6 +166,19 @@ def test_render_endpoint_has_nat_traversal_settings():
     assert "rtp_symmetric=yes" in conf
     assert "force_rport=yes" in conf
     assert "rewrite_contact=yes" in conf
+
+
+def test_render_applies_validated_outbound_proxy_to_endpoint_and_registration():
+    conf = render_trunk_conf(
+        _input(register=True, outbound_proxy="proxy.example.com:5061")
+    )
+    assert conf.count(r"outbound_proxy=sip:proxy.example.com:5061\;lr") == 2
+
+
+def test_render_srtp_enables_sdes_without_optimistic_plaintext_fallback():
+    conf = render_trunk_conf(_input(srtp=True))
+    assert "media_encryption=sdes" in conf
+    assert "media_encryption_optimistic=no" in conf
 
 
 def test_render_registers_the_login_not_caller_id_did():
@@ -186,18 +232,26 @@ def test_build_input_pulls_metadata_fields():
         "auth_username": "u",
         "metadata": {
             "caller_id": "+15550000000",
+            # Legacy workaround metadata is deliberately ignored. The
+            # account route is generated only from inbound_did_assignments.
+            "inbound_did": "+15550000001",
             "register": True,
             "register_interval": 900,
             "dtmf_mode": "rfc2833",
             "source_host": "198.51.100.5",
+            "outbound_proxy": "proxy.example.com:5061",
+            "srtp": True,
         },
     }
     inp = build_trunk_config_input(row, decrypted_password="pw")
     assert inp.caller_id == "+15550000000"
+    assert not hasattr(inp, "inbound_did")
     assert inp.register is True
     assert inp.register_interval == 900
     assert inp.dtmf_mode == "rfc2833"
     assert inp.source_host == "198.51.100.5"
+    assert inp.outbound_proxy == "proxy.example.com:5061"
+    assert inp.srtp is True
     assert inp.auth_password == "pw"
 
 
@@ -291,3 +345,26 @@ async def test_apply_decrypts_via_mock_and_writes(tmp_path):
         row, decrypted_password=plaintext, base_dir=tmp_path, reload=False,
     )
     assert "password=decrypted-pw-abc" in path.read_text(encoding="utf-8")
+
+
+@pytest.mark.asyncio
+async def test_required_live_reload_rejects_disabled_hook(tmp_path, monkeypatch):
+    monkeypatch.delenv("TELEPHONY_PJSIP_AUTO_RELOAD", raising=False)
+    row = {
+        "id": TRUNK_ID, "tenant_id": TENANT_ID, "trunk_name": "acme-byo",
+        "sip_domain": "sip.acme.example", "port": 5060, "transport": "udp",
+        "auth_username": "acmeuser", "metadata": {"register": True},
+    }
+    with pytest.raises(PJSIPReloadError, match="not applied live"):
+        await apply_trunk_config(
+            row,
+            decrypted_password="pw",
+            base_dir=tmp_path,
+            require_reload=True,
+        )
+
+
+def test_only_executed_reload_is_confirmed_coverage():
+    for status in ("coalesced", "disabled", "failed"):
+        assert not pjsip_module.PJSIPReloadResult(status, "unconfirmed").accepted
+    assert pjsip_module.PJSIPReloadResult("executed", "acknowledged").accepted

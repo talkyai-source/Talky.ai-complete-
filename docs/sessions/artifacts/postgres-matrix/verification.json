@@ -1,0 +1,47 @@
+{
+  "baseline_revision": "e7b8a84c",
+  "candidate_revision": "938783f72d08405b4c350a70ce689e18a4275d3d",
+  "source_scope": "Three integration test files only; no application or migration changes",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "TEST_DATABASE_URL": "postgresql://talky@127.0.0.1:55434/cp04_acceptance_test",
+    "DATABASE_URL": "same explicit disposable TEST_DATABASE_URL",
+    "schema_revision": "0061_dnc_runtime_contract",
+    "execution": "Exclusive local PostgreSQL test slot; Windows; original backend .venv interpreter; no backend .env in isolated worktree"
+  },
+  "interpreter": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "working_directory": "tmp/postgres-matrix-20261005/backend",
+  "checks": [
+    {
+      "command": "python -m pytest tests/integration/test_bootstrap_contract_repair.py::test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts tests/integration/test_bootstrap_contract_repair.py::test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity tests/integration/test_billing_webhook_migration.py::test_actual_alembic_downgrade_refuses_to_destroy_receipts tests/integration/test_ag06_dashboard_receipts.py::test_committed_concurrent_claim_and_lost_response_recovery -q --tb=short",
+      "source": "baseline_revision",
+      "exit_code": 1,
+      "failed": 4,
+      "duration_seconds": 61.00,
+      "output": "initial-four.txt"
+    },
+    {
+      "command": "python -m pytest tests/integration/test_bootstrap_contract_repair.py tests/integration/test_billing_webhook_migration.py tests/integration/test_ag06_dashboard_receipts.py -q --tb=short",
+      "source": "candidate_revision",
+      "exit_code": 0,
+      "passed": 27,
+      "skipped": 0,
+      "duration_seconds": 80.27,
+      "output": "final-three-modules.txt"
+    },
+    {
+      "command": "python -m ruff check --select F tests/integration/test_bootstrap_contract_repair.py tests/integration/test_billing_webhook_migration.py tests/integration/test_ag06_dashboard_receipts.py",
+      "exit_code": 0,
+      "output": "ruff.txt"
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "limits": [
+    "No real provider, email, customer call, or production database effects.",
+    "The full matrix remains a parent integration check; this evidence covers the three affected modules.",
+    "Retained ledger fingerprint verification requires a serial fixture database without concurrent unrelated writes."
+  ]
+}

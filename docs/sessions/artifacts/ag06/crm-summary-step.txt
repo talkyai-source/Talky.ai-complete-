@@ -1,0 +1,12 @@
+.F................................                                       [100%]
+================================== FAILURES ===================================
+___ test_unknown_contact_create_never_reconciles_against_changed_recipient ____
+tests\unit\test_ag06_crm_evidence.py:40: in test_unknown_contact_create_never_reconciles_against_changed_recipient
+    assert not result.success
+E   AssertionError: assert not True
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...all_id='00Ttask', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.crm_sync_service:crm_sync_service.py:306 crm_sync provider=salesforce call=77777777-7777-7777-7777-777777777777 phase=creating_contact status=unknown
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag06_crm_evidence.py::test_unknown_contact_create_never_reconciles_against_changed_recipient
+1 failed, 33 passed in 1.34s

@@ -1,0 +1,20 @@
+{
+  "status": "failed",
+  "production_approved": false,
+  "counts": {
+    "declared_profile_scenario_rows": 228,
+    "observed_rows": 228,
+    "distinct_replayed_scenario_ids": 80,
+    "control_checks": 2146,
+    "control_failures": 0,
+    "captured_or_reviewed_semantic_failures": 1,
+    "unreviewed_semantic_findings": 227
+  },
+  "runtime_control_status": "passed",
+  "semantic_status": "failed",
+  "evidence_errors": [],
+  "source_commit": "3b00bc687c5117c38db1bda7cd82b9a79dc052f2",
+  "known_regression_outside_common_cases": true,
+  "note": "Not final qualification. Root found four positive completion escapes introduced by global predicate splitting; guard follow-up required despite green existing common controls.",
+  "exit_code": 1
+}

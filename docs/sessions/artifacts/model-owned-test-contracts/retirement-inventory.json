@@ -1,0 +1,187 @@
+{
+  "base": "2d17c523e05b43c07d8d9c96942c6c5dff56dd20",
+  "files": {
+    "backend/tests/unit/test_ag02_semantic_qualification.py": {
+      "prior_test_functions": [
+        "test_predeclared_cases_and_labels_never_enter_retrieve_inputs",
+        "test_map_profile_requires_separate_review",
+        "test_profile_rejects_unreviewed_destinations_settings_or_budget",
+        "test_unexpected_reasoning_reserve_requires_replan",
+        "test_dry_run_does_not_initialize_provider_or_read_key",
+        "test_existing_output_cannot_be_overwritten",
+        "test_dotenv_file_read_is_denied_in_cli_process",
+        "test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile",
+        "test_wrong_final_answer_cannot_be_counted_as_semantic_success",
+        "test_explicit_designated_key_wins_over_ambient_pool",
+        "test_provider_truncation_stays_failed_with_original_output",
+        "test_transport_refuses_unreviewed_wire_request_before_dispatch",
+        "test_retry_and_wire_input_budgets_apply_before_dispatch"
+      ],
+      "retired_or_renamed_test_functions": [
+        "test_dry_run_does_not_initialize_provider_or_read_key",
+        "test_existing_output_cannot_be_overwritten",
+        "test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile",
+        "test_wrong_final_answer_cannot_be_counted_as_semantic_success",
+        "test_explicit_designated_key_wins_over_ambient_pool",
+        "test_provider_truncation_stays_failed_with_original_output",
+        "test_transport_refuses_unreviewed_wire_request_before_dispatch",
+        "test_retry_and_wire_input_budgets_apply_before_dispatch"
+      ],
+      "new_or_renamed_test_functions": [
+        "test_retired_cli_refuses_before_runtime_credentials_or_output",
+        "test_retired_cli_leaves_existing_evidence_untouched"
+      ],
+      "retained_test_functions": [
+        "test_predeclared_cases_and_labels_never_enter_retrieve_inputs",
+        "test_map_profile_requires_separate_review",
+        "test_profile_rejects_unreviewed_destinations_settings_or_budget",
+        "test_unexpected_reasoning_reserve_requires_replan",
+        "test_dotenv_file_read_is_denied_in_cli_process"
+      ],
+      "before_git_blob_sha256": "ec251e347b7ae0b636a315f8605f5a7118fd3aa8abef032ecbce10a05348054e",
+      "final_raw_sha256": "06fe95a972dba1df68a3a49b883d75320524324b0f3e40c4491cc0489c096cdf"
+    },
+    "backend/tests/unit/test_prompt_small_dialogue.py": {
+      "prior_test_functions": [
+        "test_no_exemplar_is_longer_than_one_short_beat",
+        "test_the_average_exemplar_is_a_short_beat_not_a_paragraph",
+        "test_some_exemplars_are_a_bare_fragment",
+        "test_exemplar_budgets_control_flags_the_old_exemplars",
+        "test_exemplars_speak_in_contractions",
+        "test_contraction_control_flags_the_old_support_exemplars",
+        "test_a_fragment_is_licensed_as_a_whole_turn",
+        "test_acknowledge_then_ask_is_named_as_the_move",
+        "test_the_agent_is_told_to_hand_the_floor_back",
+        "test_the_recency_slot_names_the_sub_sentence_turn",
+        "test_every_block_that_sizes_the_opener_states_the_same_budget",
+        "test_no_opener_block_offers_a_looser_sentence_budget",
+        "test_live_state_still_asks_for_the_opening_it_is_there_to_trigger",
+        "test_thinking_fillers_are_a_filled_pause_not_a_lookup_announcement",
+        "test_thinking_filler_control_flags_the_old_pool",
+        "test_thinking_fillers_still_cover_the_gap_and_match_their_dialect"
+      ],
+      "retired_or_renamed_test_functions": [
+        "test_no_exemplar_is_longer_than_one_short_beat",
+        "test_the_average_exemplar_is_a_short_beat_not_a_paragraph",
+        "test_some_exemplars_are_a_bare_fragment",
+        "test_exemplar_budgets_control_flags_the_old_exemplars",
+        "test_exemplars_speak_in_contractions",
+        "test_contraction_control_flags_the_old_support_exemplars",
+        "test_a_fragment_is_licensed_as_a_whole_turn",
+        "test_acknowledge_then_ask_is_named_as_the_move",
+        "test_the_agent_is_told_to_hand_the_floor_back",
+        "test_the_recency_slot_names_the_sub_sentence_turn",
+        "test_every_block_that_sizes_the_opener_states_the_same_budget",
+        "test_no_opener_block_offers_a_looser_sentence_budget",
+        "test_live_state_still_asks_for_the_opening_it_is_there_to_trigger",
+        "test_thinking_fillers_are_a_filled_pause_not_a_lookup_announcement",
+        "test_thinking_filler_control_flags_the_old_pool",
+        "test_thinking_fillers_still_cover_the_gap_and_match_their_dialect"
+      ],
+      "new_or_renamed_test_functions": [],
+      "retained_test_functions": [],
+      "before_git_blob_sha256": "d50452667442f32e402e11ad237784fee5ac4637063e998198d976bd234dcbc1",
+      "final_raw_sha256": null
+    },
+    "backend/tests/unit/test_prompt_brevity_and_narration.py": {
+      "prior_test_functions": [
+        "test_fewest_sentences_instruction_reaches_every_persona",
+        "test_knowledge_driven_campaigns_get_the_same_brevity_target",
+        "test_one_question_then_stop_talking",
+        "test_no_statement_explanation_question_stack",
+        "test_communication_principles_do_not_license_the_three_part_stack",
+        "test_the_three_turn_shape_blocks_agree_with_each_other",
+        "test_no_composed_block_encourages_length_or_thoroughness",
+        "test_thinking_and_lookups_are_silent",
+        "test_a_knowledge_miss_is_a_next_step_not_a_status_report",
+        "test_never_mention_the_knowledge_base_covers_its_paraphrases",
+        "test_personas_no_longer_teach_process_narration",
+        "test_filler_permission_survives_the_narration_fix",
+        "test_few_shot_exemplars_are_short",
+        "test_lead_gen_opener_shape_fits_the_decision_window",
+        "test_lead_gen_opener_tells_the_agent_to_stop",
+        "test_lead_gen_opener_dropped_the_worst_measured_pattern"
+      ],
+      "retired_or_renamed_test_functions": [
+        "test_fewest_sentences_instruction_reaches_every_persona",
+        "test_knowledge_driven_campaigns_get_the_same_brevity_target",
+        "test_one_question_then_stop_talking",
+        "test_no_statement_explanation_question_stack",
+        "test_communication_principles_do_not_license_the_three_part_stack",
+        "test_the_three_turn_shape_blocks_agree_with_each_other",
+        "test_no_composed_block_encourages_length_or_thoroughness",
+        "test_thinking_and_lookups_are_silent",
+        "test_a_knowledge_miss_is_a_next_step_not_a_status_report",
+        "test_never_mention_the_knowledge_base_covers_its_paraphrases",
+        "test_personas_no_longer_teach_process_narration",
+        "test_filler_permission_survives_the_narration_fix",
+        "test_few_shot_exemplars_are_short",
+        "test_lead_gen_opener_shape_fits_the_decision_window",
+        "test_lead_gen_opener_tells_the_agent_to_stop",
+        "test_lead_gen_opener_dropped_the_worst_measured_pattern"
+      ],
+      "new_or_renamed_test_functions": [
+        "test_each_persona_path_gets_one_natural_conversation_guide"
+      ],
+      "retained_test_functions": [],
+      "before_git_blob_sha256": "19dda713556a0a2116a351eb4b4779ac635488a3bb6794a8d2cc19e6e51ae3a0",
+      "final_raw_sha256": "21b546f2c9f00e9cde5b333b9a803bd427bbb6d061a582c07a37900906217002"
+    },
+    "backend/tests/unit/test_prompt_audit_fixes.py": {
+      "prior_test_functions": [
+        "test_compliance_reanchor_carries_key_invariants_and_is_short",
+        "test_model_addendum_matches_gemini_latest_aliases",
+        "test_ai_denial_scan_catches_paraphrases",
+        "test_ai_denial_scan_no_false_positive_on_benign",
+        "test_knowledge_precedence_allows_prompt_body_facts",
+        "test_inline_kb_rejects_poisoned_tree_before_baking"
+      ],
+      "retired_or_renamed_test_functions": [
+        "test_compliance_reanchor_carries_key_invariants_and_is_short",
+        "test_model_addendum_matches_gemini_latest_aliases",
+        "test_knowledge_precedence_allows_prompt_body_facts",
+        "test_inline_kb_rejects_poisoned_tree_before_baking"
+      ],
+      "new_or_renamed_test_functions": [
+        "test_models_do_not_receive_scripted_contact_readback_addenda",
+        "test_knowledge_guide_preserves_original_question_and_source_conditions"
+      ],
+      "retained_test_functions": [
+        "test_ai_denial_scan_catches_paraphrases",
+        "test_ai_denial_scan_no_false_positive_on_benign"
+      ],
+      "before_git_blob_sha256": "497a92ba18dedb6c8da150c0257ceacfde3c82754933c90b90c5604d4e06c738",
+      "final_raw_sha256": "6bd741117c8cee0523924f4863817f16be1afb6d9a02f42cf114adaf9f64ee06"
+    },
+    "backend/tests/unit/test_prompt_consistency.py": {
+      "prior_test_functions": [
+        "test_kd_callee_first_prompt_does_not_claim_a_greeting_already_played",
+        "test_kd_agent_first_prompt_keeps_the_pickup_greeting_stage",
+        "test_kd_body_reuses_the_shared_openings_not_a_private_copy",
+        "test_prompt_carries_no_dated_changelog_notes",
+        "test_voicemail_has_one_instruction_end_the_call",
+        "test_wrong_person_is_a_pivot_everywhere_not_a_hangup",
+        "test_silence_is_owned_by_the_silence_monitor_not_the_prompt"
+      ],
+      "retired_or_renamed_test_functions": [
+        "test_kd_agent_first_prompt_keeps_the_pickup_greeting_stage",
+        "test_wrong_person_is_a_pivot_everywhere_not_a_hangup",
+        "test_silence_is_owned_by_the_silence_monitor_not_the_prompt"
+      ],
+      "new_or_renamed_test_functions": [
+        "test_kd_agent_first_prompt_supplies_context_without_claiming_playback"
+      ],
+      "retained_test_functions": [
+        "test_kd_callee_first_prompt_does_not_claim_a_greeting_already_played",
+        "test_kd_body_reuses_the_shared_openings_not_a_private_copy",
+        "test_prompt_carries_no_dated_changelog_notes",
+        "test_voicemail_has_one_instruction_end_the_call"
+      ],
+      "before_git_blob_sha256": "0161e0f1f654419764f568734161b6d268152597df9a8565fa8183cdef75613b",
+      "final_raw_sha256": "e84daffce78a8577c860a7af9fcb5611396724b794ee0b87989fb336c7cce6f4"
+    }
+  },
+  "cache_shape_git_bytes_unchanged": true,
+  "cache_shape_blob_sha256": "89f11b2408f4811030dd6448486bbd31a3f68d8dc686d476d320186a8515faba",
+  "retirement_means": "Names include renamed/replaced contracts; details in accompanying session report. Old source and baseline failures remain preserved in Git and artifacts."
+}

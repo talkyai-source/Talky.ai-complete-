@@ -34,8 +34,35 @@ enum class SessionState {
 
 [[nodiscard]] const char* session_state_to_string(SessionState state);
 
+struct CallbackDeliverySnapshot {
+    uint64_t delivered{0};
+    uint64_t failed{0};
+    uint64_t dropped{0};
+    int64_t failure_streak_ms{0};
+    bool healthy{true};
+};
+
+// Shared by the HTTP sender and session snapshot; never owns either worker.
+// Health follows observed failed deliveries, not caller silence or RTP state.
+class CallbackDeliveryState {
+public:
+    void record(bool delivered, std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now());
+    void drop(uint64_t count);
+    void worker_failed();
+    [[nodiscard]] CallbackDeliverySnapshot snapshot() const;
+private:
+    mutable std::mutex mutex_;
+    CallbackDeliverySnapshot stats_;
+    std::chrono::steady_clock::time_point first_failure_{};
+    bool failing_{false};
+};
+
 struct SessionConfig {
     std::string session_id;
+    // SHA-256 of the canonical start payload, supplied by the controller.
+    // Duplicate starts are idempotent only when this digest matches; reusing a
+    // session id with different RTP/callback settings is a hard conflict.
+    std::string config_digest;
     std::string listen_ip;
     uint16_t listen_port{0};
     std::string remote_ip;
@@ -70,6 +97,7 @@ struct SessionConfig {
     // The backend uses this to feed caller audio into the STT pipeline.
     // Optional — if empty, received audio is only used for echo/jitter buffer.
     std::string audio_callback_url;
+    std::shared_ptr<CallbackDeliveryState> callback_delivery;
     // Maximum number of audio frames to batch into a single callback POST.
     // 1 = one POST per 20 ms frame (lowest latency). Default: 1.
     int audio_callback_batch_frames{1};
@@ -103,6 +131,7 @@ struct SessionConfig {
 
 struct SessionStatsSnapshot {
     std::string session_id;
+    std::string config_digest;
     std::string state;
     std::string stop_reason;
     uint64_t packets_in{0};
@@ -144,6 +173,7 @@ struct SessionStatsSnapshot {
     // a chunk for an interrupted (retired) utterance, or a duplicate/backwards
     // chunk_seq. Visibility for the canary before the backend relies on it.
     uint64_t tts_chunks_rejected_stale_total{0};
+    CallbackDeliverySnapshot callback_delivery;
 };
 
 class RtpSession {
@@ -167,6 +197,7 @@ public:
     [[nodiscard]] bool running() const;
     [[nodiscard]] bool healthy() const;
     [[nodiscard]] SessionState state() const;
+    [[nodiscard]] const std::string& config_digest() const noexcept;
     [[nodiscard]] SessionStatsSnapshot snapshot() const;
     // utterance_id/chunk_seq (both optional; empty/-1 = legacy behavior, VG-13):
     // when the backend stamps them, a chunk belonging to an utterance that was
@@ -181,6 +212,9 @@ public:
     // already committed to send (passed its generation check) has finished its
     // send (bounded wait) — the VG-24 send-completion barrier.
     bool interrupt_tts(const std::string& reason, std::size_t& dropped_frames, std::size_t& interrupted_segments);
+    // Receipt v1 certifies RTP transmission only, never remote playback.
+    bool finish_tts_utterance(const std::string& utterance_id, int64_t last_chunk_seq,
+                             std::string& status, std::size_t& transmitted_frames, std::string& error);
 
     // Register a callback that fires with each received audio batch.
     // Called from the receiver thread; keep it non-blocking.
@@ -216,6 +250,7 @@ private:
     struct TtsSegmentState {
         std::size_t remaining_frames{0};
         bool interrupted{false};
+        std::string utterance_id;
     };
 
     void receiver_loop();
@@ -277,6 +312,12 @@ private:
     std::string tts_current_utterance_id_;
     std::string tts_retired_utterance_id_;
     int64_t tts_last_chunk_seq_{-1};
+    std::string tts_receipt_utterance_id_;
+    std::size_t tts_receipt_accepted_{0};
+    std::size_t tts_receipt_sent_{0};
+    bool tts_receipt_final_{false};
+    bool tts_receipt_failed_{false};
+    bool tts_receipt_cancelled_{false};
 
     // Latches on the first start() call. RtpSession is single-use (its worker
     // std::threads are one-shot); a second start() would assign over joinable
@@ -375,14 +416,6 @@ private:
     bool last_played_seq_valid_{false};
     uint16_t last_played_seq_{0};
     bool has_prev_arrival_{false};
-    // RTP source pinning (only consulted when config_.enforce_rtp_source).
-    // Locked to the first packet's (source IP, source port); later mismatches
-    // are dropped as injected (VG-08). SSRC is intentionally NOT pinned here —
-    // SSRC changes from the trusted tuple go through the sequencer's restart
-    // probation instead (review #6).
-    bool rtp_source_locked_{false};
-    uint32_t locked_source_ip_{0};
-    uint16_t locked_source_port_{0};
     uint32_t prev_rtp_timestamp_{0};
     std::chrono::steady_clock::time_point prev_arrival_time_{};
     std::chrono::steady_clock::time_point last_rtcp_report_sent_at_{};

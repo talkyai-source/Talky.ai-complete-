@@ -2,19 +2,29 @@
 Billing API Endpoints
 Handles Stripe subscription management and payment operations
 """
-import os
-import logging
-from datetime import datetime, timedelta, timezone
-from uuid import UUID
-from fastapi import APIRouter, HTTPException, Depends, Request, status
-from pydantic import BaseModel
-from typing import Any, List, Optional
-from app.core.postgres_adapter import Client
 
-from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser, get_audit_logger, get_db_pool
-from app.core.security.rbac import require_permission, Permission
-from app.domain.services.billing_service import BillingService
+import logging
+import os
+import json
+from datetime import datetime, timedelta, timezone
+from typing import Any, List, Literal, Optional
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, ConfigDict
+
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_current_user,
+    get_db_client,
+    get_db_pool,
+    get_optional_user,
+)
+from app.core.postgres_adapter import Client
+from app.core.security.rbac import Permission, require_permission
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.billing_service import BillingService
 from app.domain.services.call_outcomes import (
     ANSWERED_OUTCOME_LIST,
     FAILED_OUTCOME_LIST,
@@ -29,28 +39,36 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 # Request/Response Models
 # ============================================
 
+
 class CreateCheckoutRequest(BaseModel):
-    """Request to create a checkout session"""
-    plan_id: str
-    success_url: Optional[str] = None
-    cancel_url: Optional[str] = None
+    """Select an approved server price; preserve identity across uncertainty."""
+
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    price_option_id: UUID
 
 
 class CreateCheckoutResponse(BaseModel):
     """Checkout session response"""
-    session_id: str
-    checkout_url: str
+
+    request_id: UUID
+    state: Literal["open", "activated", "pending", "expired", "failed"]
+    session_id: Optional[str] = None
+    checkout_url: Optional[str] = None
+    price_option: dict[str, Any]
     mock_mode: bool = False
     message: Optional[str] = None
 
 
 class PortalRequest(BaseModel):
     """Request to create customer portal session"""
-    return_url: Optional[str] = None
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class PortalResponse(BaseModel):
     """Portal session response"""
+
     portal_url: str
     mock_mode: bool = False
     message: Optional[str] = None
@@ -58,6 +76,7 @@ class PortalResponse(BaseModel):
 
 class SubscriptionResponse(BaseModel):
     """Subscription status response"""
+
     status: str
     plan_id: Optional[str] = None
     plan_name: Optional[str] = None
@@ -67,10 +86,14 @@ class SubscriptionResponse(BaseModel):
     minutes_allocated: int = 0
     minutes_used: int = 0
     minutes_remaining: int = 0
+    minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
+    purchased_price_option: Optional[dict[str, Any]] = None
+    billing_portal_available: bool = False
 
 
 class CancelResponse(BaseModel):
     """Cancellation response"""
+
     status: str
     cancel_at_period_end: bool = False
     mock_mode: bool = False
@@ -79,36 +102,73 @@ class CancelResponse(BaseModel):
 
 class UsageSummaryResponse(BaseModel):
     """Usage summary response"""
+
     usage_type: str
     total_used: int
     allocated: int
     remaining: int
     overage: int
+    unlimited: bool
+    metering_period: Literal["calendar_month"]
 
 
 # ============================================
 # Helper Functions
 # ============================================
 
+
 def get_billing_service(db_client: Client = Depends(get_db_client)) -> BillingService:
     """Dependency to get billing service instance"""
     return BillingService(db_client)
-
-
-def get_default_urls(request: Request):
-    """Get default success/cancel URLs based on request origin"""
-    origin = request.headers.get("origin", "http://localhost:3000")
-    return {
-        "success_url": f"{origin}/dashboard/billing/success",
-        "cancel_url": f"{origin}/dashboard/billing/canceled"
-    }
 
 
 # ============================================
 # Endpoints
 # ============================================
 
-@router.post("/create-checkout-session", response_model=CreateCheckoutResponse, dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))])
+
+def _is_platform_admin(current_user) -> bool:
+    from app.core.security.rbac import UserRole, normalize_role
+
+    try:
+        return normalize_role(current_user.role) == UserRole.PLATFORM_ADMIN
+    except Exception:
+        return False
+
+
+def _is_billing_team(current_user) -> bool:
+    """Who may see and buy team-only plans (billing_mode.is_billing_team)."""
+    from app.domain.services.billing_mode import is_billing_team
+
+    if current_user is None:
+        return False
+    return is_billing_team(
+        is_platform_admin=_is_platform_admin(current_user),
+        email=getattr(current_user, "email", None),
+    )
+
+
+def _require_checkout_permitted_in_test_mode(current_user) -> None:
+    """Stripe TEST mode in production sells only to the team (billing_mode)."""
+    from app.domain.services.billing_mode import checkout_permitted_in_test_mode
+
+    is_platform_admin = _is_platform_admin(current_user)
+    if not checkout_permitted_in_test_mode(is_platform_admin=is_platform_admin, email=current_user.email):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "test_billing_team_only",
+                "message": "Payments are not open yet. Billing is in test mode for the Talk-Lee team.",
+                "request_not_started": True,
+            },
+        )
+
+
+@router.post(
+    "/create-checkout-session",
+    response_model=CreateCheckoutResponse,
+    dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))],
+)
 async def create_checkout_session(
     body: CreateCheckoutRequest,
     request: Request,
@@ -119,20 +179,15 @@ async def create_checkout_session(
     """
     Create a Stripe Checkout Session for subscribing to a plan.
     """
+    _require_checkout_permitted_in_test_mode(current_user)
     try:
-        # Get default URLs if not provided
-        default_urls = get_default_urls(request)
-        success_url = body.success_url or default_urls["success_url"]
-        cancel_url = body.cancel_url or default_urls["cancel_url"]
-        
-        # Validate plan exists
         result = await billing.create_checkout_session(
             tenant_id=current_user.tenant_id,
             email=current_user.email,
-            plan_id=body.plan_id,
-            success_url=success_url,
-            cancel_url=cancel_url,
-            business_name=current_user.business_name
+            request_id=str(body.request_id),
+            price_option_id=str(body.price_option_id),
+            business_name=current_user.business_name,
+            allow_team_only=_is_billing_team(current_user),
         )
 
         # Log event (Day 8)
@@ -142,25 +197,75 @@ async def create_checkout_session(
             actor_type="user",
             tenant_id=current_user.tenant_id,
             action="checkout_session_created",
-            description=f"User initiated checkout for plan: {body.plan_id}",
-            metadata={"plan_id": body.plan_id, "mock_mode": result.get("mock_mode", False)},
+            description="User requested a saved subscription checkout",
+            metadata={
+                "request_id": str(body.request_id),
+                "price_option_id": str(body.price_option_id),
+            },
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
-        
+
         return CreateCheckoutResponse(**result)
-    
+
     except ValueError as e:
+        from app.domain.services.billing_checkout import CheckoutError
+
+        detail = {
+            "code": getattr(e, "code", "checkout_unconfirmed"),
+            "message": (
+                str(e)
+                if isinstance(e, CheckoutError)
+                else "Checkout is unconfirmed. Retry the same saved request."
+            ),
+        }
+        if isinstance(e, CheckoutError) and e.request_not_started:
+            detail["request_not_started"] = True
+            if e.existing_attempt is not None:
+                detail["existing_attempt"] = e.existing_attempt
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
+            status_code=e.status_code if isinstance(e, CheckoutError) else 503,
+            detail=detail,
         )
     except Exception as e:
-        logger.error(f"Failed to create checkout session: {e}")
+        logger.error("Checkout outcome unconfirmed: %s", type(e).__name__)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create checkout session: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "checkout_unconfirmed",
+                "message": "Checkout is unconfirmed. Retry the same saved request.",
+            },
         )
+
+
+@router.get(
+    "/checkout-attempts/{request_id}",
+    response_model=CreateCheckoutResponse,
+    dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))],
+)
+async def get_checkout_attempt(
+    request_id: UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    billing: BillingService = Depends(get_billing_service),
+):
+    from app.domain.services.billing_checkout import CheckoutError
+
+    try:
+        return await billing.get_checkout_attempt(
+            tenant_id=current_user.tenant_id, request_id=str(request_id)
+        )
+    except CheckoutError as exc:
+        raise HTTPException(
+            exc.status_code, detail={"code": exc.code, "message": str(exc)}
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            503,
+            detail={
+                "code": "checkout_unconfirmed",
+                "message": "Checkout status is unavailable. Keep your saved request.",
+            },
+        ) from exc
 
 
 @router.post("/webhooks")
@@ -173,35 +278,48 @@ async def stripe_webhook(
     Handle Stripe webhook events.
     """
     billing = BillingService(db_client, audit_logger=audit_logger)
-    
+
     # Get raw body and signature
-    payload = await request.body()
+    payload = bytearray()
+    async for chunk in request.stream():
+        payload.extend(chunk)
+        if len(payload) > 512 * 1024:
+            raise HTTPException(413, detail="Webhook payload is too large")
     signature = request.headers.get("stripe-signature", "")
-    
+
     if not signature and not billing.mock_mode:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Missing Stripe signature"
+            status_code=status.HTTP_400_BAD_REQUEST, detail="Missing Stripe signature"
         )
-    
+
+    from app.domain.services.billing_webhooks import BillingWebhookRetryable
+
     try:
-        result = await billing.handle_webhook(payload, signature)
+        result = await billing.handle_webhook(bytes(payload), signature)
         return result
-    
+    except BillingWebhookRetryable as exc:
+        raise HTTPException(
+            503,
+            detail={
+                "code": exc.code,
+                "message": "Billing event is not completed. Retry or reconcile the saved receipt.",
+            },
+            headers={"Retry-After": "30"},
+        ) from exc
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Webhook handling failed: {e}")
+        logger.error("Webhook handling failed error_type=%s", type(e).__name__)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Webhook handling failed"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Webhook handling failed"
         )
 
 
-@router.get("/subscription", response_model=SubscriptionResponse)
+@router.get(
+    "/subscription",
+    response_model=SubscriptionResponse,
+    dependencies=[Depends(require_permission(Permission.BILLING_READ))],
+)
 async def get_subscription(
     current_user: CurrentUser = Depends(get_current_user),
     billing: BillingService = Depends(get_billing_service),
@@ -209,7 +327,7 @@ async def get_subscription(
 ):
     """
     Get the current user's subscription status.
-    
+
     Returns subscription details including:
     - Current plan
     - Billing period dates
@@ -218,53 +336,68 @@ async def get_subscription(
     try:
         subscription = await billing.get_subscription(current_user.tenant_id)
 
-        # Live `minutes_used` from the calls table; matches the dashboard
-        # endpoint and the auth/profile path.
-        from app.services.scripts.tenant_minutes import compute_tenant_minutes_used
-        minutes_used = await compute_tenant_minutes_used(
-            db_pool,
-            tenant_id=current_user.tenant_id,
-        )
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.minutes_quota import compute_minutes_status
+
+        async with acquire_with_tenant(db_pool, current_user.tenant_id) as conn:
+            quota = (await compute_minutes_status(conn, current_user.tenant_id)).require_available()
+        minutes_used = quota.used_minutes
 
         if not subscription:
-            allocated = (
-                current_user.minutes_remaining + minutes_used
-                if current_user.minutes_remaining is not None
-                else 0
-            )
             return SubscriptionResponse(
                 status="inactive",
-                minutes_allocated=allocated,
+                minutes_allocated=quota.allocated,
                 minutes_used=minutes_used,
-                minutes_remaining=current_user.minutes_remaining,
+                minutes_remaining=quota.remaining_minutes,
+                minutes_state=quota.state,
             )
 
         # Get plan info
         plan = subscription.get("plans") or subscription.get("plan") or {}
-        allocated = int(plan.get("minutes", 0) or 0) if plan else 0
-        minutes_remaining = max(0, allocated - minutes_used)
+        allocated = quota.allocated
+        minutes_remaining = quota.remaining_minutes
 
         return SubscriptionResponse(
             status=subscription.get("status", "unknown"),
             plan_id=subscription.get("plan_id"),
             plan_name=plan.get("name") if plan else None,
-            current_period_start=str(subscription.get("current_period_start")) if subscription.get("current_period_start") else None,
-            current_period_end=str(subscription.get("current_period_end")) if subscription.get("current_period_end") else None,
+            current_period_start=(
+                str(subscription.get("current_period_start"))
+                if subscription.get("current_period_start")
+                else None
+            ),
+            current_period_end=(
+                str(subscription.get("current_period_end"))
+                if subscription.get("current_period_end")
+                else None
+            ),
             cancel_at_period_end=bool(subscription.get("cancel_at")),
             minutes_allocated=allocated,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,
+            minutes_state=quota.state,
+            purchased_price_option=subscription.get("purchased_price_option"),
+            billing_portal_available=bool(subscription.get("billing_portal_available")),
         )
-    
+
     except Exception as e:
-        logger.error(f"Failed to get subscription: {e}")
+        from app.domain.services.minutes_quota import MeteringUnavailable
+        if isinstance(e, MeteringUnavailable):
+            raise HTTPException(status_code=503, detail={"code": "usage_unavailable", "message": "Minute allowance is temporarily unavailable."}) from e
+        logger.error("Failed to get subscription: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get subscription: {str(e)}"
+            detail="Subscription details are temporarily unavailable.",
         )
 
 
-@router.post("/portal", response_model=PortalResponse, dependencies=[Depends(require_permission(Permission.BILLING_UPDATE))])
+@router.post(
+    "/portal",
+    response_model=PortalResponse,
+    # The portal can cancel the subscription, so it needs the same permission
+    # as /cancel (owner-only), not the billing_user BILLING_UPDATE grant.
+    dependencies=[Depends(require_permission(Permission.BILLING_ADMIN))],
+)
 async def create_portal_session(
     body: PortalRequest,
     request: Request,
@@ -276,12 +409,12 @@ async def create_portal_session(
     Create a Stripe Customer Portal session.
     """
     try:
-        default_urls = get_default_urls(request)
-        return_url = body.return_url or f"{default_urls['success_url'].rsplit('/', 1)[0]}"
-        
+        from app.domain.services.billing_checkout import billing_return_urls
+
+        return_url = billing_return_urls()
+
         result = await billing.create_portal_session(
-            tenant_id=current_user.tenant_id,
-            return_url=return_url
+            tenant_id=current_user.tenant_id, return_url=return_url
         )
 
         # Log event (Day 8)
@@ -295,23 +428,24 @@ async def create_portal_session(
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
-        
+
         return PortalResponse(**result)
-    
+
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to create portal session: {e}")
+        logger.error("Failed to create portal session: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create portal session: {str(e)}"
+            detail="The billing portal could not be opened. Please try again.",
         )
 
 
-@router.post("/cancel", response_model=CancelResponse, dependencies=[Depends(require_permission(Permission.BILLING_ADMIN))])
+@router.post(
+    "/cancel",
+    response_model=CancelResponse,
+    dependencies=[Depends(require_permission(Permission.BILLING_ADMIN))],
+)
 async def cancel_subscription(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
@@ -323,8 +457,7 @@ async def cancel_subscription(
     """
     try:
         result = await billing.cancel_subscription(
-            tenant_id=current_user.tenant_id,
-            cancel_at_period_end=True
+            tenant_id=current_user.tenant_id, cancel_at_period_end=True
         )
 
         # Log event (Day 8)
@@ -339,83 +472,73 @@ async def cancel_subscription(
             ip_address=request.client.host if request.client else None,
             user_agent=request.headers.get("user-agent"),
         )
-        
+
         return CancelResponse(**result)
-    
+
     except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except Exception as e:
-        logger.error(f"Failed to cancel subscription: {e}")
+        logger.error("Failed to cancel subscription: %s", type(e).__name__)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to cancel subscription: {str(e)}"
+            detail="The subscription could not be cancelled. Please try again.",
         )
 
 
-@router.get("/usage", response_model=UsageSummaryResponse)
+@router.get(
+    "/usage",
+    response_model=UsageSummaryResponse,
+    dependencies=[Depends(require_permission(Permission.BILLING_READ))],
+)
 async def get_usage_summary(
-    usage_type: str = "minutes",
+    usage_type: Literal["minutes"] = "minutes",
     current_user: CurrentUser = Depends(get_current_user),
-    billing: BillingService = Depends(get_billing_service)
+    billing: BillingService = Depends(get_billing_service),
 ):
     """
-    Get usage summary for the current billing period.
-    
-    Returns:
-    - Total minutes/units used
-    - Allocated amount (from plan)
-    - Remaining amount
-    - Overage (if any)
+    Current calendar-month settled usage and actual tenant allowance, including
+    recorded top-ups. This is not an invoice-period or monetary projection.
     """
     try:
         result = await billing.get_usage_summary(
-            tenant_id=current_user.tenant_id,
-            usage_type=usage_type
+            tenant_id=current_user.tenant_id, usage_type=usage_type
         )
-        
+
         return UsageSummaryResponse(**result)
-    
+
     except Exception as e:
-        logger.error(f"Failed to get usage summary: {e}")
+        logger.error("Usage summary unavailable error_type=%s", type(e).__name__)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get usage summary: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "usage_unavailable", "message": "Usage is temporarily unavailable."},
         )
 
 
-@router.get("/invoices")
+@router.get("/invoices", dependencies=[Depends(require_permission(Permission.BILLING_READ))])
 async def list_invoices(
-    limit: int = 10,
+    limit: int = Query(10, ge=1, le=100),
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_pool=Depends(get_db_pool),
 ):
     """
     List invoices for the current tenant.
     """
     try:
-        result = db_client.table("invoices").select(
-            "*"
-        ).eq("tenant_id", current_user.tenant_id).order(
-            "created_at", desc=True
-        ).limit(limit).execute()
-        
-        return {
-            "invoices": result.data if result.data else [],
-            "count": len(result.data) if result.data else 0
-        }
-    
+        rows = await _invoice_rows(db_pool, current_user.tenant_id, limit=limit)
+        return {"invoices": [_invoice_public(row) for row in rows], "count": len(rows)}
+
     except Exception as e:
-        logger.error(f"Failed to list invoices: {e}")
+        logger.error("Invoice list unavailable error_type=%s", type(e).__name__)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to list invoices: {str(e)}"
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "invoices_unavailable",
+                "message": "Invoices are temporarily unavailable.",
+            },
         )
 
 
-@router.get("/usage/daily")
+@router.get("/usage/daily", dependencies=[Depends(require_permission(Permission.BILLING_READ))])
 async def get_daily_usage(
     days: int = 30,
     current_user: CurrentUser = Depends(get_current_user),
@@ -424,14 +547,16 @@ async def get_daily_usage(
     """
     Daily minutes-used breakdown for the last `days` days (default 30).
 
-    Aggregates `duration_seconds` from the `calls` table grouped by day.
+    Aggregates settled parent and finalized transfer seconds by the parent's UTC day.
     Days with no calls return 0 so the response is a continuous time series
     ready for a sparkline.
 
     Minutes are summed with NO disposition filter, matching the dashboard and
     `minutes_quota.compute_minutes_status` (the gate that actually blocks
-    calls). Connected/failed counts key on `outcome`, never `status` — see
-    `call_outcomes`. The previous version filtered
+    calls). Legacy outbound rows remain usage; inbound parent time becomes
+    usage only after its immutable finalize transaction commits. Connected
+    and failed counts key on `outcome`, never `status` — see `call_outcomes`.
+    The previous version filtered
     `status IN ('answered','completed','in_progress')`, which dropped every
     `ended` call, and then derived `failed` from `status NOT IN (...)` — a
     count the outer WHERE made structurally impossible to be anything but 0.
@@ -447,29 +572,55 @@ async def get_daily_usage(
     )
 
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                rows = await conn.fetch(
-                    """
-                    SELECT date_trunc('day', created_at)::date AS day,
-                           COALESCE(SUM(duration_seconds), 0) AS total_seconds,
+        from app.core.db_utils import acquire_with_tenant
+
+        async with acquire_with_tenant(db_pool, str(tenant_uuid), timeout=5) as conn:
+            rows = await conn.fetch(
+                """
+                    WITH parent_usage AS (
+                    SELECT date_trunc('day', created_at AT TIME ZONE 'UTC')::date AS day,
+                           COALESCE(
+                               SUM(duration_seconds) FILTER (
+                                   WHERE direction IS DISTINCT FROM 'inbound'
+                                      OR billing_status='finalized'
+                               ),
+                               0
+                           ) AS total_seconds,
                            COUNT(*) AS total_calls,
                            COUNT(*) FILTER (WHERE outcome = ANY($2::text[])) AS successful,
                            COUNT(*) FILTER (WHERE outcome = ANY($3::text[])) AS failed
                     FROM calls
                     WHERE tenant_id = $1
                       AND created_at >= $4
+                      AND NOT is_test          -- test sessions are not billable
                     GROUP BY day
+                    ), transfer_usage AS (
+                      SELECT date_trunc('day', parent.created_at AT TIME ZONE 'UTC')::date AS day,
+                             COALESCE(SUM(COALESCE(leg.duration_seconds,0)),0) AS total_seconds
+                        FROM call_legs leg JOIN calls parent ON parent.id=leg.call_id
+                       WHERE parent.tenant_id=$1 AND parent.created_at >= $4
+                         AND NOT parent.is_test AND leg.leg_type='transfer'
+                         AND leg.billing_status='finalized'
+                       GROUP BY day
+                    )
+                    SELECT p.day,p.total_seconds+COALESCE(t.total_seconds,0) AS total_seconds,
+                           p.total_calls,p.successful,p.failed
+                      FROM parent_usage p LEFT JOIN transfer_usage t ON t.day=p.day
                     """,
-                    tenant_uuid,
-                    ANSWERED_OUTCOME_LIST,
-                    FAILED_OUTCOME_LIST,
-                    start,
-                )
+                tenant_uuid,
+                ANSWERED_OUTCOME_LIST,
+                FAILED_OUTCOME_LIST,
+                start,
+            )
     except Exception as e:
-        logger.error(f"Daily usage query failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load daily usage")
+        logger.error("Daily usage unavailable error_type=%s", type(e).__name__)
+        raise HTTPException(
+            503,
+            detail={
+                "code": "usage_unavailable",
+                "message": "Daily usage is temporarily unavailable.",
+            },
+        ) from e
 
     by_day = {r["day"].isoformat(): r for r in rows}
     out: List[dict] = []
@@ -480,17 +631,138 @@ async def get_daily_usage(
         total_calls = int(r["total_calls"]) if r else 0
         successful = int(r["successful"]) if r else 0
         failed = int(r["failed"]) if r else 0
-        out.append({
-            "date": d,
-            "minutesUsed": total_seconds // 60,
-            "totalCalls": total_calls,
-            "successfulCalls": successful,
-            "failedCalls": failed,
-        })
+        out.append(
+            {
+                "date": d,
+                "minutesUsed": total_seconds // 60,
+                # Daily whole minutes are floored separately. Retain seconds so
+                # clients never imply sum(daily floors) equals the monthly meter.
+                "secondsUsed": total_seconds,
+                "totalCalls": total_calls,
+                "successfulCalls": successful,
+                "failedCalls": failed,
+            }
+        )
     return out
 
 
-@router.get("/invoices/{invoice_id}")
+async def _invoice_rows(pool, tenant_id, *, invoice_id=None, limit=10):
+    """Latest recorded provider capture, with two explicit tenant predicates."""
+    from app.core.db_utils import acquire_with_tenant
+
+    async with acquire_with_tenant(pool, str(tenant_id), timeout=5) as conn:
+        return await conn.fetch(
+            """SELECT i.*,snapshot.projection,snapshot.captured_at
+                 FROM invoices i
+                 LEFT JOIN LATERAL (
+                   SELECT projection,captured_at FROM invoice_snapshots
+                    WHERE invoice_id=i.id AND tenant_id=i.tenant_id
+                    ORDER BY id DESC LIMIT 1
+                 ) snapshot ON TRUE
+                WHERE i.tenant_id=$1 AND ($2::uuid IS NULL OR i.id=$2)
+                ORDER BY i.created_at DESC,i.id DESC LIMIT $3""",
+            UUID(str(tenant_id)),
+            invoice_id,
+            limit,
+        )
+
+
+def _invoice_public(row):
+    """Exact recorded minor units. Null means unrecorded, not a zero charge."""
+    from app.domain.services.billing_catalog import _EXPONENTS
+    from app.domain.services.billing_invoice_projection import provider_document_url
+
+    record = dict(row)
+
+    def date(value):
+        return value.isoformat() if hasattr(value, "isoformat") else value
+
+    def amount(value):
+        return value if type(value) is int and abs(value) <= 2**53 - 1 else None
+
+    currency = record.get("currency")
+    currency = currency.lower() if isinstance(currency, str) and currency else None
+    output = {
+        "id": str(record["id"]),
+        "tenant_id": str(record["tenant_id"]),
+        "stripe_invoice_id": record["stripe_invoice_id"],
+        "status": record["status"],
+        "invoice_pdf": record.get("invoice_pdf"),
+        "hosted_invoice_url": record.get("hosted_invoice_url"),
+        "paid_at": date(record.get("paid_at")),
+        "due_date": date(record.get("due_date")),
+        "created_at": date(record.get("created_at")),
+        "detail_status": "unavailable",
+        "detail_source": "stored_summary",
+        "captured_at": None,
+        "source": "stripe",
+        "source_reference": None,
+        "provider_mode": None,
+        "invoice_number": None,
+        "currency": currency,
+        "currency_exponent": _EXPONENTS.get(currency),
+        "amount_due": amount(record.get("amount_due")),
+        "amount_paid": amount(record.get("amount_paid")),
+        "amount_remaining": None,
+        "subtotal": None,
+        "total": None,
+        "discounts": None,
+        "taxes": None,
+        "credits": None,
+        "refunds": None,
+        "line_items": None,
+        "period_start": date(record.get("period_start")),
+        "period_end": date(record.get("period_end")),
+        "errors": [],
+    }
+    projection = record.get("projection")
+    if isinstance(projection, str):
+        try:
+            projection = json.loads(projection)
+        except (TypeError, ValueError):
+            projection = None
+    if isinstance(projection, dict):
+        fields = (
+            "detail_status",
+            "source",
+            "source_reference",
+            "provider_mode",
+            "invoice_number",
+            "currency",
+            "currency_exponent",
+            "amount_due",
+            "amount_paid",
+            "amount_remaining",
+            "subtotal",
+            "total",
+            "discounts",
+            "taxes",
+            "credits",
+            "refunds",
+            "line_items",
+            "period_start",
+            "period_end",
+            "invoice_pdf",
+            "hosted_invoice_url",
+            "status",
+            "paid_at",
+            "due_date",
+            "errors",
+        )
+        output.update({key: projection[key] for key in fields if key in projection})
+        output.update(
+            detail_source="provider_snapshot", captured_at=date(record.get("captured_at"))
+        )
+    for key in ("invoice_pdf", "hosted_invoice_url"):
+        output[key] = provider_document_url(output[key])
+    for key in ("amount_due", "amount_paid", "amount_remaining", "subtotal", "total"):
+        output[key] = amount(output[key])
+    return output
+
+
+@router.get(
+    "/invoices/{invoice_id}", dependencies=[Depends(require_permission(Permission.BILLING_READ))]
+)
 async def get_invoice(
     invoice_id: str,
     current_user: CurrentUser = Depends(get_current_user),
@@ -506,134 +778,104 @@ async def get_invoice(
         raise HTTPException(status_code=400, detail="Invalid id")
 
     try:
-        async with db_pool.acquire() as conn:
-            async with conn.transaction():
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
-                row = await conn.fetchrow(
-                    """
-                    SELECT i.*, p.name AS plan_name, p.minutes AS plan_minutes,
-                           p.concurrent_calls AS plan_concurrent_calls
-                    FROM invoices i
-                    LEFT JOIN subscriptions s ON s.stripe_subscription_id = i.stripe_subscription_id
-                    LEFT JOIN plans p ON p.id = s.plan_id
-                    WHERE i.id = $1 AND i.tenant_id = $2
-                    """,
-                    inv_uuid,
-                    tenant_uuid,
-                )
+        rows = await _invoice_rows(db_pool, tenant_uuid, invoice_id=inv_uuid, limit=1)
     except Exception as e:
-        logger.error(f"Invoice fetch failed: {e}")
-        raise HTTPException(status_code=500, detail="Failed to load invoice")
+        logger.error("Invoice unavailable error_type=%s", type(e).__name__)
+        raise HTTPException(
+            503,
+            detail={
+                "code": "invoice_unavailable",
+                "message": "Invoice is temporarily unavailable.",
+            },
+        ) from e
 
-    if not row:
+    if not rows:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
-    amount_due = (row["amount_due"] or 0) / 100.0
-    amount_paid = (row["amount_paid"] or 0) / 100.0
-    plan_minutes = int(row["plan_minutes"] or 0)
-    plan_concurrent = int(row["plan_concurrent_calls"] or 0)
-
-    return {
-        "id": str(row["id"]),
-        "tenantId": str(row["tenant_id"]),
-        "billingPeriodStart": row["period_start"].isoformat() if row["period_start"] else None,
-        "billingPeriodEnd": row["period_end"].isoformat() if row["period_end"] else None,
-        "planName": row["plan_name"] or "—",
-        "planFee": amount_due,
-        "includedMinutes": plan_minutes,
-        "usedMinutes": plan_minutes,
-        "overageMinutes": 0,
-        "overageCharges": 0,
-        "includedConcurrentCalls": plan_concurrent,
-        "peakConcurrentCalls": 0,
-        "adjustments": [],
-        "subtotal": amount_due,
-        "tax": 0,
-        "totalAmount": amount_due,
-        "status": row["status"],
-        "paidAt": row["paid_at"].isoformat() if row["paid_at"] else None,
-        "dueDate": row["due_date"].isoformat() if row["due_date"] else None,
-        "createdAt": row["created_at"].isoformat() if row["created_at"] else None,
-        "currency": row["currency"] or "usd",
-        "amountPaid": amount_paid,
-        "invoicePdf": row["invoice_pdf"],
-        "hostedInvoiceUrl": row["hosted_invoice_url"],
-        "lineItems": [
-            {
-                "description": f"{row['plan_name'] or 'Plan'} subscription",
-                "quantity": 1,
-                "unitPrice": amount_due,
-                "total": amount_due,
-            }
-        ],
-    }
+    return _invoice_public(rows[0])
 
 
-@router.get("/overage-alerts")
+@router.get("/overage-alerts", dependencies=[Depends(require_permission(Permission.BILLING_READ))])
 async def get_overage_alerts(
     current_user: CurrentUser = Depends(get_current_user),
     billing: BillingService = Depends(get_billing_service),
     db_pool=Depends(get_db_pool),
 ):
     """
-    Derived overage alerts: emits an alert if current usage exceeds the
-    plan's included minutes. No dedicated table; computed on the fly so
-    the UI always reflects the live state from `calls` + `plans`.
+    Current settled usage above the tenant's actual allowance. Without an
+    approved monetary overage policy, this reports usage only, never a charge.
     """
     try:
-        subscription = await billing.get_subscription(current_user.tenant_id)
-        from app.services.scripts.tenant_minutes import compute_tenant_minutes_used
-        minutes_used = await compute_tenant_minutes_used(
-            db_pool, tenant_id=current_user.tenant_id,
-        )
+        usage = await billing.get_usage_summary(current_user.tenant_id)
     except Exception as e:
-        logger.error(f"Overage alerts query failed: {e}")
+        logger.error("Overage status unavailable error_type=%s", type(e).__name__)
+        raise HTTPException(
+            503,
+            detail={"code": "usage_unavailable", "message": "Usage is temporarily unavailable."},
+        ) from e
+    if usage["unlimited"]:
         return []
-
-    plan = (subscription or {}).get("plans") or (subscription or {}).get("plan") or {}
-    allocated = int(plan.get("minutes", 0) or 0)
-    if allocated <= 0:
-        return []
-
+    allocated, minutes_used = usage["allocated"], usage["total_used"]
     alerts: List[dict] = []
     if minutes_used > allocated:
         exceeded = minutes_used - allocated
-        # Standard $0.10/min overage in mock; real rate would live on plans table
-        rate = float(plan.get("overage_per_minute", 0.10) or 0.10)
-        alerts.append({
-            "type": "minutes",
-            "currentUsage": minutes_used,
-            "limit": allocated,
-            "exceededBy": exceeded,
-            "estimatedCharge": round(exceeded * rate, 2),
-            "severity": "critical",
-        })
+        alerts.append(
+            {
+                "type": "minutes",
+                "currentUsage": minutes_used,
+                "limit": allocated,
+                "exceededBy": exceeded,
+                # No approved overage pricing policy is stored. Crossing a usage
+                # allowance is not evidence of an additional monetary charge.
+                "estimatedCharge": None,
+                "currency": None,
+                "currency_exponent": None,
+                "severity": "critical",
+            }
+        )
     return alerts
 
 
-@router.get("/adjustments")
+@router.get("/adjustments", dependencies=[Depends(require_permission(Permission.BILLING_READ))])
 async def get_adjustments(
     current_user: CurrentUser = Depends(get_current_user),
+    db_pool=Depends(get_db_pool),
 ):
     """
-    Billing adjustments / credits ledger. No backing table yet — returns
-    an empty list so the UI renders an honest empty state instead of
-    pulling from a mock constant.
+    Existing signed top-up movements, with no invented invoice relationship.
     """
-    return []
+    from app.domain.services.topup_service import TopupService, public_ledger_entry
+
+    try:
+        rows = await TopupService(db_pool).ledger(current_user.tenant_id, limit=100)
+        return [public_ledger_entry(row) for row in rows]
+    except Exception as exc:
+        logger.error("Billing adjustments unavailable error_type=%s", type(exc).__name__)
+        raise HTTPException(
+            503,
+            detail={
+                "code": "adjustments_unavailable",
+                "message": "Billing movements are temporarily unavailable.",
+            },
+        ) from exc
 
 
 @router.get("/plans")
 async def list_billing_plans(
     db_client: Client = Depends(get_db_client),
+    current_user: Optional[CurrentUser] = Depends(get_optional_user),
 ):
     """
     Convenience pass-through to the plans catalog so the frontend can
-    fetch /billing/plans from a single billing module.
+    fetch /billing/plans from a single billing module. The team also sees
+    its team-only plans (the $1 payment check).
     """
     try:
-        response = db_client.table("plans").select("*").order("price").execute()
-        return response.data or []
+        from app.domain.services.billing_catalog import list_plan_catalog
+
+        return await list_plan_catalog(
+            db_client.pool, include_team_only=_is_billing_team(current_user)
+        )
     except Exception as e:
         logger.error(f"Failed to list plans: {e}")
         raise HTTPException(status_code=500, detail="Failed to list plans")
@@ -643,14 +885,17 @@ async def list_billing_plans(
 async def get_billing_config():
     """
     Get billing configuration status.
-    
+
     Useful for frontend to determine if billing is in mock mode.
     """
-    stripe_configured = bool(os.getenv("STRIPE_SECRET_KEY"))
-    mock_mode = os.getenv("STRIPE_MOCK_MODE", "false").lower() == "true" or not stripe_configured
-    
+    from app.domain.services.billing_mode import get_billing_mode
+
+    mode = get_billing_mode()
+    stripe_configured = mode in {"live", "test"}
+
     return {
         "stripe_configured": stripe_configured,
-        "mock_mode": mock_mode,
-        "publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY") if stripe_configured else None
+        "mock_mode": mode == "mock",
+        "billing_mode": mode,
+        "publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY") if stripe_configured else None,
     }

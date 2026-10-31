@@ -1,0 +1,67 @@
+{
+  "date": "2026-10-01",
+  "scope": "Minimal dependency remediation and isolated compatibility checks; no deployed files or customer traffic changed",
+  "source_sha256": {
+    "Talk-Leee/package.json": "5aed5b1408fd328fc05635bc48333de53054863bed451e00ab70f5052f74a489",
+    "Talk-Leee/package-lock.json": "834c420ccd9c84cf75ac8a8ece012a4d01413b3e2530ea9ae71f7b7226a526dc",
+    "Talk-Leee/src/app/api/v1/[...path]/route.ts": "35e1d4aa2b0c4b9a774eb48a5bf9e0e58ffcf371e67d2dbba4f752b48830dd4e",
+    "Talk-Leee/src/lib/temperature-advice.ts": "877cb7e1500c5928da775f279ec274e415c31468651b613c7d06ee519a59841a",
+    "Admin/frontend/package-lock.json": "e9264771624e18c1445a472ac6299ae3eca1d467eab33e8b53407bc1c29cb6b4"
+  },
+  "changes": {
+    "next": "16.3.8 minimum; eslint-config-next aligned",
+    "nodemailer": "10.0.13 minimum; named Transporter type import required by bundled declarations",
+    "storybook": "Scoped overrides only: builder-webpack5 -> webpack-dev-middleware7.4.6; addon-actions -> uuid11.1.1; retained Storybook8",
+    "lockfiles": "Preserved root audit-fix changes in both frontend lockfiles"
+  },
+  "audit": {
+    "frontend": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "admin": {
+      "info": 0,
+      "low": 0,
+      "moderate": 0,
+      "high": 0,
+      "critical": 0,
+      "total": 0
+    },
+    "fresh_frontend_install": "npm ci --ignore-scripts --no-fund: success, 938 installed, 0 audit vulnerabilities"
+  },
+  "isolated_runtime": {
+    "node": "20.20.2",
+    "npm": "10.8.2",
+    "location": "new temporary directory outside production app; no environment files copied",
+    "shared_local_node_modules": "junction preserved; no installation into junction"
+  },
+  "checks": {
+    "full_frontend_typecheck": "passed, including final temperature-advice.ts copy",
+    "nodemailer": "passed streamTransport buffer message generation, supported SMTP URL/object construction; verify/sendMail APIs present; no external email sent",
+    "uuid": "passed addon-actions actual resolved dependency require; v4() valid version4 UUID",
+    "webpack_dev_middleware": "passed actual builder-resolved dependency compile, waitUntilValid, writeToDisk, loopback HTTP asset serving, and close",
+    "storybook_candidate": "failed: existing .storybook setup lacks TypeScript compiler loader; import type in stories/preview does not parse",
+    "storybook_baseline": "same import type parse failure reproduced after clean installation of exact HEAD package.json/package-lock.json: builder8.6.15, middleware6.1.3, uuid9.0.1",
+    "baseline_package_sha256": "d10ec6e17df73b9b44aa89871e3db3b9f019958eb0d043a72cab28d0ea761abb",
+    "baseline_lock_sha256": "fe906eea5601fe6c4f0a6b51adac8ca5ddba37733d6601d98938cf31241ad8a7"
+  },
+  "limits": [
+    "Full Storybook build is not passing; pre-existing compiler configuration was left unchanged at root direction.",
+    "Next production build is a separate final CI check; not claimed by these focused checks.",
+    "No SMTP delivery, browser Storybook visual flow, or production deployment was tested.",
+    "npm audit reports known advisories at validation time; zero is not a universal security guarantee."
+  ],
+  "primary_sources": [
+    "https://github.com/nodemailer/nodemailer/releases/tag/v10.0.0",
+    "https://github.com/nodemailer/nodemailer/security/advisories/GHSA-6vj9-mwq6-2f5v",
+    "https://github.com/webpack/webpack-dev-middleware/releases/tag/v7.0.0",
+    "https://github.com/webpack/webpack-dev-middleware/security/advisories/GHSA-g84c-rxfj-3j2c",
+    "https://github.com/uuidjs/uuid/blob/v11.1.1/CHANGELOG.md",
+    "https://github.com/uuidjs/uuid/security/advisories/GHSA-w5hq-g745-h8pq",
+    "https://storybook.js.org/docs/8/get-started/frameworks/react-webpack5"
+  ]
+}

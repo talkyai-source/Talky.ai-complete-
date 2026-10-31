@@ -1,0 +1,48 @@
+tests\integration\test_dnc_settlement_truth.py:26:22: F811 Redefinition of unused `dnc_db` from line 20
+   |
+25 | @pytest_asyncio.fixture
+26 | async def settlement(dnc_db):
+   |                      ^^^^^^ F811
+27 |     db = dnc_db
+28 |     call_id = uuid4()
+   |
+   = help: Remove definition: `dnc_db`
+
+tests\integration\test_dnc_settlement_truth.py:224:82: F811 Redefinition of unused `dnc_db` from line 20
+    |
+223 | @pytest.mark.parametrize("source,accepted", [("caller_opt_out", 1), ("bulk_import", 0)])
+224 | async def test_bulk_expired_duplicate_acknowledgement_matches_actual_suppression(dnc_db, source, accepted):
+    |                                                                                  ^^^^^^ F811
+225 |     db = dnc_db
+226 |     service = DNCService(db.pool)
+    |
+    = help: Remove definition: `dnc_db`
+
+tests\integration\test_dnc_settlement_truth.py:237:61: F811 Redefinition of unused `dnc_db` from line 20
+    |
+237 | async def test_concurrent_bulk_duplicates_and_foreign_scope(dnc_db):
+    |                                                             ^^^^^^ F811
+238 |     db = dnc_db
+239 |     service = DNCService(db.pool)
+    |
+    = help: Remove definition: `dnc_db`
+
+tests\integration\test_dnc_settlement_truth.py:248:67: F811 Redefinition of unused `dnc_db` from line 20
+    |
+248 | async def test_bulk_row_database_failure_does_not_poison_next_row(dnc_db):
+    |                                                                   ^^^^^^ F811
+249 |     db = dnc_db
+250 |     bad = "+15555550109"
+    |
+    = help: Remove definition: `dnc_db`
+
+tests\integration\test_dnc_settlement_truth.py:277:73: F811 Redefinition of unused `dnc_db` from line 20
+    |
+277 | async def test_bulk_permission_failure_is_not_masked_as_a_skipped_input(dnc_db):
+    |                                                                         ^^^^^^ F811
+278 |     db = dnc_db
+279 |     await db.admin.execute(f'REVOKE INSERT ON dnc_entries FROM "{db.role}"')
+    |
+    = help: Remove definition: `dnc_db`
+
+Found 5 errors.

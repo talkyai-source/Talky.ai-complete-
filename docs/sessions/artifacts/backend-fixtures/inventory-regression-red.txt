@@ -1,0 +1,14 @@
+F......                                                                  [100%]
+================================== FAILURES ===================================
+________ test_unrelated_python_alter_cannot_borrow_another_tables_rls _________
+tests\unit\test_rls_policy_backfill_migration.py:316: in test_unrelated_python_alter_cannot_borrow_another_tables_rls
+    assert rls_tables == {"invoice_snapshots"}
+E   AssertionError: assert {'invoices'} == {'invoice_snapshots'}
+E     Extra items in the left set:
+E     'invoices'
+E     Extra items in the right set:
+E     'invoice_snapshots'
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit/test_rls_policy_backfill_migration.py::test_unrelated_python_alter_cannot_borrow_another_tables_rls
+1 failed, 6 passed, 7 deselected in 1.39s

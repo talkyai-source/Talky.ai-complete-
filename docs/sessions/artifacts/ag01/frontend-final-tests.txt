@@ -1,0 +1,48 @@
+✔ view and save preserve deepgram_flux/en profile with available voice (547.136ms)
+✔ view and save preserve deepgram_flux/en profile with missing voice (285.0038ms)
+✔ view and save preserve deepgram_nova/es profile with available voice (214.7782ms)
+✔ view and save preserve deepgram_flux/es profile with available voice (228.3743ms)
+✔ late save from account A cannot replace B's draft or play audio (360.6315ms)
+✔ late preview from account A cannot replace B's draft or play audio (381.2113ms)
+✔ late overlapping_preview from account A cannot replace B's draft or play audio (434.739ms)
+✔ late playing_preview from account A cannot replace B's draft or play audio (451.9575ms)
+▶ RadialKnob
+  ✔ exposes its formatted value and purpose to assistive technology (115.109ms)
+  ✔ supports stepped keyboard changes (18.5056ms)
+  ✔ can shrink below its desktop size and retains a visible focus treatment (9.6963ms)
+✔ RadialKnob (145.3447ms)
+✔ Realtime controls keep traditional settings intact and preserve each prompt field (119.7214ms)
+✔ Unavailable Realtime reports its reason and disables controls (71.8513ms)
+✔ Campaign inherits Realtime defaults and retains its prompt across engine switches (54.4433ms)
+✔ AI Options GET and save response preserve all tuning including explicit null eager mode (5.5166ms)
+✔ confirmed B scope loads and creates normally without importing legacy A history or destination (105.4917ms)
+✔ logout clears notifications before server response and stale bootstrap cannot reactivate them (9.9928ms)
+✔ late A profile refresh cannot overwrite a newly verified B login (22.0437ms)
+✔ same verified identity refresh (silent=true) preserves notifications, settings and bound callback (26.4032ms)
+✔ same verified identity refresh (silent=false) preserves notifications, settings and bound callback (15.6483ms)
+✔ foreground refresh preserves scope and latest read (silent=true) settles loading and identity (14.2403ms)
+✔ foreground refresh preserves scope and latest read (silent=false) settles loading and identity (17.2963ms)
+✔ cross-tab non-null token change masks A immediately and verifies B before enabling notifications (31.0906ms)
+✔ unverified same-account token rotation aborts old work but restores saved history after verification (21.888ms)
+✔ cookie-only logout broadcasts an identity boundary even with no stored bearer token (27.0547ms)
+✔ cross-tab cookie logout fences an outstanding profile response without a bearer-key event (13.7446ms)
+✔ a verified user without tenant identity remains unscoped and cannot create notifications (14.2092ms)
+✔ logout then login as A creates a new generation that rejects pre-logout A work (33.7601ms)
+✔ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (15.1399ms)
+✔ blocked storage still receives cookie logout over BroadcastChannel and fences delayed profile reads (16.2837ms)
+✔ blocked-storage account change uses verified B scope and duplicate channel/storage marker verifies only once (18.4806ms)
+✔ local cookie logout and login publish secret-free BroadcastChannel markers when storage writes fail (28.4838ms)
+✔ notifications remain unscoped when neither storage nor BroadcastChannel can synchronize cookie identity (17.4469ms)
+✔ AI Options refetches all tenant catalogs on account switch and never reuses A's cached profile (142.6528ms)
+✔ late A response cannot become B's config or repopulate the departing cache (72.2799ms)
+✔ unverified or tenantless identities cannot start AI Options queries or prefetch (12.8026ms)
+✔ post-login prefetch reruns for a different tenant even when the user ID is unchanged and no editor is mounted (95.4984ms)
+✔ Strict Mode effect replay with an already verified account leaves active query observers usable (49.0132ms)
+ℹ tests 38
+ℹ suites 1
+ℹ pass 38
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 10412.3635

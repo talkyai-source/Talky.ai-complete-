@@ -156,8 +156,11 @@ export async function logoutSession(_token: string | undefined, sessionId: strin
 export async function logoutAllOtherSessions(_token?: string): Promise<{ success: boolean }> {
   const sessions = await getActiveSessions();
   const others = sessions.filter((s) => !s.isCurrent);
-  // Fire revokes in parallel — backend will reject the current one anyway.
-  await Promise.all(others.map((s) => logoutSession(undefined, s.id).catch(() => undefined)));
+  const outcomes = await Promise.allSettled(others.map((s) => logoutSession(undefined, s.id)));
+  const unconfirmed = outcomes.filter((outcome) => outcome.status === "rejected").length;
+  if (unconfirmed > 0) {
+    throw new Error(`${unconfirmed} of ${others.length} session revocations were not confirmed; ${others.length - unconfirmed} confirmed. Refresh the device list before trying again.`);
+  }
   return { success: true };
 }
 

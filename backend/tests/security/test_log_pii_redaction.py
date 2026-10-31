@@ -390,3 +390,22 @@ def test_exemption_can_only_cost_debuggability_not_privacy():
         f"field name(s) are both PII-exempt and sensitive: {sorted(overlap)} — "
         "an exempt name wins, so this would silently stop redacting caller speech"
     )
+
+
+@pytest.mark.parametrize("field", [
+    "instructions_sha256", "knowledge_block_sha256", "knowledge_versions_sha256",
+    "knowledge_snapshot_checksum", "snapshot_sha256", "request_envelope_sha256", "sources_sha256",
+])
+def test_complete_profile_digest_survives_inside_json(field):
+    digest = "a" * 40 + "12345678901234567890" + "b" * 4
+    line = '{"' + field + '": "' + digest + '", "phone": "+447754566590"}'
+    scrubbed = log_redact.scrub_text(line)
+    assert digest in scrubbed
+    assert "447754566590" not in scrubbed
+
+
+@pytest.mark.parametrize("field", ["instructions_sha256", "knowledge_snapshot_checksum", "sources_sha256"])
+@pytest.mark.parametrize("value", ["447754566590", "+447754566590", "a" * 40 + "447754566590"])
+def test_profile_field_name_does_not_exempt_arbitrary_identifier(field, value):
+    scrubbed = log_redact.scrub_text('{"' + field + '": "' + value + '"}')
+    assert "447754566590" not in scrubbed

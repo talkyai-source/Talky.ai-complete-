@@ -4,9 +4,35 @@ Abstract interface for calendar integrations.
 """
 from abc import abstractmethod
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from app.infrastructure.connectors.base import BaseConnector, ConnectorCapability
+
+
+def utc_datetime(value):
+    """Keep explicit offsets; legacy direct connector callers used naive UTC."""
+    if isinstance(value, str):
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    return (value.replace(tzinfo=timezone.utc) if value.tzinfo is None else value.astimezone(timezone.utc))
+
+
+def available_intervals(start_time, end_time, busy_periods, duration_minutes):
+    """Return complete free ranges, clipping overlapping busy intervals to the window."""
+    start, end = utc_datetime(start_time), utc_datetime(end_time)
+    if end <= start or not 1 <= duration_minutes <= 480:
+        raise ValueError("Provide a valid calendar window and duration")
+    current, available = start, []
+    duration = timedelta(minutes=duration_minutes)
+    periods = sorted((max(start, utc_datetime(a)), min(end, utc_datetime(b))) for a, b in busy_periods)
+    for busy_start, busy_end in periods:
+        if busy_end <= start or busy_start >= end or busy_end <= busy_start:
+            continue
+        if current + duration <= busy_start:
+            available.append({"start": current, "end": busy_start})
+        current = max(current, busy_end)
+    if current + duration <= end:
+        available.append({"start": current, "end": end})
+    return available
 
 
 class CalendarEvent:

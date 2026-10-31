@@ -1,0 +1,134 @@
+"""Synthetic actual-method probes; no DB/provider/socket use."""
+import asyncio
+import json
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'backend'))
+from app.api.v1.dependencies import CurrentUser
+from app.api.v1.endpoints import dnc as api
+from app.domain.services.call_guard import CallGuard
+from app.domain.services.call_service import CallService
+from app.domain.services.dialer.opt_out import purge_lead_on_opt_out, record_purge_result
+from app.domain.services.telephony.outcome_resolver import resolve_call_outcome
+
+TENANT = '20000000-0000-4000-8000-000000000017'
+LEAD = '30000000-0000-4000-8000-000000000017'
+PHONE = '+15555550107'
+
+
+class Connection:
+    def __init__(self, expired_source=None):
+        self.lead = {'id': LEAD, 'status': 'calling', 'last_call_result': None,
+                     'do_not_call': False, 'call_attempts': 0}
+        self.entry = self.make_entry(expired_source, datetime.now(timezone.utc) - timedelta(days=1)) if expired_source else None
+
+    def make_entry(self, source, expiry):
+        return {'id': '40000000-0000-4000-8000-000000000017', 'tenant_id': TENANT,
+                'normalized_number': PHONE, 'source': source, 'reason': 'synthetic',
+                'expires_at': expiry, 'created_at': datetime.now(timezone.utc)}
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *args):
+        return False
+
+    def transaction(self):
+        return self
+
+    async def execute(self, sql, *args):
+        if sql.strip().startswith('SET LOCAL'):
+            return 'SET'
+        if 'UPDATE dialer_jobs' in sql:
+            return 'UPDATE 0'
+        if 'UPDATE leads' in sql:
+            self.lead.update(status=args[1], last_call_result=args[2], call_attempts=args[3])
+            return 'UPDATE 1'
+        if 'INSERT INTO dnc_entries' in sql:
+            assert 'ON CONFLICT DO NOTHING' in sql
+            if self.entry is not None:
+                return 'INSERT 0 0'
+            self.entry = self.make_entry(args[2], None)
+            return 'INSERT 0 1'
+        raise AssertionError(sql)
+
+    async def fetchval(self, sql, *args):
+        assert 'SELECT call_attempts FROM leads' in sql
+        return self.lead['call_attempts']
+
+    async def fetchrow(self, sql, *args):
+        if 'INSERT INTO dnc_entries' in sql:
+            self.entry = self.make_entry(args[2], args[5])
+            return self.entry
+        if "UPDATE leads SET status='dnc'" in sql:
+            self.lead.update(status='dnc', last_call_result=args[2])
+            return {'id': LEAD}
+        if 'FROM leads' in sql and 'AND do_not_call' in sql:
+            return {'id': LEAD} if self.lead['do_not_call'] else None
+        if 'FROM dnc_entries' in sql:
+            active = self.entry and (self.entry['expires_at'] is None or self.entry['expires_at'] > datetime.now(timezone.utc))
+            return self.entry if active else None
+        raise AssertionError(sql)
+
+
+async def probe():
+    result = {'scope': 'Actual methods and bulk endpoint handlers with synthetic in-memory SQL ports; no full lifecycle/real SQL/HTTP authorization proof', 'lead_projection': [], 'expired_bulk': []}
+    for achieved in (False, True):
+        conn = Connection()
+        pool = SimpleNamespace(acquire=lambda: conn)
+        voice = SimpleNamespace(_goal_achieved=achieved, _caller_opted_out=True,
+            call_session=SimpleNamespace(conversation_history=[SimpleNamespace(role='user', content='Do not call me again.')]))
+        receipt = await purge_lead_on_opt_out(db_pool=pool, db_client=None,
+            tenant_id=TENANT, lead_id=LEAD, phone_number=PHONE, call_id='synthetic-call')
+        record_purge_result(voice, receipt)
+        before = dict(conn.lead)
+        outcome = resolve_call_outcome(voice)
+        await CallService.__new__(CallService)._update_lead_status_pooled(conn, LEAD, outcome)
+        guard = CallGuard.__new__(CallGuard)
+        guard._db_pool = pool
+        guarded = await guard._check_dnc(TENANT, PHONE, lead_id=LEAD)
+        result['lead_projection'].append({'goal_achieved': achieved, 'purge_complete': receipt['purge_complete'],
+            'before': before, 'outcome': outcome.value, 'after': dict(conn.lead),
+            'lifecycle_purge_skip_condition': bool(voice._caller_opted_out and voice._opt_out_purged),
+            'phone_guard_passed': guarded.passed, 'phone_guard_reason': guarded.reason})
+    for source in ('caller_opt_out', 'bulk_import'):
+        conn = Connection(source)
+        pool = SimpleNamespace(acquire=lambda: conn)
+        user = CurrentUser(id='synthetic-admin', email='admin@example.com', tenant_id=TENANT, role='tenant_admin')
+        response = await api.bulk_import(api.DNCBulkImportRequest(numbers=[PHONE], source=source), user, pool)
+        checked = await api.check_dnc(PHONE, user, pool)
+        result['expired_bulk'].append({'source': source, 'accepted_count': response.accepted_count,
+            'skipped_count': response.skipped_count, 'on_dnc_after': checked.on_dnc,
+            'expiry_still_in_past': conn.entry['expires_at'] < datetime.now(timezone.utc)})
+    from tests.unit.test_call_service_pooled_teardown import _FakeConn, _service
+    from app.core.security.tenant_isolation import set_bypass_rls, set_current_tenant_id, clear_tenant_context
+    from unittest.mock import AsyncMock
+    result['full_pooled_settlement'] = []
+    try:
+        set_bypass_rls(True)
+        set_current_tenant_id(TENANT)
+        for case in ('answered', 'goal_achieved', 'pipeline_failed'):
+            voice = SimpleNamespace(_caller_opted_out=True, _opt_out_purged=True,
+                _goal_achieved=case == 'goal_achieved', _pipeline_failed=case == 'pipeline_failed',
+                call_session=SimpleNamespace(conversation_history=[SimpleNamespace(role='user',content='Do not call me again.')]))
+            outcome = resolve_call_outcome(voice)
+            conn = _FakeConn(
+                calls_row={'id':'call-1','lead_id':LEAD,'campaign_id':'camp-1','dialer_job_id':'job-1','status':'in_progress'},
+                leads_row={'id':LEAD,'call_attempts':0,'status':'dnc','last_call_result':'caller_opt_out','do_not_call':False},
+                dialer_jobs_row={'id':'job-1','status':'processing','attempt_number':1,'tenant_id':TENANT,'priority':5,'phone_number':PHONE})
+            service = _service(conn)
+            service._effective_attempt_number = AsyncMock(return_value=1)
+            execution = await service._handle_call_status_pooled('call-1',outcome,outcome.value,duration=42)
+            result['full_pooled_settlement'].append({'case':case,'resolved_outcome':outcome.value,
+                'lead_after':dict(conn.leads_row),'job_status_after':conn.dialer_jobs_row['status'],
+                'retry_booked':execution.retry_args is not None,
+                'terminal_retry_payload':conn.calls_row['terminal_retry_payload']})
+    finally:
+        clear_tenant_context()
+    print(json.dumps(result, indent=2))
+
+
+asyncio.run(probe())

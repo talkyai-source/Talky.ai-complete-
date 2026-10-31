@@ -7,31 +7,25 @@ Every turn produces a parent span covering the full STT→LLM→TTS cycle,
 with child spans per stage and latency attributes on each.
 """
 import asyncio
+import inspect
 import logging
 import os
 import time
-from dataclasses import is_dataclass
-from typing import Any, Optional, AsyncIterator
+from typing import Any, Optional
 from datetime import datetime
 
 from fastapi import WebSocket
 
 from app.domain.models.session import CallSession, CallState
-from app.domain.models.conversation import AudioChunk, TranscriptChunk, Message, MessageRole, BargeInSignal
-from app.domain.models.conversation_state import ConversationState, CallOutcomeType
+from app.domain.models.conversation import MessageRole
 from app.domain.interfaces.stt_provider import STTProvider
-from app.infrastructure.llm.groq import GroqLLMProvider, LLMTimeoutError
-from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
+from app.infrastructure.llm.groq import GroqLLMProvider
 from app.domain.interfaces.tts_provider import TTSProvider
 from app.domain.interfaces.media_gateway import MediaGateway
-from app.domain.services.conversation_engine import ConversationEngine
 from app.domain.services.transcript_service import TranscriptService
-from app.domain.services.llm_guardrails import LLMGuardrails, LLMGuardrailsConfig, get_guardrails
+from app.domain.services.llm_guardrails import get_guardrails as get_guardrails
 from app.domain.services.latency_tracker import get_latency_tracker
-from app.domain.services.global_ai_config import get_global_config
-from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO, PRODUCT_KEYWORDS as _ASK_AI_PRODUCT_KEYWORDS
 from app.domain.services.end_session_action import (
-    build_end_session_tool_instructions,
     parse_end_session_action,
 )
 from app.domain.services.voice_pipeline import (
@@ -39,25 +33,20 @@ from app.domain.services.voice_pipeline import (
     is_terminal_period_boundary as _is_terminal_period_boundary_impl,
     is_repetitive_transcript as _is_repetitive_transcript_impl,
 )
-from app.domain.services.voice_pipeline.llm_response import (
-    generate_llm_response as _generate_llm_response_impl,
-    response_max_sentences_for_turn as _response_max_sentences_for_turn_impl,
-)
+from app.domain.services.voice_pipeline import capture_mode
 from app.domain.services.voice_pipeline.tts_playback import TtsPlayback
 from app.domain.services.voice_pipeline.turn_runner import TurnRunner
 from app.domain.services.voice_pipeline.turn_streamer import TurnStreamer
 from app.domain.services.voice_pipeline.audio_ingest import AudioIngest, TerminalSTTError
 from app.domain.services.voice_pipeline.transcript_handler import TranscriptHandler
-from app.domain.services.voice_pipeline.turn_ender import TurnEnder, _CONFIDENCE_UNSET
-from app.core.container import get_container
-from app.core.postgres_adapter import Client as PostgresAdapterClient
-from app.core.telemetry import get_tracer, pipeline_span, record_latency, voice_span
-from app.core.telephony_observability import record_turn_silent_reason
-from app.services.scripts import (
-    CallState as CapturedSlotsState,
-    compose_system_prompt,
-    update_state_from_user_turn,
+from app.domain.services.voice_pipeline.turn_ender import (
+    TurnEnder,
+    _CONFIDENCE_UNSET,
+    _CONTACT_EVIDENCE_UNSET,
+    mark_teardown_cancel,
 )
+from app.core.telemetry import get_tracer, voice_span
+from app.core.telephony_observability import record_turn_silent_reason
 
 logger = logging.getLogger(__name__)
 
@@ -257,12 +246,6 @@ class VoicePipelineService:
             extra={"call_id": call_id, "turn_silent_reason": reason},
         )
 
-    # Sentence-budget logic extracted to voice_pipeline.llm_response (item 2,
-    # slice 2). Uses no instance state, so it's a static delegator — call
-    # sites (self._response_max_sentences_for_turn(...)) and the tests that
-    # call it on the instance are unchanged.
-    _response_max_sentences_for_turn = staticmethod(_response_max_sentences_for_turn_impl)
-
     def _barge_in_event_for(self, session: CallSession) -> asyncio.Event:
         event = self._barge_in_events.get(session.call_id)
         if event is None:
@@ -283,9 +266,14 @@ class VoicePipelineService:
         """Cancel any in-flight turn task for a call. Called on hangup/teardown
         so a reply still streaming TTS stops sending audio to a gateway/channel
         that's already gone (otherwise: 'no gateway session' warnings + wasted
-        synthesis on a dead call)."""
+        synthesis on a dead call).
+
+        TEARDOWN ONLY. The task is tagged so the turn queued behind it is
+        dropped rather than dispatched when it unwinds (a barge-in cancels
+        through _cancel_turn_task instead, untagged, and keeps its queue)."""
         task = self._pending_llm_tasks.pop(call_id, None)
         if task and not task.done():
+            mark_teardown_cancel(task)
             task.cancel()
             await self._await_task_after_cancel(task, call_id, "teardown")
 
@@ -326,6 +314,22 @@ class VoicePipelineService:
         session.tts_active = False
         session.state = CallState.ENDING
 
+        # Do the thing before saying it was done. An opt-out is the one end
+        # action with a hard compliance consequence, and until 2026-09-02 the
+        # farewell "I'll take you off the list" played to completion while the
+        # DNC write waited for teardown (best-effort). Write first; if the write
+        # does not land, say something that is true instead.
+        if getattr(session, "_caller_opted_out", False):
+            from app.domain.services.dialer import opt_out as _opt_out
+
+            if not await _opt_out.purge_opt_out_before_farewell(session):
+                logger.warning(
+                    "opt_out_unconfirmed_farewell call_id=%s — DNC write did not land "
+                    "before the farewell; speaking a non-committal close",
+                    call_id[:12],
+                )
+                farewell = _opt_out.OPT_OUT_UNCONFIRMED_FAREWELL
+
         if farewell:
             try:
                 if hasattr(self.media_gateway, "start_playback_tracking"):
@@ -353,7 +357,17 @@ class VoicePipelineService:
 
         hangup = getattr(self.media_gateway, "hangup_call", None)
         hangup_requested = False
+        pbx_session_live = False
         if callable(hangup):
+            # Sampled before the hangup. An awaitable probe (test doubles) is
+            # unknown, which keeps the local teardown below.
+            probe = getattr(self.media_gateway, "is_session_active", None)
+            live = probe(call_id) if callable(probe) else False
+            if inspect.isawaitable(live):
+                if hasattr(live, "close"):
+                    live.close()
+                live = False
+            pbx_session_live = live is True
             try:
                 hangup_requested = bool(await hangup(call_id, reason))
             except Exception as exc:
@@ -368,7 +382,14 @@ class VoicePipelineService:
         # PBX save path then sees an empty buffer and silently skips the save.
         # For sessions with no PBX hangup (browser / ask_ai), hangup_requested is
         # False, so we still tear the gateway session down locally as before.
-        if not hangup_requested:
+        # An UNCONFIRMED PBX hangup on a live session is different: the channel
+        # may still be up, and its ChannelDestroyed teardown (or orphan
+        # recovery) must still find the recording buffer, so stop the agent but
+        # keep the session registered.
+        deactivate = getattr(self.media_gateway, "deactivate_session", None)
+        if not hangup_requested and pbx_session_live and callable(deactivate):
+            deactivate(call_id)
+        elif not hangup_requested:
             try:
                 await self.media_gateway.on_call_ended(call_id, reason)
             except Exception as exc:
@@ -479,6 +500,9 @@ class VoicePipelineService:
                 pending_task = self._pending_llm_tasks.pop(call_id, None)
                 if pending_task:
                     if not pending_task.done():
+                        # Pipeline end is teardown, not a barge-in: the turn
+                        # queued behind this one must not run after it.
+                        mark_teardown_cancel(pending_task)
                         pending_task.cancel()
                     await self._await_task_after_cancel(pending_task, call_id, "orphaned_llm")
                 # Remove barge-in event so a future session cannot inherit stale state.
@@ -486,6 +510,9 @@ class VoicePipelineService:
                 self._turn_epochs.pop(call_id, None)
                 self._barge_in_epoch.pop(call_id, None)
                 self._utterance_seq.pop(call_id, None)
+                # Module-level capture-mode tracking is keyed by call: drop it
+                # (a call that ended right after an email ask would stay armed).
+                capture_mode.clear(call_id)
                 session.stt_active = False
                 self.latency_tracker.cleanup_call(call_id)
                 logger.info("pipeline_end", extra={"call_id": call_id})
@@ -527,6 +554,7 @@ class VoicePipelineService:
         source: str = "final",
         user_text: Optional[str] = None,
         confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
     ) -> None:
         """Run the end-of-turn LLM+TTS cycle.
 
@@ -547,7 +575,12 @@ class VoicePipelineService:
         session read, unchanged.
         """
         return await self._turn_ender.handle(
-            session, websocket, source, user_text=user_text, confidence=confidence
+            session,
+            websocket,
+            source,
+            user_text=user_text,
+            confidence=confidence,
+            transcript_alternatives=transcript_alternatives,
         )
 
     # ── Barge-in ──────────────────────────────────────────────────
@@ -571,6 +604,16 @@ class VoicePipelineService:
                 "instant_opener_echo_ignored call=%s text=%r",
                 call_id[:12], (transcript_text or "")[:24],
             )
+            return
+        from app.domain.services.voice_pipeline.first_line_guard import (
+            is_first_line_greeting_repeat,
+        )
+        if is_first_line_greeting_repeat(session, transcript_text):
+            logger.info(
+                "first_line_greeting_kept_playing call=%s text=%r",
+                call_id[:12], (transcript_text or "")[:24],
+            )
+            session._first_line_barge_skipped = True
             return
 
         # Protect an in-flight FINAL answer that has not started playing yet.
@@ -649,10 +692,19 @@ class VoicePipelineService:
         # id across the whole chain and — because interrupt_playback is
         # single-flight — no possibility of two concurrent barge-ins cancelling
         # the same task twice.
+        _cancelled_turn: dict = {}
+        _barge_at = time.monotonic()
+
         async def _cancel_pending_turn() -> bool:
             cancelled_task = self._pending_llm_tasks.pop(call_id, None)
             if not cancelled_task:
                 return False
+            # Remember what this turn was answering, so a barge-in that turns
+            # out to carry no words at all can re-issue it (see
+            # _resume_after_false_barge_in).
+            _cancelled_turn["text"] = getattr(cancelled_task, "_source_text", None)
+            _cancelled_turn["type"] = getattr(cancelled_task, "_turn_type", "final")
+            _cancelled_turn["caller_turn_order"] = getattr(cancelled_task, "_caller_turn_order", None)
             # Bounded, NON-blocking cancel: never freeze the single STT consumer
             # waiting for the cancelled turn to unwind. Unbounded awaiting here let
             # rapid barge-ins pile up and dropped every backlogged turn → seconds
@@ -665,9 +717,18 @@ class VoicePipelineService:
             session.llm_active = False
             # Roll back any history the cancelled task may have appended before
             # being cancelled (mirrors the TurnResumed rollback path).
+            # The snapshot is taken BEFORE turn_runner appends the caller's own
+            # message, so cutting straight to it deleted what the caller had
+            # just said whenever the cancelled task had not unwound yet (the
+            # common case under this bounded cancel) — 51450718, "I want full
+            # body checkup", never answered. Keep that USER entry; drop only
+            # what the cancelled task added after it.
             restore_len = getattr(session, "_speculative_history_len", None)
             if restore_len is not None and len(session.conversation_history) > restore_len:
-                session.conversation_history = session.conversation_history[:restore_len]
+                keep = restore_len
+                if session.conversation_history[restore_len].role == MessageRole.USER:
+                    keep += 1
+                session.conversation_history = session.conversation_history[:keep]
             session._speculative_history_len = None
             return True
 
@@ -715,6 +776,13 @@ class VoicePipelineService:
             cancel_task=_cancel_pending_turn,
             tts_provider=self.tts_provider,
         )
+        if _cancelled_turn.get("text") and _cancelled_turn.get("type") == "final":
+            asyncio.create_task(
+                self._resume_after_false_barge_in(
+                    session, websocket, _cancelled_turn["text"], _barge_at,
+                    caller_turn_order=_cancelled_turn.get("caller_turn_order"),
+                )
+            )
         if websocket:
             try:
                 await websocket.send_json({
@@ -724,6 +792,86 @@ class VoicePipelineService:
                 })
             except Exception as e:
                 logger.warning(f"Failed to send barge_in to websocket: {e}")
+
+    async def _resume_after_false_barge_in(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket],
+        user_text: str,
+        barge_at: float,
+        *,
+        caller_turn_order: Optional[int] = None,
+    ) -> None:
+        """Re-issue a reply that a word-less barge-in cancelled.
+
+        Live call c54579ea (2026-09-24 07:51:45, softphone → ext 940003): after
+        a Flux stall the call ran on Nova, whose acoustic SpeechStarted fired
+        0.5 s into the reply to "I'm the existing patient." with no words
+        behind it. The reply was cancelled, no caller turn ever followed, and
+        the agent sat silent for 14 s until the caller hung up. A real
+        interruption always produces caller text; if none arrives within the
+        window and nothing else is running, the barge-in was noise or echo —
+        answer the caller's last turn again instead of leaving dead air.
+        """
+        try:
+            window = float(os.getenv("VOICE_FALSE_BARGE_IN_WINDOW_S", "2.0"))
+        except ValueError:
+            window = 2.0
+        await asyncio.sleep(window)
+        call_id = session.call_id
+        if call_id not in self._barge_in_events:
+            return  # session torn down
+        if (caller_turn_order is not None
+                and getattr(session, "_accepted_caller_turn_order", None) != caller_turn_order):
+            return  # a newer accepted caller turn owns the reply, even if finished
+        last_text = getattr(session, "_caller_last_text_at", None)
+        if isinstance(last_text, (int, float)) and last_text >= barge_at:
+            return  # the caller really spoke; their words drive the next turn
+        pending = self._pending_llm_tasks.get(call_id)
+        if pending is not None and not pending.done():
+            return
+        if getattr(session, "tts_active", False):
+            return
+        # Bounded: on call d3a21591 (2026-09-27) this re-issued the same reply
+        # five times and every copy was cut off again by the same line noise.
+        # Two re-issues per caller line; after that the loop is doing harm.
+        try:
+            cap = int(os.getenv("VOICE_FALSE_BARGE_IN_MAX_RESUMES", "2"))
+        except ValueError:
+            cap = 2
+        state = getattr(session, "_false_barge_resumes", None)
+        count = state[1] if isinstance(state, tuple) and state[0] == user_text else 0
+        if count >= cap:
+            logger.info(
+                "false_barge_in_resume_capped call=%s resumes=%d — not re-issuing again",
+                call_id[:12], count,
+            )
+            return
+        session._false_barge_resumes = (user_text, count + 1)
+        # The cancelled turn's USER message is kept in history (so the model
+        # still sees it); the re-run appends it again, so drop the kept copy.
+        history = session.conversation_history
+        if (
+            history
+            and history[-1].role == MessageRole.USER
+            and history[-1].content == user_text
+        ):
+            session.conversation_history = history[:-1]
+        logger.info(
+            "false_barge_in_resumed call=%s — no caller words within %.1fs of "
+            "the barge-in; re-issuing the cancelled reply",
+            call_id[:12], window,
+        )
+        task = asyncio.create_task(
+            self.handle_turn_end(
+                session, websocket, source="final", user_text=user_text,
+            )
+        )
+        task._turn_type = "final"
+        task._utterance_seq = self._utterance_seq.get(call_id, 0)
+        task._caller_turn_order = caller_turn_order
+        task._source_text = user_text
+        self._pending_llm_tasks[call_id] = task
 
     def clear_barge_in_event(self, session: CallSession) -> None:
         """Clear the barge-in event so pending TTS is not immediately interrupted."""
@@ -761,19 +909,6 @@ class VoicePipelineService:
         unchanged.
         """
         return await self._turn_runner.run(session, full_transcript, websocket, turn_id)
-
-    # ── LLM helper ────────────────────────────────────────────────
-
-    async def get_llm_response(self, session: CallSession, user_input: str) -> str:
-        """Get LLM response with guardrails applied.
-
-        Implementation extracted to voice_pipeline.llm_response (item 2,
-        slice 2). Kept as a method so call sites — and tests that mock
-        ``service.get_llm_response`` — are unchanged.
-        """
-        return await _generate_llm_response_impl(
-            self.llm_provider, self.latency_tracker, session, user_input
-        )
 
     # ── TTS helper ────────────────────────────────────────────────
 

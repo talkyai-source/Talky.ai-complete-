@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,10 @@ class StreamEventOut(BaseModel):
 
 
 class StreamEventsResponse(BaseModel):
+    # The authenticated recipient, not the actor that created an event. Browser
+    # tabs validate both fields before attributing this response to local history.
+    tenant_id: str
+    user_id: str
     items: list[StreamEventOut]
     next_cursor: Optional[str] = None
 
@@ -138,7 +143,11 @@ async def list_stream_events(
 
     query = "\n".join(sql)
 
-    async with db_client.pool.acquire() as conn:
+    # RLS is enforced (the app role is no longer BYPASSRLS), so the connection
+    # must carry the tenant GUC or the policy on stream_events filters every row
+    # out and the activity feed silently renders empty. The tenant is the
+    # caller's own (required above), so scope to it rather than bypassing.
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
         rows = await conn.fetch(query, *args)
 
     has_more = len(rows) > limit
@@ -165,4 +174,9 @@ async def list_stream_events(
         last = page[-1]
         next_cursor = _encode_cursor(last["created_at"], last["id"])
 
-    return StreamEventsResponse(items=items, next_cursor=next_cursor)
+    return StreamEventsResponse(
+        tenant_id=current_user.tenant_id,
+        user_id=current_user.id,
+        items=items,
+        next_cursor=next_cursor,
+    )

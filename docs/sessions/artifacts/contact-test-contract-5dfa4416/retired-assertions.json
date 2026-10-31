@@ -1,0 +1,13 @@
+{
+  "retired": [
+    "test_with_the_fix_the_flow_confirms_the_email_then_takes_the_number",
+    "test_as_it_happened_the_open_contacts_survive_and_the_goodbye_is_replaced",
+    "test_the_directive_is_sent_last_and_the_goodbye_gate_is_wired",
+    "test_an_address_counts_as_the_callers_only_if_they_said_it",
+    "test_the_answered_note_and_the_drop_are_wired"
+  ],
+  "migrated": [
+    "test_a_phone_request_during_the_email_read_back_is_kept_not_dropped",
+    "test_the_directive_is_a_marked_note_on_the_callers_latest_turn"
+  ]
+}

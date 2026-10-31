@@ -1,0 +1,15 @@
+...................                                                      [100%]
+============================== warnings summary ===============================
+tests/unit/test_op01_metering_unavailable.py::test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+tests/unit/test_op01_metering_unavailable.py::test_worker_defers_same_job_on_selective_meter_failure_then_recovers
+tests/unit/test_op01_metering_unavailable.py::test_bridge_meter_failure_preserves_attempt_through_actual_http_adapter[False]
+tests/unit/test_op01_metering_unavailable.py::test_bridge_meter_failure_preserves_attempt_through_actual_http_adapter[False]
+tests/unit/test_op01_metering_unavailable.py::test_bridge_meter_failure_preserves_attempt_through_actual_http_adapter[True]
+tests/unit/test_op01_metering_unavailable.py::test_bridge_meter_failure_preserves_attempt_through_actual_http_adapter[True]
+tests/unit/test_op01_metering_unavailable.py::test_existing_queue_deferral_preserves_identity_and_bounded_delay
+tests/unit/test_op01_metering_unavailable.py::test_existing_queue_deferral_preserves_identity_and_bounded_delay
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+19 passed, 8 warnings in 9.77s

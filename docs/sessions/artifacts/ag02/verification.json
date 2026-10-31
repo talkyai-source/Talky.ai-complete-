@@ -1,0 +1,39 @@
+{
+  "candidate": "69d09fe575831c42a14b28c0a7417ca1b388c492",
+  "base": "717fb14faf70f365e023f4fd630cadb1e86775b8",
+  "status": "local_repairs_verified_quality_gate_failed_acceptance_open",
+  "source_integrity": "source-integrity.json",
+  "tests": {
+    "combined_backend_passed": 791,
+    "postgresql_passed": 9,
+    "quality_gate_passed": false
+  },
+  "hash_normalization": "CRLF to LF",
+  "files": {
+    "docs/production ready.md": "16c9bef50689b05fb3e17e60dcc735611aee63038eb18c7bc4bd04de57019daa",
+    "docs/production-readiness/execution-tracker.json": "6e296b59d3c7ed64b2bf5b011cd888521c9cf6b4a4a967ea775a15425ee854e2",
+    "docs/sessions/2026-10-05-ag02-implementation.md": "c60c3c265e2eba1004507137b307748ae808e5389157ae6a764051dd66e82ef4",
+    "docs/sessions/artifacts/ag02/backend-final-command.json": "9701431f9731d42d4d647b25cbea109dcdb0618423b703320f18e439472d8711",
+    "docs/sessions/artifacts/ag02/backend-final.txt": "64a1baddcbdbd0ac938929c4dc6e8300bdaa8ff9c543b02921cc26bc14e4b9f6",
+    "docs/sessions/artifacts/ag02/backend-regression-command.json": "e76a8e0eda6c667f1a393c4ba8f5d121835e5d78273efecf033afb0103f7221b",
+    "docs/sessions/artifacts/ag02/backend-regression.txt": "17a9ac012d992490a3e211f2b827bb91bfbc8e6c3b532111118c04a7ba343e56",
+    "docs/sessions/artifacts/ag02/evidence-boundary.json": "2a44908edfe105783a6d1a27191c56f3113c5b3bf5753837f7cb862269d09cd0",
+    "docs/sessions/artifacts/ag02/gold-corpus.json": "31782fc367ca7bb3f07ba0569b5d1eb0e4cdfbae274b618f3b7c0733db504b52",
+    "docs/sessions/artifacts/ag02/gold-pinned-current.json": "afcb67a071c4051ab8481b6d09ba0d148941e9d08d457d7475b0ad45c79a1ff3",
+    "docs/sessions/artifacts/ag02/gold-pinned-initial.json": "fb010c0c4c1ce034574228121b9429bf55557a10ad5333cfe2928beab72eb910",
+    "docs/sessions/artifacts/ag02/gold-postgres-initial.json": "81311694c7b5e7f9c33c95c86fe5217ae56c2c060c9f710a8996d86140c70421",
+    "docs/sessions/artifacts/ag02/gold-postgres.json": "20eb488104b91d52db37fea0ad280fa1d6304fa23d510e9e8cfd9b9c41801baa",
+    "docs/sessions/artifacts/ag02/ingestion-retrieval-notes.md": "ad70f923b3867e72bed7d2622fe431cf3e9dbe6a144fbf2e32a7c6763050d3f6",
+    "docs/sessions/artifacts/ag02/ingestion-retrieval-postgres.txt": "8761c0ec7a119bbe2f48d749d3a095f731d0dc94d85b7d417b8ea86d97fc7e02",
+    "docs/sessions/artifacts/ag02/ingestion-retrieval-unit.txt": "5d4b464c71d4eed95d6f7d709db137a6d156792588f5a834c98b6b59763410d2",
+    "docs/sessions/artifacts/ag02/lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag02/native-before.txt": "33dea8a25b34e5119041e335fecde5f53cda632199964329381878e280506a8c",
+    "docs/sessions/artifacts/ag02/native-delayed-send-before.txt": "87b0150d077e210eceaf6c511ef911f32a51a5c7d65240b0ba6ed19d8b287089",
+    "docs/sessions/artifacts/ag02/native-focused.txt": "6017655710d6834bf15e55fffb6afba825fda70ddc37c2e3795160b3eef20da3",
+    "docs/sessions/artifacts/ag02/native-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag02/native-regression.txt": "183de8155e3687c3ab5911549bf6ee9a3ab8514bcf5a1e91b64f8bd4ddbfa2fd",
+    "docs/sessions/artifacts/ag02/native-verification.json": "a5f92c6ac00b85557fce3d6dc93da08ab4b0d8bed472fdd0aef9da33c5ae1f57",
+    "docs/sessions/artifacts/ag02/root-verification.json": "e3f09fd767fd9b12b06046d1000aa063763067f6c1a15b1279b220426d149d56",
+    "docs/sessions/artifacts/ag02/source-integrity.json": "bc81ec901241bacd5c2ca4321b46c592013906bd813d8e9b082d4aa8607efad7"
+  }
+}

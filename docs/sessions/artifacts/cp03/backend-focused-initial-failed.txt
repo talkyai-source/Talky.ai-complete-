@@ -1,0 +1,348 @@
+........................................................................ [  4%]
+........................................................................ [  9%]
+..........................FF...............FFF.F.........F.F............ [ 13%]
+........................................................................ [ 18%]
+........................................................................ [ 23%]
+........................................................................ [ 27%]
+........................................................................ [ 32%]
+........................................................................ [ 37%]
+........................................................................ [ 41%]
+........................................................................ [ 46%]
+........................................................................ [ 51%]
+........................................................................ [ 55%]
+........................................................................ [ 60%]
+......F................................................................. [ 65%]
+........................................................................ [ 69%]
+........................................................................ [ 74%]
+........................................................................ [ 78%]
+........................................................................ [ 83%]
+........................................................................ [ 88%]
+........................................................................ [ 92%]
+........................................................................ [ 97%]
+.......................s..............                                   [100%]
+================================== FAILURES ===================================
+__ test_distinct_success_events_credit_once_and_recover_same_receipt_intent ___
+
+    @pytest.mark.asyncio
+    async def test_distinct_success_events_credit_once_and_recover_same_receipt_intent():
+        fixture = fixture_data()
+        first = await apply(fixture)
+>       second = await apply(fixture, "checkout.session.async_payment_succeeded", "evt_late")
+
+tests\unit\test_billing_topup_events.py:88:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('4d575a58-ef4c-4e32-aa38-96db460ce00b')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+_ test_credit_refund_then_late_credit_has_one_positive_and_one_negative_entry _
+
+    @pytest.mark.asyncio
+    async def test_credit_refund_then_late_credit_has_one_positive_and_one_negative_entry():
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge.update(amount_refunded=2500, refunded=True)
+>       await apply(fixture, "charge.refunded", "evt_refund")
+
+tests\unit\test_billing_topup_events.py:101:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('1e036db4-9f8c-431b-b754-6aeadbf7c1e3')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+_____ test_partial_refund_is_explicit_review_without_invented_rounding[1] _____
+
+refunded = 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refunded", [1, 333, 2499])
+    async def test_partial_refund_is_explicit_review_without_invented_rounding(refunded):
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge["amount_refunded"] = refunded
+        with pytest.raises(events.BillingTopupReviewRequired, match="partial_refund"):
+>           await apply(fixture, "charge.refunded", "evt_partial")
+
+tests\unit\test_billing_topup_events.py:132:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('069a79fd-703b-44f4-8bf8-373ed818f0d3')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+
+During handling of the above exception, another exception occurred:
+
+refunded = 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refunded", [1, 333, 2499])
+    async def test_partial_refund_is_explicit_review_without_invented_rounding(refunded):
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge["amount_refunded"] = refunded
+>       with pytest.raises(events.BillingTopupReviewRequired, match="partial_refund"):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'partial_refund'
+E        Input: 'recorded_credit_conflict'
+
+tests\unit\test_billing_topup_events.py:131: AssertionError
+____ test_partial_refund_is_explicit_review_without_invented_rounding[333] ____
+
+refunded = 333
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refunded", [1, 333, 2499])
+    async def test_partial_refund_is_explicit_review_without_invented_rounding(refunded):
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge["amount_refunded"] = refunded
+        with pytest.raises(events.BillingTopupReviewRequired, match="partial_refund"):
+>           await apply(fixture, "charge.refunded", "evt_partial")
+
+tests\unit\test_billing_topup_events.py:132:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('fdbfb434-6599-4bdc-8a15-434d3ee65e7a')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+
+During handling of the above exception, another exception occurred:
+
+refunded = 333
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refunded", [1, 333, 2499])
+    async def test_partial_refund_is_explicit_review_without_invented_rounding(refunded):
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge["amount_refunded"] = refunded
+>       with pytest.raises(events.BillingTopupReviewRequired, match="partial_refund"):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'partial_refund'
+E        Input: 'recorded_credit_conflict'
+
+tests\unit\test_billing_topup_events.py:131: AssertionError
+___ test_partial_refund_is_explicit_review_without_invented_rounding[2499] ____
+
+refunded = 2499
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refunded", [1, 333, 2499])
+    async def test_partial_refund_is_explicit_review_without_invented_rounding(refunded):
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge["amount_refunded"] = refunded
+        with pytest.raises(events.BillingTopupReviewRequired, match="partial_refund"):
+>           await apply(fixture, "charge.refunded", "evt_partial")
+
+tests\unit\test_billing_topup_events.py:132:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('0588c3b4-4eac-415e-bdc3-28b78d0df0f4')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+
+During handling of the above exception, another exception occurred:
+
+refunded = 2499
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("refunded", [1, 333, 2499])
+    async def test_partial_refund_is_explicit_review_without_invented_rounding(refunded):
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge["amount_refunded"] = refunded
+>       with pytest.raises(events.BillingTopupReviewRequired, match="partial_refund"):
+E       AssertionError: Regex pattern did not match.
+E        Regex: 'partial_refund'
+E        Input: 'recorded_credit_conflict'
+
+tests\unit\test_billing_topup_events.py:131: AssertionError
+________ test_current_dispute_reverses_once_without_inventing_a_refund ________
+
+    @pytest.mark.asyncio
+    async def test_current_dispute_reverses_once_without_inventing_a_refund():
+        fixture = fixture_data()
+        await apply(fixture)
+        fixture.charge["disputed"] = True
+>       await apply(fixture, "charge.dispute.created", "evt_dispute")
+
+tests\unit\test_billing_topup_events.py:152:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('222c6c90-b5ff-40a1-82fb-c649e774af55')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+______ test_paid_unlimited_tenant_retains_sentinel_and_duplicate_ledger _______
+
+    @pytest.mark.asyncio
+    async def test_paid_unlimited_tenant_retains_sentinel_and_duplicate_ledger():
+        fixture = fixture_data()
+        fixture.store.update(allocated=0, enforced=0)
+        await apply(fixture)
+>       await apply(fixture, event_id="evt_repeat")
+
+tests\unit\test_billing_topup_events.py:259:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('0dd25567-82dc-4f2b-b22a-57d00d684c56')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.topup_service:topup_service.py:260 topup_on_unlimited_tenant tenant=0dd25567 order=afacdab1 minutes=250 � money recorded, allocation untouched. This tenant should not have been offered a top-up.
+_______ test_existing_ledger_currency_conflict_requires_review[refund] ________
+
+kind = 'refund'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("kind", ["topup", "refund"])
+    async def test_existing_ledger_currency_conflict_requires_review(kind):
+        fixture = fixture_data()
+        await apply(fixture)
+        if kind == "refund":
+            fixture.charge.update(amount_refunded=2500, refunded=True)
+>           await apply(fixture, "charge.refunded", "evt_refund")
+
+tests\unit\test_billing_topup_events.py:271:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_billing_topup_events.py:81: in apply
+    return await events.apply_topup_event(fixture.conn, fixture.provider, event_type, deepcopy(data), event_id)
+app\domain\services\billing_topup_events.py:203: in apply_topup_event
+    _review("recorded_credit_conflict", tenant_id)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+reason = 'recorded_credit_conflict'
+tenant_id = UUID('18e2c9d4-2453-45f4-bc60-aabe99ea5a08')
+
+    def _review(reason, tenant_id=None):
+>       raise BillingTopupReviewRequired(reason, tenant_id)
+E       app.domain.services.topup_service.BillingTopupReviewRequired: recorded_credit_conflict
+
+app\domain\services\billing_topup_events.py:18: BillingTopupReviewRequired
+________________ test_rls_table_guard_matches_schema_inventory ________________
+
+    def test_rls_table_guard_matches_schema_inventory() -> None:
+        """A migration cannot add protected surface without extending this guard."""
+        inventory = runpy.run_path(str(_BACKEND_ROOT / "scripts" / "rls_acquire_inventory.py"))
+        discovered, _tenant_scoped = inventory["discover_rls_tables"](_BACKEND_ROOT)
+        assert tuple(sorted(set(_RLS_TABLES))) == _RLS_TABLES, (
+            "_RLS_TABLES must remain sorted and duplicate-free so stale entries are "
+            "reviewable instead of hidden in a generated-looking list"
+        )
+>       assert set(_RLS_TABLES) == discovered, (
+            "RLS table guard drifted from the schema inventory. "
+            f"missing={sorted(discovered - set(_RLS_TABLES))}, "
+            f"stale={sorted(set(_RLS_TABLES) - discovered)}"
+        )
+E       AssertionError: RLS table guard drifted from the schema inventory. missing=['billing_webhook_notifications', 'billing_webhook_review_log', 'processed_webhook_events'], stale=[]
+E       assert {'abuse_detec...rations', ...} == {'abuse_detec...rations', ...}
+E         Extra items in the right set:
+E         'processed_webhook_events'
+E         'billing_webhook_review_log'
+E         'billing_webhook_notifications'
+E         Use -v to get more diff
+
+tests\unit\test_rls_set_local_invariant.py:307: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra0]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra1]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra2]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra3]
+tests/unit/test_billing_checkout_http.py::test_http_rejects_untrusted_purchase_terms_before_service[extra4]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:59: StarletteDeprecationWarning: 'HTTP_422_UNPROCESSABLE_ENTITY' is deprecated. Use 'HTTP_422_UNPROCESSABLE_CONTENT' instead.
+    response = await handler(conn, exc)  # type: ignore[arg-type]
+
+tests/unit/test_subscription_status_vocabulary.py::test_the_archive_verb_writes_the_same_value_the_guard_blocks_on
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_endpoint_auth_audit.py::test_every_db_route_requires_auth
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:147: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
+
+tests/unit/test_endpoint_auth_audit.py::test_every_db_route_requires_auth
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\api\v1\endpoints\abuse_monitoring.py:684: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    min_severity: str = Query("high", regex="^(medium|high|critical)$"),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_billing_topup_events.py::test_distinct_success_events_credit_once_and_recover_same_receipt_intent
+FAILED tests/unit/test_billing_topup_events.py::test_credit_refund_then_late_credit_has_one_positive_and_one_negative_entry
+FAILED tests/unit/test_billing_topup_events.py::test_partial_refund_is_explicit_review_without_invented_rounding[1]
+FAILED tests/unit/test_billing_topup_events.py::test_partial_refund_is_explicit_review_without_invented_rounding[333]
+FAILED tests/unit/test_billing_topup_events.py::test_partial_refund_is_explicit_review_without_invented_rounding[2499]
+FAILED tests/unit/test_billing_topup_events.py::test_current_dispute_reverses_once_without_inventing_a_refund
+FAILED tests/unit/test_billing_topup_events.py::test_paid_unlimited_tenant_retains_sentinel_and_duplicate_ledger
+FAILED tests/unit/test_billing_topup_events.py::test_existing_ledger_currency_conflict_requires_review[refund]
+FAILED tests/unit/test_rls_set_local_invariant.py::test_rls_table_guard_matches_schema_inventory
+9 failed, 1540 passed, 1 skipped, 8 warnings in 245.67s (0:04:05)

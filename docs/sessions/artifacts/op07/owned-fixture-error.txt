@@ -1,0 +1,74 @@
+.................................................F                       [100%]
+================================== FAILURES ===================================
+_ test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000023E50740AA0>
+
+    @pytest.mark.asyncio
+    async def test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim(monkeypatch):
+        gateway = TelephonyMediaGateway()
+        await gateway.initialize({"sample_rate": 8000, "tts_source_format": "s16le"})
+        adapter = SimpleNamespace(begin_tts_utterance=AsyncMock(), send_tts_audio=AsyncMock())
+
+        async def finish(call_id, utterance_id):
+            return {
+                "utterance_id": utterance_id,
+                "status": "completed",
+                "evidence": "transmitted",
+                "played_ms": 20,
+            }
+
+        adapter.finish_tts_utterance = finish
+        await gateway.on_call_started(CALL, {"adapter": adapter, "pbx_call_id": "synthetic-pbx"})
+        voice, _ = make_voice(monkeypatch, gateway)
+        await _speak_recording_disclosure(voice)
+        assert policy.get_disclosure_state(CALL) == "transmitted"
+        assert policy.consent_satisfied(DECISION, CALL)
+        assert voice.call_session._tts_playout_completed is False
+        adapter.send_tts_audio.assert_awaited()
+
+        # The same transmitted ledger proof admits the configured storage path;
+        # this does not elevate it into a human-hearing or transport-played claim.
+        from contextlib import asynccontextmanager
+        from app.domain.services import recording_service as recording
+        @asynccontextmanager
+        async def owned_call(pool, tenant):
+            assert tenant == TENANT
+            yield SimpleNamespace(fetchrow=AsyncMock(return_value={"id": CALL}))
+        monkeypatch.setattr(recording, "acquire_with_tenant", owned_call)
+>       monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))
+E       NameError: name 'tmp_path' is not defined
+
+backend\tests\unit\test_op07_disclosure_receipts.py:175: NameError
+============================== warnings summary ===============================
+tests/unit/test_op07_recording_retention.py: 42 warnings
+  <string>:9: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:625: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_started = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-cloud]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-cloud]
+tests/unit/test_op07_recording_retention.py::test_teardown_stub_preserves_authoritative_tenant[same-owner]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:643: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    upload_finished = datetime.utcnow()
+
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[local]
+tests/unit/test_op07_recording_retention.py::test_explicit_policy_and_owned_call_allow_existing_storage[configured-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[spoken-local]
+tests/unit/test_op07_recording_retention.py::test_required_notice_supported_transport_evidence_allows_storage[transmitted-local]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-op07-20261005\backend\app\domain\services\recording_service.py:739: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/test_op07_disclosure_receipts.py::test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim
+  <string>:8: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_op07_disclosure_receipts.py::test_actual_asterisk_gateway_transmission_is_supported_without_hearing_claim
+1 failed, 49 passed, 55 warnings in 3.36s

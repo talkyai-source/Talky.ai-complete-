@@ -1,0 +1,97 @@
+app\api\v1\endpoints\telephony_bridge.py:35:22: F401 [*] `datetime.datetime` imported but unused
+   |
+33 | from contextlib import asynccontextmanager
+34 | from dataclasses import dataclass, replace
+35 | from datetime import datetime, timezone
+   |                      ^^^^^^^^ F401
+36 | from uuid import UUID, uuid4
+37 | from typing import Literal, Optional
+   |
+   = help: Remove unused import
+
+app\api\v1\endpoints\telephony_bridge.py:35:32: F401 [*] `datetime.timezone` imported but unused
+   |
+33 | from contextlib import asynccontextmanager
+34 | from dataclasses import dataclass, replace
+35 | from datetime import datetime, timezone
+   |                                ^^^^^^^^ F401
+36 | from uuid import UUID, uuid4
+37 | from typing import Literal, Optional
+   |
+   = help: Remove unused import
+
+app\api\v1\endpoints\telephony_bridge.py:79:5: F401 [*] `app.domain.services.telephony.config._RINGING_MAX_AGE_S` imported but unused
+   |
+77 | from app.domain.services.telephony.config import (  # noqa: E402
+78 |     _MAX_TELEPHONY_SESSIONS,
+79 |     _RINGING_MAX_AGE_S,
+   |     ^^^^^^^^^^^^^^^^^^ F401
+80 | )
+81 | from app.domain.services.telephony.adapter_registry import (  # noqa: E402
+   |
+   = help: Remove unused import: `app.domain.services.telephony.config._RINGING_MAX_AGE_S`
+
+app\api\v1\endpoints\telephony_bridge.py:600:9: F841 Local variable `container` is assigned to but never used
+    |
+598 |     provider_health: dict = {}
+599 |     try:
+600 |         container = _get_orchestrator().__class__  # just a way to import lazily
+    |         ^^^^^^^^^ F841
+601 |         from app.core.container import get_container
+    |
+    = help: Remove assignment to unused variable `container`
+
+app\api\v1\endpoints\telephony_bridge.py:2435:13: F841 Local variable `detector` is assigned to but never used
+     |
+2433 |         # Trigger post-call abuse detection (async)
+2434 |         try:
+2435 |             detector = AbuseDetectionService(
+     |             ^^^^^^^^ F841
+2436 |                 db_pool=container.db_pool,
+2437 |                 redis_client=getattr(container, "redis", None),
+     |
+     = help: Remove assignment to unused variable `detector`
+
+app\api\v1\endpoints\telephony_providers.py:20:56: F401 [*] `fastapi.status` imported but unused
+   |
+18 | from uuid import UUID
+19 | 
+20 | from fastapi import APIRouter, Depends, HTTPException, status
+   |                                                        ^^^^^^ F401
+21 | from pydantic import BaseModel, Field
+   |
+   = help: Remove unused import: `fastapi.status`
+
+app\workers\dialer_worker.py:915:21: F841 Local variable `talklee_call_id` is assigned to but never used
+    |
+914 |                     internal_call_id = call_intent.call_id
+915 |                     talklee_call_id = call_intent.talklee_call_id
+    |                     ^^^^^^^^^^^^^^^ F841
+916 |                     leg_id = call_intent.leg_id
+    |
+    = help: Remove assignment to unused variable `talklee_call_id`
+
+app\workers\dialer_worker.py:916:21: F841 Local variable `leg_id` is assigned to but never used
+    |
+914 |                     internal_call_id = call_intent.call_id
+915 |                     talklee_call_id = call_intent.talklee_call_id
+916 |                     leg_id = call_intent.leg_id
+    |                     ^^^^^^ F841
+917 | 
+918 |                     # B1: transition the call into the public state machine
+    |
+    = help: Remove assignment to unused variable `leg_id`
+
+app\workers\dialer_worker.py:1407:67: F401 [*] `app.domain.services.call_guard.GuardDecision` imported but unused
+     |
+1405 |         """
+1406 |         try:
+1407 |             from app.domain.services.call_guard import CallGuard, GuardDecision
+     |                                                                   ^^^^^^^^^^^^^ F401
+1408 | 
+1409 |             guard = CallGuard(
+     |
+     = help: Remove unused import: `app.domain.services.call_guard.GuardDecision`
+
+Found 9 errors.
+[*] 5 fixable with the `--fix` option (4 hidden fixes can be enabled with the `--unsafe-fixes` option).

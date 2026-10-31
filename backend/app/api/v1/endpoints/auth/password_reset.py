@@ -32,12 +32,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, EmailStr, Field
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
     PasswordValidationError,
     hash_password,
     validate_password_strength,
 )
+from app.core.security.lockout import record_login_attempt
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import revoke_all_user_sessions
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
@@ -115,6 +117,62 @@ def _reset_redis_key(email: str) -> str:
 
 def _hash_reset_code(code: str) -> str:
     return hashlib.sha256(code.encode("utf-8")).hexdigest()
+
+
+def _password_generation(stored_hash) -> str:
+    return hashlib.sha256(str(stored_hash or "").encode("utf-8")).hexdigest()
+
+
+async def _clear_reset_request(redis, email, original) -> None:
+    """Cleanup cannot remove a newer request or change a committed outcome."""
+    try:
+        await redis.eval("""if redis.call('GET',KEYS[1]) == ARGV[1] then
+            return redis.call('DEL',KEYS[1]) else return 0 end""",
+            1, _reset_redis_key(email), original)
+    except Exception:
+        logger.warning("password_reset_request_cleanup_unavailable")
+
+
+# A 6-digit code has 1e6 values; uncapped, a few hundred requests a second
+# find it within its 15-minute life. Every verification claims an attempt
+# atomically BEFORE the code is compared, so parallel guesses cannot exceed
+# the cap, and past it the code is burned. The counter is keyed by the
+# code's hash, so a newly issued code starts its own count.
+_RESET_MAX_ATTEMPTS = 5
+_CLAIM_RESET_ATTEMPT = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return -2 end
+local n = redis.call('INCR', KEYS[2])
+if n == 1 then
+  local ttl = redis.call('PTTL', KEYS[1])
+  if ttl <= 0 then ttl = tonumber(ARGV[3]) end
+  redis.call('PEXPIRE', KEYS[2], ttl)
+end
+if n > tonumber(ARGV[2]) then
+  redis.call('DEL', KEYS[1])
+  return -1
+end
+return n
+"""
+
+
+async def _claim_reset_attempt(redis, email: str, original, pending: dict) -> bool:
+    """True when this verification may compare the code; fails closed."""
+    attempts_key = (
+        f"pwreset:attempts:{email.strip().lower()}:"
+        f"{str(pending.get('code_hash') or '')[:16]}"
+    )
+    try:
+        claimed = await redis.eval(
+            _CLAIM_RESET_ATTEMPT, 2, _reset_redis_key(email), attempts_key,
+            original, _RESET_MAX_ATTEMPTS, _RESET_CODE_TTL_SECONDS * 1000,
+        )
+    except Exception as exc:
+        logger.warning("password_reset_attempt_claim_unavailable err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Redis is unavailable; cannot reset password right now.",
+        ) from exc
+    return int(claimed) > 0
 
 
 # --- refresh-token revocation reason ---------------------------------------
@@ -227,8 +285,8 @@ async def forgot_password(
     email = body.email.strip().lower()
     generic_ok = {
         "message": (
-            "If an account exists for that email, a 6-digit reset code "
-            "has been sent. The code expires in 15 minutes."
+            "If the account is eligible, check its email for a reset code. "
+            "A code expires in 15 minutes; if none arrives, try again later."
         ),
     }
 
@@ -243,9 +301,10 @@ async def forgot_password(
         # additional emails arriving; that's the intended behaviour.
         return generic_ok
 
-    async with db_client.pool.acquire() as conn:
+    # Password recovery starts with an email, before a tenant is known.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         user_row = await conn.fetchrow(
-            "SELECT id FROM user_profiles WHERE LOWER(email) = $1",
+            "SELECT id,password_hash FROM user_profiles WHERE LOWER(email) = $1",
             email,
         )
 
@@ -263,35 +322,39 @@ async def forgot_password(
         "user_id": user_id,
         "email": email,
         "code_hash": _hash_reset_code(code),
+        "password_generation": _password_generation(user_row["password_hash"]),
     }
-    redis = _get_redis_or_503()
-    await redis.setex(_reset_redis_key(email), _RESET_CODE_TTL_SECONDS, json.dumps(payload))
+    # A storage or mail failure answers exactly like an unknown address. A 500
+    # here (and only for registered emails) would reveal which accounts exist.
+    try:
+        await redis.setex(_reset_redis_key(email), _RESET_CODE_TTL_SECONDS, json.dumps(payload))
+    except Exception as exc:
+        logger.warning("forgot_password_pending_write_failed err=%s", type(exc).__name__)
+        return generic_ok
 
     # Send the code.  Tolerate send failures (logged) so a misconfigured
     # SMTP setup doesn't 500 the caller — they'd just never receive a code,
     # which is the same observable failure as a typo'd email anyway.
-    email_service = get_email_service()
     try:
-        sent = await email_service.send_password_reset_email(
+        email_service = get_email_service()
+        # EmailService may not have a dedicated reset method; the generic
+        # signup-code template ("here is your code, expires in N minutes")
+        # works for both.
+        sender = getattr(email_service, "send_password_reset_email", None) \
+            or email_service.send_signup_code_email
+        sent = await sender(
             recipient_email=email,
             recipient_name=email.split("@")[0],
             code=code,
             expires_in_minutes=_RESET_CODE_TTL_SECONDS // 60,
         )
-    except AttributeError:
-        # EmailService may not have a dedicated reset method yet; fall back
-        # to the generic signup-code template — the body wording is similar
-        # ("here is your code, expires in N minutes") and works for both.
-        sent = await email_service.send_signup_code_email(
-            recipient_email=email,
-            recipient_name=email.split("@")[0],
-            code=code,
-            expires_in_minutes=_RESET_CODE_TTL_SECONDS // 60,
-        )
+    except Exception as exc:
+        logger.warning("forgot_password_email_send_error err=%s", type(exc).__name__)
+        sent = False
     if not sent:
         logger.warning(
             "forgot_password_email_send_failed email=%s — code stored in Redis "
-            "but no email was delivered. Check SMTP_HOST / SMTP_USER / "
+            "but email submission was not confirmed. Check SMTP_HOST / SMTP_USER / "
             "SMTP_PASSWORD env vars.",
             email,
         )
@@ -302,7 +365,7 @@ async def forgot_password(
             actor_id=user_id,
             actor_type="user",
             action="password_reset_requested",
-            description=f"Password reset code emailed to {email}",
+            description="Password reset requested; email submission accepted" if sent else "Password reset requested; email submission unconfirmed",
             ip_address=get_client_ip(request),
             user_agent=get_user_agent(request),
         )
@@ -356,13 +419,23 @@ async def reset_password(
         pending = json.loads(raw)
     except Exception:
         # Corrupted Redis entry — treat as invalid.
-        await redis.delete(_reset_redis_key(email))
+        await _clear_reset_request(redis, email, raw)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset code.",
         )
 
-    if _hash_reset_code(code) != pending.get("code_hash"):
+    if not isinstance(pending, dict):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code.",
+        )
+    if not await _claim_reset_attempt(redis, email, raw, pending):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or expired reset code. Request a new code.",
+        )
+    if not secrets.compare_digest(_hash_reset_code(code), str(pending.get("code_hash") or "")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset code.",
@@ -371,7 +444,7 @@ async def reset_password(
     user_id = pending.get("user_id")
     if not user_id:
         # Should never happen — defensive guard.
-        await redis.delete(_reset_redis_key(email))
+        await _clear_reset_request(redis, email, raw)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset code.",
@@ -379,17 +452,19 @@ async def reset_password(
 
     new_hash = hash_password(new_password)
 
-    async with db_client.pool.acquire() as conn:
+    # The server-stored Redis recovery record identifies a user, but carries no
+    # tenant claim; resolve and mutate it under the narrow pre-auth scope.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         # Re-confirm the user still exists and the email hasn't changed.
         row = await conn.fetchrow(
-            "SELECT id FROM user_profiles WHERE id = $1 AND LOWER(email) = $2",
+            "SELECT id,password_hash FROM user_profiles WHERE id = $1 AND LOWER(email) = $2 FOR UPDATE",
             user_id, email,
         )
-        if not row:
-            await redis.delete(_reset_redis_key(email))
+        if (not row or not isinstance(pending.get("password_generation"), str)
+                or not secrets.compare_digest(pending["password_generation"], _password_generation(row["password_hash"]))):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired reset code.",
+                detail="Invalid or expired reset code. Request a new code.",
             )
 
         async with conn.transaction():
@@ -429,12 +504,19 @@ async def reset_password(
             # EVERY device must re-authenticate, including the caller.
             refresh_revoked = await _revoke_refresh_tokens_for_reset(conn, user_id)
 
+            # Lockout is computed from login_attempts, not the columns zeroed
+            # above; a success row is the boundary that clears it.
+            await record_login_attempt(
+                conn, email=email, user_id=user_id, ip_address=get_client_ip(request),
+                success=True, failure_reason="password_reset",
+            )
+
     logger.info(
         "password_reset_completed user=%s sessions_revoked=%s refresh_tokens_revoked=%s",
         user_id, sessions_revoked, refresh_revoked,
     )
 
-    await redis.delete(_reset_redis_key(email))
+    await _clear_reset_request(redis, email, raw)
 
     try:
         await audit_logger.log(

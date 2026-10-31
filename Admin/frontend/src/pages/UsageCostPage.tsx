@@ -1,9 +1,14 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
 import { UsageBreakdownCard } from '../components/UsageBreakdownCard';
+import { SupplierEvidenceCard } from '../components/SupplierEvidenceCard';
 import { DollarSign, RefreshCw, Info, Building2 } from 'lucide-react';
 import { api } from '../lib/api';
+import type { LegacyOutboundEstimate } from '../lib/api';
+import { formatLegacyEstimate, formatRecordedCount, sumRecordedValues } from '../lib/usage-evidence';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { useOperationOwner } from '../lib/use-operation-owner';
 
 // Shape returned by GET /admin/usage/breakdown?group_by=tenant
 interface TenantUsageRow {
@@ -11,7 +16,9 @@ interface TenantUsageRow {
     tenant_name: string;
     call_count: number;
     total_minutes: number;
-    total_cost: number;
+    total_seconds: number;
+    total_cost: number | null;
+    legacy_outbound_estimate: LegacyOutboundEstimate;
 }
 
 // First day of the current month, YYYY-MM-DD (UTC, matching the backend).
@@ -24,15 +31,30 @@ function today(): string {
 }
 
 export function UsageCostPage() {
+    const generation = useAuthGeneration();
+    return <UsageCostContent key={generation} generation={generation} />;
+}
+
+function UsageCostContent({ generation }: { generation: number }) {
     const [fromDate, setFromDate] = useState(monthStart());
     const [toDate, setToDate] = useState(today());
     const [tenantRows, setTenantRows] = useState<TenantUsageRow[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [monetaryNote, setMonetaryNote] = useState(
+        'Authoritative inbound monetary totals are ledger-only and are not shown here.',
+    );
     // Bumped on Refresh / date change to force the summary card to refetch.
     const [reloadKey, setReloadKey] = useState(0);
+    const [supplierLocked, setSupplierLocked] = useState(false);
+    const [resolvedQuery, setResolvedQuery] = useState<string | null>(null);
+    const requestGeneration = useRef(0);
+    const queryKey = `${fromDate}|${toDate}|${reloadKey}`;
+    const captureOwner = useOperationOwner(generation, queryKey);
 
     const fetchTenantBreakdown = useCallback(async () => {
+        const owns = captureOwner();
+        const generation = ++requestGeneration.current;
         setLoading(true);
         setError(null);
         try {
@@ -41,31 +63,47 @@ export function UsageCostPage() {
                 from_date: fromDate,
                 to_date: toDate,
             });
-            if (res.error) {
-                setError(res.error.message);
+            if (!owns() || generation !== requestGeneration.current) return;
+            const validRows = res.data && Array.isArray(res.data.breakdown)
+                && typeof res.data.monetary_note === 'string' && res.data.breakdown.every(row =>
+                    row && typeof row.tenant_id === 'string' && (row.tenant_name === null || typeof row.tenant_name === 'string')
+                    && [row.call_count, row.total_minutes, row.total_seconds].every(value =>
+                        value === null || (typeof value === 'number' && Number.isFinite(value) && value >= 0)));
+            if (res.error || !res.data || !validRows) {
+                setError('Usage data is unavailable. Please retry.');
                 setTenantRows([]);
             } else {
-                const rows = (res.data?.breakdown ?? []) as unknown as TenantUsageRow[];
+                const rows = [...res.data.breakdown] as unknown as TenantUsageRow[];
+                if (res.data) {
+                    setMonetaryNote(res.data.monetary_note);
+                }
                 // Highest spend / usage first.
                 rows.sort((a, b) => (b.total_minutes ?? 0) - (a.total_minutes ?? 0));
                 setTenantRows(rows);
             }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to load usage breakdown');
+        } catch {
+            if (!owns() || generation !== requestGeneration.current) return;
+            setError('Usage data is unavailable. Please retry.');
             setTenantRows([]);
         } finally {
-            setLoading(false);
+            if (owns() && generation === requestGeneration.current) {
+                setLoading(false);
+                setResolvedQuery(queryKey);
+            }
         }
-    }, [fromDate, toDate]);
+    }, [fromDate, toDate, queryKey, captureOwner]);
 
     useEffect(() => {
         fetchTenantBreakdown();
+        return () => { requestGeneration.current += 1; };
     }, [fetchTenantBreakdown, reloadKey]);
 
-    const refresh = () => setReloadKey((k) => k + 1);
+    const refresh = () => { if (!supplierLocked) setReloadKey((k) => k + 1); };
 
-    const tenantTotalMinutes = tenantRows.reduce((s, r) => s + (r.total_minutes ?? 0), 0);
-    const tenantTotalCalls = tenantRows.reduce((s, r) => s + (r.call_count ?? 0), 0);
+    const tenantTotalSeconds = sumRecordedValues(tenantRows.map((r) => r.total_seconds));
+    const tenantTotalMinutes = tenantTotalSeconds === null ? null : Math.floor(tenantTotalSeconds / 60);
+    const tenantTotalCalls = sumRecordedValues(tenantRows.map((r) => r.call_count));
+    const currentPeriodLoaded = !loading && resolvedQuery === queryKey;
 
     return (
         <div className="app-layout">
@@ -81,7 +119,7 @@ export function UsageCostPage() {
                         </div>
                         <div>
                             <h1 className="page-title">Usage &amp; Cost</h1>
-                            <p className="page-description">Monitor platform usage and billing analytics</p>
+                            <p className="page-description">Review recorded usage and retained supplier evidence</p>
                         </div>
                         <div className="page-header-actions">
                             <div className="date-range-filter">
@@ -91,7 +129,8 @@ export function UsageCostPage() {
                                         type="date"
                                         value={fromDate}
                                         max={toDate}
-                                        onChange={(e) => setFromDate(e.target.value)}
+                                        disabled={supplierLocked}
+                                        onChange={(e) => { if (!supplierLocked) setFromDate(e.target.value); }}
                                     />
                                 </label>
                                 <label>
@@ -101,11 +140,12 @@ export function UsageCostPage() {
                                         value={toDate}
                                         min={fromDate}
                                         max={today()}
-                                        onChange={(e) => setToDate(e.target.value)}
+                                        disabled={supplierLocked}
+                                        onChange={(e) => { if (!supplierLocked) setToDate(e.target.value); }}
                                     />
                                 </label>
                             </div>
-                            <button className="btn btn-secondary" onClick={refresh} disabled={loading}>
+                            <button className="btn btn-secondary" onClick={refresh} disabled={loading || supplierLocked}>
                                 <RefreshCw size={16} className={loading ? 'spinning' : ''} />
                                 Refresh
                             </button>
@@ -115,13 +155,12 @@ export function UsageCostPage() {
                     <div className="usage-disclaimer">
                         <Info size={15} />
                         <span>
-                            Call minutes and API-call counts are actual. Provider costs are estimates
-                            derived from usage (Deepgram ~$0.0325/min, Groq ~$0.01/call), not billed
-                            amounts. Per-tenant cost shows $0 until telephony cost is recorded on each call.
+                            Recorded duration and call counts include inbound and outbound activity.
+                            Complete supplier spending and call-level provider attribution are unavailable. {monetaryNote}
                         </span>
                     </div>
 
-                    {error && (
+                    {currentPeriodLoaded && error && (
                         <div className="error-banner">
                             <p>{error}</p>
                             <button onClick={refresh}>Retry</button>
@@ -135,6 +174,9 @@ export function UsageCostPage() {
                         toDate={toDate}
                     />
 
+                    <SupplierEvidenceCard fromDate={fromDate} toDate={toDate} generation={generation}
+                        refreshVersion={reloadKey} onLockedChange={setSupplierLocked} />
+
                     {/* Per-tenant breakdown */}
                     <div className="card">
                         <div className="card-header">
@@ -142,15 +184,17 @@ export function UsageCostPage() {
                                 <Building2 size={18} />
                                 Usage by Tenant
                             </h3>
-                            <span className="card-count">{tenantRows.length} tenants</span>
+                            <span className="card-count">{currentPeriodLoaded ? `${tenantRows.length} tenants` : 'Loading…'}</span>
                         </div>
                         <div className="card-body">
                             <div className="table-container">
-                                {loading ? (
+                                {!currentPeriodLoaded ? (
                                     <div className="table-loading">
                                         <RefreshCw className="spinning" size={20} />
                                         <span>Loading tenant usage…</span>
                                     </div>
+                                ) : error ? (
+                                    <p>Tenant usage is unavailable.</p>
                                 ) : tenantRows.length === 0 ? (
                                     <div className="empty-state">
                                         <DollarSign size={40} />
@@ -163,7 +207,9 @@ export function UsageCostPage() {
                                                 <th>Tenant</th>
                                                 <th style={{ textAlign: 'right' }}>Calls</th>
                                                 <th style={{ textAlign: 'right' }}>Minutes</th>
-                                                <th style={{ textAlign: 'right' }}>Cost</th>
+                                                <th style={{ textAlign: 'right' }}>
+                                                    Legacy outbound USD estimate
+                                                </th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -171,13 +217,13 @@ export function UsageCostPage() {
                                                 <tr key={r.tenant_id}>
                                                     <td>{r.tenant_name || 'Unknown'}</td>
                                                     <td style={{ textAlign: 'right' }}>
-                                                        {(r.call_count ?? 0).toLocaleString()}
+                                                        {formatRecordedCount(r.call_count)}
                                                     </td>
                                                     <td style={{ textAlign: 'right' }}>
-                                                        {(r.total_minutes ?? 0).toLocaleString()}
+                                                        {formatRecordedCount(r.total_minutes)}
                                                     </td>
                                                     <td style={{ textAlign: 'right' }}>
-                                                        ${(r.total_cost ?? 0).toFixed(2)}
+                                                        {formatLegacyEstimate(r.legacy_outbound_estimate)}
                                                     </td>
                                                 </tr>
                                             ))}
@@ -186,10 +232,10 @@ export function UsageCostPage() {
                                             <tr>
                                                 <td><strong>Total</strong></td>
                                                 <td style={{ textAlign: 'right' }}>
-                                                    <strong>{tenantTotalCalls.toLocaleString()}</strong>
+                                                    <strong>{formatRecordedCount(tenantTotalCalls)}</strong>
                                                 </td>
                                                 <td style={{ textAlign: 'right' }}>
-                                                    <strong>{tenantTotalMinutes.toLocaleString()}</strong>
+                                                    <strong>{formatRecordedCount(tenantTotalMinutes)}</strong>
                                                 </td>
                                                 <td style={{ textAlign: 'right' }}>—</td>
                                             </tr>

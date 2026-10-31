@@ -1,0 +1,96 @@
+{
+  "packages": [
+    "OP01",
+    "OP02",
+    "OP03"
+  ],
+  "status": "local_implementation_verified; package acceptance incomplete",
+  "base_revision": "ba0c0eb8d4716392303263fc211d1b36a722f056",
+  "tested_application_revision": "09cfad067a3999098766987dfa2378fd415384fd",
+  "source_commits": {
+    "op01_implementation_commit": "28f27ac878bd6e11c0d87802c252f06a27fa7735",
+    "op02_implementation_commit": "482ea9debc765a0132a94606eddacc50c660edd2",
+    "op02_test_dependency_commit": "2a8fe78eedfcee1a6340360831f050df74eb9b4d",
+    "op03_implementation_commit": "2043c3c368c4aa6af97c13c8628e369c27cf6e5a",
+    "operations_ci_commit": "4151b82f81a8357c32f9c8cb5d06d8e2d39d53ca"
+  },
+  "scope": "Local synthetic/disposable checks only; no push, deploy, customer call or live provider request.",
+  "backend": {
+    "passed": 3704,
+    "skipped": 9,
+    "warnings": 2798,
+    "modules": 240,
+    "duration_seconds": 289.54,
+    "record": "backend-command.json",
+    "skips": [
+      "8 standalone Redis variants; corresponding actual-script fakeredis+Lua variants executed",
+      "1 POSIX file-mode assertion on Windows"
+    ]
+  },
+  "postgres": {
+    "passed": 179,
+    "skipped": 0,
+    "warnings": 30,
+    "modules": 13,
+    "duration_seconds": 414.63,
+    "record": "postgres-command.json",
+    "public_revision": "0059_auth_identity_contract",
+    "public_schema_cases": 154,
+    "isolated_schema_cases": 25,
+    "note": "25 isolated-schema cases comprise18 restricted CRM/reminder cases and7 legacy action cases; those7 do not prove restricted-role authority."
+  },
+  "frontend": {
+    "combined_passed": 176,
+    "combined_skipped": 0,
+    "combined_modules": 25,
+    "record": "../op01/frontend-integrated-command.json",
+    "fixture_followup_passed": 9,
+    "fixture_followup_overlaps_combined": true,
+    "build": "passed",
+    "postbuild_typecheck": "passed",
+    "scoped_eslint": "passed",
+    "openapi_check": "passed",
+    "final_record": "frontend-command.json"
+  },
+  "auth_merge": {
+    "passed": 11,
+    "overlaps_final_postgres": true,
+    "log": "../op01/auth-merge-postgres.txt",
+    "scope": "One-slot pool allowance/SQL-permission-denial and existing atomic credential issuance rollback controls."
+  },
+  "intermediate_failures": [
+    "First frontend build failed on two CP08 test fixtures missing the new minutes_state field; updated fixtures to known, kept production DTO strict. Failed build retained.",
+    "Frontend test wrapper printing failed under cp1252 after176 tests passed; persisted subprocess exit_code0 and unchanged-source record is authoritative. No tests failed in that wrapper incident.",
+    "Initial aggregate helper had an incorrect manifest key before launching backend tests; corrected backend_unit selection."
+  ],
+  "ci": {
+    "commit": "4151b82f81a8357c32f9c8cb5d06d8e2d39d53ca",
+    "yaml_parse": "passed",
+    "existing_migrated_modules_present": 29,
+    "new_database_modules": 12,
+    "isolated_schema_environment": "Explicit existing disposable localhost *_test DSNs for CRM/action fixtures",
+    "offline_conversation_step": "added",
+    "remote_execution": "not_run",
+    "review": "Independent fixture/DSN review identified an OP06 follow-up to extend the isolated action fixture schema before that later source integration."
+  },
+  "limits": [
+    "OP01 paid reset/timezone/rounding and admission-only versus strict active-call cap remain owner decisions. Existing calendar-month floor-based metering preserved.",
+    "OP02 process-local provider limits require verified topology and account budgets. Current outbound global voice admission remains post-answer; this is not a new ringing/origination cap. Standalone Redis/primary supported; Redis Cluster is not proven.",
+    "OP03 completed transport receipt is not human-hearing/acoustic quality proof. Bytes already sent cannot be recalled.",
+    "All final release gates and live acceptance scenarios remain not_run. AG03 candidate_verified remains unchanged; no other package is closed by these tests."
+  ],
+  "artifact_format": "Text logs normalized to LF and trailing whitespace removed for repository hygiene; test outcomes/content retained.",
+  "artifacts_sha256_lf": {
+    "backend-command.json": "0cccf84e9a5c8db3115e6cbbd1fe695f1fd3c59eaa86477b1d5fddde1667d255",
+    "backend-final.txt": "cb882645914e87dad1191ef346dd604f55203f195a738c9691633c328db89f80",
+    "backend-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "frontend-build-final.txt": "fddecd4760465d93e1b4a8ea69fb5af4e37d3efc38d09b279995c900fa1f26f0",
+    "frontend-command.json": "b4e3ad11246cfc7ecc9d9665e130484a80b5037aadb31d81cf45d4f1194d21ec",
+    "frontend-fixtures-final.txt": "a5b786445040f521217b3241a5abc342b806d5ff8ed5ed6bd1e7d898df44cdfe",
+    "frontend-lint-final.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "frontend-openapi-final.txt": "8c63452ff4b963c4c96245a32012b66689c4bca63e644eb677b51835bc34de49",
+    "frontend-typecheck-final.txt": "f277a59365fd7265e8f83b35aa6762dcb2b859b5b960362c4b7b8f3308ba2853",
+    "postgres-command.json": "8830f31d7131bd36ffa791d57aff4e2f09e6848fbe991403b8737e0c10abed9d",
+    "postgres-final.txt": "c8c6afcaea1a08762a35d0e825b98c011176ad4751e2707e506787fba19fe0bc"
+  }
+}

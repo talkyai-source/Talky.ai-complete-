@@ -1,0 +1,67 @@
+Exact base executable-source inventory.
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:26:# ~+500 chars per turn (~125 tokens) is the cost; see fit_kb_body for the
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:40:def _trim_kb_body(text: str, limit: int) -> str:
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:50:def fit_kb_body(rendered: str, node: dict, limit: int, *, query: str = "") -> str:
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:57:    budget the old ``_trim_kb_body(render_node_answer(h))`` cut it at
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:71:        return _trim_kb_body(text, limit)
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:74:        return _trim_kb_body(text, limit)
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:76:    phrasing = _trim_kb_body(phrasing, max(80, limit // 2))
+HEAD:backend/app/domain/services/voice_pipeline/kb_budget.py:78:    head = _trim_kb_body(text, head_budget)
+HEAD:backend/app/domain/services/voice_pipeline/knowledge_tool.py:32:    fit_kb_body,
+HEAD:backend/app/domain/services/voice_pipeline/knowledge_tool.py:38:    _trim_kb_body,
+HEAD:backend/app/domain/services/voice_pipeline/llm_response.py:7:get_llm_response()/_response_max_sentences_for_turn as thin delegators —
+HEAD:backend/app/domain/services/voice_pipeline/llm_response.py:70:async def generate_llm_response(llm_provider, latency_tracker, session, user_input: str) -> str:
+HEAD:backend/app/domain/services/voice_pipeline/llm_response.py:75:    the original VoicePipelineService.get_llm_response behaviour exactly.
+HEAD:backend/app/domain/services/voice_pipeline/turn_streamer.py:174:    fit_kb_body,
+HEAD:backend/app/domain/services/voice_pipeline/turn_streamer.py:179:    _trim_kb_body,
+HEAD:backend/app/domain/services/voice_pipeline_service.py:43:    generate_llm_response as _generate_llm_response_impl,
+HEAD:backend/app/domain/services/voice_pipeline_service.py:902:    async def get_llm_response(self, session: CallSession, user_input: str) -> str:
+HEAD:backend/app/domain/services/voice_pipeline_service.py:907:        ``service.get_llm_response`` — are unchanged.
+HEAD:backend/app/domain/services/voice_pipeline_service.py:909:        return await _generate_llm_response_impl(
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:128:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:142:    @pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:150:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:157:    @pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:165:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:187:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:191:        # Note: Context window management happens internally in get_llm_response
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:194:    @pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:203:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:218:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:225:    @pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:238:            response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:247:    @pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:265:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:288:            response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:306:    @pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:315:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:322:    @pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:330:        response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:411:            response = await voice_pipeline.get_llm_response(call_session, user_input)
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:418:@pytest.mark.skip(reason="drifted: asserts conversation-state management on get_llm_response, but that logic lives in ConversationEngine/handle_transcript now. Needs rewrite against the real entry point (item-2 follow-up).")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:425:    response1 = await voice_pipeline.get_llm_response(call_session, "Hello?")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:431:    response2 = await voice_pipeline.get_llm_response(call_session, "Yes, I'm available")
+HEAD:backend/tests/integration/test_voice_pipeline_conversation.py:436:    response3 = await voice_pipeline.get_llm_response(call_session, "Yes, that works")
+HEAD:backend/tests/unit/test_kb_injection_budget.py:12:def test_trim_kb_body_caps_on_word_boundary():
+HEAD:backend/tests/unit/test_kb_injection_budget.py:13:    out = ts._trim_kb_body("one two three four five six seven", 18)
+HEAD:backend/tests/unit/test_kb_injection_budget.py:19:def test_trim_kb_body_short_text_unchanged():
+HEAD:backend/tests/unit/test_kb_injection_budget.py:20:    assert ts._trim_kb_body("short answer", 100) == "short answer"
+HEAD:backend/tests/unit/test_kb_injection_budget.py:21:    assert ts._trim_kb_body("  has\nnewlines ", 100) == "has newlines"
+HEAD:backend/tests/unit/test_kb_injection_budget.py:24:def test_trim_kb_body_empty():
+HEAD:backend/tests/unit/test_kb_injection_budget.py:25:    assert ts._trim_kb_body("", 100) == ""
+HEAD:backend/tests/unit/test_kb_injection_budget.py:26:    assert ts._trim_kb_body(None, 100) == ""  # type: ignore[arg-type]
+HEAD:backend/tests/unit/test_live_structured_state.py:26:from app.domain.services.voice_pipeline.llm_response import generate_llm_response
+HEAD:backend/tests/unit/test_live_structured_state.py:324:    await generate_llm_response(_LLM(), _Latency(), session, "")
+HEAD:backend/tests/unit/test_two_model_pipeline.py:17:from app.domain.services.voice_pipeline.kb_budget import fit_kb_body
+HEAD:backend/tests/unit/test_two_model_pipeline.py:128:    body = fit_kb_body(rendered, _RATES_NODE, 350)
+HEAD:backend/tests/unit/test_two_model_pipeline.py:133:    assert "depends on your monthly volume" not in kb_budget._trim_kb_body(rendered, 350)
+HEAD:backend/tests/unit/test_two_model_pipeline.py:139:    assert fit_kb_body(rendered, node, 600) == rendered.replace("\n", " ")
+HEAD:backend/tests/unit/test_two_model_pipeline.py:144:    assert fit_kb_body(render_node_answer(node), node, 100) == kb_budget._trim_kb_body("x " * 400, 100)
+HEAD:backend/tests/unit/test_voice_pipeline_llm_response.py:10:    generate_llm_response,
+HEAD:backend/tests/unit/test_voice_pipeline_llm_response.py:66:# ── generate_llm_response (with a CORRECT async-generator mock) ───────────────
+HEAD:backend/tests/unit/test_voice_pipeline_llm_response.py:103:    out = await generate_llm_response(llm, latency, _session(), "hi")
+HEAD:backend/tests/unit/test_voice_pipeline_llm_response.py:115:    out = await generate_llm_response(_BoomLLM(), _FakeLatency(), _session(), "hi")
+HEAD:backend/tests/unit/test_voice_pipeline_runtime.py:127:async def test_get_llm_response_marks_first_token_latency():
+HEAD:backend/tests/unit/test_voice_pipeline_runtime.py:137:    response = await service.get_llm_response(session, "Hi")
+HEAD:backend/tests/unit/test_voice_pipeline_service.py:103:async def test_get_llm_response_strips_reasoning_and_keeps_full_pricing_answer():
+HEAD:backend/tests/unit/test_voice_pipeline_service.py:124:    response = await service.get_llm_response(

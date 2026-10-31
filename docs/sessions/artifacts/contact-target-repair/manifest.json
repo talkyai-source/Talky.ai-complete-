@@ -1,0 +1,60 @@
+{
+  "base_commit": "1750341b9425a994da2f43e27b2ecfb2fa7e5f04",
+  "source_commit": "3ac0db39ff9c15096821404b801a83c039262eb6",
+  "source_files": {
+    "backend/app/domain/services/voice_pipeline/lead_slot_capture.py": {
+      "executed_working_raw_sha256": "6d9635032992c52a563e5dff373c1a7f50a8dc5be1671fa84d00fce0575a6a06",
+      "git_raw_sha256": "78f4abd17ea4d92f2e0c95e33ed770f3de506bb4dcc3bab5e805e6440e610643",
+      "lf_sha256": "78f4abd17ea4d92f2e0c95e33ed770f3de506bb4dcc3bab5e805e6440e610643"
+    },
+    "backend/tests/unit/test_contact_target_recording.py": {
+      "executed_working_raw_sha256": "882ebc16678f4d34d1e0e2f9bcabb2a80e4b44345d45836c2d545ca4d35240f5",
+      "git_raw_sha256": "ba262b914959388d4ffff118b8f6b9498baff8b7fdc3eeaabfb5ca6cacfcb67c",
+      "lf_sha256": "ba262b914959388d4ffff118b8f6b9498baff8b7fdc3eeaabfb5ca6cacfcb67c"
+    },
+    "backend/app/services/scripts/call_state_tracker.py": {
+      "executed_working_raw_sha256": "cd6d39cf84a0fcbc1d9661844b2e25ed2c0438aa864a207777efe90703b09ef3",
+      "git_raw_sha256": "cd6d39cf84a0fcbc1d9661844b2e25ed2c0438aa864a207777efe90703b09ef3",
+      "lf_sha256": "cd6d39cf84a0fcbc1d9661844b2e25ed2c0438aa864a207777efe90703b09ef3"
+    },
+    "backend/app/domain/services/voice_pipeline/contact_recording.py": {
+      "executed_working_raw_sha256": "5bc719208ee924b83afe0c8d0cdfa415e18f22be8b50ab335d052e0b7a4d096f",
+      "git_raw_sha256": "90bdeb1c231dc1d0ea3d7098de485810c06de9854416956fbc7853c1425a232e",
+      "lf_sha256": "90bdeb1c231dc1d0ea3d7098de485810c06de9854416956fbc7853c1425a232e"
+    },
+    "backend/app/services/scripts/prompt_builder.py": {
+      "executed_working_raw_sha256": "572c6b959dde5cac0fd1cb0cc4b317a61ba2c8a74e04550284a6bcc13ebfdffa",
+      "git_raw_sha256": "322c0a6e49f7bed9ad4d2c02639a5b988283c1802ba67d9fe96cdb7a15293ec9",
+      "lf_sha256": "322c0a6e49f7bed9ad4d2c02639a5b988283c1802ba67d9fe96cdb7a15293ec9"
+    }
+  },
+  "artifact_lf_sha256": {
+    "docs/sessions/artifacts/contact-target-repair/baseline.txt": "aaa0e93eebec75face9dd8552e4eca0ced58e518e85fea8f9c71c82e2716e6a2",
+    "docs/sessions/artifacts/contact-target-repair/commands.txt": "2927df06316252458c6c8d3676d4caa44e464fd19e1aae386f1ec34ffbae9118",
+    "docs/sessions/artifacts/contact-target-repair/final.txt": "9a7a3902ace286a8bdea3bcd4d39b605de7a43588e8174b14f2805e519dc09d2",
+    "docs/sessions/artifacts/contact-target-repair/first.txt": "421c0bb8769b337cee29d53bb55b3bfb8e2fabd0dc6e54708005e99def9708de",
+    "docs/sessions/artifacts/contact-target-repair/focused.txt": "8538dd7f386409ffab18eb3e8da6d6425a1a1b5821a3d19bbe7d16b745ba418c",
+    "docs/sessions/artifacts/contact-target-repair/source-after.json": "2a0bc47599831cbf063edb7e468fca5fa5424de4c81ce29d47e92922ab034d26",
+    "docs/sessions/artifacts/contact-target-repair/source-before.json": "2a0bc47599831cbf063edb7e468fca5fa5424de4c81ce29d47e92922ab034d26",
+    "docs/sessions/2026-10-07-contact-target-repair.md": "e669d22639cc8aa6e02003ede3bdb510c8749dbd0a576a7e143ff715741979e5"
+  },
+  "final": {
+    "passed": 237,
+    "failed": 0,
+    "skipped": 0,
+    "modules": 12,
+    "warnings": 179,
+    "seconds": 11.71,
+    "new_controls_included": 25,
+    "internal_socketpairs": 330,
+    "prohibited_transports": 0,
+    "source_raw_before_after_equal": true
+  },
+  "counts_nonadditive": true,
+  "review": "Root plus independent /root/account_review source/test clearance; reviewer did not execute.",
+  "limits": [
+    "No actual database, provider, UI, deployed audio or model semantic qualification.",
+    "Existing shared venv, not clean exact dependency install.",
+    "Initial nine-control test bytes were not archived separately; command and baseline output retained, later native fixture correction described in commands.txt."
+  ]
+}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
 import random
 from typing import AsyncIterator, Dict, List, Optional
 
@@ -69,6 +70,7 @@ class ElevenLabsTTSProvider(TTSProvider):
     API_BASE_URL = "https://api.elevenlabs.io"
 
     def __init__(self):
+        self._observation_context = None
         self._api_key: Optional[str] = None
         self._model_id: str = "eleven_flash_v2_5"
         self._voice_id: str = ""
@@ -82,6 +84,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         self._guard = get_provider_guard("elevenlabs")
 
     async def initialize(self, config: dict) -> None:
+        self._observation_context = config.get("observation_context")
         # Multi-key pool from ELEVENLABS_API_KEYS overrides the single-key path.
         # Tenant-scoped keys (config["api_key"]) still take precedence — the pool
         # is the platform-level fallback.
@@ -99,6 +102,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         self._model_id = config.get("model_id") or config.get("model") or "eleven_flash_v2_5"
         self._voice_id = config.get("voice_id", "")
         self._sample_rate = int(config.get("sample_rate", 24000))
+        self._output_format_for_rate(self._sample_rate)
 
         # keepalive_timeout=30s keeps the connection to ElevenLabs alive between
         # sentences so subsequent synthesis calls skip the TLS handshake.
@@ -189,6 +193,9 @@ class ElevenLabsTTSProvider(TTSProvider):
                         "xi-api-key": lease.key,
                         "Content-Type": "application/json",
                     }
+                    observation = ProviderAttempt("tts", "elevenlabs", lease.key,
+                        self._observation_context if lease.key == self._api_key or
+                        (self._observation_context or {}).get("source") != "tenant" else None)
                     _t_post = asyncio.get_event_loop().time()
                     try:
                         async with self._session.post(
@@ -225,6 +232,8 @@ class ElevenLabsTTSProvider(TTSProvider):
                                 err = RuntimeError(
                                     f"ElevenLabs API error: {response.status} {error_text[:240]}"
                                 )
+                                err.status_code = response.status
+                                observation.finish(err)
                                 if is_retryable:
                                     lease.report_failure(retryable=True)
                                 if is_retryable and attempt < _EL_MAX_RETRIES:
@@ -240,21 +249,25 @@ class ElevenLabsTTSProvider(TTSProvider):
                                     continue
                                 raise err
 
+                            observation.accepted()
                             # Stream in small fixed-size frames so the first
                             # audio reaches the gateway quickly. 2048 ≈ 42ms @ 24k.
                             async for chunk in response.content.iter_chunked(2048):
                                 if not chunk:
                                     continue
                                 chunks_yielded = True
+                                observation.first_output()
                                 yield AudioChunk(
                                     data=chunk,
                                     sample_rate=selected_sample_rate,
                                     channels=1,
                                 )
+                            observation.complete()
                             lease.report_success()
                             return  # success — exit retry loop
 
                     except asyncio.TimeoutError as exc:
+                        observation.finish(exc)
                         lease.report_failure(retryable=True)
                         last_err = exc
                         if chunks_yielded:
@@ -285,13 +298,38 @@ class ElevenLabsTTSProvider(TTSProvider):
                             continue
                         raise RuntimeError("ElevenLabs TTS request timeout") from exc
                     except aiohttp.ClientError as exc:
+                        observation.finish(exc)
                         lease.report_failure(retryable=True)
                         if chunks_yielded:
                             raise ElevenLabsPartialAudioError(
                                 f"ElevenLabs TTS connection error after "
                                 f"partial audio: {exc}"
                             ) from exc
+                        # No audio has reached the caller yet, so a transient
+                        # connection failure (stale keep-alive reset, server
+                        # disconnect) is safe to retry exactly like a timeout.
+                        # aiohttp does not retry POSTs itself. Non-transient
+                        # errors (e.g. InvalidURL) still fail immediately.
+                        if (
+                            isinstance(exc, (aiohttp.ClientConnectionError, aiohttp.ClientPayloadError))
+                            and attempt < _EL_MAX_RETRIES
+                        ):
+                            last_err = exc
+                            delay = min(
+                                _EL_RETRY_BASE_DELAY * (2 ** attempt), 5.0
+                            ) * (0.5 + random.random())
+                            logger.warning(
+                                "[ElevenLabs] connection error (%s) — retry %d/%d in %.2fs",
+                                type(exc).__name__, attempt + 1, _EL_MAX_RETRIES, delay,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
                         raise RuntimeError(f"ElevenLabs TTS error: {exc}") from exc
+                    except BaseException as exc:
+                        observation.finish(exc)
+                        raise
+                    finally:
+                        observation.finish()
 
             if last_err:
                 raise RuntimeError(
@@ -307,6 +345,7 @@ class ElevenLabsTTSProvider(TTSProvider):
         if not self._session or not self._voice_id:
             logger.debug("elevenlabs connect_for_call: not ready, skipping warmup")
             return
+        observation = ProviderAttempt("tts", "elevenlabs", self._api_key, self._observation_context)
         try:
             output_format = self._output_format_for_rate(self._sample_rate)
             url = f"{self.API_BASE_URL}/v1/text-to-speech/{self._voice_id}/stream"
@@ -318,11 +357,26 @@ class ElevenLabsTTSProvider(TTSProvider):
                 params={"output_format": output_format},
                 json=payload,
             ) as resp:
-                await resp.read()  # drain so the connection returns to the pool
+                audio = await resp.read()  # drain so the connection returns to the pool
+                if resp.status in (200, 206):
+                    observation.accepted()
+                    if audio:
+                        observation.first_output()
+                    observation.complete()
+                else:
+                    error = RuntimeError("ElevenLabs warmup rejected")
+                    error.status_code = resp.status
+                    observation.finish(error)
             label = call_id[:12] if call_id and call_id != "prewarm" else "prewarm"
             logger.debug("elevenlabs warmup complete for call_id=%s", label)
         except Exception as exc:
+            observation.finish(exc)
             logger.warning("elevenlabs connect_for_call failed (non-fatal): %s", exc)
+        except BaseException as exc:
+            observation.finish(exc)
+            raise
+        finally:
+            observation.finish()
 
     async def get_available_voices(self) -> List[Dict]:
         voices = await get_elevenlabs_voices_for_current_key()
@@ -345,4 +399,6 @@ class ElevenLabsTTSProvider(TTSProvider):
             24000: "pcm_24000",
             44100: "pcm_44100",
         }
-        return mapping.get(sample_rate, "pcm_24000")
+        if sample_rate not in mapping:
+            raise ValueError(f"Unsupported ElevenLabs sample rate: {sample_rate}")
+        return mapping[sample_rate]

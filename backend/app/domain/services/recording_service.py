@@ -19,19 +19,27 @@ Configuration (all via environment variables):
                             (omit for AWS S3, set for R2/MinIO)
   S3_PRESIGNED_URL_EXPIRY = 3600                       (seconds, default 1h)
   S3_STORAGE_CLASS        = STANDARD                   (or INTELLIGENT_TIERING)
+  S3_CONNECT_TIMEOUT_SECONDS = 3                       (bounded 1-30)
+  S3_READ_TIMEOUT_SECONDS = 10                         (bounded 1-60)
+  S3_PERMANENT_DELETE_TIMEOUT_SECONDS = 45             (bounded 5-300)
+  S3_PERMANENT_DELETE_MAX_PAGES = 10                   (bounded 1-100)
+  S3_PERMANENT_DELETE_MAX_VERSIONS = 5000              (bounded 1-50000)
 
 Retention lifecycle (set on the bucket, not in this code):
   Basic plan    → 30 days  (set S3 lifecycle rule: Expiration 30 days)
   Professional  → 90 days
   Enterprise    → 365 days
 """
+
 from __future__ import annotations
 
 import asyncio
 import io
 import logging
+import math
 import os
 import struct
+import time
 import wave
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -40,6 +48,41 @@ from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
+
+def _bounded_env_float(
+    name: str,
+    default: float,
+    *,
+    minimum: float,
+    maximum: float,
+) -> float:
+    """Read an operator timeout without permitting an unbounded value."""
+
+    try:
+        value = float(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    if not math.isfinite(value):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
+def _bounded_env_int(
+    name: str,
+    default: int,
+    *,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """Read a storage work cap without permitting an unbounded value."""
+
+    try:
+        value = int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        value = default
+    return max(minimum, min(value, maximum))
+
+
 # ---------------------------------------------------------------------------
 # Optional boto3 import — graceful fallback to local storage if not installed
 # ---------------------------------------------------------------------------
@@ -47,18 +90,19 @@ try:
     import boto3
     from botocore.exceptions import ClientError, BotoCoreError
     from botocore.config import Config as BotoCoreConfig
+
     _BOTO3_AVAILABLE = True
 except ImportError:
     _BOTO3_AVAILABLE = False
     logger.warning(
-        "boto3 not installed — S3 recording upload disabled. "
-        "Install with: pip install boto3"
+        "boto3 not installed — S3 recording upload disabled. " "Install with: pip install boto3"
     )
 
 
 # ---------------------------------------------------------------------------
 # RecordingBuffer (unchanged from original — no behaviour change)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class RecordingBuffer:
@@ -67,6 +111,7 @@ class RecordingBuffer:
 
     Works with all MediaGateway implementations (Vonage, RTP, etc.)
     """
+
     call_id: str
     sample_rate: int = 16000
     channels: int = 1
@@ -118,6 +163,7 @@ class RecordingBuffer:
 # S3Client wrapper — thin layer over boto3
 # ---------------------------------------------------------------------------
 
+
 class S3Client:
     """
     Thin wrapper around boto3 S3 client.
@@ -132,6 +178,24 @@ class S3Client:
         endpoint = os.getenv("S3_ENDPOINT_URL")  # None for AWS S3
         self.access_key = os.getenv("S3_ACCESS_KEY_ID")
         self.secret_key = os.getenv("S3_SECRET_ACCESS_KEY")
+        connect_timeout = _bounded_env_float(
+            "S3_CONNECT_TIMEOUT_SECONDS", 3.0, minimum=1.0, maximum=30.0
+        )
+        read_timeout = _bounded_env_float(
+            "S3_READ_TIMEOUT_SECONDS", 10.0, minimum=1.0, maximum=60.0
+        )
+        self._permanent_delete_timeout_seconds = _bounded_env_float(
+            "S3_PERMANENT_DELETE_TIMEOUT_SECONDS",
+            45.0,
+            minimum=5.0,
+            maximum=300.0,
+        )
+        self._permanent_delete_max_pages = _bounded_env_int(
+            "S3_PERMANENT_DELETE_MAX_PAGES", 10, minimum=1, maximum=100
+        )
+        self._permanent_delete_max_versions = _bounded_env_int(
+            "S3_PERMANENT_DELETE_MAX_VERSIONS", 5000, minimum=1, maximum=50000
+        )
 
         # boto3.client(...) returns a client object even when no credentials are
         # set, so "client is not None" is NOT a real availability signal. Require
@@ -151,6 +215,8 @@ class S3Client:
             "config": BotoCoreConfig(
                 retries={"max_attempts": 3, "mode": "adaptive"},
                 max_pool_connections=20,
+                connect_timeout=connect_timeout,
+                read_timeout=read_timeout,
             ),
         }
         if endpoint:
@@ -173,26 +239,222 @@ class S3Client:
             StorageClass=self.storage_class,
         )
 
-    def presigned_url(self, key: str) -> str:
-        """Generate a presigned GET URL valid for presigned_expiry seconds."""
+    def presigned_url(
+        self,
+        key: str,
+        download_filename: Optional[str] = None,
+        bucket: Optional[str] = None,
+    ) -> str:
+        """Generate a presigned GET URL, optionally forcing a safe download name."""
+        params: Dict[str, Any] = {"Bucket": bucket or self.bucket, "Key": key}
+        if download_filename:
+            safe_name = download_filename.replace('"', "").replace("\r", "").replace("\n", "")
+            params["ResponseContentDisposition"] = f'attachment; filename="{safe_name}"'
         return self._client.generate_presigned_url(
             "get_object",
-            Params={"Bucket": self.bucket, "Key": key},
+            Params=params,
             ExpiresIn=self.presigned_expiry,
         )
 
-    def delete(self, key: str) -> None:
-        """Delete an object. Used by retention cleanup."""
-        self._client.delete_object(Bucket=self.bucket, Key=key)
+    def delete(self, key: str, bucket: Optional[str] = None) -> None:
+        """Issue an ordinary object delete (for lifecycle/retention cleanup)."""
+        self._client.delete_object(Bucket=bucket or self.bucket, Key=key)
 
-    def head(self, key: str) -> Optional[Dict[str, Any]]:
+    def delete_permanently(self, key: str, bucket: Optional[str] = None) -> None:
+        """Permanently delete one exact key and prove no version remains.
+
+        A bare ``delete_object`` on a versioned bucket only creates a delete
+        marker and leaves older audio recoverable. Permanent-erasure callers
+        may advance their durable intent only after this method has removed
+        every exact version/delete marker and a final HEAD proves absence.
+        """
+
+        target_bucket = bucket or self.bucket
+        deadline = time.monotonic() + getattr(self, "_permanent_delete_timeout_seconds", 45.0)
+        self._require_permanent_delete_time(deadline)
+        versioning = self._client.get_bucket_versioning(Bucket=target_bucket)
+        self._require_permanent_delete_time(deadline)
+        if versioning.get("Status") in {"Enabled", "Suspended"}:
+            versions = self._exact_object_versions(
+                target_bucket,
+                key,
+                deadline=deadline,
+            )
+            for offset in range(0, len(versions), 1000):
+                self._require_permanent_delete_time(deadline)
+                response = self._client.delete_objects(
+                    Bucket=target_bucket,
+                    Delete={"Objects": versions[offset : offset + 1000], "Quiet": True},
+                )
+                self._require_permanent_delete_time(deadline)
+                errors = response.get("Errors") or []
+                if errors:
+                    raise RuntimeError(
+                        f"object version deletion failed for {len(errors)} version(s)"
+                    )
+            if self._exact_object_versions(
+                target_bucket,
+                key,
+                deadline=deadline,
+            ):
+                raise RuntimeError("object versions remain after permanent deletion")
+        else:
+            self._require_permanent_delete_time(deadline)
+            self._client.delete_object(Bucket=target_bucket, Key=key)
+            self._require_permanent_delete_time(deadline)
+
+        try:
+            self._require_permanent_delete_time(deadline)
+            self._client.head_object(Bucket=target_bucket, Key=key)
+        except ClientError as exc:
+            code = str(exc.response.get("Error", {}).get("Code", ""))
+            if code in {"404", "NoSuchKey", "NotFound"}:
+                return
+            raise
+        raise RuntimeError("object remains readable after permanent deletion")
+
+    @staticmethod
+    def _require_permanent_delete_time(deadline: float) -> None:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("permanent object deletion exceeded its time budget")
+
+    def _exact_object_versions(
+        self,
+        bucket: str,
+        key: str,
+        *,
+        deadline: Optional[float] = None,
+    ) -> List[Dict[str, str]]:
+        objects: List[Dict[str, str]] = []
+        key_marker: Optional[str] = None
+        version_marker: Optional[str] = None
+        pages = 0
+        max_pages = getattr(self, "_permanent_delete_max_pages", 10)
+        max_versions = getattr(self, "_permanent_delete_max_versions", 5000)
+        while True:
+            if deadline is not None:
+                self._require_permanent_delete_time(deadline)
+            pages += 1
+            if pages > max_pages:
+                raise RuntimeError("object version listing exceeded its page limit")
+            kwargs: Dict[str, Any] = {"Bucket": bucket, "Prefix": key}
+            if key_marker:
+                kwargs["KeyMarker"] = key_marker
+            if version_marker:
+                kwargs["VersionIdMarker"] = version_marker
+            response = self._client.list_object_versions(**kwargs)
+            if deadline is not None:
+                self._require_permanent_delete_time(deadline)
+            for item in [
+                *(response.get("Versions") or []),
+                *(response.get("DeleteMarkers") or []),
+            ]:
+                if item.get("Key") == key and item.get("VersionId") is not None:
+                    objects.append({"Key": key, "VersionId": str(item["VersionId"])})
+                    if len(objects) > max_versions:
+                        raise RuntimeError("object version listing exceeded its version limit")
+            if not response.get("IsTruncated"):
+                return objects
+            key_marker = response.get("NextKeyMarker")
+            version_marker = response.get("NextVersionIdMarker")
+            if not key_marker:
+                raise RuntimeError("invalid object-version pagination response")
+
+    def download(self, key: str, bucket: Optional[str] = None) -> bytes:
+        """Download one object as bytes. Raises on storage/network failure."""
+        response = self._client.get_object(Bucket=bucket or self.bucket, Key=key)
+        body = response["Body"]
+        try:
+            return body.read()
+        finally:
+            close = getattr(body, "close", None)
+            if close:
+                close()
+
+    def head(
+        self,
+        key: str,
+        bucket: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Return object metadata or None if not found."""
         try:
-            return self._client.head_object(Bucket=self.bucket, Key=key)
+            return self._client.head_object(Bucket=bucket or self.bucket, Key=key)
         except ClientError as e:
             if e.response["Error"]["Code"] == "404":
                 return None
             raise
+
+
+# ── Storage encoding ─────────────────────────────────────────────────────────
+#
+# The gateway hands us 16 kHz stereo PCM16 (caller left, agent right). Stored
+# raw, that is 3.8 MB per minute — and the carrier leg is G.711 at 8 kHz, so
+# "16 kHz WAV" carries no fidelity that a 64 kbps MP3 or 32 kbps Opus does not.
+# Every call-recording product (Twilio, Aircall, Dialpad, Gong) stores MP3 or
+# Opus and keeps the two parties on separate channels; we do the same here,
+# with ffmpeg (present on the production host) and a WAV fallback when it is
+# not. RECORDING_AUDIO_CODEC: mp3 (default, plays in every browser incl.
+# Safari) | opus (best voice quality per byte; Ogg container) | wav (raw).
+RECORDING_AUDIO_CODEC = (os.getenv("RECORDING_AUDIO_CODEC", "mp3") or "mp3").strip().lower()
+_DEFAULT_BITRATES = {"mp3": "64k", "opus": "32k"}
+RECORDING_AUDIO_BITRATE = (
+    os.getenv("RECORDING_AUDIO_BITRATE") or _DEFAULT_BITRATES.get(RECORDING_AUDIO_CODEC, "64k")
+).strip()
+_ENCODE_TIMEOUT_S = float(os.getenv("RECORDING_ENCODE_TIMEOUT_S", "120"))
+
+_CODEC_SPECS: Dict[str, tuple[list[str], str, str]] = {
+    # ffmpeg args after "-i pipe:0", file extension, MIME type
+    "mp3": (["-c:a", "libmp3lame", "-b:a", RECORDING_AUDIO_BITRATE, "-f", "mp3"], ".mp3", "audio/mpeg"),
+    "opus": (
+        ["-c:a", "libopus", "-b:a", RECORDING_AUDIO_BITRATE, "-application", "voip", "-vbr", "on", "-f", "ogg"],
+        ".ogg",
+        "audio/ogg",
+    ),
+}
+
+
+def encode_recording_audio(
+    wav_data: bytes,
+    codec: Optional[str] = None,
+    *,
+    ffmpeg_path: Optional[str] = None,
+) -> tuple[bytes, str, str]:
+    """Return ``(bytes, extension, mime_type)`` for storage.
+
+    Blocking (subprocess); callers run it through ``asyncio.to_thread``. Any
+    failure — ffmpeg missing, non-zero exit, timeout, empty output — falls
+    back to the original WAV so a recording is never lost to an encoder.
+    """
+    codec = (codec or RECORDING_AUDIO_CODEC).lower()
+    spec = _CODEC_SPECS.get(codec)
+    if spec is None or not wav_data:
+        return wav_data, ".wav", "audio/wav"
+    import shutil
+    import subprocess
+
+    binary = ffmpeg_path or shutil.which("ffmpeg")
+    if not binary:
+        logger.warning("recording_encode_skipped codec=%s reason=ffmpeg_not_found — storing WAV", codec)
+        return wav_data, ".wav", "audio/wav"
+    args, ext, mime = spec
+    cmd = [binary, "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "wav", "-i", "pipe:0", *args, "pipe:1"]
+    try:
+        proc = subprocess.run(cmd, input=wav_data, capture_output=True, timeout=_ENCODE_TIMEOUT_S, check=False)
+    except Exception as exc:  # noqa: BLE001 — encoder problems must not lose audio
+        logger.warning("recording_encode_failed codec=%s err=%r — storing WAV", codec, exc)
+        return wav_data, ".wav", "audio/wav"
+    if proc.returncode != 0 or not proc.stdout:
+        logger.warning(
+            "recording_encode_failed codec=%s rc=%s stderr=%s — storing WAV",
+            codec, proc.returncode, (proc.stderr or b"")[:200].decode("utf-8", "replace"),
+        )
+        return wav_data, ".wav", "audio/wav"
+    logger.info(
+        "recording_encoded codec=%s bitrate=%s wav_bytes=%d out_bytes=%d ratio=%.1fx",
+        codec, RECORDING_AUDIO_BITRATE, len(wav_data), len(proc.stdout),
+        len(wav_data) / max(1, len(proc.stdout)),
+    )
+    return proc.stdout, ext, mime
 
 
 def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None:
@@ -202,14 +464,49 @@ def _write_wav_file(recordings_dir: str, filepath: str, wav_data: bytes) -> None
     access to ``self``/event-loop state — the thread only ever touches the
     plain, immutable arguments passed in, so there's nothing for it to race.
     """
-    os.makedirs(recordings_dir, exist_ok=True)
-    with open(filepath, "wb") as fh:
+    # Match the local read/delete boundary: lexical containment alone permits
+    # an in-root symlink to direct a recording outside the configured storage.
+    root = os.path.realpath(os.path.abspath(recordings_dir))
+    path = os.path.realpath(os.path.abspath(filepath))
+    try:
+        inside = os.path.commonpath((root, path)) == root and path != root
+    except ValueError:
+        inside = False
+    if not inside:
+        raise ValueError("Recording path is outside the configured root")
+
+    # makedirs(mode=...) protects only the leaf, not newly created parents.
+    # Create every missing level privately without changing the process-wide
+    # umask or chmod-ing existing directories owned/configured by the operator.
+    missing = []
+    directory = os.path.dirname(path)
+    while not os.path.exists(directory):
+        parent = os.path.dirname(directory)
+        if parent == directory:
+            raise FileNotFoundError("Recording storage root is unavailable")
+        missing.append(directory)
+        directory = parent
+    for directory in reversed(missing):
+        try:
+            os.mkdir(directory, mode=0o700)
+        except FileExistsError:
+            if not os.path.isdir(directory):
+                raise
+
+    # mode applies only to newly created files; existing regular-file modes
+    # remain unchanged. Trusted, non-writable storage parents are still needed:
+    # this is not a descriptor-relative traversal against hostile directory swaps.
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    flags |= getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags, 0o600)
+    with os.fdopen(descriptor, "wb") as fh:
         fh.write(wav_data)
 
 
 # ---------------------------------------------------------------------------
 # RecordingService
 # ---------------------------------------------------------------------------
+
 
 class RecordingService:
     """
@@ -238,19 +535,71 @@ class RecordingService:
     # ── Key generation ────────────────────────────────────────────
 
     @staticmethod
-    def _s3_key(tenant_id: str, campaign_id: str, call_id: str) -> str:
+    def _s3_key(tenant_id: str, campaign_id: str, call_id: str, ext: str = ".wav") -> str:
         """
         Build a structured S3 object key.
         Format: {tenant_id}/{campaign_id}/{call_id}.wav
         Sanitised to prevent path traversal.
         """
+
         def safe(s: str) -> str:
             return s.replace("/", "-").replace("\\", "-").replace("..", "-") if s else "unknown"
-        return f"{safe(tenant_id)}/{safe(campaign_id)}/{safe(call_id)}.wav"
+
+        return f"{safe(tenant_id)}/{safe(campaign_id)}/{safe(call_id)}{ext}"
 
     def _generate_storage_path(self, call_id: str, tenant_id: str, campaign_id: str) -> str:
         """Backward-compatible storage path helper used by legacy tests/callers."""
         return self._s3_key(tenant_id, campaign_id, call_id)
+
+    async def _retention_allowed(
+        self,
+        call_id: str,
+        tenant_id: str,
+        destination_country_code: Optional[str] = None,
+    ) -> bool:
+        """Check the current configured policy and tenant-owned call before storage.
+
+        This is a technical retention admission, not proof of legal consent or
+        human hearing. A UUID-shaped call ID alone is not ownership evidence.
+        """
+        try:
+            tenant_uuid = UUID(str(tenant_id))
+            try:
+                call_uuid = UUID(str(call_id))
+            except (ValueError, TypeError, AttributeError):
+                call_uuid = None
+            async with acquire_with_tenant(self._db, str(tenant_uuid)) as conn:
+                row = await conn.fetchrow(
+                    "SELECT id FROM calls WHERE tenant_id = $1 "
+                    "AND (id = $2 OR ($2::uuid IS NULL AND external_call_uuid = $3)) "
+                    "ORDER BY created_at DESC LIMIT 1",
+                    tenant_uuid,
+                    call_uuid,
+                    str(call_id),
+                )
+            if not row:
+                logger.warning("recording_call_binding_unavailable call=%s", call_id)
+                return False
+            from app.domain.services.recording_policy_service import (
+                RecordingPolicyService,
+                consent_satisfied,
+            )
+            decision = await RecordingPolicyService(self._db).decide(
+                tenant_id=str(tenant_uuid),
+                destination_country_code=destination_country_code,
+            )
+            allowed = bool(
+                decision.should_record and consent_satisfied(decision, call_id, str(row["id"]))
+            )
+            if not allowed:
+                logger.info(
+                    "recording_retention_suppressed call=%s policy_reason=%s",
+                    call_id, decision.reason,
+                )
+            return allowed
+        except Exception:
+            logger.warning("recording_retention_admission_unavailable call=%s", call_id)
+            return False
 
     async def save_recording(
         self,
@@ -264,6 +613,8 @@ class RecordingService:
             return None
 
         if hasattr(self.supabase, "storage"):
+            if not await self._retention_allowed(call_id, tenant_id):
+                return None
             path = self._generate_storage_path(call_id, tenant_id, campaign_id)
             bucket = self.supabase.storage.from_("recordings")
             bucket.upload(path, buffer.get_wav_bytes())
@@ -292,78 +643,29 @@ class RecordingService:
         Returns recording UUID string on success, None on failure.
         Never raises — storage failures should not break call flow.
 
-        T0.4 — Consults `tenant_recording_policy` and returns None when
-        recording is disabled. If no policy row exists for the tenant,
-        the safe default is two-party consent (announcement required).
-
-        2026-07-28 — the announcement is now ENFORCED, not just computed.
-        The greeting path (telephony/modes/agent_first.py) speaks the
-        notice as the first audio on the call and reports the outcome to
-        the disclosure ledger in `recording_policy_service`; this method
-        refuses to retain audio for a call whose required notice was not
-        delivered. Previously `announcement_required` was advisory, no
-        caller ever played it, and two-party-consent tenants were
-        recorded without the callee ever being told.
+        Every storage path requires current tenant/call ownership and the
+        configured policy/disclosure gate. Dependency failure suppresses storage.
         """
         if not buffer or buffer.total_bytes == 0:
             logger.warning(f"No audio to save for call {call_id}")
             return None
 
-        # Consult the per-tenant recording policy. Disabled → skip.
-        try:
-            from app.domain.services.recording_policy_service import (
-                RecordingPolicyService,
-                consent_satisfied,
-            )
-            policy = RecordingPolicyService(self._db)
-            decision = await policy.decide(
-                tenant_id=tenant_id,
-                destination_country_code=destination_country_code,
-            )
-            if not decision.should_record:
-                logger.info(
-                    "recording_skipped_by_policy call=%s tenant=%s reason=%s",
-                    call_id, tenant_id, decision.reason,
-                )
-                return None
-
-            # The policy demanded a spoken notice. Retain the audio only
-            # if that notice actually reached the callee on this call.
-            # Fails CLOSED — an unknown call counts as "not disclosed".
-            # Keeping audio captured without the required notice is
-            # unlawful in the UK/EU and in two-party-consent US states;
-            # dropping it costs the tenant a QA artefact. A tenant that
-            # is genuinely in a one-party jurisdiction should set
-            # `default_consent_mode = 'one_party'` on its
-            # `tenant_recording_policy` row — that is the lawful way to
-            # record without announcing, and it makes this gate a no-op.
-            if not consent_satisfied(decision, call_id):
-                logger.error(
-                    "recording_suppressed_no_disclosure call=%s tenant=%s "
-                    "reason=%s — policy requires a spoken recording notice "
-                    "and none was delivered on this call; audio discarded",
-                    call_id, tenant_id, decision.reason,
-                )
-                return None
-        except Exception as exc:
-            # Fail SAFE — if we cannot confirm the policy, we do not
-            # create a recording. Better to miss an upload than to ship
-            # non-consensual recordings to S3.
-            logger.error(
-                "recording_policy_lookup_failed call=%s tenant=%s err=%s — skipping upload",
-                call_id, tenant_id, exc,
-            )
+        if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
             return None
 
         if not self._s3.is_available():
-            logger.info(
-                f"S3 not configured — saving recording locally for call {call_id}."
+            logger.info(f"S3 not configured — saving recording locally for call {call_id}.")
+            return await self._save_local(
+                call_id, buffer, tenant_id, campaign_id, destination_country_code
             )
-            return await self._save_local(call_id, buffer, tenant_id, campaign_id)
 
         try:
-            wav_data = buffer.get_wav_bytes()
-            key = self._s3_key(tenant_id, campaign_id, call_id)
+            wav_data, ext, mime_type = await asyncio.to_thread(
+                encode_recording_audio, buffer.get_wav_bytes()
+            )
+            if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
+                return None
+            key = self._s3_key(tenant_id, campaign_id, call_id, ext)
             upload_started = datetime.utcnow()
 
             logger.info(
@@ -381,9 +683,7 @@ class RecordingService:
             # result so save_and_link's return value / ordering is
             # unchanged. `wav_data`/`key` are plain immutable bytes/str, so
             # there is nothing for the thread to race against.
-            await asyncio.to_thread(
-                self._s3.upload, key, wav_data, content_type="audio/wav"
-            )
+            await asyncio.to_thread(self._s3.upload, key, wav_data, content_type=mime_type)
             upload_finished = datetime.utcnow()
 
             logger.info(f"Recording uploaded: {key}")
@@ -397,10 +697,17 @@ class RecordingService:
                 duration_seconds=int(buffer.get_duration_seconds()),
                 upload_started=upload_started,
                 upload_finished=upload_finished,
+                mime_type=mime_type,
             )
 
-            await self._update_call_recording_url(call_id, recording_id)
-            return str(recording_id) if recording_id else None
+            if not recording_id:
+                await self._discard_unregistered_object(
+                    call_id, tenant_id, self._s3.bucket, key
+                )
+                return None
+
+            await self._update_call_recording_url(call_id, tenant_id, recording_id)
+            return str(recording_id)
 
         except Exception as exc:
             logger.error(f"Recording upload failed for call {call_id}: {exc}", exc_info=True)
@@ -415,6 +722,7 @@ class RecordingService:
         buffer: RecordingBuffer,
         tenant_id: str = "unknown",
         campaign_id: str = "unknown",
+        destination_country_code: Optional[str] = None,
     ) -> Optional[str]:
         """
         Save recording to local filesystem when S3 is not configured.
@@ -426,37 +734,34 @@ class RecordingService:
 
         Returns the recording UUID string on success, None on failure.
         """
-        # This method is also called DIRECTLY by the telephony teardown
-        # fallback (telephony/recording.py), which bypasses save_and_link
-        # and therefore bypasses the policy gate. Honour a disclosure
-        # failure we positively know about, so that bypass cannot write a
-        # recording the greeting path already determined must not be kept.
-        # Only a POSITIVE failure blocks here: an unknown call falls
-        # through unchanged, because this method has no policy decision of
-        # its own and must not turn "no information" into a silent
-        # behaviour change for callers that never consulted the policy.
-        try:
-            from app.domain.services.recording_policy_service import (
-                disclosure_known_failed,
-            )
-            if disclosure_known_failed(call_id):
-                logger.error(
-                    "recording_suppressed_no_disclosure call=%s tenant=%s "
-                    "— required recording notice was not delivered; "
-                    "local save skipped",
-                    call_id, tenant_id,
-                )
-                return None
-        except Exception as exc:
-            logger.debug("disclosure ledger check failed for %s: %s", call_id, exc)
+        if not buffer or buffer.total_bytes == 0:
+            return None
+        if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
+            return None
 
         recordings_dir = os.getenv("LOCAL_RECORDINGS_DIR", "./recordings")
         abs_dir = os.path.abspath(recordings_dir)
-        filepath = os.path.join(abs_dir, f"{call_id}.wav")
+        mime_type = "audio/wav"
         try:
-            wav_data = buffer.get_wav_bytes()
-            if not wav_data:
+            raw_wav = buffer.get_wav_bytes()
+            if not raw_wav:
                 logger.warning(f"No WAV data to save locally for call {call_id}")
+                return None
+            # Compress for storage (MP3 by default; see encode_recording_audio).
+            # The encoder is a subprocess, so it runs off the event loop too.
+            wav_data, ext, mime_type = await asyncio.to_thread(encode_recording_audio, raw_wav)
+            relative_key = self._s3_key(tenant_id, campaign_id, call_id, ext)
+            filepath = os.path.abspath(os.path.join(abs_dir, *relative_key.split("/")))
+            # `_s3_key` strips path separators and ".." from every
+            # caller-provided segment. Keep a containment assertion here as
+            # defence in depth in case key generation changes later.
+            if os.path.commonpath([abs_dir, filepath]) != abs_dir:
+                logger.error(
+                    "Refusing local recording path outside configured root: "
+                    "call=%s tenant=%s",
+                    call_id,
+                    tenant_id,
+                )
                 return None
             # ROOT CAUSE FIX (2026-07-13): os.makedirs + open()/write() are
             # synchronous filesystem calls — blocking on this process's
@@ -466,6 +771,8 @@ class RecordingService:
             # whole makedirs+write sequence to a worker thread; `filepath`/
             # `wav_data` are immutable local values captured at call time,
             # so there is no shared mutable state for the thread to race.
+            if not await self._retention_allowed(call_id, tenant_id, destination_country_code):
+                return None
             await asyncio.to_thread(_write_wav_file, recordings_dir, filepath, wav_data)
             logger.info(
                 f"Recording saved locally: {filepath} ({len(wav_data):,} bytes, "
@@ -492,15 +799,17 @@ class RecordingService:
             s3_bucket="local",
             s3_region="local",
             status="uploaded",
+            mime_type=mime_type,
         )
 
         if recording_id:
-            await self._update_call_recording_url(call_id, recording_id)
+            await self._update_call_recording_url(call_id, tenant_id, recording_id)
             logger.info(f"Local recording registered in DB: recording_id={recording_id}")
             return str(recording_id)
         else:
-            logger.warning(f"Local recording saved to disk but DB insert failed for {call_id}")
-            return filepath
+            logger.error(f"Local recording saved to disk but DB insert failed for {call_id}")
+            await self._discard_unregistered_object(call_id, tenant_id, "local", filepath)
+            return None
 
     # ── Presigned URL ─────────────────────────────────────────────
 
@@ -518,10 +827,10 @@ class RecordingService:
         if not self._s3.is_available():
             return None
 
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(self._db, tenant_id) as conn:
             row = await conn.fetchrow(
                 """
-                SELECT s3_key, status
+                SELECT s3_key, s3_bucket, status
                 FROM recordings_s3
                 WHERE id = $1 AND tenant_id = $2
                 """,
@@ -530,9 +839,7 @@ class RecordingService:
             )
 
         if not row:
-            logger.warning(
-                f"Recording {recording_id} not found or tenant {tenant_id} denied"
-            )
+            logger.warning(f"Recording {recording_id} not found or tenant {tenant_id} denied")
             return None
 
         if row["status"] != "uploaded":
@@ -540,14 +847,17 @@ class RecordingService:
             return None
 
         try:
-            return self._s3.presigned_url(row["s3_key"])
+            return self._s3.presigned_url(
+                row["s3_key"],
+                bucket=row["s3_bucket"],
+            )
         except Exception as exc:
             logger.error(f"Failed to generate presigned URL for {recording_id}: {exc}")
             return None
 
     async def list_for_call(self, call_id: str, tenant_id: str) -> List[Dict[str, Any]]:
         """Return all recording metadata rows for a call."""
-        async with self._db.acquire() as conn:
+        async with acquire_with_tenant(self._db, tenant_id) as conn:
             rows = await conn.fetch(
                 """
                 SELECT id, call_id, s3_key, file_size_bytes,
@@ -563,9 +873,7 @@ class RecordingService:
 
     # ── Private DB helpers ────────────────────────────────────────
 
-    async def _resolve_call_uuid(
-        self, call_id: str, tenant_id: str, conn: Any
-    ) -> Optional[UUID]:
+    async def _resolve_call_uuid(self, call_id: str, tenant_id: str, conn: Any) -> Optional[UUID]:
         """Resolve an incoming ``call_id`` to the authoritative ``calls.id``.
 
         ``call_id`` is a proper UUID on the dialer/campaign path, but on
@@ -604,7 +912,8 @@ class RecordingService:
         except Exception as exc:
             logger.warning(
                 "recording_call_id_resolution_failed call_id=%s err=%s",
-                call_id, exc,
+                call_id,
+                exc,
             )
             return None
 
@@ -616,7 +925,8 @@ class RecordingService:
             "no matching calls row (channel id not a UUID and no "
             "external_call_uuid match); recording will not have a "
             "recordings_s3 DB row (WAV remains on disk/S3 only)",
-            call_id, tenant_id,
+            call_id,
+            tenant_id,
         )
         return None
 
@@ -633,6 +943,7 @@ class RecordingService:
         s3_bucket: Optional[str] = None,
         s3_region: Optional[str] = None,
         status: str = "uploaded",
+        mime_type: str = "audio/wav",
     ) -> Optional[UUID]:
         """Insert a row into recordings_s3 and return the new UUID.
 
@@ -642,13 +953,15 @@ class RecordingService:
         never silently dropped by a ``UUID()`` parse failure.
         """
         try:
-            async with self._db.acquire() as conn:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
                 try:
                     tenant_uuid = UUID(tenant_id)
                 except (ValueError, AttributeError, TypeError):
                     logger.warning(
                         "Failed to insert recording_s3 record: invalid "
-                        "tenant_id=%s for call_id=%s", tenant_id, call_id,
+                        "tenant_id=%s for call_id=%s",
+                        tenant_id,
+                        call_id,
                     )
                     return None
 
@@ -670,9 +983,7 @@ class RecordingService:
                         "SELECT set_config('app.current_tenant_id', $1, true)",
                         str(tenant_uuid),
                     )
-                    resolved_call_id = await self._resolve_call_uuid(
-                        call_id, tenant_id, conn
-                    )
+                    resolved_call_id = await self._resolve_call_uuid(call_id, tenant_id, conn)
                     if resolved_call_id is None:
                         return None
 
@@ -682,8 +993,9 @@ class RecordingService:
                             call_id, tenant_id, campaign_id,
                             s3_bucket, s3_key, s3_region,
                             file_size_bytes, duration_seconds,
-                            status, upload_started_at, upload_finished_at
-                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+                            status, upload_started_at, upload_finished_at,
+                            mime_type
+                        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
                         RETURNING id
                         """,
                         resolved_call_id,
@@ -697,6 +1009,7 @@ class RecordingService:
                         status,
                         upload_started,
                         upload_finished,
+                        mime_type,
                     )
                 return row["id"] if row else None
         except Exception as exc:
@@ -704,13 +1017,13 @@ class RecordingService:
             return None
 
     async def _update_call_recording_url(
-        self, call_id: str, recording_id: Optional[UUID]
+        self, call_id: str, tenant_id: str, recording_id: Optional[UUID]
     ) -> None:
         """Point calls.recording_url at the internal stream API path."""
         if not recording_id:
             return
         try:
-            async with self._db.acquire() as conn:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
                 await conn.execute(
                     """
                     UPDATE calls
@@ -723,6 +1036,63 @@ class RecordingService:
         except Exception as exc:
             logger.warning(f"Could not update calls.recording_url for {call_id}: {exc}")
 
+    async def _discard_unregistered_object(
+        self, call_id: str, tenant_id: str, bucket: str, key: str
+    ) -> None:
+        """Remove audio that was stored but could not be registered.
+
+        Without a recordings_s3 row the audio cannot be listed, played,
+        retained or erased on request (DSAR), so it must not stay behind.
+        The object key is deterministic per call, so a duplicate/raced insert
+        means ANOTHER row may reference this very object: only delete when no
+        row references (bucket, key), and keep it (logged) whenever that cannot
+        be verified.
+        """
+        try:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
+                referenced = await conn.fetchval(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1 FROM recordings_s3
+                        WHERE tenant_id = $1 AND s3_bucket = $2 AND s3_key = $3
+                    )
+                    """,
+                    UUID(tenant_id),
+                    bucket,
+                    key,
+                )
+        except Exception as exc:
+            logger.error(
+                "recording_orphan_unverified call=%s tenant=%s bucket=%s key=%s err=%s - "
+                "audio stored without a DB row and could not be checked; needs manual reconciliation",
+                call_id, tenant_id, bucket, key, type(exc).__name__,
+            )
+            return
+        if referenced:
+            logger.warning(
+                "recording_orphan_skipped call=%s key=%s - another row already references this object",
+                call_id, key,
+            )
+            return
+        try:
+            if bucket == "local":
+                await asyncio.to_thread(os.remove, key)
+            else:
+                await asyncio.to_thread(self._s3.delete_permanently, key, bucket)
+            logger.error(
+                "recording_orphan_removed call=%s tenant=%s bucket=%s key=%s - "
+                "recording row insert failed, stored audio deleted",
+                call_id, tenant_id, bucket, key,
+            )
+        except FileNotFoundError:
+            pass
+        except Exception as exc:
+            logger.error(
+                "recording_orphan_delete_failed call=%s tenant=%s bucket=%s key=%s err=%s - "
+                "audio remains without a DB row; needs manual cleanup",
+                call_id, tenant_id, bucket, key, type(exc).__name__,
+            )
+
     async def _mark_upload_failed(
         self,
         call_id: str,
@@ -732,7 +1102,16 @@ class RecordingService:
     ) -> None:
         """Insert a 'failed' row so the failure is visible in the admin panel."""
         try:
-            async with self._db.acquire() as conn:
+            async with acquire_with_tenant(self._db, tenant_id) as conn:
+                # call_id may be a PBX channel id, not a UUID: use the
+                # authoritative calls.id like the success-path insert does.
+                call_uuid = await self._resolve_call_uuid(call_id, tenant_id, conn)
+                if call_uuid is None:
+                    logger.warning(
+                        "recording_failed_row_not_written call=%s tenant=%s - call id unresolved",
+                        call_id, tenant_id,
+                    )
+                    return
                 await conn.execute(
                     """
                     INSERT INTO recordings_s3 (
@@ -741,20 +1120,25 @@ class RecordingService:
                     ) VALUES ($1,$2,$3,$4,$5,$6,'failed')
                     ON CONFLICT DO NOTHING
                     """,
-                    UUID(call_id),
+                    call_uuid,
                     UUID(tenant_id),
                     UUID(campaign_id) if campaign_id else None,
                     self._s3.bucket,
                     f"failed/{call_id}.wav",
                     self._s3.region,
                 )
-        except Exception:
-            pass  # Best-effort — don't shadow the original error
+        except Exception as exc:
+            # Best-effort - don't shadow the original error, but leave a trace.
+            logger.warning(
+                "recording_failed_row_not_written call=%s tenant=%s err=%s",
+                call_id, tenant_id, type(exc).__name__,
+            )
 
 
 # ---------------------------------------------------------------------------
 # mix_stereo_recording — telephony two-channel recording mixer
 # ---------------------------------------------------------------------------
+
 
 def mix_stereo_recording(
     caller_chunks: List[bytes],
@@ -828,8 +1212,8 @@ def mix_stereo_recording(
     for i in range(total_samples):
         l_off = i * 2
         s_off = i * 4
-        stereo[s_off:s_off + 2] = left_buf[l_off:l_off + 2]
-        stereo[s_off + 2:s_off + 4] = agent_buf[l_off:l_off + 2]
+        stereo[s_off : s_off + 2] = left_buf[l_off : l_off + 2]
+        stereo[s_off + 2 : s_off + 4] = agent_buf[l_off : l_off + 2]
 
     buf = io.BytesIO()
     with wave.open(buf, "wb") as wf:
@@ -845,6 +1229,7 @@ def mix_stereo_recording(
 # Backwards-compatible factory
 # ---------------------------------------------------------------------------
 
+
 def make_recording_service(db_pool: Any) -> RecordingService:
     """
     Factory used by the DI container and existing call sites.
@@ -853,3 +1238,6 @@ def make_recording_service(db_pool: Any) -> RecordingService:
     Now:        make_recording_service(db_pool) — asyncpg pool
     """
     return RecordingService(db_pool=db_pool)
+
+
+from app.core.db_utils import acquire_with_tenant

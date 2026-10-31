@@ -1,0 +1,38 @@
+........................................................................ [ 18%]
+........................................................................ [ 36%]
+........................................................................ [ 54%]
+........................................................................ [ 73%]
+........................................................................ [ 91%]
+.................................                                        [100%]
+============================== warnings summary ===============================
+app\api\v1\endpoints\admin\health\_shared.py:16
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_hubspot_call_receipts.py::test_hubspot_create_and_reconcile_share_reference
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\app\infrastructure\connectors\crm\hubspot.py:259: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    ts = timestamp or datetime.utcnow()
+
+tests/unit/test_communication_delivery_contract.py::test_vonage_sdk_send_runs_off_event_loop_and_requires_message_id
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\app\infrastructure\connectors\sms\vonage_sms.py:151: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    sent_at=datetime.utcnow(),
+
+tests/unit/test_communication_delivery_contract.py::test_support_smtp_uses_off_loop_ack_and_the_transmitted_message_id
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\app\infrastructure\connectors\email\smtp.py:219: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    sent_at=datetime.utcnow()
+
+tests/unit/test_connector_health.py::test_gmail_parser_walks_nested_mime_parts
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\app\infrastructure\connectors\email\gmail.py:503: DeprecationWarning: datetime.datetime.utcfromtimestamp() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.fromtimestamp(timestamp, datetime.UTC).
+    sent_at=datetime.utcfromtimestamp(int(data["internalDate"]) / 1000) if data.get("internalDate") else None
+
+tests/unit/assistant/test_calendar_and_drive_errors.py::TestReadCalendarEvents::test_lists_upcoming_events
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\tests\unit\assistant\test_calendar_and_drive_errors.py:80: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now = datetime.utcnow()
+
+tests/unit/assistant/test_calendar_and_drive_errors.py::TestReadCalendarEvents::test_lists_upcoming_events
+tests/unit/assistant/test_calendar_and_drive_errors.py::TestReadCalendarEvents::test_provider_permission_failure_is_honest
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\crm-receipt-inspection-20261006\backend\app\infrastructure\assistant\tools\calendar_read.py:129: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    start = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+393 passed, 8 warnings in 27.86s

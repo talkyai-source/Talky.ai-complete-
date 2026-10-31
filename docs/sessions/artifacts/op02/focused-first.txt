@@ -1,0 +1,17 @@
+.....F......................................F.....................       [100%]
+================================== FAILURES ===================================
+_____ test_cleanup_during_handshake_does_not_adopt_socket_after_shutdown ______
+tests\unit\test_op02_provider_boundary_inventory.py:179: in test_cleanup_during_handshake_does_not_adopt_socket_after_shutdown
+    assert socket.closed
+E   assert False
+E    +  where False = <tests.unit.test_op02_provider_boundary_inventory.Socket object at 0x000001F0FCA61EB0>.closed
+________ test_all_direct_websocket_connections_use_the_v15_header_name ________
+tests\unit\test_container_dependency_security.py:63: in test_all_direct_websocket_connections_use_the_v15_header_name
+    assert flux.count("additional_headers=headers") == 2
+E   assert 1 == 2
+E    +  where 1 = <built-in method count of str object at 0x000001F0FB9A1800>('additional_headers=headers')
+E    +    where <built-in method count of str object at 0x000001F0FB9A1800> = '"""\nDeepgram Flux STT Provider Implementation - aligned with official best practices.\n\nUses direct WebSocket conne...epr__(self) -> str:\n        return f"DeepgramFluxSTTProvider(model={self._model}, sample_rate={self._sample_rate})"\n'.count
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op02_provider_boundary_inventory.py::test_cleanup_during_handshake_does_not_adopt_socket_after_shutdown
+FAILED tests/unit/test_container_dependency_security.py::test_all_direct_websocket_connections_use_the_v15_header_name
+2 failed, 64 passed in 5.92s

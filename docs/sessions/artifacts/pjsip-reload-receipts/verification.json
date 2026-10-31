@@ -1,0 +1,27 @@
+{
+  "source_commit": "28833884d9843406729fe8ced9987266a6003a95",
+  "final_test_source_matches_commit": true,
+  "passed": 85,
+  "failed": 0,
+  "skipped": 1,
+  "skip": "POSIX configuration file-mode check on Windows",
+  "ruff_command": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "ruff",
+    "check",
+    "backend/app/api/v1/endpoints/telephony_sip/trunks.py",
+    "backend/app/infrastructure/telephony/pjsip_config_generator.py",
+    "backend/tests/unit/test_pjsip_config_generator.py",
+    "backend/tests/unit/test_pjsip_reload_receipts.py",
+    "--select",
+    "F",
+    "--extend-ignore",
+    "F401,F841"
+  ],
+  "ruff_exit_code": 0,
+  "diff_check_exit_code": 0,
+  "review": "llm_audit read final source/tests; no independent suite run",
+  "actual_local_subprocesses": "Two harmless Python children; no Asterisk binary or external process service",
+  "production_approved": false
+}

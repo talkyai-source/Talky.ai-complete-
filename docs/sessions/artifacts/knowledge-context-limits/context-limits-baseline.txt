@@ -1,0 +1,45 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_known_oversized_current_exchange_asks_for_narrower_question_without_provider _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000242DF6CE3F0>
+
+    async def test_known_oversized_current_exchange_asks_for_narrower_question_without_provider(monkeypatch):
+        service, session, rounds = setup_turn(monkeypatch, "Exact caller words. " * 6000, ["Unexpected provider reply."])
+        monkeypatch.setattr(turn_streamer, "context_window_for", lambda _model: 8192)
+        original = list(session.conversation_history)
+        response, _, _ = await service._stream_llm_and_tts(session)
+>       assert rounds == []
+E       AssertionError: assert [([Message(ro...: None, ...})] == []
+E         Left contains one more item: ([Message(role=<MessageRole.USER: 'user'>, content='Exact caller words. Exact caller words. Exact caller words. Exact ...ntroduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', 'temperature': None, ...})
+E         Use -v to get more diff
+
+tests\unit\test_knowledge_limits.py:44: AssertionError
+___ test_known_oversized_system_reports_unavailable_instead_of_repeat_loop ____
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x00000242DF7989E0>
+
+    async def test_known_oversized_system_reports_unavailable_instead_of_repeat_loop(monkeypatch):
+        service, session, rounds = setup_turn(monkeypatch, "Please explain the terms.", ["Unexpected provider reply."])
+        session.system_prompt = "Oversized campaign setup. " * 6000
+        monkeypatch.setattr(turn_streamer, "context_window_for", lambda _model: 8192)
+        response, _, _ = await service._stream_llm_and_tts(session)
+>       assert rounds == []
+E       AssertionError: assert [([Message(ro...: None, ...})] == []
+E         Left contains one more item: ([Message(role=<MessageRole.USER: 'user'>, content='Please explain the terms.', timestamp=datetime.datetime(2026, 10, ...ntroduced=no\nconfirmed_contacts=none\nlast_tool_result=unknown\nEND LIVE STRUCTURED STATE', 'temperature': None, ...})
+E         Use -v to get more diff
+
+tests\unit\test_knowledge_limits.py:55: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_knowledge_limits.py::test_known_oversized_current_exchange_asks_for_narrower_question_without_provider
+tests/unit/test_knowledge_limits.py::test_known_oversized_current_exchange_asks_for_narrower_question_without_provider
+tests/unit/test_knowledge_limits.py::test_known_oversized_system_reports_unavailable_instead_of_repeat_loop
+tests/unit/test_knowledge_limits.py::test_known_oversized_system_reports_unavailable_instead_of_repeat_loop
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_limits.py::test_known_oversized_current_exchange_asks_for_narrower_question_without_provider
+FAILED tests/unit/test_knowledge_limits.py::test_known_oversized_system_reports_unavailable_instead_of_repeat_loop
+2 failed, 2 deselected, 4 warnings in 1.84s

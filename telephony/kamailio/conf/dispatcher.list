@@ -4,11 +4,10 @@
 #
 # Format: <setid> <destination> <flags> <priority> <weight>
 #
-# Set 1: B2BUA pool — Asterisk (primary) + FreeSWITCH (backup).
-# Set 2: Canary lane — mirrors set 1 until explicitly overridden.
+# Sets 1 and 2 are Asterisk-only for the inbound canary.  Asterisk failure
+# must surface as a SIP failure, not silently exercise a second runtime whose
+# admission, persistence, recording, and settlement paths are not in scope.
 
 # setid  destination              flags  priority  weight
 1 sip:127.0.0.1:5070 0 0 100   # Asterisk   (primary)
-1 sip:127.0.0.1:5080 0 1 100   # FreeSWITCH (backup, auto-failover)
 2 sip:127.0.0.1:5070 0 0 100   # Canary: stable mirror (Asterisk)
-2 sip:127.0.0.1:5080 0 1 100   # Canary: backup  mirror (FreeSWITCH)

@@ -1,0 +1,101 @@
+....FFF.F........FF...F..F...........F.....F......................       [100%]
+================================== FAILURES ===================================
+_ test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[False] _
+tests\unit\test_op05_pre_attempt_holds.py:86: in test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once
+    worker._update_job_status.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.queue_service:queue_service.py:708 redefer_inflight failed job=job-abc err=synthetic schedule acknowledgement unavailable
+_ test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[True] _
+tests\unit\test_op05_pre_attempt_holds.py:86: in test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once
+    worker._update_job_status.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.queue_service:queue_service.py:708 redefer_inflight failed job=job-abc err=synthetic schedule acknowledgement unavailable
+____________ test_missing_original_payload_does_not_invent_a_retry ____________
+tests\unit\test_op05_pre_attempt_holds.py:107: in test_missing_original_payload_does_not_invent_a_retry
+    worker._update_job_status.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+_ test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_job_status] _
+tests\unit\test_op05_pre_attempt_holds.py:121: in test_post_handoff_bookkeeping_failure_cannot_create_new_attempt
+    assert len(scheduled) == 1
+E   assert 0 == 1
+E    +  where 0 = len([])
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:2475 dialer_redefer_persist_failed job=job-abc attempt=1 error_type=ConnectionError
+_ test_campaign_status_outage_redefers_same_payload_without_terminal_skip[1] __
+tests\unit\test_dialer_origination_durability.py:258: in test_campaign_status_outage_redefers_same_payload_without_terminal_skip
+    worker.queue_service._redefer_inflight.assert_awaited_once_with(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2363: in assert_awaited_once_with
+    return self.assert_awaited_with(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2352: in assert_awaited_with
+    raise AssertionError(_error_message()) from cause
+E   AssertionError: expected await not found.
+E   Expected: _redefer_inflight('44444444-4444-4444-8444-444444444444', 'campaign_status_unavailable')
+E     Actual: _redefer_inflight('44444444-4444-4444-8444-444444444444', 'campaign_status_unavailable', delay_seconds=120, scheduled_at=datetime.datetime(2026, 10, 5, 3, 34, 32, 451166, tzinfo=datetime.timezone.utc))
+_ test_campaign_status_outage_redefers_same_payload_without_terminal_skip[2] __
+tests\unit\test_dialer_origination_durability.py:258: in test_campaign_status_outage_redefers_same_payload_without_terminal_skip
+    worker.queue_service._redefer_inflight.assert_awaited_once_with(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2363: in assert_awaited_once_with
+    return self.assert_awaited_with(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2352: in assert_awaited_with
+    raise AssertionError(_error_message()) from cause
+E   AssertionError: expected await not found.
+E   Expected: _redefer_inflight('44444444-4444-4444-8444-444444444444', 'campaign_status_unavailable')
+E     Actual: _redefer_inflight('44444444-4444-4444-8444-444444444444', 'campaign_status_unavailable', delay_seconds=120, scheduled_at=datetime.datetime(2026, 10, 5, 3, 34, 33, 38455, tzinfo=datetime.timezone.utc))
+__ test_cancellation_before_intent_redefers_same_payload_before_propagating ___
+tests\unit\test_dialer_origination_durability.py:371: in test_cancellation_before_intent_redefers_same_payload_before_propagating
+    worker.queue_service._redefer_inflight.assert_awaited_once_with(
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2363: in assert_awaited_once_with
+    return self.assert_awaited_with(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2352: in assert_awaited_with
+    raise AssertionError(_error_message()) from cause
+E   AssertionError: expected await not found.
+E   Expected: _redefer_inflight('44444444-4444-4444-8444-444444444444', 'worker_cancelled_before_origination')
+E     Actual: _redefer_inflight('44444444-4444-4444-8444-444444444444', 'worker_cancelled_before_origination', delay_seconds=120, scheduled_at=datetime.datetime(2026, 10, 5, 3, 34, 34, 108797, tzinfo=datetime.timezone.utc))
+_ test_real_task_cancellation_before_intent_resolution_redefers_same_payload __
+tests\unit\test_dialer_origination_durability.py:508: in test_real_task_cancellation_before_intent_resolution_redefers_same_payload
+    assert redefer_finished.is_set()
+E   assert False
+E    +  where False = <bound method Event.is_set of <asyncio.locks.Event object at 0x0000021898853DA0 [unset]>>()
+E    +    where <bound method Event.is_set of <asyncio.locks.Event object at 0x0000021898853DA0 [unset]>> = <asyncio.locks.Event object at 0x0000021898853DA0 [unset]>.is_set
+------------------------------ Captured log call ------------------------------
+WARNING  app.workers.dialer_worker:dialer_worker.py:2486 dialer_pre_intent_redefer_failed job=44444444-4444-4444-8444-444444444444 error_type=TypeError
+______ test_genuinely_stale_cooldown_clears_and_persists_attempt_number _______
+tests\unit\test_dialer_lead_cooldown_gate.py:121: in test_genuinely_stale_cooldown_clears_and_persists_attempt_number
+    worker.queue_service.enqueue_job.assert_awaited_once()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2334: in assert_awaited_once
+    raise AssertionError(msg)
+E   AssertionError: Expected enqueue_job to have been awaited once. Awaited 0 times.
+________________ test_reaper_marks_in_flight_and_returns_count ________________
+tests\unit\test_dialer_lifecycle_and_reaper.py:61: in test_reaper_marks_in_flight_and_returns_count
+    assert "UPDATE dialer_jobs" in sql and "failed" in sql
+E   assert ('UPDATE dialer_jobs' in "\n        UPDATE dialer_jobs\n           SET failure_category = COALESCE(failure_category, 'internal'),\n            ...ob_id = dialer_jobs.id\n                  AND c.status = ANY($4::text[])\n           )\n        RETURNING id\n        " and 'failed' in "\n        UPDATE dialer_jobs\n           SET failure_category = COALESCE(failure_category, 'internal'),\n            ...ob_id = dialer_jobs.id\n                  AND c.status = ANY($4::text[])\n           )\n        RETURNING id\n        ")
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.dialer.stuck_job_reaper:stuck_job_reaper.py:162 reaper: 3 stale dialer job(s) require reconciliation (in-flight > 90s); ownership retained
+============================== warnings summary ===============================
+tests/unit/test_op05_pre_attempt_holds.py: 22 warnings
+tests/unit/test_dialer_origination_durability.py: 48 warnings
+tests/unit/test_dialer_lead_cooldown_gate.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[False]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_failed_or_lost_schedule_ack_keeps_original_evidence_and_recovers_once[True]
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_missing_original_payload_does_not_invent_a_retry
+FAILED tests/unit/test_op05_pre_attempt_holds.py::test_post_handoff_bookkeeping_failure_cannot_create_new_attempt[_update_job_status]
+FAILED tests/unit/test_dialer_origination_durability.py::test_campaign_status_outage_redefers_same_payload_without_terminal_skip[1]
+FAILED tests/unit/test_dialer_origination_durability.py::test_campaign_status_outage_redefers_same_payload_without_terminal_skip[2]
+FAILED tests/unit/test_dialer_origination_durability.py::test_cancellation_before_intent_redefers_same_payload_before_propagating
+FAILED tests/unit/test_dialer_origination_durability.py::test_real_task_cancellation_before_intent_resolution_redefers_same_payload
+FAILED tests/unit/test_dialer_lead_cooldown_gate.py::test_genuinely_stale_cooldown_clears_and_persists_attempt_number
+FAILED tests/unit/test_dialer_lifecycle_and_reaper.py::test_reaper_marks_in_flight_and_returns_count
+10 failed, 56 passed, 80 warnings in 22.50s

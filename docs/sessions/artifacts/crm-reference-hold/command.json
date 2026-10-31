@@ -1,0 +1,42 @@
+{
+  "source_commit": "e7add564b3b73b2f2ac73805b128ca630a55a7cf",
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend",
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "runner_at_execution": "../tmp/crm-unknown-verification.py",
+  "runner_archived_as": "runner.py",
+  "argv": [
+    "final",
+    "tests/unit/test_crm_sync_service.py",
+    "tests/unit/test_ag06_crm_evidence.py",
+    "tests/unit/test_crm_sync_hooks.py",
+    "-q",
+    "--tb=short",
+    "--disable-warnings"
+  ],
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  },
+  "lint": {
+    "argv": [
+      "-m",
+      "ruff",
+      "check",
+      "--select",
+      "F",
+      "--extend-ignore",
+      "F401,F841",
+      "backend/app/services/crm_sync_service.py",
+      "backend/tests/unit/test_crm_sync_service.py"
+    ],
+    "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004",
+    "exit_code": 0
+  },
+  "broader_lint_experiment": {
+    "selection": "E,F,W ignoring E501",
+    "result": "2 existing E701 findings at test lines 386-387; no new findings"
+  }
+}

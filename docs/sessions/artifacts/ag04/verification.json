@@ -1,0 +1,87 @@
+{
+  "package_id": "AG04",
+  "status": "in_progress",
+  "candidate_revision": "c93a05e3561b5feaf7da467b30c2aa37be0e41bd",
+  "base_revision": "e551a9487d7b79db541655bd14cb3e987311ee45",
+  "backend": {
+    "passed": 1797,
+    "skipped": 0,
+    "warnings": 2344,
+    "modules": 114,
+    "exit_code": 0
+  },
+  "replay": {
+    "command": "python -m scripts.evaluate_ag04_conversations --output ../docs/sessions/artifacts/ag04/replay-final.json",
+    "exit_code": 1,
+    "status": "failed",
+    "control_checks": 1120,
+    "control_failures": 0,
+    "rows": 170,
+    "semantic_failures": 1,
+    "semantic_unreviewed": 169,
+    "matrix_proposed": 50,
+    "matrix_mapped_anywhere": 37,
+    "missing_mappings": 13,
+    "network_attempts": 0,
+    "source_hashes_verified_before_source_commit": true
+  },
+  "lint": "passed",
+  "staged_source_diff": "passed",
+  "source_files": 18,
+  "compression": [
+    {
+      "path": "docs/sessions/artifacts/ag04/replay-initial.json.gz",
+      "uncompressed_bytes": 12194950,
+      "compressed_bytes": 586743,
+      "uncompressed_sha256": "30d55d1195b90c7d7127011790f95ae5e35c14561fb16ab2f64f997e779be157",
+      "compressed_sha256": "d51b959972cb072a579c4cc4a613fb4cb94facf1054fdba928bb47a22e74dc32"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag04/replay-final.json.gz",
+      "uncompressed_bytes": 12194950,
+      "compressed_bytes": 586742,
+      "uncompressed_sha256": "ebc084235e9bd96f1c23b07fcb9ed1ad9ca512ede8c896d7e670365fc8923311",
+      "compressed_sha256": "baa56606cf05e5f41465d4f2a71b195aeb3e9948423d57b7e406782b319c053c"
+    },
+    {
+      "path": "docs/sessions/artifacts/ag04/traditional-before-clarification.json.gz",
+      "uncompressed_bytes": 10227799,
+      "compressed_bytes": 452442,
+      "uncompressed_sha256": "54db3590678f92af1f30159a9bb2c2ee22a7f5793fa487d41c16f2ffafba9942",
+      "compressed_sha256": "9b2d64944e66d1ae28ca9c967df9a0cc31f98e4a3bec6cc9300cef8c5fc8c3cd"
+    }
+  ],
+  "exploratory_report_note": "replay-initial provenance sampled before TurnEnder final edit; not frozen evidence. Final replay hashes matched source before commit.",
+  "log_format_note": "Trailing horizontal whitespace removed from text logs for git hygiene; outcomes unchanged.",
+  "not_run": [
+    "current provider generation",
+    "human semantic approval",
+    "telephone/audio/hearing/latency",
+    "real external effect or durable DNC",
+    "release/deployment/push"
+  ],
+  "artifacts_sha256_lf": {
+    "backend-final-command.json": "cc04d9caa94e051b13edddc74b2c26bf2f12626e6f0b89590912db787e8fbe83",
+    "backend-final.txt": "e65ed320466f3df44b74f642b9245a2b6f49b0cbb54f195669b0906d0bfeea72",
+    "clarification-red.txt": "4f3bbe9a153e6954e91b49558bbc9cfa214c585c9682fbbbeb8902dfac720125",
+    "independent-gate-final.txt": "1935e392bfacd803e3f98ef5e22ee318b6f2c1190690f6be2cd88109d6884f00",
+    "independent-gate-initial.txt": "bf2cd4911517f701f159588ffb7ffbd1c3166d21e4b901bd4d19fd478ce720d3",
+    "independent-review.md": "3ef34f4ee9d8c94fb6f5bd44ef8a3298091887f82a3295ea6115d405edd09074",
+    "lint-command.json": "ed164b964fe04a9da89ccc6b92ce55b1bdae779055c407575b0d5cbe1b36f7a8",
+    "lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "native-contact-prefix-red.txt": "29d2e25ee9cc99366138ee00414ed54e9fb075703ad671730a3b3b891de1d1bd",
+    "native-lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "native-opening-green.txt": "85b0fdf009d7d5fc3c312ea9140d8e6a0f9531e7ea4e6fd274a4a5e7509769c1",
+    "native-opening-red.txt": "dea38980d106e81c63c4f1d48ffb35d65755a123c18c02c24d3ffe10877471ac",
+    "native-regression.txt": "1c6dff50666505b94d45619a6a792d7e875c147d6cff19a9fa10673bb5f0c42b",
+    "native-verification.json": "88aa60826606c7267219786510369962209fc4fe7d41a3a196da4daa902549c3",
+    "replay-final-console.txt": "ad4370a9980b3528452ac7dc9347040b16091ee402a3ea4324c6952de2b08232",
+    "replay-initial-console.txt": "9b0ed9661bf66f09310c3a8ba761f38230d3327ce7343effda548b5c4cdccc30",
+    "smoke-after.txt": "bce37d533c471c836e484bbf60a4b0e202e846d42eef92a698cbed9ef40f16ed",
+    "smoke-before.txt": "ce8282c1b704b3c2454b2b01a3969a8d47ff17e4bc579541d0936d0cd9a9a145",
+    "source-integrity.json": "a35ee26ce42bcee078056434fe321550283d858b469ecd4318611a29547a2a69",
+    "traditional-red.txt": "26363bea47ae5a1912bb8b03ce0cfd3b7bba68261c09c155827fbebe29ff0c36",
+    "traditional-regressions.json": "66cbabe07d5a11322ecba92611b6d4a60bacf8e1571a6da96b4a62f2b9dc42bc",
+    "traditional-regressions.txt": "022acdea0de8ea90da4f7a2949006f267b91d138e05c31fae88be3ca2d9ea6f5"
+  }
+}

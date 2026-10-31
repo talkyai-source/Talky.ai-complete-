@@ -1,0 +1,13 @@
+{
+  "steps": [
+    "stamp 0008_tenant_voice_tuning (consolidated canonical baseline)",
+    "upgrade head (actual 0009 through 0062 migration chain)"
+  ],
+  "network": {
+    "database_socket_attempts": 0,
+    "database_transport_attempts": 2,
+    "database_address_resolutions": 0,
+    "internal_socketpairs": 2,
+    "prohibited_attempts": 0
+  }
+}

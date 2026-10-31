@@ -1,0 +1,66 @@
+[
+  {
+    "ref": "add699c4",
+    "text": "The callback, as requested, was scheduled.",
+    "result": [
+      false,
+      "unconfirmed_action:schedule_callback"
+    ]
+  },
+  {
+    "ref": "add699c4",
+    "text": "The email, as requested, was sent.",
+    "result": [
+      false,
+      "unconfirmed_action:send_email"
+    ]
+  },
+  {
+    "ref": "add699c4",
+    "text": "I have sent the price and payment information.",
+    "result": [
+      false,
+      "unconfirmed_action:send_email"
+    ]
+  },
+  {
+    "ref": "add699c4",
+    "text": "The form, as requested, was submitted.",
+    "result": [
+      false,
+      "unconfirmed_action:submit_form"
+    ]
+  },
+  {
+    "ref": "7e6a96bf",
+    "text": "The callback, as requested, was scheduled.",
+    "result": [
+      true,
+      null
+    ]
+  },
+  {
+    "ref": "7e6a96bf",
+    "text": "The email, as requested, was sent.",
+    "result": [
+      true,
+      null
+    ]
+  },
+  {
+    "ref": "7e6a96bf",
+    "text": "I have sent the price and payment information.",
+    "result": [
+      true,
+      null
+    ]
+  },
+  {
+    "ref": "7e6a96bf",
+    "text": "The form, as requested, was submitted.",
+    "result": [
+      true,
+      null
+    ]
+  }
+]

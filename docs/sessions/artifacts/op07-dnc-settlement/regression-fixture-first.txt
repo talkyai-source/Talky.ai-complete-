@@ -1,0 +1,2613 @@
+........................................................................ [ 32%]
+.............FFFFFFFFFFFFFFFFFFF........................................ [ 65%]
+........................................................................ [ 98%]
+....                                                                     [100%]
+================================== FAILURES ===================================
+_________________ test_busy_lead_stops_after_exactly_the_cap __________________
+
+    @pytest.mark.asyncio
+    async def test_busy_lead_stops_after_exactly_the_cap():
+        conn, queue, service = _make_case()
+
+>       dials = await _dial_until_exhausted(conn, service, CallOutcome.BUSY)
+
+tests\unit\test_disposition_retry_bounds.py:291:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C2851C0>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_______ test_every_retryable_disposition_is_bounded_at_its_cap[busy-4] ________
+
+outcome = <CallOutcome.BUSY: 'busy'>, cap = 4
+
+    @pytest.mark.parametrize("outcome,cap", RETRYABLE_CAPS)
+    @pytest.mark.asyncio
+    async def test_every_retryable_disposition_is_bounded_at_its_cap(outcome, cap):
+        conn, queue, service = _make_case()
+
+>       dials = await _dial_until_exhausted(conn, service, outcome)
+
+tests\unit\test_disposition_retry_bounds.py:312:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C2CB170>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_____ test_every_retryable_disposition_is_bounded_at_its_cap[no_answer-3] _____
+
+outcome = <CallOutcome.NO_ANSWER: 'no_answer'>, cap = 3
+
+    @pytest.mark.parametrize("outcome,cap", RETRYABLE_CAPS)
+    @pytest.mark.asyncio
+    async def test_every_retryable_disposition_is_bounded_at_its_cap(outcome, cap):
+        conn, queue, service = _make_case()
+
+>       dials = await _dial_until_exhausted(conn, service, outcome)
+
+tests\unit\test_disposition_retry_bounds.py:312:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C3902F0>
+call_uuid = 'call-1', outcome = <CallOutcome.NO_ANSWER: 'no_answer'>
+outcome_value = 'no_answer', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_____ test_every_retryable_disposition_is_bounded_at_its_cap[voicemail-2] _____
+
+outcome = <CallOutcome.VOICEMAIL: 'voicemail'>, cap = 2
+
+    @pytest.mark.parametrize("outcome,cap", RETRYABLE_CAPS)
+    @pytest.mark.asyncio
+    async def test_every_retryable_disposition_is_bounded_at_its_cap(outcome, cap):
+        conn, queue, service = _make_case()
+
+>       dials = await _dial_until_exhausted(conn, service, outcome)
+
+tests\unit\test_disposition_retry_bounds.py:312:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C3681A0>
+call_uuid = 'call-1', outcome = <CallOutcome.VOICEMAIL: 'voicemail'>
+outcome_value = 'voicemail', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+______ test_every_retryable_disposition_is_bounded_at_its_cap[failed-3] _______
+
+outcome = <CallOutcome.FAILED: 'failed'>, cap = 3
+
+    @pytest.mark.parametrize("outcome,cap", RETRYABLE_CAPS)
+    @pytest.mark.asyncio
+    async def test_every_retryable_disposition_is_bounded_at_its_cap(outcome, cap):
+        conn, queue, service = _make_case()
+
+>       dials = await _dial_until_exhausted(conn, service, outcome)
+
+tests\unit\test_disposition_retry_bounds.py:312:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C338920>
+call_uuid = 'call-1', outcome = <CallOutcome.FAILED: 'failed'>
+outcome_value = 'failed', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+______ test_every_retryable_disposition_is_bounded_at_its_cap[timeout-3] ______
+
+outcome = <CallOutcome.TIMEOUT: 'timeout'>, cap = 3
+
+    @pytest.mark.parametrize("outcome,cap", RETRYABLE_CAPS)
+    @pytest.mark.asyncio
+    async def test_every_retryable_disposition_is_bounded_at_its_cap(outcome, cap):
+        conn, queue, service = _make_case()
+
+>       dials = await _dial_until_exhausted(conn, service, outcome)
+
+tests\unit\test_disposition_retry_bounds.py:312:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C320530>
+call_uuid = 'call-1', outcome = <CallOutcome.TIMEOUT: 'timeout'>
+outcome_value = 'timeout', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_______________ test_terminal_dispositions_are_never_redialled ________________
+
+    @pytest.mark.asyncio
+    async def test_terminal_dispositions_are_never_redialled():
+        for outcome in (
+            CallOutcome.REJECTED,
+            CallOutcome.ANSWERED,
+            CallOutcome.GOAL_ACHIEVED,
+            CallOutcome.GOAL_NOT_ACHIEVED,
+            CallOutcome.SPAM,
+            CallOutcome.INVALID,
+            CallOutcome.DISCONNECTED,
+            CallOutcome.UNAVAILABLE,
+        ):
+            conn, queue, service = _make_case()
+>           dials = await _dial_until_exhausted(conn, service, outcome)
+
+tests\unit\test_disposition_retry_bounds.py:333:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C204E90>
+call_uuid = 'call-1', outcome = <CallOutcome.REJECTED: 'rejected'>
+outcome_value = 'rejected', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+___________ test_frozen_counter_reproduces_the_infinite_redial_bug ____________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002187FDCD190>
+
+    @pytest.mark.asyncio
+    async def test_frozen_counter_reproduces_the_infinite_redial_bug(monkeypatch):
+        """Revert the fix (freeze the persisted counter AND hide the live one,
+        i.e. exactly the pre-fix state) and prove the loop never terminates.
+
+        Without this, ``test_busy_lead_stops_after_exactly_the_cap`` could pass
+        for the wrong reason (e.g. the loop ending because of some unrelated
+        guard rather than the cap).
+        """
+        conn, queue, service = _make_case()
+
+        # Pre-fix state #1: nothing ever advanced dialer_jobs.attempt_number.
+        original_fetchval = conn.fetchval
+
+        async def frozen_fetchval(query: str, *args: Any):
+            before = conn.dialer_jobs_row.get("attempt_number")
+            result = await original_fetchval(query, *args)
+            conn.dialer_jobs_row["attempt_number"] = before
+            return result
+
+        monkeypatch.setattr(conn, "fetchval", frozen_fetchval)
+        # Pre-fix state #2: the live Redis count was never consulted.
+        monkeypatch.setattr(
+            queue, "get_live_attempt_number", AsyncMock(return_value=None),
+        )
+
+>       dials = await _dial_until_exhausted(conn, service, CallOutcome.BUSY, limit=25)
+
+tests\unit\test_disposition_retry_bounds.py:369:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002187FDE38F0>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_________________ test_double_increment_would_skip_an_attempt _________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x000002180C207D70>
+
+    @pytest.mark.asyncio
+    async def test_double_increment_would_skip_an_attempt(monkeypatch):
+        """The second bug, pinned from the other side: pre-incrementing in
+        ``_schedule_retry`` on top of ``schedule_retry``'s own bump makes the
+        retry job claim an attempt it never made, so the lead loses a dial."""
+        conn, queue, service = _make_case()
+
+        original = CallService._schedule_retry
+
+        async def double_incrementing_schedule_retry(self, *args, **kwargs):
+            args = list(args)
+            args[6] = args[6] + 1  # the old `attempt_number + 1` at the call site
+            return await original(self, *args, **kwargs)
+
+        monkeypatch.setattr(
+            CallService, "_schedule_retry", double_incrementing_schedule_retry,
+        )
+
+>       dials = await _dial_until_exhausted(conn, service, CallOutcome.BUSY)
+
+tests\unit\test_disposition_retry_bounds.py:396:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C323BC0>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+________________ test_retry_job_carries_exactly_one_increment _________________
+
+    @pytest.mark.asyncio
+    async def test_retry_job_carries_exactly_one_increment():
+        conn, queue, service = _make_case()
+
+        conn.dialer_jobs_row["status"] = "processing"
+>       _, _, retry_args = await service._handle_call_status_pooled(
+            "call-1", CallOutcome.BUSY, "busy", duration=0,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:415:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C338500>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+________ test_persisted_counter_is_not_advanced_on_a_terminal_outcome _________
+
+    @pytest.mark.asyncio
+    async def test_persisted_counter_is_not_advanced_on_a_terminal_outcome():
+        conn, _queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+
+>       await service._handle_call_status_pooled(
+            "call-1", CallOutcome.ANSWERED, "answered", duration=30,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:437:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C392FC0>
+call_uuid = 'call-1', outcome = <CallOutcome.ANSWERED: 'answered'>
+outcome_value = 'answered', duration = 30
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+____________ test_duplicate_teardown_does_not_advance_the_counter _____________
+
+    @pytest.mark.asyncio
+    async def test_duplicate_teardown_does_not_advance_the_counter():
+        """The idempotency guard and the increment share one UPDATE, so a
+        replayed teardown must not burn an attempt."""
+        conn, queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+
+>       await service._handle_call_status_pooled(
+            "call-1", CallOutcome.BUSY, "busy", duration=0,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:452:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C29A0F0>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_________ test_live_redis_count_wins_when_it_is_ahead_of_the_database _________
+
+    @pytest.mark.asyncio
+    async def test_live_redis_count_wins_when_it_is_ahead_of_the_database():
+        """Pre-answer retries (originate failures) bump only the Redis job, so
+        the live count can legitimately exceed the persisted one. The cap must
+        be enforced against the HIGHER of the two � never the stale lower one."""
+        conn, queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+        # DB still says 1; the live job has already burned 4 busy attempts.
+        queue.live["job-1"] = 4
+
+>       _, _, retry_args = await service._handle_call_status_pooled(
+            "call-1", CallOutcome.BUSY, "busy", duration=0,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:478:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002187FDC9D00>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_____________ test_missing_live_count_falls_back_to_the_database ______________
+
+    @pytest.mark.asyncio
+    async def test_missing_live_count_falls_back_to_the_database():
+        conn, queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+        conn.dialer_jobs_row["attempt_number"] = 4  # DB alone says the cap is hit
+        queue.live.clear()  # Redis has nothing (reaped / flushed)
+
+>       _, _, retry_args = await service._handle_call_status_pooled(
+            "call-1", CallOutcome.BUSY, "busy", duration=0,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:493:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C3209E0>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_______________ test_live_lookup_failure_never_breaks_teardown ________________
+
+    @pytest.mark.asyncio
+    async def test_live_lookup_failure_never_breaks_teardown():
+        conn, queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+
+        async def boom(_job_id):
+            raise RuntimeError("redis is down")
+
+        queue.get_live_attempt_number = boom
+
+>       _, _, retry_args = await service._handle_call_status_pooled(
+            "call-1", CallOutcome.BUSY, "busy", duration=0,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:511:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C205BE0>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+__________ test_campaign_counters_bump_once_per_lead_not_per_attempt __________
+
+    @pytest.mark.asyncio
+    async def test_campaign_counters_bump_once_per_lead_not_per_attempt():
+        conn, _queue, service = _make_case()
+
+>       dials = await _dial_until_exhausted(conn, service, CallOutcome.BUSY)
+
+tests\unit\test_disposition_retry_bounds.py:529:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\unit\test_disposition_retry_bounds.py:273: in _dial_until_exhausted
+    _, _, retry_args = await service._handle_call_status_pooled(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C2AD100>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+______________ test_counters_not_bumped_while_a_retry_is_pending ______________
+
+    @pytest.mark.asyncio
+    async def test_counters_not_bumped_while_a_retry_is_pending():
+        conn, _queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+
+>       await service._handle_call_status_pooled(
+            "call-1", CallOutcome.BUSY, "busy", duration=0,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:544:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C285220>
+call_uuid = 'call-1', outcome = <CallOutcome.BUSY: 'busy'>
+outcome_value = 'busy', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+_______________ test_terminal_outcome_still_bumps_the_counters ________________
+
+    @pytest.mark.asyncio
+    async def test_terminal_outcome_still_bumps_the_counters():
+        conn, _queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+
+>       await service._handle_call_status_pooled(
+            "call-1", CallOutcome.ANSWERED, "answered", duration=30,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:556:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002187FDCA210>
+call_uuid = 'call-1', outcome = <CallOutcome.ANSWERED: 'answered'>
+outcome_value = 'answered', duration = 30
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+___________ test_non_reachable_terminal_outcome_bumps_calls_failed ____________
+
+    @pytest.mark.asyncio
+    async def test_non_reachable_terminal_outcome_bumps_calls_failed():
+        conn, _queue, service = _make_case()
+        conn.dialer_jobs_row["status"] = "processing"
+
+>       await service._handle_call_status_pooled(
+            "call-1", CallOutcome.REJECTED, "rejected", duration=0,
+        )
+
+tests\unit\test_disposition_retry_bounds.py:568:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.call_service.CallService object at 0x000002180C3920F0>
+call_uuid = 'call-1', outcome = <CallOutcome.REJECTED: 'rejected'>
+outcome_value = 'rejected', duration = 0
+
+    async def _handle_call_status_pooled(
+        self,
+        call_uuid: str,
+        outcome: CallOutcome,
+        outcome_value: str,
+        duration: Optional[int],
+    ) -> _CallStatusExecution:
+        """Non-blocking equivalent of the RPC-then-fallback flow above.
+
+        RLS: the teardown caller (lifecycle.py `_on_call_ended`) has no
+        request JWT, so it sets `set_bypass_rls(True)` (+ tenant id, when
+        known) on the `tenant_isolation` contextvars before calling
+        `handle_call_status`. We read those SAME contextvars � exactly what
+        `get_db()` reads � and hand them to `acquire_with_tenant`, which
+        opens the pooled connection inside an explicit `conn.transaction()`
+        and issues the `SET LOCAL app.bypass_rls` / `app.current_tenant_id`
+        for the lifetime of that transaction. (A bare `get_db()` call sets
+        those as their own single-statement implicit transaction, which
+        reverts before our next query runs � not suitable for the
+        multi-statement transaction this method needs, so we go straight to
+        `acquire_with_tenant`, which already gets this right.)
+
+        A saturated pool fails closed: `acquire_with_tenant`'s
+        `timeout` mirrors `get_db()`'s bounded acquire
+        (`PG_POOL_ACQUIRE_TIMEOUT`, default 10s) � on expiry we log and
+        returns an explicit non-durable result instead of stalling teardown
+        indefinitely or manufacturing success.
+
+        Returns (job_id, campaign_id, retry_args) where retry_args is either
+        None or the positional-argument tuple for `_schedule_retry`,
+        deferred until AFTER the transaction commits (Redis I/O must never
+        happen while holding a pooled DB connection).
+
+        2026-07-13 fix: this used to only resolve `dialer_job_id` (and only
+        update the `leads` row) on the "call row not found on the first
+        SELECT" fallback branch � which never happens for dialer calls
+        (they always pre-create the row via `dialer_worker._create_call_
+        record`). That left `leads.status` stuck on "calling" forever and
+        `dialer_jobs` stuck PROCESSING forever on the production pooled
+        path. There is now exactly one lookup + one write path; job_id is
+        resolved from `calls.dialer_job_id` (now populated at INSERT � see
+        `dialer_worker._create_call_record`) and the lead update always
+        runs when a lead_id is present, matching the legacy
+        `_sequential_update` behavior this method otherwise mirrors.
+        """
+        bypass = get_bypass_rls()
+        tenant_id = get_current_tenant_id()
+
+        if not bypass and not tenant_id:
+            # Neither bypass nor a tenant context is set. Not expected on
+            # the real teardown path (both lifecycle.py call sites set
+            # bypass_rls=True before invoking handle_call_status) � fail
+            # loud-but-caught (by the outer try/except in
+            # handle_call_status) instead of silently guessing an RLS scope.
+            raise RuntimeError(
+                "handle_call_status: no bypass_rls and no tenant context "
+                "set � refusing to guess an RLS scope for call "
+                f"{call_uuid}"
+            )
+
+        job_id = None
+        campaign_id = None
+        lead_id = None
+        retry_args = None
+
+        try:
+            async with acquire_with_tenant(
+                self._db_pool,
+                None if bypass else tenant_id,
+                timeout=_ACQUIRE_TIMEOUT_S,
+            ) as conn:
+                # ---- Step 1: elect one durable settlement winner -----------
+                # The row lock is the concurrency boundary. A provider burst,
+                # an operator endpoint followed by the provider callback, and
+                # two different worker processes serialize here. The endpoint
+                # is allowed to win the terminal *status*; terminal_settled_at
+                # separately records that outbound lead/job/campaign effects
+                # have committed exactly once.
+                row = await conn.fetchrow(
+                    """
+                    SELECT id, tenant_id, phone_number, lead_id, campaign_id, dialer_job_id, status,
+                           outcome, ended_at, duration_seconds,
+                           terminal_settled_at, terminal_retry_payload,
+                           terminal_retry_enqueued_at
+                    FROM calls WHERE id = $1
+                    FOR UPDATE
+                    """,
+                    call_uuid,
+                )
+                if row is None:
+                    logger.warning(f"Call not found: {call_uuid}")
+                    return _CallStatusExecution(
+                        result=CallStatusResult(
+                            call_id=call_uuid,
+                            found=False,
+                            applied=False,
+                            durable=False,
+                            error="call_not_found",
+                        )
+                    )
+
+                # Serialize lead projection with a concurrent opt-out purge
+                # before reading DNC. Otherwise a cached negative lookup can
+                # overwrite an opt-out which committed while this lock waited.
+                if row["lead_id"]:
+                    owned_lead = await conn.fetchval(
+                        "SELECT id FROM leads WHERE id=$1 AND tenant_id=$2 FOR UPDATE",
+>                       row["lead_id"], row["tenant_id"],
+                    )
+E                   KeyError: 'tenant_id'
+
+app\domain\services\call_service.py:555: KeyError
+============================== warnings summary ===============================
+tests/unit/test_dnc_bulk_acknowledgement.py: 8 warnings
+tests/unit/test_dnc_service.py: 14 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\tests\unit\test_dnc_service.py:87: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    created_at=datetime.utcnow(),
+
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+tests/unit/test_call_service_pooled_teardown.py::test_retry_outbox_replays_fail_once_enqueue_and_acks_exactly_one_job
+tests/unit/test_disposition_retry_bounds.py::test_queue_get_live_attempt_number_reads_the_inflight_payload
+tests/unit/test_disposition_retry_bounds.py::test_queue_get_live_attempt_number_reads_the_inflight_payload
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_webhooks_call_idor.py::test_goal_achieved_cross_tenant_changes_nothing
+tests/unit/test_webhooks_call_idor.py::test_goal_achieved_nonexistent_id_same_as_foreign
+tests/unit/test_webhooks_call_idor.py::test_goal_achieved_same_tenant_writes
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\app\domain\services\call_service.py:1470: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "updated_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_webhooks_call_idor.py::test_goal_achieved_same_tenant_writes
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\app\domain\services\call_service.py:1490: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "completed_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_webhooks_call_idor.py::test_mark_spam_same_tenant_writes
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\app\domain\services\call_service.py:1560: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "updated_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_webhooks_call_idor.py::test_mark_spam_same_tenant_writes
+tests/unit/test_webhooks_call_idor.py::test_mark_spam_lead_only_cross_tenant_changes_nothing
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-dnc-settlement-20261005\backend\app\domain\services\call_service.py:1579: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "updated_at": datetime.utcnow().isoformat(),
+
+tests/unit/test_webhooks_call_idor.py::test_admin_configure_rejects_unauthenticated
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\fastapi\testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
+    from starlette.testclient import TestClient as TestClient  # noqa
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_disposition_retry_bounds.py::test_busy_lead_stops_after_exactly_the_cap
+FAILED tests/unit/test_disposition_retry_bounds.py::test_every_retryable_disposition_is_bounded_at_its_cap[busy-4]
+FAILED tests/unit/test_disposition_retry_bounds.py::test_every_retryable_disposition_is_bounded_at_its_cap[no_answer-3]
+FAILED tests/unit/test_disposition_retry_bounds.py::test_every_retryable_disposition_is_bounded_at_its_cap[voicemail-2]
+FAILED tests/unit/test_disposition_retry_bounds.py::test_every_retryable_disposition_is_bounded_at_its_cap[failed-3]
+FAILED tests/unit/test_disposition_retry_bounds.py::test_every_retryable_disposition_is_bounded_at_its_cap[timeout-3]
+FAILED tests/unit/test_disposition_retry_bounds.py::test_terminal_dispositions_are_never_redialled
+FAILED tests/unit/test_disposition_retry_bounds.py::test_frozen_counter_reproduces_the_infinite_redial_bug
+FAILED tests/unit/test_disposition_retry_bounds.py::test_double_increment_would_skip_an_attempt
+FAILED tests/unit/test_disposition_retry_bounds.py::test_retry_job_carries_exactly_one_increment
+FAILED tests/unit/test_disposition_retry_bounds.py::test_persisted_counter_is_not_advanced_on_a_terminal_outcome
+FAILED tests/unit/test_disposition_retry_bounds.py::test_duplicate_teardown_does_not_advance_the_counter
+FAILED tests/unit/test_disposition_retry_bounds.py::test_live_redis_count_wins_when_it_is_ahead_of_the_database
+FAILED tests/unit/test_disposition_retry_bounds.py::test_missing_live_count_falls_back_to_the_database
+FAILED tests/unit/test_disposition_retry_bounds.py::test_live_lookup_failure_never_breaks_teardown
+FAILED tests/unit/test_disposition_retry_bounds.py::test_campaign_counters_bump_once_per_lead_not_per_attempt
+FAILED tests/unit/test_disposition_retry_bounds.py::test_counters_not_bumped_while_a_retry_is_pending
+FAILED tests/unit/test_disposition_retry_bounds.py::test_terminal_outcome_still_bumps_the_counters
+FAILED tests/unit/test_disposition_retry_bounds.py::test_non_reachable_terminal_outcome_bumps_calls_failed
+19 failed, 201 passed, 36 warnings in 16.69s

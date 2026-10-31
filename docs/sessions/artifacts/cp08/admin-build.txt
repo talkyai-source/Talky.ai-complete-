@@ -1,0 +1,13 @@
+
+> frontend@0.0.0 build
+> tsc -b && vite build
+
+vite v7.3.6 building client environment for production...
+transforming...
+✓ 1765 modules transformed.
+rendering chunks...
+computing gzip size...
+dist/index.html                   0.47 kB │ gzip:   0.30 kB
+dist/assets/index-DaOXwTze.css   63.20 kB │ gzip:  11.02 kB
+dist/assets/index-Dc1mGNVz.js   423.28 kB │ gzip: 117.49 kB
+✓ built in 1m 5s

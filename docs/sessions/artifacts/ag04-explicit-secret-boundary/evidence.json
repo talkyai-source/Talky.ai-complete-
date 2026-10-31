@@ -1,0 +1,224 @@
+{
+  "base_revision": "fe1ad226f8e68ba1042d5b3df880db7c08d434fa",
+  "source_commit": "939567b9137adaa19cd5fc807b9c0a9a080dcc83",
+  "scope": "New voice text with explicit English secret labels and complete bounded values; no provider, database, recording, historic-data or acceptance operation.",
+  "files": [
+    {
+      "path": "backend/app/domain/services/explicit_secrets.py",
+      "sha256": "fdeabb22c6cc09337d8a55ef391b32192834636e8a8a6bcfca7e47e8edaf3166"
+    },
+    {
+      "path": "backend/app/domain/services/transcript_service.py",
+      "sha256": "54f5d4bf70b5c0abb46eb7463725a7c5de14592711e7fc22d60c9a7490c40ed8"
+    },
+    {
+      "path": "backend/app/domain/services/voice_pipeline/transcript_handler.py",
+      "sha256": "0b57e53803d5f1a7cbc713b0b6921b08647d6ec275326b0f77dfaf562e55115d"
+    },
+    {
+      "path": "backend/app/realtime/bridge.py",
+      "sha256": "7166eff853b0684793f42de474479716b64ae99c251a2a7b208c9b63bcc7f8b8"
+    },
+    {
+      "path": "backend/app/realtime/prompts.py",
+      "sha256": "035af192c32fdbb831425c90f7ab3783cbc9dc80abc15da7dd8139069ff01ad0"
+    },
+    {
+      "path": "backend/app/services/scripts/prompts/guardrails.py",
+      "sha256": "22d39af229f6a32aa682e7ca101535d62f454f7e1ca5b9a6399857341520f710"
+    },
+    {
+      "path": "backend/app/services/scripts/prompts/versions.py",
+      "sha256": "931fe3d94ff60f71087033dc8ccf72a14d3319fc6f556d100e6937ca0d449fee"
+    },
+    {
+      "path": "backend/app/domain/services/call_summary/summarizer.py",
+      "sha256": "5b5b5cbfa937ec902edd498e42220919651b82cf77ed175169e68ea35f3465f8"
+    },
+    {
+      "path": "backend/tests/unit/test_explicit_secret_boundary.py",
+      "sha256": "f2d233cee9f9416c5cc33a51d093e0fbc2d5001ebb77cc01aaf631d7a15ebbe5"
+    },
+    {
+      "path": "backend/tests/unit/test_prompt_versions.py",
+      "sha256": "d7333cc9d461576a1b0b9a9ce9d3fa280b087e2a179e165c04ccb5e03a9c55ea"
+    },
+    {
+      "path": "backend/tests/unit/test_true_inbound_prompt_separation.py",
+      "sha256": "f504a62cecd4f58179cf8f3609438414c97437d90d2cf2fbaedb6ef6a6831148"
+    }
+  ],
+  "reproduction": {
+    "original": {
+      "artifact": "baseline.txt",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/unit/test_explicit_secret_boundary.py",
+        "-q",
+        "--disable-warnings"
+      ],
+      "result": {
+        "valid_secret_failures": 10,
+        "invalid_fixture_failures": 1,
+        "passed": 7,
+        "warnings": 22
+      },
+      "fixture_error": "SQL control used a non-UUID tenant and failed before its SQL writes; it does not count as a reproduced persistence defect."
+    },
+    "corrected_sql": {
+      "artifact": "baseline-sql-valid-fixture.txt",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/unit/test_explicit_secret_boundary.py::test_actual_incremental_and_final_sql_payloads_never_retain_explicit_secret",
+        "-q",
+        "--disable-warnings"
+      ],
+      "source": "HEAD TranscriptService restored temporarily under try/finally; candidate bytes restored afterward",
+      "result": {
+        "failed": 1,
+        "warnings": 1
+      },
+      "failure": "Both actual writer methods and three SQL updates succeeded before the retained-secret assertion failed."
+    },
+    "policy_followup": {
+      "artifact": "policy-followup-baseline.txt",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/unit/test_explicit_secret_boundary.py",
+        "-k",
+        "explicit_password_state or policy_exclusions",
+        "-q",
+        "--disable-warnings"
+      ],
+      "result": {
+        "failed": 11,
+        "passed": 4,
+        "deselected": 62,
+        "warnings": 15
+      }
+    },
+    "final_review": {
+      "artifact": "final-review-baseline.txt",
+      "command": [
+        "python",
+        "-m",
+        "pytest",
+        "tests/unit/test_explicit_secret_boundary.py",
+        "-k",
+        "scope_exclusions or small_canonical",
+        "-q",
+        "--disable-warnings"
+      ],
+      "result": {
+        "failed": 6,
+        "passed": 6,
+        "deselected": 77,
+        "warnings": 6
+      }
+    }
+  },
+  "final_validation": {
+    "artifact": "scoped-reviewed-final.txt",
+    "working_directory": "backend",
+    "command": [
+      "python",
+      "-m",
+      "pytest",
+      "tests/unit/test_explicit_secret_boundary.py",
+      "tests/unit/test_ag05_transcript_evidence.py",
+      "tests/unit/test_ag05_native_contact_revision.py",
+      "tests/unit/test_ag03_caller_dispatch_order.py",
+      "tests/unit/test_transcript_conversation_turns.py",
+      "tests/unit/test_transcript_flush_pooled.py",
+      "tests/unit/test_transcript_sealed_after_hangup.py",
+      "tests/unit/test_call_transcript_persister.py",
+      "tests/unit/test_contact_capture_state_machine.py",
+      "tests/unit/test_realtime_quality_pass.py",
+      "tests/unit/test_ag04_native_qualification.py",
+      "tests/unit/test_ag04_traditional_qualification.py",
+      "tests/unit/test_prompt_versions.py",
+      "tests/unit/test_true_inbound_prompt_separation.py",
+      "tests/unit/test_core_prompt_contract.py",
+      "tests/unit/call_summary/test_summarizer.py",
+      "tests/unit/call_summary/test_summarizer_facts.py",
+      "-q",
+      "--disable-warnings"
+    ],
+    "result": {
+      "passed": 472,
+      "warnings": 2488,
+      "elapsed_seconds": 14.05
+    },
+    "new_boundary_controls": 89,
+    "ruff_select_F": "passed for all eight app and three test files",
+    "git_diff_check": "passed",
+    "ruff_command": [
+      "python",
+      "-m",
+      "ruff",
+      "check",
+      "app/domain/services/explicit_secrets.py",
+      "app/domain/services/transcript_service.py",
+      "app/domain/services/voice_pipeline/transcript_handler.py",
+      "app/realtime/bridge.py",
+      "app/realtime/prompts.py",
+      "app/services/scripts/prompts/guardrails.py",
+      "app/services/scripts/prompts/versions.py",
+      "app/domain/services/call_summary/summarizer.py",
+      "tests/unit/test_explicit_secret_boundary.py",
+      "tests/unit/test_prompt_versions.py",
+      "tests/unit/test_true_inbound_prompt_separation.py",
+      "--select",
+      "F"
+    ]
+  },
+  "prior_validation": [
+    {
+      "artifact": "scoped-final.txt",
+      "result": {
+        "passed": 445,
+        "warnings": 2467
+      },
+      "qualification": "Predates final policy-talk follow-up; not final count"
+    },
+    {
+      "artifact": "scoped-policy-final.txt",
+      "result": {
+        "passed": 460,
+        "warnings": 2482
+      },
+      "qualification": "Predates final bracket-token and bounded-length fixes"
+    }
+  ],
+  "governance": {
+    "old_prompt_hash_entries_preserved": true,
+    "new_versions": {
+      "lead_gen@13": "2d6b540419dab373",
+      "customer_support@11": "968fb986d3653107",
+      "receptionist@11": "4691260c5a7819c5",
+      "realtime": "realtime@7 (per-configuration content hash)"
+    },
+    "existing_prompt_budget": 1800,
+    "budget_unchanged": true
+  },
+  "limitations": [
+    "English explicit labels only; unlabelled values, unknown-language labels, incomplete or fragmented values, cross-turn values and oversized unsupported shapes are outside the boundary.",
+    "Numeric secret spans are at most 256 characters including separators; password tokens/quoted phrases at most 128 characters. No PAN, bank-account validity or caller ownership inference.",
+    "Ambiguous unquoted password state words and canonical small 1–64 length descriptions are deliberately preserved; leading-zero or larger values do not qualify. This is not general policy-language understanding, a general credential/PII detector or a guarantee every spoken secret disappears.",
+    "Known speech-bearing metadata fields and alternatives are sanitized; opaque IDs remain unchanged. Transformed imported revision proof stays unavailable; canonical authored revisions hash the sanitized text.",
+    "Native audio already reaches the provider before the bridge sees transcription. No guarantee about raw audio recordings, provider retention, all transient SDK buffers, historical saved transcripts or separate feedback-recording transcription.",
+    "No proof of actual model refusal, no-repeat speech, acoustic interruption, human hearing or customer acceptance. Prompt/name-uncertainty checks verify assembled contracts only.",
+    "AG04 matrix/tracker/gold/thresholds unchanged. The 43/50 mapped count is not increased and no scenario or feature is closed by these controls."
+  ],
+  "review": {
+    "root": "cleared final bounded source",
+    "independent": "account_finalize cleared final eleven-file source; no reviewer reruns",
+    "helper_sha256": "fdeabb22c6cc09337d8a55ef391b32192834636e8a8a6bcfca7e47e8edaf3166"
+  }
+}

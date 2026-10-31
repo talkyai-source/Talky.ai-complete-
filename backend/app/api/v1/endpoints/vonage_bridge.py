@@ -74,9 +74,24 @@ def _get_orchestrator():
 # for deployments that never enabled it.
 
 def _bridge_enabled() -> bool:
+    # A signed outbound callee is not canonical tenant/campaign ownership.
+    # Keep this legacy bridge available only for explicit nonproduction proof.
+    if os.getenv("ENVIRONMENT", "development").strip().lower() == "production":
+        return False
     return os.getenv("VONAGE_BRIDGE_ENABLED", "false").strip().lower() in {
         "1", "true", "yes", "on",
     }
+
+
+def _is_supported_answer_direction(value: object) -> bool:
+    """The legacy provider bridge is outbound-only.
+
+    True inbound is admitted only by the Asterisk path that durably creates
+    the tenant call row and quota/concurrency reservations before Answer.
+    Missing or unknown direction is therefore an unsafe ambiguity.
+    """
+
+    return str(value or "").strip().lower() == "outbound"
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +242,11 @@ async def _build_vonage_session_config(to_number: Optional[str] = None):
         resolve_ai_config_for_did,
     )
 
+    from app.domain.services.telephony_session_config import resolve_stt_selection
+    from app.domain.services.voice_tuning import get_voice_tuning_resolver
+
     tenant_id, config = await resolve_ai_config_for_did(to_number)
+    tuning = await get_voice_tuning_resolver().for_tenant_async(tenant_id, require_available=bool(tenant_id))
     llm_provider_type = (
         getattr(config.llm_provider, "value", None)
         or str(config.llm_provider)
@@ -236,15 +255,16 @@ async def _build_vonage_session_config(to_number: Optional[str] = None):
 
     return VoiceSessionConfig(
         gateway_type="browser",
-        stt_provider_type="deepgram_flux",
+        **resolve_stt_selection(config, campaign_id="vonage"),
         llm_provider_type=llm_provider_type,
         tts_provider_type=config.tts_provider,
-        stt_model="flux-general-en",       # was nova-2 — use Flux for better EOT detection
         stt_sample_rate=16000,
         stt_encoding="linear16",
-        stt_eot_threshold=0.85,            # was default 0.7 — stop cutting users off
-        stt_eot_timeout_ms=1500,           # was 5000 — industry min is 1000ms; Flux integrated EOT handles accuracy
-        stt_eager_eot_threshold=None,      # disable eager — no speculative LLM yet
+        stt_eot_threshold=tuning.stt_eot_threshold,
+        stt_eot_timeout_ms=tuning.stt_eot_timeout_ms,
+        stt_eager_eot_threshold=tuning.stt_eager_eot_threshold,
+        turn_0_min_confidence=tuning.turn_0_min_confidence,
+        turn_0_min_alpha_chars=tuning.turn_0_min_alpha_chars,
         llm_model=config.llm_model,
         llm_temperature=config.llm_temperature,
         llm_max_tokens=config.llm_max_tokens,
@@ -277,13 +297,13 @@ async def _build_vonage_session_config(to_number: Optional[str] = None):
 @router.post("/answer")
 async def vonage_answer(request: Request):
     """
-    Called by Vonage when an inbound call arrives or an outbound call is answered.
+    Legacy nonproduction handler for an outbound answer; inbound is refused.
 
     Returns an NCCO that connects the call audio to our WebSocket endpoint.
     This is the official pattern per Vonage Voice API documentation.
     """
     if not _bridge_enabled():
-        logger.warning("vonage_answer rejected: VONAGE_BRIDGE_ENABLED is not set")
+        logger.warning("vonage_answer rejected: bridge disabled or unavailable in production")
         return JSONResponse(content={"error": "not_found"}, status_code=404)
     # Minting an audio-socket token off an UNVERIFIED webhook would hand the
     # credential to anyone who can POST here, so require the signature secret.
@@ -300,6 +320,13 @@ async def vonage_answer(request: Request):
     call_uuid = body.get("uuid", body.get("conversation_uuid", "unknown"))
     from_number = body.get("from", "unknown")
     to_number = body.get("to", "unknown")
+    if not _is_supported_answer_direction(body.get("direction")):
+        logger.error(
+            "vonage_answer refused: direction=%s has no durable pre-answer "
+            "inbound admission path",
+            str(body.get("direction") or "missing")[:32],
+        )
+        return JSONResponse(content={"error": "unavailable"}, status_code=503)
 
     logger.info(
         "Vonage answer webhook: uuid=%s from=%s to=%s",
@@ -357,6 +384,11 @@ async def vonage_event(request: Request):
     Maps Vonage-specific statuses to the canonical VoiceCallState via
     ``map_vonage_status()``.
     """
+    if not _bridge_enabled():
+        return JSONResponse(content={"error": "not_found"}, status_code=404)
+    if not (os.getenv("VONAGE_SIGNATURE_SECRET") or "").strip():
+        logger.error("vonage_event refused: VONAGE_SIGNATURE_SECRET unset")
+        return JSONResponse(content={"error": "unavailable"}, status_code=503)
     if not verify_vonage_signature(authorization=request.headers.get("Authorization")):
         logger.warning("vonage_event rejected: bad signature")
         return JSONResponse(content={"error": "unauthorized"}, status_code=403)
@@ -410,7 +442,7 @@ async def vonage_ws_audio(
     socket, a session, or a concurrency slot.
     """
     if not _bridge_enabled():
-        logger.warning("vonage ws-audio rejected: VONAGE_BRIDGE_ENABLED is not set")
+        logger.warning("vonage ws-audio rejected: bridge disabled or unavailable in production")
         await websocket.close(code=1008, reason="Vonage bridge disabled")
         return
 

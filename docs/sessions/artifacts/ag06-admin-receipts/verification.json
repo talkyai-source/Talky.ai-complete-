@@ -1,0 +1,145 @@
+{
+  "package": "AG06 bounded Admin saved-receipt presentation",
+  "recorded_at_utc": "2026-10-05T05:41:00.410740+00:00",
+  "base_sha": "a42f270046a21121b60e108fce3926b39b31c5a4",
+  "source_sha": "deec6bbdf5c6bf4a8e57c7b5968f5338b8e7f17c",
+  "source_files": [
+    "Admin/frontend/src/components/ActionDetailDrawer.tsx",
+    "Admin/frontend/src/components/ActionReceiptPanel.tsx",
+    "Admin/frontend/src/components/ActionStatusBadge.tsx",
+    "Admin/frontend/src/components/ActionsTable.tsx",
+    "Admin/frontend/src/index.css",
+    "Admin/frontend/src/lib/api.ts",
+    "Admin/frontend/src/pages/ActionsPage.tsx",
+    "Admin/frontend/tests/action-receipts.test.mjs",
+    "backend/app/api/v1/endpoints/admin/actions.py",
+    "backend/tests/unit/test_ag06_admin_receipt_projection.py"
+  ],
+  "backend_modules": [
+    "tests/unit/test_ag06_admin_receipt_projection.py",
+    "tests/unit/test_ag06_admin_actions.py",
+    "tests/unit/test_ag06_dashboard_actions.py"
+  ],
+  "dependency_overlay_order": [
+    "tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+    "tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  ],
+  "results": {
+    "backend_initial": {
+      "passed": 69,
+      "failed": 6
+    },
+    "admin_initial": {
+      "passed": 0,
+      "failed": 5
+    },
+    "baseline_selection": {
+      "passed": 0,
+      "failed": 3
+    },
+    "backend_final": {
+      "passed": 75,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 22
+    },
+    "admin_final": {
+      "passed": 34,
+      "failed": 0,
+      "skipped": 0,
+      "new_cases": 11
+    },
+    "typescript_app": "passed",
+    "typescript_node": "passed",
+    "changed_file_eslint": "passed",
+    "ruff_ci": "passed",
+    "vite_build": "passed"
+  },
+  "commands": {
+    "backend": "PYTHONPATH=<exact-requirements packages first>;<OP02 Lua deps> <original backend/.venv/Scripts/python.exe> docs/sessions/artifacts/ag06-admin-receipts/run_backend.py",
+    "admin": "node --test tests/*.test.mjs",
+    "typescript_app": "node node_modules/typescript/bin/tsc -p tsconfig.app.json --noEmit --incremental false",
+    "typescript_node": "node node_modules/typescript/bin/tsc -p tsconfig.node.json --noEmit --incremental false",
+    "eslint": "node node_modules/eslint/bin/eslint.js src/components/ActionDetailDrawer.tsx src/components/ActionReceiptPanel.tsx src/components/ActionStatusBadge.tsx src/components/ActionsTable.tsx src/pages/ActionsPage.tsx src/lib/api.ts",
+    "ruff": "<original Python> -m ruff check backend/app/api/v1/endpoints/admin/actions.py backend/tests/unit/test_ag06_admin_receipt_projection.py --select F --ignore F401,F841",
+    "build": "node node_modules/vite/bin/vite.js build",
+    "selection_red": "node --test --test-name-pattern=\"late A|cancellation confirmation\" tests/action-receipts.test.mjs, using ActionDetailDrawer.tsx read from git show a42f2700, restoring the current bytes in finally"
+  },
+  "independent_review": {
+    "reviewer_role": "audio_audit subagent",
+    "method": "read-only source review",
+    "result": "no additional material defect",
+    "independent_tests_run": false
+  },
+  "limitations": [
+    "No browser execution or React concurrency qualification; actual component code uses a synthetic hook scheduler and server rendering.",
+    "ASGI tests override authenticated Admin dependency and synthetic tenant-filtered storage; no new PostgreSQL/RLS or session-auth claim.",
+    "Existing authorized raw detail API fields remain unchanged; drawer renders the sanitized projection instead of raw input/output.",
+    "No provider lookup, status mutation, automatic retry, audit primitive or operator adjudication implemented.",
+    "Stored acknowledgement is not a fresh provider readback or recipient-delivery proof.",
+    "Missing original account/ref remains unavailable; existing connector display is explicitly current context.",
+    "AG06 operator-resolution policy/evidence workflow remains open."
+  ],
+  "artifacts": {
+    "admin-build.txt": {
+      "sha256": "e9fd98d47d43bd558234d80dccb843ae88ddd571cc5c61c58729ee7fa35841ee",
+      "bytes": 353
+    },
+    "admin-final.txt": {
+      "sha256": "130e04b33d651d8d3245fb6d17ccdd8b810fa01148ed3ab8e2246409d1343531",
+      "bytes": 2735
+    },
+    "admin-interim.txt": {
+      "sha256": "494aeff9a82045bd5169876fc848bba31e826f95deb9d9f89976dbaacc36df3e",
+      "bytes": 502
+    },
+    "admin-lint.txt": {
+      "sha256": "81a784efb321e0df27a71978ccdb247727f246289444ebe21a8769a7e7b62d3e",
+      "bytes": 27
+    },
+    "admin-node-typecheck.txt": {
+      "sha256": "ffec14c56c6a19dd852a96aec76b370990ece9e31bcd57cd6d43aeac7eb91f13",
+      "bytes": 16
+    },
+    "admin-red.txt": {
+      "sha256": "5bab228d34106e39f3b0d7b4d7a53ecd935e172b4320bdb99742374dcd24a66c",
+      "bytes": 37330
+    },
+    "admin-typecheck.txt": {
+      "sha256": "a1d504087da64ec229769b4ff1452ea565047ee17f81a97f327eb9f59d19f136",
+      "bytes": 15
+    },
+    "backend-final.txt": {
+      "sha256": "1dde80b12388604e33cc2eaa23fc873a929a2ed8547ab271737b1cfb0de8d8b8",
+      "bytes": 6523
+    },
+    "backend-lint.txt": {
+      "sha256": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+      "bytes": 19
+    },
+    "backend-red.txt": {
+      "sha256": "67641851ac453042fd2d243011ae0c85b755b7faaa3139581a19df24d9f6a2fb",
+      "bytes": 11516
+    },
+    "run_backend.py": {
+      "sha256": "b16c92f269d0eeba4a749c4a901799c8e3caf36ba41c02fdd1489452072e99c1",
+      "bytes": 2062
+    },
+    "selection-red.txt": {
+      "sha256": "035400c7cb2b50e1bedf0a7888c8fb08a515d59ba8bf183525da7c9735e47b06",
+      "bytes": 14010
+    }
+  },
+  "source_sha256_lf": {
+    "Admin/frontend/src/components/ActionDetailDrawer.tsx": "6ebc0c919b3ce073e3ec25bf3b84517bfd60559cffdfd388f511adc9435f9d7f",
+    "Admin/frontend/src/components/ActionReceiptPanel.tsx": "4d259cfe94dfbecd1ad05d0a115f1ef368f4b4851fdd1f23b9285d6a7e70606d",
+    "Admin/frontend/src/components/ActionStatusBadge.tsx": "19bd3c13d9af0220d1c5b9e52ce6ca14306a5bced670b95fa86fda97c0434252",
+    "Admin/frontend/src/components/ActionsTable.tsx": "c5eb122f868079ceacf58d643839c8cc97790e10d5c4b3ea791b70397dbbc23a",
+    "Admin/frontend/src/index.css": "88816565faf17ee9f18c031f7af98ae6b5167a8cd14353367970b0b1c68e7417",
+    "Admin/frontend/src/lib/api.ts": "3a2b329550ca4c86f56849701f5ec5fbc42a7d3888843b3221113d1854dab331",
+    "Admin/frontend/src/pages/ActionsPage.tsx": "ac0080e7782bcb458b8008cd470b7cffa71e82e613fa3ff98462bdb989284731",
+    "Admin/frontend/tests/action-receipts.test.mjs": "b588302bc209c074cf4c77c825b647efd74544d772240463b7f9380270226acb",
+    "backend/app/api/v1/endpoints/admin/actions.py": "98622b862b4e430326b8ae01c66809e49726664b1df3d00a9af804053e430c67",
+    "backend/tests/unit/test_ag06_admin_receipt_projection.py": "f6beb39caea10da4e08dd1b737e8a3c5fb10d243fdacf5b09d837d450f18119d"
+  }
+}

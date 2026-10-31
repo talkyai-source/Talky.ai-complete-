@@ -1,0 +1,74 @@
+{
+  "date": "2026-10-06",
+  "execution_commit": "3de75cd32c923b5bbf7eb65af813eb2154ef32bb",
+  "calendar_owner_source": "2010a1bf10b1305280ba6047099e0af44f3b7147",
+  "source_hashes_lf": {
+    "backend/app/services/crm_sync_service.py": "443e157411d0d48a9098f8d52a3cdbacb74c31b2c0f87e3f8ed7ec6d77711ff1",
+    "backend/app/services/connector_resolver.py": "054e6f5a0e7824ce55dadc8c29c9665b65d7bb6aad113d6c96abf9704a2143e0",
+    "backend/app/domain/services/voice_pipeline/action_execution.py": "33779d45ca915814fea12b04dc39fb6c48a5a7a359a1340ef1b67704209b023a",
+    "backend/app/api/v1/endpoints/admin/actions.py": "dd30dde55159273f2129f993a5122c356c141d477720267785445104daa66823",
+    "backend/app/services/action_execution.py": "991c5f746e8b93312a21d046ee4554c1426e42031b10bc0a832868d1d9ad89d8",
+    "backend/app/services/email_service.py": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+    "backend/app/services/meeting_service.py": "26775c66e5dd9e5e1dafeca6a00af599d513594202111d56f517328b6473774d",
+    "backend/app/api/v1/endpoints/admin/calls.py": "4ee2b9cc6ba31f131ce57b01a8184d44b622f64b48756f7284856bf2b03e4cad",
+    "backend/app/infrastructure/connectors/crm/base.py": "e18c16b5055e77e0d1062da46aae6f0b12e18797e95acac97bb089b3b828c430",
+    "backend/app/infrastructure/connectors/crm/hubspot.py": "da902d16118d0df30e2b83adf88efc50551634c05945d2f2a7e39920a3756b22",
+    "backend/app/infrastructure/connectors/crm/salesforce.py": "38282ec10b2ead2fa82fb857bcd2048d5a7472601991c98bb94f24436c1870d9",
+    "backend/app/infrastructure/connectors/calendar/google_calendar.py": "62ed1e955a2311b6ec176eb90d3aad08ffcb990f9609838d357c7ba4688253c2",
+    "backend/app/infrastructure/connectors/calendar/outlook_calendar.py": "243acb58d03154e2d248d5e9d08a21e738eb15d325a28fc8654c57e01c484810",
+    "backend/tests/unit/test_crm_sync_service.py": "f47477ad8c05a5ca4f31f035905931afd72c53a7fa2b006c3fbf5513dc2faa08",
+    "backend/tests/unit/test_ag06_crm_evidence.py": "d0b1e35a8cc63d75a604fcf89b620d572a98dc035c7558f0efccaade27b710db",
+    "backend/tests/unit/test_crm_sync_hooks.py": "b1fdccd586cedb23cb2c8291e52181d6fb3eb24ed1345a0e6d7c81c930ef0bec",
+    "backend/tests/unit/test_admin_crm_inspection.py": "310c22aab9b872001b8edcf56801269dad28fde15b826eeb72a8686633ee142a",
+    "backend/tests/unit/test_reviewed_selector_identity_types.py": "c1aea1efe6929be29cd0cfc1fe6cfd3fe6c571cd08d7d0fd28cc20369eb9e7a6",
+    "backend/tests/unit/test_reviewed_account_identity.py": "8b00221c871ad882e1e878e8fe53bc6568e72209ccba952b54974893b966d933",
+    "backend/tests/unit/test_inbox_original_account.py": "5ec8cb2518e619054a754ef9d6bfdfcc337022d8cf41585db57d79e620295a1a",
+    "backend/tests/unit/test_inbox_authorization_health.py": "78b1845dfb4e3032688ab1656c063566df9e39c50a9a5732c07f4b88679392cd",
+    "backend/tests/unit/test_admin_gmail_inspection.py": "ba8b55aa0d031345ef59fce95db9e867bcbeba729459578c238165bcdd14fc18",
+    "backend/tests/unit/test_voice_email_receipt_proof.py": "47c4f5b8de5d3f92e345fc4573718e5735091aa62229141c3e612236633ee967",
+    "backend/tests/unit/test_voice_email_inspection_handoff.py": "7d0ce510df7224e486b05b00c116b961fb84f1cf4a66458ee3266dddfe64e765",
+    "backend/tests/unit/test_admin_calendar_inspection.py": "3776f820c712ea074253e7044cf949719dfc3a5f8be7de5fdc2dc6e6fbf12518"
+  },
+  "source_matches_committed_git": true,
+  "owner_paths_matching_integrated_source": [
+    "Admin/frontend/src/components/ActionReceiptPanel.tsx",
+    "Admin/frontend/src/lib/api.ts",
+    "Admin/frontend/tests/action-receipts.test.mjs",
+    "backend/app/api/v1/endpoints/admin/actions.py",
+    "backend/app/infrastructure/connectors/calendar/google_calendar.py",
+    "backend/app/infrastructure/connectors/calendar/outlook_calendar.py",
+    "backend/tests/unit/test_admin_calendar_inspection.py"
+  ],
+  "result": {
+    "passed": 508,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 1,
+    "modules": 12
+  },
+  "prohibited_network_attempts": 0,
+  "allowed_windows_internal_socketpairs": 922,
+  "production_gate_promoted": false,
+  "artifacts": {
+    "command.json": {
+      "sha256_raw": "5859e45b7e74fbd65b0290959b67718fe1c4876e32c47c66225d800c0b3be1c6",
+      "sha256_lf": "1c87ecacb6e5cdd90e1c3af9c6ea5b524a719d47152c3d67e6b71be5d2ea3e2b"
+    },
+    "result.json": {
+      "sha256_raw": "36a4843fc850d2149704556a5bf982258c5912042da8ac91da2116af12df5f3b",
+      "sha256_lf": "b1e5896456587c86a7d852dc5c8308e2aa43785ce3ee0e16ce0bf919483f581b"
+    },
+    "runner.py": {
+      "sha256_raw": "122c51523cf5df9c2407980119c4304c1d4e9e40c06a8d60529399c13af03ac5",
+      "sha256_lf": "9892873eea4c97ba560e590cb2cf1a843af26af36e289107706070dce1733a46"
+    },
+    "tests.txt": {
+      "sha256_raw": "0ff6c7c3f0b756372a8d7097d29ef03ecc07138185cc36a8fc8894d0ed462bf7",
+      "sha256_lf": "05e2ca38208a226c1267eef4bd81f446b1f97ee8c13ab8aab8cd1fa53f655450"
+    },
+    "verification.md": {
+      "sha256_raw": "66fc6f1e9fa71176abbab5c0bbc0eff964dd2a4f56ee69e0b3572201d58ce6c6",
+      "sha256_lf": "13b02fc5f8c627f2b2536aeae4ba36c04faab24cd67ee4fd63bf99102449e6eb"
+    }
+  }
+}

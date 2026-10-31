@@ -1,0 +1,25 @@
+........................................................................ [ 64%]
+........................................                                 [100%]
+============================== warnings summary ===============================
+tests/unit/test_ag04_native_qualification.py: 163 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-receipts-20261005\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_ag04_traditional_qualification.py: 250 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_ag04_traditional_qualification.py: 136 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-receipts-20261005\backend\app\domain\services\voice_pipeline\transcript_handler.py:150: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+tests/unit/test_ag04_traditional_qualification.py: 316 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-receipts-20261005\backend\app\domain\models\session.py:207: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    self.last_activity_at = datetime.utcnow()
+
+tests/unit/test_ag04_traditional_qualification.py: 64 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag04-native-receipts-20261005\backend\app\domain\services\voice_pipeline\turn_ender.py:594: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "timestamp": datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+112 passed, 929 warnings in 13.14s

@@ -122,6 +122,7 @@ def build_turn_prompt(
     accent_block: Optional[str] = None,
     trailing_block: Optional[str] = None,
     captured_slots=None,
+    has_callback_executor: bool = False,
     cache_friendly_order: Optional[bool] = None,
 ) -> str:
     """Assemble the final per-turn system prompt from the base + resolved
@@ -139,6 +140,14 @@ def build_turn_prompt(
     if cache_friendly_order is None:
         cache_friendly_order = _cache_friendly_default()
 
+    # The compliance floor (NON-NEGOTIABLES, plus the brand line the composer
+    # appends after it) is the LAST thing the composer writes so it wins by
+    # recency over the tenant's own text. Every per-turn block below used to
+    # land after it, which is why a compact second copy was re-appended each
+    # turn — the model read NON-NEGOTIABLES twice, every turn. Split the floor
+    # off here and re-append it after everything else: one copy, still last.
+    base_prompt, floor_tail = _split_off_floor(base_prompt)
+
     if not cache_friendly_order:
         # LEGACY ORDER — kept executable, not just described, so the revert
         # switch is covered by tests rather than being a claim in a comment.
@@ -155,10 +164,10 @@ def build_turn_prompt(
                 parts.append(block)
         prompt = "\n\n".join(parts)
         if captured_slots is not None:
-            prompt = compose_system_prompt(prompt, captured_slots)
+            prompt = compose_system_prompt(prompt, captured_slots, has_callback_executor=has_callback_executor)
         if live_state_block:
             prompt = live_state_block + "\n\n" + prompt
-        return prompt
+        return _append_floor(prompt, floor_tail)
 
     # ── stable-for-the-call prefix: this is the part the provider caches ──
     stable = [base_prompt]
@@ -174,9 +183,13 @@ def build_turn_prompt(
         # compose_system_prompt PREPENDS the CAPTURED header to whatever it is
         # given. Handing it the tail (rather than the whole prompt, as the
         # legacy path does) is what moves CAPTURED out of the cached prefix
-        # while keeping it above the blocks it qualifies. Returns its input
-        # unchanged when no slot is filled, so an empty tail stays empty.
-        tail = compose_system_prompt(tail, captured_slots)
+        # while keeping it above the blocks it qualifies. Since the
+        # CALLBACK POLICY fix (prompt_builder.py, 2026-09-23/24) it no longer
+        # returns its input unchanged when no slot is filled -- the policy
+        # line is appended unconditionally (has_callback_executor defaults to
+        # False) -- so an empty tail now always comes back carrying at least
+        # that line.
+        tail = compose_system_prompt(tail, captured_slots, has_callback_executor=has_callback_executor)
     if live_state_block:
         tail = f"{tail}\n\n{live_state_block}" if tail else live_state_block
 
@@ -185,4 +198,27 @@ def build_turn_prompt(
         parts = parts + [tail]
     if trailing_block:
         parts = parts + [trailing_block]
-    return "\n\n".join(parts)
+    return _append_floor("\n\n".join(parts), floor_tail)
+
+
+_FLOOR_MARKER = "## NON-NEGOTIABLES"
+
+
+def _split_off_floor(base_prompt: str) -> tuple[str, str]:
+    """Return ``(base_without_floor, floor_and_everything_after_it)``.
+
+    The composer writes the floor last, followed only by the brand-accuracy
+    line, so everything from the marker on is the recency block. A base with
+    no floor (ask-AI, tests, legacy prompts) is returned unchanged with an
+    empty tail.
+    """
+    idx = (base_prompt or "").find(_FLOOR_MARKER)
+    if idx < 0:
+        return base_prompt, ""
+    return base_prompt[:idx].rstrip(), base_prompt[idx:].strip()
+
+
+def _append_floor(prompt: str, floor_tail: str) -> str:
+    if not floor_tail:
+        return prompt
+    return f"{prompt}\n\n{floor_tail}" if prompt else floor_tail

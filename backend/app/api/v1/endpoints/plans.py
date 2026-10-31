@@ -1,74 +1,67 @@
-"""
-Plans & Pricing Endpoints
-Provides pricing plan information for the frontend
-"""
-from fastapi import APIRouter, HTTPException, Depends
-from typing import List, Optional
-from pydantic import BaseModel
-from app.core.postgres_adapter import Client
+"""Public plan capabilities and verified server-owned purchase options."""
 
-from app.api.v1.dependencies import get_db_client
+import json
+import logging
+
+from fastapi import APIRouter, Depends, HTTPException
+
+from app.api.v1.dependencies import get_db_pool
+from app.core.db_utils import acquire_with_tenant
+from app.domain.services.billing_catalog import _EXPONENTS, list_plan_catalog
+from app.domain.services.payg import PAYG, PAYG_PLAN_ID
 
 router = APIRouter(prefix="/plans", tags=["plans"])
+logger = logging.getLogger(__name__)
 
 
-class PlanResponse(BaseModel):
-    """Plan response model"""
-    id: str
-    name: str
-    price: float
-    description: str
-    minutes: int
-    agents: int
-    concurrent_calls: int
-    features: List[str]
-    not_included: List[str]
-    popular: bool
-    # Stripe billing fields
-    stripe_price_id: Optional[str] = None
-    stripe_product_id: Optional[str] = None
-    billing_period: str = "monthly"
+@router.get("/")
+async def list_plans(pool=Depends(get_db_pool)):
+    try:
+        return await list_plan_catalog(pool)
+    except Exception:
+        logger.exception("Unable to load billing catalog")
+        raise HTTPException(
+            status_code=503, detail="Pricing is temporarily unavailable. Please try again."
+        )
 
 
-@router.get("/", response_model=List[PlanResponse])
-async def list_plans(
-    db_client: Client = Depends(get_db_client)
-):
-    """
-    Get all available pricing plans.
-    
-    Used by: PackagesPage to render pricing cards dynamically.
-    
-    This endpoint is public (no auth required).
+@router.get("/payg")
+async def pay_as_you_go(pool=Depends(get_db_pool)):
+    """The prepaid plan and its current minute bundles, for the public pricing page.
+
+    Prices live in ``topup_packages`` (audience ``payg``) and change through the
+    Admin API without a release, so the page reads them from here.
     """
     try:
-        response = db_client.table("plans").select("*").order("price").execute()
-        
-        if not response.data:
-            return []
-        
-        plans = []
-        for plan in response.data:
-            plans.append(PlanResponse(
-                id=plan["id"],
-                name=plan["name"],
-                price=float(plan["price"]),
-                description=plan.get("description", ""),
-                minutes=plan["minutes"],
-                agents=plan["agents"],
-                concurrent_calls=plan["concurrent_calls"],
-                features=plan.get("features", []),
-                not_included=plan.get("not_included", []),
-                popular=plan.get("popular", False),
-                stripe_price_id=plan.get("stripe_price_id"),
-                stripe_product_id=plan.get("stripe_product_id"),
-                billing_period=plan.get("billing_period", "monthly")
-            ))
-        
-        return plans
-    
-    except Exception as e:
+        async with acquire_with_tenant(pool, None) as conn:
+            plan = await conn.fetchrow(
+                "SELECT id, name, description, agents, concurrent_calls, features FROM plans "
+                "WHERE id = $1 AND billing_model = 'prepaid'",
+                PAYG_PLAN_ID,
+            )
+            packages = await conn.fetch(
+                """SELECT code, name, minutes, price_cents, currency FROM topup_packages
+                   WHERE is_active AND audience = $1 ORDER BY sort_order, minutes""",
+                PAYG,
+            )
+    except Exception:
+        logger.exception("Unable to load pay-as-you-go prices")
         raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch plans: {str(e)}"
+            status_code=503, detail="Pricing is temporarily unavailable. Please try again."
         )
+    if plan is None or not packages:
+        raise HTTPException(status_code=404, detail="Pay as you go is not offered.")
+    features = plan["features"]
+    if isinstance(features, str):
+        features = json.loads(features)
+    return {
+        "plan": {**dict(plan), "features": list(features or [])},
+        "packages": [
+            {
+                **dict(row),
+                "currency_exponent": _EXPONENTS.get(str(row["currency"]).lower()),
+                "price_per_minute_cents": round(row["price_cents"] / row["minutes"], 2),
+            }
+            for row in packages
+        ],
+    }

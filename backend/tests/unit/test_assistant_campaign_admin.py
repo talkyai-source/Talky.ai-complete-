@@ -48,6 +48,9 @@ class _FakeQuery:
 
     # chaining helpers
     def select(self, *args, **kwargs):
+        self._fake_db._select_calls.append(
+            {"table": self._table, "columns": args[0] if args else None}
+        )
         return self
 
     def update(self, payload):
@@ -102,6 +105,7 @@ class FakeDbClient:
         self._update_calls: list = []
         self._insert_calls: list = []
         self._delete_calls: list = []
+        self._select_calls: list = []
         # responses keyed by table+op
         self._responses: dict = {}
         # pool is unused in these tests (no pool-based calls)
@@ -159,6 +163,7 @@ async def test_get_campaign_detail_tenant_scoped():
                 "id": "camp-1",
                 "name": "My Campaign",
                 "status": "running",
+                "direction": "outbound",
                 "voice_id": "v1",
                 "tts_provider": "google",
                 "knowledge_mode": "off",
@@ -177,6 +182,11 @@ async def test_get_campaign_detail_tenant_scoped():
 
     assert result.get("campaign") is not None
     assert result["campaign"]["id"] == "camp-1"
+    assert result["campaign"]["direction"] == "outbound"
+    projection = next(
+        call["columns"] for call in db._select_calls if call["table"] == "campaigns"
+    )
+    assert "direction" in projection
 
     # Confirm eq("tenant_id", "tenant-abc") was called (not "tenant-xyz" or anything else)
     tenant_eq_calls = [
@@ -327,6 +337,9 @@ async def test_update_campaign_config_confirm_merges_script_config():
             }
         ],
     )
+    db.configure_response(
+        "campaigns", "update", data=[{"id": "camp-3", "direction": "outbound"}]
+    )
 
     result = await update_campaign_config(
         tenant_id="t1",
@@ -352,6 +365,69 @@ async def test_update_campaign_config_confirm_merges_script_config():
     assert merged_sc["agent_names"] == ["Alice", "Bob"]
     assert merged_sc["additional_instructions"] == "Be polite."
     assert merged_sc["knowledge_driven"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_campaign_config_does_not_claim_success_after_direction_race():
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Outbound",
+                "goal": "old goal",
+                "script_config": {},
+                "direction": "outbound",
+            }
+        ],
+    )
+    db.configure_response("campaigns", "update", data=[])
+
+    result = await update_campaign_config(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="campaign-1",
+        changes={"goal": "new goal"},
+        confirm=True,
+    )
+
+    assert result["applied"] is False
+    assert result["error"] == "inbound_campaign_managed_separately"
+    assert result["campaign_ids"] == ["campaign-1"]
+
+
+@pytest.mark.asyncio
+async def test_update_campaign_config_does_not_report_database_error_as_direction_race():
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Outbound",
+                "goal": "old goal",
+                "script_config": {},
+                "direction": "outbound",
+            }
+        ],
+    )
+    db.configure_response("campaigns", "update", data=[])
+    db._responses[("campaigns", "update")].error = "database unavailable"
+
+    result = await update_campaign_config(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="campaign-1",
+        changes={"goal": "new goal"},
+        confirm=True,
+    )
+
+    assert result["applied"] is False
+    assert result["error"] == "campaign_update_failed"
+    assert "inbound_campaign_managed_separately" not in str(result)
 
 
 @pytest.mark.asyncio
@@ -405,22 +481,122 @@ async def test_update_campaign_config_not_found():
     assert "error" in result
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("confirm", [False, True])
+async def test_update_campaign_config_refuses_inbound_before_preview_or_apply(confirm):
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "inbound-1",
+                "name": "Main line",
+                "goal": "answer callers",
+                "script_config": {},
+                "direction": "inbound",
+            }
+        ],
+    )
+
+    result = await update_campaign_config(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="inbound-1",
+        changes={"goal": "changed outside inbound lifecycle"},
+        confirm=confirm,
+    )
+
+    assert result["error"] == "inbound_campaign_managed_separately"
+    assert result["campaign_ids"] == ["inbound-1"]
+    assert db._update_calls == []
+    assert db._insert_calls == []
+
+
+@pytest.mark.asyncio
+async def test_update_campaign_config_rechecks_direction_when_proposal_is_applied():
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Outbound",
+                "goal": "old goal",
+                "script_config": {},
+                "direction": "outbound",
+            }
+        ],
+    )
+    preview = await update_campaign_config(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="campaign-1",
+        changes={"goal": "new goal"},
+        confirm=False,
+    )
+    assert preview["preview"] is True
+
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[
+            {
+                "id": "campaign-1",
+                "name": "Inbound now",
+                "goal": "old goal",
+                "script_config": {},
+                "direction": "inbound",
+            }
+        ],
+    )
+    applied = await update_campaign_config(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="campaign-1",
+        changes={"goal": "new goal"},
+        confirm=True,
+    )
+
+    assert applied["error"] == "inbound_campaign_managed_separately"
+    assert db._update_calls == []
+    assert db._insert_calls == []
+
+
 # ---------------------------------------------------------------------------
 # Tests: get_knowledge_tree tenant-gated via campaign ownership
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_get_knowledge_tree_campaign_not_found():
+async def test_get_knowledge_tree_campaign_not_found(monkeypatch):
     """Should return error if campaign doesn't belong to tenant."""
+    from contextlib import asynccontextmanager
+
+    from app.domain.services.campaign_knowledge_access import (
+        CampaignKnowledgeNotFound,
+    )
+    from app.infrastructure.assistant.tools import campaign_admin
+
     db = FakeDbClient()
-    # campaign ownership check returns nothing
-    db.configure_response("campaigns", "select", data=[])
+
+    @asynccontextmanager
+    async def missing_campaign(*_args, **_kwargs):
+        raise CampaignKnowledgeNotFound("camp-ghost")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(
+        campaign_admin,
+        "campaign_knowledge_access_lease",
+        missing_campaign,
+    )
 
     result = await get_knowledge_tree(
         tenant_id="t1",
         db_client=db,
         campaign_id="camp-ghost",
+        actor_user_id="user-1",
     )
     assert result == {"error": "campaign not found"}
 
@@ -502,6 +678,83 @@ async def test_manage_lead_add_missing_phone():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("confirm", [False, True])
+async def test_manage_lead_refuses_inbound_before_preview_or_apply(confirm):
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns",
+        "select",
+        data=[{"id": "inbound-1", "direction": "inbound"}],
+    )
+
+    result = await manage_lead(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="inbound-1",
+        action="add",
+        phone_number="415 555 1234",
+        confirm=confirm,
+    )
+
+    assert result["error"] == "inbound_campaign_managed_separately"
+    assert result["campaign_ids"] == ["inbound-1"]
+    assert db._insert_calls == []
+    assert db._update_calls == []
+
+
+@pytest.mark.asyncio
+async def test_manage_lead_add_uses_canonical_phone_normalizer():
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns", "select", data=[{"id": "c1", "direction": "outbound"}]
+    )
+
+    result = await manage_lead(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="c1",
+        action="add",
+        phone_number="(415) 555-1234",
+        confirm=False,
+    )
+
+    assert result["changes"][0]["after"]["phone_number"] == "+14155551234"
+
+
+@pytest.mark.asyncio
+async def test_manage_lead_rechecks_direction_when_add_proposal_is_applied():
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns", "select", data=[{"id": "c1", "direction": "outbound"}]
+    )
+    preview = await manage_lead(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="c1",
+        action="add",
+        phone_number="(415) 555-1234",
+        confirm=False,
+    )
+    assert preview["preview"] is True
+
+    db.configure_response(
+        "campaigns", "select", data=[{"id": "c1", "direction": "inbound"}]
+    )
+    applied = await manage_lead(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="c1",
+        action="add",
+        phone_number="(415) 555-1234",
+        confirm=True,
+    )
+
+    assert applied["error"] == "inbound_campaign_managed_separately"
+    assert db._insert_calls == []
+    assert db._update_calls == []
+
+
+@pytest.mark.asyncio
 async def test_manage_lead_remove_preview_no_delete():
     """action=remove, confirm=False → preview, no delete."""
     db = FakeDbClient()
@@ -549,6 +802,7 @@ async def test_manage_lead_remove_confirm_soft_deletes():
         data=[{"id": "lead-1", "phone_number": "+15559999999", "first_name": "Bob",
                "last_name": "Smith", "status": "pending", "campaign_id": "c1"}],
     )
+    db.configure_response("leads", "update", data=[{"id": "lead-1"}])
 
     result = await manage_lead(
         tenant_id="t1",
@@ -563,6 +817,45 @@ async def test_manage_lead_remove_confirm_soft_deletes():
     assert db._delete_calls == [], "Hard delete must not be used; use soft-delete (update status)"
     assert len(db._update_calls) == 1
     assert db._update_calls[0]["payload"] == {"status": "deleted"}
+    assert ("campaign_id", "c1") in db._update_calls[0]["eq"]
+
+
+@pytest.mark.asyncio
+async def test_manage_lead_lookup_is_bound_to_the_requested_campaign():
+    db = FakeDbClient()
+    db.configure_response(
+        "campaigns", "select", data=[{"id": "c1", "direction": "outbound"}]
+    )
+    db.configure_response(
+        "leads",
+        "select",
+        data=[
+            {
+                "id": "lead-other",
+                "phone_number": "+15559999999",
+                "first_name": "Other",
+                "last_name": "Campaign",
+                "status": "pending",
+                "campaign_id": "c2",
+            }
+        ],
+    )
+
+    await manage_lead(
+        tenant_id="t1",
+        db_client=db,
+        campaign_id="c1",
+        action="remove",
+        lead_id="lead-other",
+        confirm=False,
+    )
+
+    lead_select_eq = [
+        (field, value)
+        for table, op, field, value in db._eq_record
+        if table == "leads" and op == "select"
+    ]
+    assert ("campaign_id", "c1") in lead_select_eq
 
 
 @pytest.mark.asyncio

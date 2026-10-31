@@ -10,7 +10,7 @@ STT
   - Happy path streams primary's transcripts end-to-end.
   - Primary raise at start → failover to secondary + replay buffer.
   - Circuit open on entry → straight to secondary, no primary attempt.
-  - No secondary configured → happy path still works; failure → empty.
+  - No secondary configured → happy path works; failure propagates to lifecycle.
   - Ring buffer caps replay volume.
 
 TTS
@@ -164,13 +164,12 @@ async def test_stt_primary_failure_fails_over_to_secondary():
 
 
 @pytest.mark.asyncio
-async def test_stt_no_secondary_yields_nothing_on_failure():
+async def test_stt_no_secondary_raises_terminal_failure():
     primary = _FakeSTT("primary", [], raise_on_enter=RuntimeError("ws dropped"))
     wrapper = ResilientSTTProvider(primary, secondary=None)
 
-    results = await _drain(wrapper.stream_transcribe(_audio_stream()))
-
-    assert results == []
+    with pytest.raises(RuntimeError, match="no secondary"):
+        await _drain(wrapper.stream_transcribe(_audio_stream()))
 
 
 @pytest.mark.asyncio

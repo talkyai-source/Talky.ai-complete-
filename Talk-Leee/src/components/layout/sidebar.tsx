@@ -3,10 +3,11 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
     LayoutDashboard,
     Phone,
+    PhoneIncoming,
     Users,
     Megaphone,
     Settings,
@@ -27,6 +28,8 @@ import {
     Lock,
     ChevronDown,
     Plug,
+    MessageSquare,
+    LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ViewportDrawer } from "@/components/ui/viewport-drawer";
@@ -37,6 +40,7 @@ import { useWhiteLabelBranding } from "@/components/white-label/white-label-bran
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/hooks/useAuth";
 import { getAdminUiCapabilities, roleLabel } from "@/lib/admin-access";
+import { getServerSupportStatus, getSupportStatus, subscribeSupportStatus } from "@/lib/support-status-store";
 
 type NavChild = {
     name: string;
@@ -51,19 +55,38 @@ type NavItem = {
     icon: React.ComponentType<{ className?: string }>;
     adminOnly?: boolean;
     children?: NavChild[];
+    /** Shown only while GET /support/config says support is on for this account. */
+    supportOnly?: boolean;
+    /** A live count rendered after the label; "support" reads the unread ticket count. */
+    badge?: "support";
 };
 
 const navigation: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
     { name: "Campaigns", href: "/campaigns", icon: Megaphone },
+    // Exactly one Inbound entry. A second row pointing at /inbound was
+    // added by a parallel implementation and removed on 2026-09-01: both
+    // rows were named "Inbound", and this list renders with `key={item.name}`,
+    // so they collided as duplicate React keys. The duplicate `PhoneIncoming`
+    // import that came with it broke `tsc` and `next build` outright.
+    // Inbound call history is a direction filter on /calls, not a nav row.
+    { name: "Inbound", href: "/inbound-campaigns", icon: PhoneIncoming },
     { name: "Call History", href: "/calls", icon: Phone },
     { name: "Contacts", href: "/contacts", icon: Users },
     { name: "Analytics", href: "/analytics", icon: BarChart2 },
     { name: "Recordings", href: "/recordings", icon: Volume2 },
+    // Agent Reviews moved to the admin panel (/admin/reviews). Rating a call
+    // happens inline next to its play button; READING everyone's reviews is an
+    // admin activity, and its endpoint was already require_admin_tenant — so
+    // offering it to every user only produced a 403 that looked like a bug.
     { name: "Connectors", href: "/connectors", icon: Plug },
     // Assistant moved out of this group — it's queued for v2 and lives
     // in Settings as a "Coming soon" tile.
     { name: "AI Options", href: "/ai-options", icon: Cpu },
+    // goals.md §4: Security is a main destination, not a tab three levels down
+    // inside Settings. Everything on it — is 2FA on, what is still signed in,
+    // who changed that — is looked for in a hurry.
+    { name: "Security", href: "/security", icon: ShieldCheck },
     {
         name: "Billing & Logs", href: "/billing", icon: CreditCard,
         children: [
@@ -80,6 +103,12 @@ const navigation: NavItem[] = [
         ],
     },
     {
+        name: "Agent Quality", href: "/admin/reviews", icon: MessageSquare, adminOnly: true,
+        children: [
+            { name: "Agent Reviews", href: "/admin/reviews", icon: MessageSquare },
+        ],
+    },
+    {
         name: "Developer Hub", href: "/admin/api-keys", icon: Key, adminOnly: true,
         children: [
             { name: "API Keys", href: "/admin/api-keys", icon: Key },
@@ -88,6 +117,7 @@ const navigation: NavItem[] = [
             { name: "Secrets", href: "/admin/secrets", icon: Lock },
         ],
     },
+    { name: "Support", href: "/support", icon: LifeBuoy, supportOnly: true, badge: "support" },
 ];
 
 const bottomNavigation = [
@@ -103,7 +133,7 @@ export function Sidebar({ className }: { className?: string }) {
     const brandLogoAlt = whiteLabel?.branding.logo.alt ?? "Talk-Lee";
     const brandLogoWidth = whiteLabel?.branding.logo.width ?? 28;
     const brandLogoHeight = whiteLabel?.branding.logo.height ?? 28;
-    const brandHomeHref = whiteLabel ? `/white-label/${whiteLabel.branding.partnerId}/preview` : "/dashboard";
+    const brandHomeHref = whiteLabel ? `/white-label/${whiteLabel.branding.partnerId}/preview` : "/";
     const { collapsed, mobileOpen } = useSidebarState();
     const { toggleCollapsed, closeMobile } = useSidebarActions();
     const tooltip = useHoverTooltip();
@@ -111,8 +141,9 @@ export function Sidebar({ className }: { className?: string }) {
     const isDark = theme === "dark";
 
     const measureRef = useRef<HTMLDivElement | null>(null);
-    const [isShortViewport, setIsShortViewport] = useState(false);
     const [openDropdowns, setOpenDropdowns] = useState<Set<string>>(new Set());
+    const [logoutPending, setLogoutPending] = useState(false);
+    const [logoutError, setLogoutError] = useState("");
 
     const toggleDropdown = (name: string) => {
         setOpenDropdowns(prev => {
@@ -128,10 +159,13 @@ export function Sidebar({ className }: { className?: string }) {
     const desktopTextClass = collapsed ? "hidden" : "block";
     const capabilities = useMemo(() => getAdminUiCapabilities(user), [user]);
     const isAdmin = capabilities.canViewAuditLogs;
+    const support = useSyncExternalStore(subscribeSupportStatus, getSupportStatus, getServerSupportStatus);
+    const supportVisible = support.visible;
     const visibleNavigation = useMemo(
         () => {
             return navigation
                 .filter((item) => !item.adminOnly || isAdmin)
+                .filter((item) => !item.supportOnly || supportVisible)
                 .map((item) => {
                     if (!item.children) return item;
                     const visibleChildren = item.children.filter((child) => !child.adminOnly || isAdmin);
@@ -140,11 +174,15 @@ export function Sidebar({ className }: { className?: string }) {
                     return { ...item, children: visibleChildren };
                 });
         },
-        [isAdmin]
+        [isAdmin, supportVisible]
     );
 
     // Automatically expand dropdowns if a child is active
     useEffect(() => {
+        // Reacts to route changes (pathname) to auto-open the dropdown that
+        // contains the newly active link — an external-event sync, not
+        // something derivable purely from the current render.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- auto-expands nav dropdown on route change, not derivable during render
         setOpenDropdowns((prev) => {
             const next = new Set(prev);
             let changed = false;
@@ -176,18 +214,46 @@ export function Sidebar({ className }: { className?: string }) {
         [brandName, visibleNavigation]
     );
 
-    useEffect(() => {
-        if (typeof window === "undefined") return;
-        const mql = window.matchMedia("(max-height: 760px)");
-        const update = () => setIsShortViewport(mql.matches);
-        update();
-        if (typeof mql.addEventListener === "function") {
-            mql.addEventListener("change", update);
-            return () => mql.removeEventListener("change", update);
-        }
-        (mql as unknown as { addListener?: (cb: () => void) => void }).addListener?.(update);
-        return () => (mql as unknown as { removeListener?: (cb: () => void) => void }).removeListener?.(update);
-    }, []);
+    // Vertical sizing. Every height in the sidebar is one point on a line
+    // between a compact size (min) and today's size (max), picked by how much
+    // height the sidebar has (`--sb-e`, in px, 0..sizeRange). Above
+    // sizeMinTotal + sizeRange the sizes are exactly today's; below
+    // sizeMinTotal they sit at the compact minimum and the whole sidebar
+    // scrolls (scroll bar hidden). The two totals are the sidebar's height at
+    // the compact / full sizes, so the content exactly fills the available
+    // height in between and there is no dead zone. Row counts (nav + Settings
+    // + Logout) and open dropdown groups feed the totals.
+    const rowCount = visibleNavigation.length + bottomNavigation.length + 1;
+    const openGroupsExtra = collapsed
+        ? 0
+        : visibleNavigation.reduce(
+              // group child block: mt-1 (4) + n * 30.25 (13px link) + (n-1) * 2 gaps
+              (sum, item) => (item.children && openDropdowns.has(item.name) ? sum + 2 + 32.25 * item.children.length : sum),
+              0
+          );
+    // header 48 + nav padding 16 + bottom-group chrome 21 + tenant 58 + rows 32 each + 2px gaps between rows
+    const sizeMinTotal = 139 + 34 * rowCount + openGroupsExtra;
+    // header +16, nav padding +8, bottom-group chrome +12, tenant +28, rows +6 each, gaps +4 each
+    const sizeRange = 56 + 10 * rowCount;
+    const grow = (min: number, extra: number) => `calc(${min}px + ${extra} * var(--sb-e) / ${sizeRange})`;
+    const sizeVars = {
+        containerType: "size",
+        "--sb-e": `clamp(0px, calc(100cqh - ${sizeMinTotal}px), ${sizeRange}px)`,
+        "--sb-header": grow(48, 16),
+        "--sb-row": grow(32, 6),
+        "--sb-gap": grow(2, 4),
+        "--sb-navpad": grow(8, 4),
+        "--sb-mt": grow(4, 4),
+        "--sb-bpad": grow(8, 4),
+        "--sb-font": grow(13, 1),
+        "--sb-icon": grow(18, 2),
+        "--sb-avatar": grow(32, 8),
+        "--sb-cardpy": grow(8, 8),
+        "--sb-tpb": grow(8, 4),
+        "--sb-name-fs": grow(14, 2),
+        "--sb-name-lh": grow(16, 8),
+    } as React.CSSProperties;
+    const rowSizeClass = "h-[var(--sb-row)] text-[length:var(--sb-font)] [&>svg:first-child]:size-[var(--sb-icon)]";
 
     useEffect(() => {
         if (typeof document === "undefined") return;
@@ -212,9 +278,21 @@ export function Sidebar({ className }: { className?: string }) {
     }, [collapsed]);
 
     const handleLogout = () => {
-        void logout().finally(() => {
-            window.location.href = "/";
-        });
+        if (logoutPending) return;
+        setLogoutPending(true);
+        setLogoutError("");
+        void logout().then((result) => {
+            if (!result.identityCurrent) return;
+            // A full page reload is required here: it tears down all
+            // in-memory React state/providers and clears client caches so no
+            // stale authenticated state survives into the logged-out view.
+            // Absolute destination satisfies next/next/no-location-assign-relative-destination.
+            const destination = result.serverConfirmed ? "/auth/login" : "/auth/login?logout=unconfirmed";
+            window.location.href = new URL(destination, window.location.origin).toString();
+        }).catch(() => {
+            // No identity ownership proof: do not navigate a newer login.
+            setLogoutError("Sign-out could not be confirmed. Please try again.");
+        }).finally(() => setLogoutPending(false));
     };
 
     const onClose = () => {
@@ -230,11 +308,10 @@ export function Sidebar({ className }: { className?: string }) {
     };
 
     const NavContent = (
-        <div className="flex flex-col h-full overflow-y-auto">
+        <div className="flex flex-col h-full overflow-y-auto hide-scrollbar" style={sizeVars}>
             <div
                 className={cn(
-                    "relative flex items-center border-b border-sidebar-border/60",
-                    isShortViewport ? "h-14" : "h-16",
+                    "relative flex items-center shrink-0 h-[var(--sb-header)] border-b border-sidebar-border/60",
                     collapsed ? "justify-center px-2" : "justify-between px-3"
                 )}
             >
@@ -254,13 +331,14 @@ export function Sidebar({ className }: { className?: string }) {
                             </Button>
                         ) : null}
 
-                        <Link
-                            href={brandHomeHref}
+                        {/* Only the brand name links home; the logo is inert. The
+                            wrapper keeps the exact collapse classes so the
+                            animation is unchanged. */}
+                        <div
                             className={cn(
                                 "flex items-center gap-3 min-w-0 overflow-hidden transition-[opacity,transform,max-width] duration-300 ease-in-out",
                                 collapsed ? "max-w-0 opacity-0 -translate-x-2 pointer-events-none" : "max-w-[190px] opacity-100 translate-x-0"
                             )}
-                            onClick={onClose}
                         >
                             {whiteLabel ? (
                                 <Image src={brandLogoSrc} alt={brandLogoAlt} width={brandLogoWidth} height={brandLogoHeight} className="w-7 h-7" />
@@ -270,9 +348,15 @@ export function Sidebar({ className }: { className?: string }) {
                                 </svg>
                             )}
                             <div className="min-w-0">
-                                <div className="text-base font-black leading-none text-sidebar-foreground tracking-tight">{brandName}</div>
+                                <Link
+                                    href={brandHomeHref}
+                                    className="block text-base font-black leading-none text-sidebar-foreground tracking-tight"
+                                    onClick={onClose}
+                                >
+                                    {brandName}
+                                </Link>
                             </div>
-                        </Link>
+                        </div>
                     </div>
 
                     <div className={cn("flex items-center gap-2 shrink-0", collapsed ? "hidden" : undefined)}>
@@ -305,7 +389,7 @@ export function Sidebar({ className }: { className?: string }) {
                 </div>
             </div>
 
-            <nav className={cn("flex-1 px-2 space-y-1.5", isShortViewport ? "py-2" : "py-3")}>
+            <nav className="grow shrink-0 px-2 py-[var(--sb-navpad)] [&>*+*]:mt-[var(--sb-gap)]">
                 {visibleNavigation.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
 
@@ -324,9 +408,9 @@ export function Sidebar({ className }: { className?: string }) {
                                     onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                                     onMouseLeave={() => tooltip.hide()}
                                     className={cn(
-                                        "w-full group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold transition-colors border",
+                                        "w-full group flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
+                                        rowSizeClass,
                                         desktopNavItemClass,
-                                        isShortViewport ? "py-1.5" : "py-2",
                                         hasActiveChild
                                             ? "bg-sidebar-accent border-sidebar-border/60 text-sidebar-accent-foreground"
                                             : "bg-transparent border-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent hover:border-sidebar-border/60 hover:text-sidebar-foreground"
@@ -359,7 +443,7 @@ export function Sidebar({ className }: { className?: string }) {
                                                         onClick={onClose}
                                                         className={cn(
                                                             "group flex min-w-0 items-center gap-2 rounded-lg text-[13px] font-medium transition-colors border px-2",
-                                                            isShortViewport ? "py-1" : "py-1.5",
+                                                            "py-1.5",
                                                             isChildActive
                                                                 ? "bg-sidebar-accent/70 border-sidebar-border/40 text-sidebar-accent-foreground"
                                                                 : "bg-transparent border-transparent text-sidebar-foreground/60 hover:bg-sidebar-accent/50 hover:text-sidebar-foreground"
@@ -378,6 +462,7 @@ export function Sidebar({ className }: { className?: string }) {
                     }
 
                     // Regular link (or collapsed dropdown acting as direct link)
+                    const badgeCount = item.badge === "support" ? support.unreadCount : 0;
                     return (
                         <Link
                             key={item.name}
@@ -387,9 +472,9 @@ export function Sidebar({ className }: { className?: string }) {
                             onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                             onMouseLeave={() => tooltip.hide()}
                             className={cn(
-                                "group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold transition-colors border",
+                                "group relative flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
+                                rowSizeClass,
                                 desktopNavItemClass,
-                                isShortViewport ? "py-1.5" : "py-2",
                                 isActive
                                     ? "bg-sidebar-accent border-sidebar-border/60 text-sidebar-accent-foreground"
                                     : "bg-transparent border-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent hover:border-sidebar-border/60 hover:text-sidebar-foreground"
@@ -398,16 +483,25 @@ export function Sidebar({ className }: { className?: string }) {
                             <item.icon className={cn("w-5 h-5", isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground")} />
                             <span className={cn("min-w-0 whitespace-nowrap leading-tight", desktopTextClass)}>{item.name}</span>
                             {collapsed ? <span className="sr-only">{item.name}</span> : null}
+                            {badgeCount > 0 ? (
+                                <span
+                                    data-support-unread-badge
+                                    aria-label={`${badgeCount} unread`}
+                                    className={cn(
+                                        "min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[11px] font-bold leading-none text-white",
+                                        collapsed ? "absolute -right-1 -top-1" : "ml-auto"
+                                    )}
+                                >
+                                    {badgeCount > 99 ? "99+" : badgeCount}
+                                </span>
+                            ) : null}
                         </Link>
                     );
                 })}
             </nav>
 
             <div
-                className={cn(
-                    "px-2 border-t border-sidebar-border/60 space-y-1.5",
-                    isShortViewport ? "mt-1 pt-2 pb-2" : "mt-2 pt-3 pb-3"
-                )}
+                className="shrink-0 px-2 mt-[var(--sb-mt)] pt-[var(--sb-bpad)] pb-[var(--sb-bpad)] border-t border-sidebar-border/60 [&>*+*]:mt-[var(--sb-gap)]"
             >
                 {bottomNavigation.map((item) => {
                     const isActive = pathname === item.href || pathname.startsWith(item.href + "/");
@@ -420,9 +514,9 @@ export function Sidebar({ className }: { className?: string }) {
                             onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                             onMouseLeave={() => tooltip.hide()}
                             className={cn(
-                                "group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold transition-colors border",
+                                "group flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
+                                rowSizeClass,
                                 desktopNavItemClass,
-                                isShortViewport ? "py-1.5" : "py-2",
                                 isActive
                                     ? "bg-sidebar-accent border-sidebar-border/60 text-sidebar-accent-foreground"
                                     : "bg-transparent border-transparent text-sidebar-foreground/70 hover:bg-sidebar-accent hover:border-sidebar-border/60 hover:text-sidebar-foreground"
@@ -438,9 +532,10 @@ export function Sidebar({ className }: { className?: string }) {
                 <button
                     type="button"
                     onClick={handleLogout}
+                    disabled={logoutPending}
                     className={cn(
-                        "w-full group flex min-w-0 items-center gap-2 rounded-xl text-sm font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors border border-transparent hover:border-sidebar-border/60",
-                        isShortViewport ? "py-1.5" : "py-2",
+                        "w-full group flex min-w-0 items-center gap-2 rounded-xl font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-foreground transition-colors border border-transparent hover:border-sidebar-border/60",
+                        rowSizeClass,
                         desktopNavItemClass
                     )}
                     onMouseEnter={(e) => maybeShowTooltip(e, "Logout")}
@@ -451,16 +546,23 @@ export function Sidebar({ className }: { className?: string }) {
                     <span className={cn("min-w-0 whitespace-nowrap leading-tight", desktopTextClass)}>Logout</span>
                     {collapsed ? <span className="sr-only">Logout</span> : null}
                 </button>
+                {logoutError ? <p role="alert" className="px-2 text-xs text-red-600">{logoutError}</p> : null}
             </div>
 
-            <div className={cn("px-2 pb-3", isShortViewport ? "hidden" : "block")}>
-                <div className="rounded-2xl border border-sidebar-border/60 bg-sidebar-accent/60 px-3 py-4 backdrop-blur-sm shadow-sm transition-colors duration-300">
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-full bg-sidebar-primary/15 border border-sidebar-border/60 flex items-center justify-center shadow-sm">
+            <div className="shrink-0 px-2 pb-[var(--sb-tpb)]">
+                <div
+                    className={cn(
+                        "rounded-2xl border border-sidebar-border/60 bg-sidebar-accent/60 py-[var(--sb-cardpy)] backdrop-blur-sm shadow-sm transition-colors duration-300",
+                        collapsed ? "px-0" : "px-3"
+                    )}
+                    title={collapsed ? `${profileUser.name ?? profileUser.email} · ${roleLabel(profileUser.role)}` : undefined}
+                >
+                    <div className={cn("flex items-center", collapsed ? "justify-center" : "gap-3")}>
+                        <div className="w-[var(--sb-avatar)] h-[var(--sb-avatar)] shrink-0 rounded-full bg-sidebar-primary/15 border border-sidebar-border/60 flex items-center justify-center shadow-sm">
                             <span className="text-sm font-black text-sidebar-foreground">{profileUser.email?.charAt(0).toUpperCase()}</span>
                         </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="font-bold text-sidebar-foreground truncate">{profileUser.name ?? profileUser.email}</p>
+                        <div className={collapsed ? "sr-only" : "flex-1 min-w-0"}>
+                            <p className="font-bold text-[length:var(--sb-name-fs)] leading-[var(--sb-name-lh)] text-sidebar-foreground truncate">{profileUser.name ?? profileUser.email}</p>
                             <p className="text-xs text-sidebar-foreground/60 font-semibold truncate">{roleLabel(profileUser.role)}</p>
                         </div>
                     </div>
@@ -500,7 +602,7 @@ export function Sidebar({ className }: { className?: string }) {
                 hideScrollbar
                 ariaLabel="Sidebar"
                 className="lg:hidden"
-                panelClassName={cn(isDark ? "dark" : undefined, "group/sidebar border-sidebar-border/60 bg-sidebar/85 overflow-hidden")}
+                panelClassName={cn(isDark ? "dark" : undefined, "group/sidebar border-sidebar-border/60 bg-(image:--home-card-gradient) bg-cover bg-no-repeat overflow-hidden")}
             >
                 {NavContent}
             </ViewportDrawer>

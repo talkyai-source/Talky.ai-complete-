@@ -17,12 +17,28 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Play, Sparkles, Square } from "lucide-react";
 
 import { Label } from "@/components/ui/label";
+import { Select } from "@/components/ui/select";
 import { aiOptionsApi, VoiceInfo } from "@/lib/ai-options-api";
 import { PersonaType } from "@/lib/dashboard-api";
 import {
     compareVoicesByPersonaRecommendation,
     isRecommendedVoiceForPersona,
 } from "@/lib/campaign-personas";
+import { voiceLatencyNote } from "@/lib/voice-latency";
+
+function descriptiveVoiceLabel(voice: VoiceInfo): string {
+    const name = voice.name.trim() || "Unnamed voice";
+    // Some providers already include the descriptor in the display name
+    // (for example, "Bella - Professional, Bright, Warm"). Keep those names
+    // intact; otherwise use the first description sentence as a compact label.
+    if (/\s[-–—]\s\S/.test(name)) return name;
+
+    const description = voice.description.trim();
+    if (!description) return name;
+
+    const summary = description.split(/[.!?](?:\s|$)/, 1)[0]?.trim();
+    return summary ? `${name} - ${summary}` : name;
+}
 
 export type VoiceProviderPickerProps = {
     personaType: PersonaType;
@@ -48,17 +64,26 @@ export function VoiceProviderPicker({
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [provider, setProvider] = useState<string>("");
     const [loaded, setLoaded] = useState(false);
+    // A failed catalog request is not an empty catalog: say so and offer a retry.
+    const [loadError, setLoadError] = useState<string | null>(null);
+    const [loadAttempt, setLoadAttempt] = useState(0);
     const [playingId, setPlayingId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const audioCtxRef = useRef<AudioContext | null>(null);
 
+    // Latest-callback refs. These are written from an effect, never during
+    // render: under the React Compiler a render-phase ref write can be skipped
+    // when the render is memoized away, which would leave the async callbacks
+    // below firing a stale parent handler.
     const emitProvider = useRef(onProviderChange);
-    emitProvider.current = onProviderChange;
+    useEffect(() => {
+        emitProvider.current = onProviderChange;
+    }, [onProviderChange]);
 
     useEffect(() => {
         let cancelled = false;
         Promise.all([
-            aiOptionsApi.getVoices().then((r) => r.voices).catch(() => [] as VoiceInfo[]),
+            aiOptionsApi.getVoices().then((r) => r.voices),
             aiOptionsApi.getConfig().catch(() => null),
         ]).then(([vs, cfg]) => {
             if (cancelled) return;
@@ -69,19 +94,25 @@ export function VoiceProviderPicker({
             setProvider(def);
             emitProvider.current?.(def);
             setLoaded(true);
+        }).catch((err: unknown) => {
+            if (cancelled) return;
+            setLoadError(err instanceof Error ? err.message : "The voice catalog is unavailable.");
+            setLoaded(true);
         });
         return () => {
             cancelled = true;
             if (audioCtxRef.current) { void audioCtxRef.current.close(); audioCtxRef.current = null; }
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [loadAttempt]);
 
     // Keep the parent's notion of "what gender is the selected voice" in sync.
     // Depends on `voices` too so it resolves once the catalog arrives for a
     // voice that was already saved on the campaign.
     const emitGender = useRef(onVoiceGenderChange);
-    emitGender.current = onVoiceGenderChange;
+    useEffect(() => {
+        emitGender.current = onVoiceGenderChange;
+    }, [onVoiceGenderChange]);
     useEffect(() => {
         const g = voices.find((v) => v.id === voiceId)?.gender;
         const norm = (g || "").trim().toLowerCase();
@@ -149,29 +180,50 @@ export function VoiceProviderPicker({
                 {providerOptions.length > 0 && (
                     <div className="flex items-center gap-1.5">
                         <span className="text-xs text-muted-foreground">Provider</span>
-                        <select
+                        <Select
+                            ariaLabel="Voice provider"
+                            fitLongestOption
                             value={provider}
-                            onChange={(e) => changeProvider(e.target.value)}
-                            className="rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1 text-xs capitalize focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                            onChange={changeProvider}
+                            selectClassName="h-auto border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1 pr-8 text-xs capitalize"
                         >
                             {providerOptions.map((p) => (
                                 <option key={p} value={p}>{p}</option>
                             ))}
-                        </select>
+                        </Select>
                     </div>
                 )}
             </div>
             {error && <p className="mt-1 text-[11px] text-red-600 dark:text-red-400">{error}</p>}
-            {!loaded ? (
+            {voiceLatencyNote(provider) && (
+                <p className="mt-1 text-[11px] text-amber-700 dark:text-amber-400">{voiceLatencyNote(provider)}</p>
+            )}
+            {loadError ? (
+                <div role="alert" className="mt-2 space-y-2 text-sm text-destructive">
+                    <p>Voices could not be loaded. {loadError}</p>
+                    <button
+                        type="button"
+                        className="font-medium underline underline-offset-2"
+                        onClick={() => { setLoaded(false); setLoadError(null); setLoadAttempt((attempt) => attempt + 1); }}
+                    >
+                        Retry voices
+                    </button>
+                </div>
+            ) : !loaded ? (
                 <p className="mt-1 text-xs text-muted-foreground">Loading voices…</p>
             ) : shownVoices.length === 0 ? (
                 <p className="mt-1 text-xs text-muted-foreground">No voices for this provider.</p>
             ) : (
-                <div className="mt-1 grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                <div
+                    className="mt-1 grid max-h-56 gap-2 overflow-y-auto pr-1 sm:grid-cols-2"
+                    role="radiogroup"
+                    aria-label="Available voices"
+                >
                     {shownVoices.map((v) => {
                         const rec = isRecommendedVoiceForPersona(v, personaType);
                         const selected = voiceId === v.id;
                         const playing = playingId === v.id;
+                        const label = descriptiveVoiceLabel(v);
                         return (
                             <div
                                 key={v.id}
@@ -183,10 +235,13 @@ export function VoiceProviderPicker({
                                 <button
                                     type="button"
                                     onClick={() => onVoiceChange(v.id, v.name)}
+                                    role="radio"
+                                    aria-checked={selected}
+                                    aria-label={`Select ${label}`}
                                     className="flex min-w-0 flex-1 items-center justify-between gap-2 px-3 py-2 text-left"
                                 >
                                     <span className="min-w-0">
-                                        <span className="block truncate font-medium text-gray-900 dark:text-zinc-100">{v.name}</span>
+                                        <span className="block truncate font-medium text-gray-900 dark:text-zinc-100" title={label}>{label}</span>
                                         <span className="block truncate text-xs text-muted-foreground">
                                             {[v.gender, v.accent].filter(Boolean).join(" · ") || v.language}
                                         </span>

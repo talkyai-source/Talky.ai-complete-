@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
     X,
     Mail,
@@ -13,16 +13,15 @@ import {
     Zap,
     RefreshCw,
     Ban,
-    ChevronDown,
-    ChevronUp,
-    Copy,
-    CheckCircle,
-    XCircle,
-    Loader2,
     AlertTriangle
 } from 'lucide-react';
 import { api } from '../lib/api';
+import { ActionStatusBadge } from './ActionStatusBadge';
+import { ActionReceiptPanel } from './ActionReceiptPanel';
 import type { ActionDetail, ActionType } from '../lib/api';
+import { useAuthGeneration } from '../lib/use-auth-generation';
+import { useOperationOwner } from '../lib/use-operation-owner';
+import { useDialogFocus } from '../lib/use-dialog-focus';
 
 interface ActionDetailDrawerProps {
     actionId: string | null;
@@ -64,51 +63,11 @@ function formatDuration(ms: number | null): string {
     return `${(ms / 1000).toFixed(2)}s`;
 }
 
-function JsonViewer({ data, title }: { data: Record<string, unknown> | null; title: string }) {
-    const [expanded, setExpanded] = useState(false);
-    const [copied, setCopied] = useState(false);
-
-    if (!data || Object.keys(data).length === 0) {
-        return (
-            <div className="json-viewer empty">
-                <h4>{title}</h4>
-                <p className="no-data">No data available</p>
-            </div>
-        );
-    }
-
-    const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(JSON.stringify(data, null, 2));
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        } catch {
-            console.error('Failed to copy');
-        }
-    };
-
-    return (
-        <div className="json-viewer">
-            <div className="json-header" onClick={() => setExpanded(!expanded)}>
-                <h4>
-                    {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
-                    {title}
-                </h4>
-                <button className="btn btn-ghost btn-sm" onClick={(e) => { e.stopPropagation(); handleCopy(); }}>
-                    {copied ? <CheckCircle size={14} /> : <Copy size={14} />}
-                    {copied ? 'Copied!' : 'Copy'}
-                </button>
-            </div>
-            {expanded && (
-                <pre className="json-content">
-                    {JSON.stringify(data, null, 2)}
-                </pre>
-            )}
-        </div>
-    );
-}
-
 export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailDrawerProps) {
+    const session = useAuthGeneration();
+    const scope = `${session}:${actionId ?? ''}`;
+    const [loadedScope, setLoadedScope] = useState(scope);
+    const captureOwner = useOperationOwner(session, actionId ?? '');
     const [action, setAction] = useState<ActionDetail | null>(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -116,69 +75,134 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
     const [cancelling, setCancelling] = useState(false);
     const [confirmCancel, setConfirmCancel] = useState(false);
     const [confirmRetry, setConfirmRetry] = useState(false);
+    const [cancelledScope, setCancelledScope] = useState<string | null>(null);
+    const [receiptReadError, setReceiptReadError] = useState<string | null>(null);
+    const [receiptReading, setReceiptReading] = useState(false);
+    const cancelledReceipt = useRef<string | null>(null);
+    const receiptReadFlight = useRef(false);
+    const cancellationConfirmed = cancelledScope === scope;
+
+    const selection = useRef<{ id: string | null; active: boolean } | null>(null);
+    const mutationInFlight = useRef(false);
+    const drawerRef = useRef<HTMLDivElement>(null);
+    useDialogFocus(Boolean(actionId), drawerRef, onClose, cancelling || retrying);
 
     useEffect(() => {
-        if (!actionId) {
-            setAction(null);
-            return;
-        }
-
-        const fetchAction = async () => {
-            setLoading(true);
-            setError(null);
-            try {
-                const response = await api.getActionDetail(actionId);
-                if (response.data) {
+        const owner = { id: actionId, active: true };
+        const owns = () => owner.active && selection.current === owner && session === api.getAuthGeneration();
+        selection.current = owner;
+        setLoadedScope(`${session}:${actionId ?? ''}`);
+        mutationInFlight.current = false;
+        cancelledReceipt.current = null;
+        receiptReadFlight.current = false;
+        setCancelledScope(null);
+        setReceiptReadError(null);
+        setReceiptReading(false);
+        setAction(null);
+        setError(null);
+        setConfirmCancel(false);
+        setConfirmRetry(false);
+        setCancelling(false);
+        setRetrying(false);
+        setLoading(Boolean(actionId));
+        if (actionId) {
+            const fetchAction = async () => {
+                try {
+                    const response = await api.getActionDetail(actionId);
+                    if (!owner.active || !owns()) return;
+                    if (response.error || !response.data || response.data.id !== actionId) {
+                        throw new Error('The selected action receipt is unavailable.');
+                    }
                     setAction(response.data);
+                } catch (err) {
+                    if (owner.active && owns()) setError(err instanceof Error ? err.message : 'Failed to fetch action details');
+                } finally {
+                    if (owner.active && owns()) setLoading(false);
                 }
-            } catch (err) {
-                setError(err instanceof Error ? err.message : 'Failed to fetch action details');
-            } finally {
-                setLoading(false);
-            }
-        };
+            };
+            void fetchAction();
+        }
+        return () => { owner.active = false; };
+    }, [actionId, session]);
 
-        fetchAction();
-    }, [actionId]);
+    const reloadReceipt = async (): Promise<ActionDetail | null> => {
+        const owner = selection.current;
+        const owns = captureOwner();
+        if (!owns() || !owner?.active || owner.id !== actionId || action?.id !== actionId) return null;
+        const response = await api.getActionDetail(actionId);
+        if (!owner.active || !owns() || response.error || !response.data || response.data.id !== actionId) return null;
+        // A stale or mismatched read cannot undo an exact cancellation receipt.
+        if (cancelledReceipt.current === scope && response.data.status !== 'cancelled') return null;
+        setAction(response.data);
+        return response.data;
+    };
+
+    const reloadCancelledReceipt = async () => {
+        const owns = captureOwner();
+        if (!owns() || cancelledReceipt.current !== scope || receiptReadFlight.current) return;
+        receiptReadFlight.current = true;
+        setReceiptReading(true);
+        setReceiptReadError(null);
+        try {
+            const refreshed = await reloadReceipt();
+            if (owns() && !refreshed) {
+                setReceiptReadError('Cancellation is confirmed. The latest action details could not be verified; reload the saved details.');
+            }
+        } catch {
+            if (owns()) setReceiptReadError('Cancellation is confirmed. The latest action details could not be loaded; reload the saved details.');
+        } finally {
+            if (owns()) { receiptReadFlight.current = false; setReceiptReading(false); }
+        }
+    };
 
     const handleRetry = async () => {
-        if (!actionId || !confirmRetry) {
+        const owner = selection.current;
+        const owns = captureOwner();
+        if (!owns() || !owner?.active || owner.id !== actionId || action?.id !== actionId || mutationInFlight.current || cancelledReceipt.current === scope) return;
+        if (!confirmRetry) {
             setConfirmRetry(true);
             return;
         }
-
+        mutationInFlight.current = true;
         setRetrying(true);
         try {
-            await api.retryAction(actionId);
+            const response = await api.retryAction(actionId);
+            if (!owner.active || !owns()) return;
+            if (response.error) throw new Error(response.error.message);
             onRetry?.();
             onClose();
         } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to retry action');
+            if (owner.active && owns()) setError(err instanceof Error ? err.message : 'Failed to retry action');
         } finally {
-            setRetrying(false);
-            setConfirmRetry(false);
+            if (owner.active && owns()) { mutationInFlight.current = false; setRetrying(false); setConfirmRetry(false); }
         }
     };
 
     const handleCancel = async () => {
-        if (!actionId || !confirmCancel) {
+        const owner = selection.current;
+        const owns = captureOwner();
+        if (!owns() || !owner?.active || owner.id !== actionId || action?.id !== actionId || mutationInFlight.current || cancelledReceipt.current === scope) return;
+        if (!confirmCancel) {
             setConfirmCancel(true);
             return;
         }
-
+        mutationInFlight.current = true;
         setCancelling(true);
         try {
-            await api.cancelAction(actionId);
-            // Refresh the action data
-            const response = await api.getActionDetail(actionId);
-            if (response.data) {
-                setAction(response.data);
+            const cancelled = await api.cancelAction(actionId);
+            if (!owner.active || !owns()) return;
+            if (cancelled.error) throw new Error(cancelled.error.message);
+            if (cancelled.data?.action_id !== actionId || cancelled.data.new_status !== 'cancelled') {
+                throw new Error('Cancellation is not confirmed. Reload the saved action before retrying.');
             }
-        } catch (err) {
-            setError(err instanceof Error ? err.message : 'Failed to cancel action');
-        } finally {
-            setCancelling(false);
+            cancelledReceipt.current = scope;
+            setCancelledScope(scope);
             setConfirmCancel(false);
+            await reloadCancelledReceipt();
+        } catch (err) {
+            if (owner.active && owns()) setError(err instanceof Error ? err.message : 'Failed to cancel action');
+        } finally {
+            if (owner.active && owns()) { mutationInFlight.current = false; setCancelling(false); setConfirmCancel(false); }
         }
     };
 
@@ -188,40 +212,44 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
 
     return (
         <>
-            <div className="drawer-overlay" onClick={onClose}></div>
-            <div className="drawer action-detail-drawer">
+            <div className="drawer-overlay" onClick={() => { if (!cancelling && !retrying) onClose(); }}></div>
+            <div className="drawer action-detail-drawer" ref={drawerRef} role="dialog" aria-modal="true"
+                aria-labelledby="action-details-title" tabIndex={-1}>
                 <div className="drawer-header">
-                    <h2>Action Details</h2>
-                    <button className="drawer-close" onClick={onClose}>
+                    <h2 id="action-details-title">Action Details</h2>
+                    <button type="button" className="drawer-close" aria-label="Close action details" onClick={onClose} disabled={cancelling || retrying}>
                         <X size={20} />
                     </button>
                 </div>
 
                 <div className="drawer-body">
-                    {loading ? (
+                    {loadedScope !== scope || loading ? (
                         <div className="drawer-loading">
                             <div className="loading-spinner"></div>
                             <p>Loading action details...</p>
                         </div>
-                    ) : error ? (
+                    ) : error && !cancellationConfirmed ? (
                         <div className="error-banner">
                             <p>{error}</p>
                         </div>
-                    ) : action ? (
+                    ) : action?.id === actionId ? (
                         <>
+                            {cancellationConfirmed && <div aria-label="Confirmed cancellation">
+                                <p role="status">Cancellation confirmed.</p>
+                                {receiptReading && <p role="status">Loading the saved action details…</p>}
+                                {receiptReadError && <div className="error-banner" role="alert">
+                                    <p>{receiptReadError}</p>
+                                    <button type="button" className="btn btn-secondary btn-sm" disabled={receiptReading}
+                                        onClick={() => void reloadCancelledReceipt()}>Reload saved action details</button>
+                                </div>}
+                            </div>}
                             {/* Action Header */}
                             <div className="action-info-header">
                                 <div className="action-type-header">
                                     <ActionIcon size={24} />
                                     <span>{ACTION_LABELS[action.type] || action.type}</span>
                                 </div>
-                                <span className={`action-status-badge status-${action.status}`}>
-                                    {action.status === 'running' && <Loader2 size={12} className="spinning" />}
-                                    {action.status === 'completed' && <CheckCircle size={12} />}
-                                    {action.status === 'failed' && <XCircle size={12} />}
-                                    {action.status === 'cancelled' && <Ban size={12} />}
-                                    {action.status}
-                                </span>
+                                <ActionStatusBadge status={cancellationConfirmed ? 'cancelled' : action.status} />
                             </div>
 
                             {/* Quick Stats */}
@@ -283,7 +311,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                                     )}
                                     {action.connector_name && (
                                         <div className="related-item">
-                                            <span className="label">Connector</span>
+                                            <span className="label">Current connector display name</span>
                                             <span className="value">{action.connector_name}</span>
                                         </div>
                                     )}
@@ -301,9 +329,8 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                                 </div>
                             )}
 
-                            {/* Input/Output JSON */}
-                            <JsonViewer data={action.input_data} title="Input Payload" />
-                            <JsonViewer data={action.output_data} title="Output / Result" />
+                            {(!cancellationConfirmed || action.status === 'cancelled') &&
+                                <ActionReceiptPanel key={scope} action={action} onReloadReceipt={reloadReceipt} />}
 
                             {/* Audit Info */}
                             {(action.ip_address || action.idempotency_key) && (
@@ -331,7 +358,7 @@ export function ActionDetailDrawer({ actionId, onClose, onRetry }: ActionDetailD
                             )}
 
                             {/* Action Buttons */}
-                            {(action.is_cancellable || action.is_retryable) && (
+                            {!cancellationConfirmed && (action.is_cancellable || action.is_retryable) && (
                                 <div className="action-buttons">
                                     {action.is_cancellable && (
                                         confirmCancel ? (

@@ -21,12 +21,24 @@ import { AlertCircle, Loader2, Phone, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { dashboardApi, ContactList } from "@/lib/dashboard-api";
-import { notificationsStore } from "@/lib/notifications";
+import { isApiClientError } from "@/lib/http-client";
+import { useNotificationsActions } from "@/lib/notifications-client";
+import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 
 export const UNGROUPED_LIST_ID = "ungrouped";
 
 function errText(err: unknown, fallback: string): string {
     return err instanceof Error ? err.message : fallback;
+}
+
+function activeStateFromCallError(err: unknown, listId: string): boolean | undefined {
+    if (!isApiClientError(err) || !err.details || typeof err.details !== "object") return undefined;
+    const raw = err.details as Record<string, unknown>;
+    const details = raw.detail && typeof raw.detail === "object"
+        ? raw.detail as Record<string, unknown>
+        : raw;
+    if (typeof details.list_id === "string" && details.list_id !== listId) return undefined;
+    return typeof details.is_active === "boolean" ? details.is_active : undefined;
 }
 
 export function ContactLists({
@@ -49,16 +61,21 @@ export function ContactLists({
     /** Fired after a "Call this list" enqueues jobs, so the parent can refresh stats. */
     onCallStarted?: () => void;
 }) {
+    const { create: createNotification } = useNotificationsActions();
     const [lists, setLists] = useState<ContactList[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
     const [togglingId, setTogglingId] = useState<string | null>(null);
     const [callingId, setCallingId] = useState<string | null>(null);
+    const readiness = useCampaignReadiness([campaignId], lists.some((list) => list.id !== UNGROUPED_LIST_ID));
 
     // Keep callbacks in refs so they aren't effect dependencies (parents often
-    // pass fresh closures each render).
+    // pass fresh closures each render). Assigning during render reads/writes a
+    // ref outside an effect/handler, so update it in an effect instead.
     const loadedCb = useRef(onListsLoaded);
-    loadedCb.current = onListsLoaded;
+    useEffect(() => {
+        loadedCb.current = onListsLoaded;
+    });
 
     const load = useCallback(async () => {
         try {
@@ -74,6 +91,9 @@ export function ContactLists({
     }, [campaignId]);
 
     useEffect(() => {
+        // Fetch on mount and whenever campaignId/refreshToken change; load()
+        // sets loading/error/lists internally as the async request resolves.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch on mount/refresh, not derivable during render
         void load();
     }, [load, refreshToken]);
 
@@ -91,7 +111,7 @@ export function ContactLists({
         try {
             const updated = await dashboardApi.updateContactList(list.id, next);
             setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, ...updated } : l)));
-            notificationsStore.create({
+            createNotification({
                 type: "success",
                 title: next ? "List activated" : "List paused",
                 message: `“${list.name}” is now ${next ? "active" : "inactive"}.`,
@@ -99,7 +119,7 @@ export function ContactLists({
         } catch (err) {
             // Revert to the server-truth value we started from.
             setLists((prev) => prev.map((l) => (l.id === list.id ? { ...l, is_active: list.is_active } : l)));
-            notificationsStore.create({
+            createNotification({
                 type: "error",
                 title: "Couldn't update list",
                 message: errText(err, "The active state was reverted."),
@@ -110,7 +130,7 @@ export function ContactLists({
     }
 
     async function handleCall(list: ContactList) {
-        if (list.id === UNGROUPED_LIST_ID || callingId) return;
+        if (list.id === UNGROUPED_LIST_ID || callingId || !readiness.ready) return;
         const ok = window.confirm(
             `Call all eligible contacts in “${list.name}” now?\n\n` +
             "This places REAL outbound calls immediately — just like starting the campaign.",
@@ -119,7 +139,13 @@ export function ContactLists({
         setCallingId(list.id);
         try {
             const res = await dashboardApi.callContactList(list.id);
-            notificationsStore.create({
+            // Starting a list activates it first. Reconcile from the response
+            // even when this component is used on /contacts without a parent
+            // refresh callback.
+            setLists((current) => current.map((item) => (
+                item.id === list.id ? { ...item, is_active: res.is_active } : item
+            )));
+            createNotification({
                 type: res.jobs_enqueued > 0 ? "success" : "warning",
                 title: res.jobs_enqueued > 0 ? "Calls started" : "No calls placed",
                 message:
@@ -128,7 +154,16 @@ export function ContactLists({
             });
             onCallStarted?.();
         } catch (err) {
-            notificationsStore.create({
+            // The backend deliberately returns 503 when activation committed
+            // but enqueue failed. Its structured `is_active` value is server
+            // truth; reverting to the pre-click UI would lie to the operator.
+            const active = activeStateFromCallError(err, list.id);
+            if (active !== undefined) {
+                setLists((current) => current.map((item) => (
+                    item.id === list.id ? { ...item, is_active: active } : item
+                )));
+            }
+            createNotification({
                 type: "error",
                 title: "Couldn't start calls",
                 message: errText(err, "The list was not called."),
@@ -174,6 +209,7 @@ export function ContactLists({
                     </button>
                 )}
             </div>
+            {lists.some((list) => list.id !== UNGROUPED_LIST_ID) && <CampaignReadinessNotice readiness={readiness} />}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {lists.map((list) => {
                     const active = list.is_active;
@@ -242,7 +278,7 @@ export function ContactLists({
                                     <Button
                                         size="sm"
                                         variant={active ? "default" : "outline"}
-                                        disabled={callingId === list.id}
+                                        disabled={Boolean(callingId) || !readiness.ready}
                                         onClick={() => void handleCall(list)}
                                     >
                                         {callingId === list.id ? (

@@ -1,0 +1,34 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+_ test_lost_remote_success_remains_held_despite_matching_reference[salesforce] _
+tests\unit\test_crm_sync_service.py:547: in test_lost_remote_success_remains_held_despite_matching_reference
+    assert not second.success and second.crm_call_id is None
+E   AssertionError: assert (not True)
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['salesforce'], crm_contact_id='...'recovered-call', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.crm_sync_service:crm_sync_service.py:314 crm_sync provider=salesforce call=77777777-7777-7777-7777-777777777777 phase=creating_call status=unknown
+__ test_lost_remote_success_remains_held_despite_matching_reference[hubspot] __
+tests\unit\test_crm_sync_service.py:547: in test_lost_remote_success_remains_held_despite_matching_reference
+    assert not second.success and second.crm_call_id is None
+E   AssertionError: assert (not True)
+E    +  where True = CRMSyncResult(success=True, call_id='77777777-7777-7777-7777-777777777777', providers=['hubspot'], crm_contact_id='con...'recovered-call', skipped=False, skipped_reason=None, error_message=None, warning_message=None, updated_existing=False).success
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.crm_sync_service:crm_sync_service.py:314 crm_sync provider=hubspot call=77777777-7777-7777-7777-777777777777 phase=creating_call status=unknown
+_ test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[salesforce] _
+tests\unit\test_crm_sync_service.py:574: in test_expired_creating_call_recovery_never_adopts_or_updates_an_activity
+    with pytest.raises(CRMDestinationMismatch, match='original-account review'):
+E   Failed: DID NOT RAISE <class 'app.services.crm_sync_service.CRMDestinationMismatch'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.crm_sync_service:crm_sync_service.py:314 crm_sync provider=salesforce call=77777777-7777-7777-7777-777777777777 phase=creating_call status=unknown
+_ test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[hubspot] _
+tests\unit\test_crm_sync_service.py:574: in test_expired_creating_call_recovery_never_adopts_or_updates_an_activity
+    with pytest.raises(CRMDestinationMismatch, match='original-account review'):
+E   Failed: DID NOT RAISE <class 'app.services.crm_sync_service.CRMDestinationMismatch'>
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.crm_sync_service:crm_sync_service.py:314 crm_sync provider=hubspot call=77777777-7777-7777-7777-777777777777 phase=creating_call status=unknown
+=========================== short test summary info ===========================
+FAILED tests/unit/test_crm_sync_service.py::test_lost_remote_success_remains_held_despite_matching_reference[salesforce]
+FAILED tests/unit/test_crm_sync_service.py::test_lost_remote_success_remains_held_despite_matching_reference[hubspot]
+FAILED tests/unit/test_crm_sync_service.py::test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[salesforce]
+FAILED tests/unit/test_crm_sync_service.py::test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[hubspot]
+4 failed, 31 deselected in 3.73s

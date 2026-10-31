@@ -7,7 +7,6 @@ from app.domain.models.agent_config import AgentConfig, AgentGoal, ConversationF
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.conversation_state import ConversationContext, ConversationState
 from app.domain.models.session import CallSession, CallState
-from app.domain.services.voice_pipeline.identity_disposition import IdentityDisposition
 from app.domain.services.voice_pipeline_service import VoicePipelineService
 
 
@@ -28,45 +27,14 @@ def _make_session() -> CallSession:
             company_name="Talky.ai",
             rules=ConversationRule(),
             flow=ConversationFlow(),
-            response_max_sentences=2,
         ),
     )
     session.barge_in_event = asyncio.Event()
     return session
 
 
-def test_pricing_questions_get_extended_sentence_budget_for_custom_prompt_sessions():
-    service = VoicePipelineService(
-        stt_provider=MagicMock(),
-        llm_provider=AsyncMock(),
-        tts_provider=AsyncMock(),
-        media_gateway=AsyncMock(),
-    )
-
-    limit = service._response_max_sentences_for_turn(
-        _make_session(),
-        "Can you explain all your plans and pricing?",
-        has_custom_prompt=True,
-    )
-
-    assert limit == 4
 
 
-def test_non_pricing_questions_keep_default_sentence_budget():
-    service = VoicePipelineService(
-        stt_provider=MagicMock(),
-        llm_provider=AsyncMock(),
-        tts_provider=AsyncMock(),
-        media_gateway=AsyncMock(),
-    )
-
-    limit = service._response_max_sentences_for_turn(
-        _make_session(),
-        "What does Talky do?",
-        has_custom_prompt=True,
-    )
-
-    assert limit == 2
 
 
 def test_ask_ai_end_session_action_parser():
@@ -100,7 +68,7 @@ class _StreamingLLMProvider:
 
 
 @pytest.mark.asyncio
-async def test_get_llm_response_strips_reasoning_and_keeps_full_pricing_answer():
+async def test_streamed_response_strips_reasoning_and_keeps_grounded_pricing():
     service = VoicePipelineService(
         stt_provider=MagicMock(),
         llm_provider=_StreamingLLMProvider([
@@ -121,17 +89,21 @@ async def test_get_llm_response_strips_reasoning_and_keeps_full_pricing_answer()
         Message(role=MessageRole.USER, content="What are your packages and pricing?")
     ]
 
-    response = await service.get_llm_response(
-        session,
-        "What are your packages and pricing?",
+    session.system_prompt += (
+        "\n<company_knowledge>Basic is $29 per month. Professional is $79 per month. "
+        "Enterprise is custom pricing.</company_knowledge>"
     )
+    session.turn_id = 3
+    session.knowledge_mode = "inline"
+    service.synthesize_and_send_audio = AsyncMock(return_value=False)
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    response, _, _ = await service._stream_llm_and_tts(session)
+    submitted = " ".join(c.args[1] for c in service.synthesize_and_send_audio.await_args_list)
+    assert response == submitted
 
     assert "<think>" not in response
     assert "**" not in response
     assert "#" not in response
-    assert "1." not in response
-    assert "2." not in response
-    assert "3." not in response
     assert "outline the pricing plan first" not in response
     assert "Basic" in response
     assert "Professional" in response
@@ -337,28 +309,10 @@ async def test_ask_ai_session_skips_identity_disposition_block():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.NONE
     service.media_gateway.hangup_call.assert_not_awaited()
     assert session.state != CallState.ENDED
 
 
-@pytest.mark.asyncio
-async def test_telephony_session_wrong_business_still_ends_deterministically():
-    # Telephony behavior (campaign_id is a real campaign/lead id, not
-    # "ask-ai"/"voice-demo") must be unchanged by the session-type gate.
-    service = _make_service_for_disposition([])  # LLM must not be invoked
-    session = _make_session()
-    session.campaign_id = "campaign-123"
-    session.current_user_input = "Sorry, you've got the wrong company."
-    websocket = AsyncMock()
-
-    await service.handle_turn_end(session, websocket)
-
-    assert session._turn_disposition == IdentityDisposition.WRONG_BUSINESS
-    service.media_gateway.hangup_call.assert_awaited_once_with(
-        session.call_id, "wrong_number_disposition"
-    )
-    assert session.state == CallState.ENDED
 
 
 @pytest.mark.asyncio
@@ -375,7 +329,6 @@ async def test_wrong_person_plus_explicit_goodbye_honors_model_end_call():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
     service.media_gateway.hangup_call.assert_awaited_once_with(
         session.call_id, "agent_end_call"
     )
@@ -396,7 +349,6 @@ async def test_wrong_person_without_goodbye_still_strips_model_end_call():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
     service.media_gateway.hangup_call.assert_not_awaited()
     assert getattr(session, "_end_call_requested", False) is False
 
@@ -414,37 +366,11 @@ async def test_goodbye_alone_does_not_affect_a_non_wrong_person_end_call():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.NONE
     service.media_gateway.hangup_call.assert_awaited_once_with(
         session.call_id, "agent_end_call"
     )
 
 
-@pytest.mark.asyncio
-async def test_turn_disposition_does_not_go_stale_across_turns():
-    # Staleness check: a WRONG_PERSON turn followed by an ordinary turn must
-    # NOT leave the reverse gate acting on the first turn's stale disposition.
-    service = _make_service_for_disposition(
-        [
-            "Got it, thanks for letting me know.",  # turn 1: pivot, no END_CALL
-            "Great, take care! [[END_CALL]]",        # turn 2: ordinary end_call
-        ]
-    )
-    session = _make_session()
-    session.campaign_id = "campaign-123"
-    websocket = AsyncMock()
-
-    session.current_user_input = "She's not here."
-    await service.handle_turn_end(session, websocket)
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
-    service.media_gateway.hangup_call.assert_not_awaited()
-
-    session.current_user_input = "Sounds good, thanks a lot!"
-    await service.handle_turn_end(session, websocket)
-    assert session._turn_disposition == IdentityDisposition.NONE
-    service.media_gateway.hangup_call.assert_awaited_once_with(
-        session.call_id, "agent_end_call"
-    )
 
 
 def _make_service_for_bargein() -> VoicePipelineService:
@@ -620,21 +546,22 @@ async def test_handle_barge_in_cancels_active_turn_task_immediately():
 async def test_run_turn_commits_partial_assistant_reply_on_barge_in():
     """Barge-in with a non-empty LLM response: both user and assistant are committed
     to preserve user→assistant alternation in history (prevents consecutive user messages)."""
-    service = VoicePipelineService(
-        stt_provider=AsyncMock(),
-        llm_provider=AsyncMock(),
-        tts_provider=AsyncMock(),
-        media_gateway=AsyncMock(),
-        mute_during_tts=False,
-    )
-    service.latency_tracker = MagicMock()
-    service.latency_tracker.get_metrics.return_value = None
-    service.get_llm_response = AsyncMock(return_value="Hello there.")
-    service.synthesize_and_send_audio = AsyncMock(return_value=True)
+    service = _make_service_for_disposition(["Hello there. ", "More details."])
     service.transcript_service = MagicMock()
     service.transcript_service.flush_to_database = AsyncMock()
 
     session = _make_session()
+    service._barge_in_events[session.call_id] = session.barge_in_event
+    submitted = []
+
+    async def synthesize(_session, text, *_args, **_kwargs):
+        submitted.append(text)
+        if len(submitted) == 2:
+            session.barge_in_event.set()
+            return True
+        return False
+
+    service.synthesize_and_send_audio = synthesize
     websocket = AsyncMock()
 
     await service._run_turn(session, "Tell me about Talky.", websocket, turn_id=2)
@@ -643,6 +570,8 @@ async def test_run_turn_commits_partial_assistant_reply_on_barge_in():
         MessageRole.USER,
         MessageRole.ASSISTANT,
     ]
+    assert submitted == ["Hello there.", "More details."]
+    assert session.conversation_history[-1].content == "Hello there. [interrupted by caller]"
     service.transcript_service.accumulate_turn.assert_called_once()
 
 
@@ -690,11 +619,11 @@ async def test_bare_no_after_non_question_is_not_suppressed_as_backchannel():
 # --- F-13 / F-14 / F-15 / F-11b (2026-07-20) — hardening today's disposition
 #     work against the listening-path audit --------------------------------
 @pytest.mark.asyncio
-async def test_deterministic_dnc_persists_opt_out_and_hangs_up():
+async def test_caller_dnc_persists_opt_out_and_hangs_up():
     # F-13: the deterministic DNC path SPOKE "I'll take you off the list" but
     # never set _caller_opted_out, so teardown's opt-out purge never ran. It
     # must now mirror the LLM-JSON path and flag the session.
-    service = _make_service_for_disposition([])  # no LLM — deterministic path
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session.current_user_input = "Please stop calling me."
@@ -702,17 +631,16 @@ async def test_deterministic_dnc_persists_opt_out_and_hangs_up():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.DNC
     assert getattr(session, "_caller_opted_out", False) is True
     service.media_gateway.hangup_call.assert_awaited_once()
 
 
 @pytest.mark.asyncio
-async def test_deterministic_dnc_survives_repetition_guard():
+async def test_caller_dnc_survives_repetition_guard():
     # F-13(d): an emphatic repeated "no ... stop calling me" is >50% one word,
     # so the repetitive-STT guard used to drop it before classification. It must
     # now reach the DNC path and persist the opt-out.
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session.current_user_input = "no no no no no no stop calling me"
@@ -720,7 +648,6 @@ async def test_deterministic_dnc_survives_repetition_guard():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.DNC
     assert getattr(session, "_caller_opted_out", False) is True
 
 
@@ -728,13 +655,12 @@ async def test_deterministic_dnc_survives_repetition_guard():
 async def test_wrong_business_is_not_an_opt_out():
     # A wrong-business end must NOT flag an opt-out (it's a wrong number, not a
     # do-not-call request) — the persistence is DNC-only.
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session.current_user_input = "Sorry, you've got the wrong company."
     await service.handle_turn_end(session, AsyncMock())
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_BUSINESS
     assert getattr(session, "_caller_opted_out", False) is False
 
 
@@ -757,55 +683,37 @@ async def test_json_end_on_wrong_person_turn_is_suppressed():
 
     await service.handle_turn_end(session, websocket)
 
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
     assert session.state != CallState.ENDED
     service.media_gateway.hangup_call.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_json_do_not_call_still_ends_even_on_identity_turn():
-    # F-15 exemption: do_not_call is a real opt-out and must ALWAYS end +
-    # persist, never suppressed by the wrong-person gate.
+async def test_json_do_not_call_cannot_turn_ordinary_goodbye_into_opt_out():
+    # The model flag cannot override what the caller actually requested.
     service = _make_service_for_disposition(
         ['{"action":"end_ask_ai_session","reason":"user_request","do_not_call":true,"farewell":"Understood."}']
     )
     session = _make_session()
     session.campaign_id = "campaign-123"
-    # A non-identity transcript so disposition is NONE (do_not_call must end
-    # regardless of disposition anyway).
+    # This ends the current conversation; it does not revoke future contact.
     session.current_user_input = "yeah whatever, I'm done."
     websocket = AsyncMock()
 
     await service.handle_turn_end(session, websocket)
 
-    assert getattr(session, "_caller_opted_out", False) is True
+    assert getattr(session, "_caller_opted_out", False) is False
     assert session.state == CallState.ENDED
 
 
-@pytest.mark.asyncio
-async def test_identity_clarify_flag_is_consumed_after_one_turn():
-    # F-14(d): _identity_clarify_asked was set but never cleared, so a single
-    # clarify permanently armed the aggressive post-clarify branch for the rest
-    # of the call. It must be consumed the turn we act on it.
-    service = _make_service_for_disposition(["Let me get the right person for you."])
-    session = _make_session()
-    session.campaign_id = "campaign-123"
-    session._identity_clarify_asked = True
-    session.current_user_input = "Just the wrong person, David moved teams."
-
-    await service.handle_turn_end(session, AsyncMock())
-
-    assert session._identity_clarify_asked is False
-    assert session._turn_disposition == IdentityDisposition.WRONG_PERSON
 
 
 @pytest.mark.asyncio
-async def test_disposition_early_returns_reset_speculative_snapshot():
+async def test_identity_turns_reset_speculative_snapshot():
     # F-11b: the deterministic early-returns append to history but return before
     # the finally-cleanup that clears the speculative snapshot. Left stale, a
     # barge-in truncates the just-committed exchange. Both paths must reset it.
     # WRONG_BUSINESS / DNC end path:
-    service = _make_service_for_disposition([])
+    service = _make_service_for_disposition(["Understood."])
     session = _make_session()
     session.campaign_id = "campaign-123"
     session._speculative_history_len = 0  # stale pre-turn snapshot
@@ -814,13 +722,12 @@ async def test_disposition_early_returns_reset_speculative_snapshot():
     assert session._speculative_history_len is None
 
     # AMBIGUOUS clarify path (call CONTINUES — matters most):
-    service2 = _make_service_for_disposition([])
+    service2 = _make_service_for_disposition(["Could you explain?"])
     session2 = _make_session()
     session2.campaign_id = "campaign-123"
     session2._speculative_history_len = 0
     session2.current_user_input = "Wrong number."
     await service2.handle_turn_end(session2, AsyncMock())
-    assert session2._turn_disposition == IdentityDisposition.AMBIGUOUS
     assert session2._speculative_history_len is None
 
 
@@ -872,6 +779,14 @@ async def test_empty_eot_marker_after_suppressed_backchannel_is_swallowed():
     session = _make_session()
     session.tts_active = True
     session.llm_active = False
+    # Mid-call, agent made a statement: a first utterance or an answer to an
+    # agent question is not a backchannel (listen-2, test_live_risk_listening).
+    from app.domain.models.conversation import Message, MessageRole
+    session.conversation_history = [
+        Message(role=MessageRole.ASSISTANT, content="Hi."),
+        Message(role=MessageRole.USER, content="Hello."),
+        Message(role=MessageRole.ASSISTANT, content="We offer roofing and gutters."),
+    ]
 
     # StartOfTurn bumps the utterance seq (mirrors _on_barge_in_direct).
     service._utterance_seq[session.call_id] = 1
@@ -960,3 +875,188 @@ async def test_normal_nonbackchannel_endofturn_still_barges_in_during_tts():
     task = service._pending_llm_tasks[session.call_id]
     service.handle_turn_end.assert_called_once()
     task.cancel()
+
+
+# --- DNC must be WRITTEN before it is SPOKEN (2026-09-02) --------------------
+# Until now the farewell "I'll take you off the list" was synthesised, played to
+# completion and the hangup requested; purge_lead_on_opt_out ran later, at
+# teardown, best-effort. A spoken promise stood in for the backend action.
+
+@pytest.mark.asyncio
+async def test_dnc_record_is_written_before_the_farewell_is_spoken(monkeypatch):
+    from app.domain.services.dialer import opt_out as opt_out_mod
+
+    order: list[str] = []
+
+    async def fake_purge(session, **_kw):
+        order.append("purge")
+        return True
+
+    monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", fake_purge)
+
+    service = _make_service_for_disposition(["Understood."])
+    original_tts = service.synthesize_and_send_audio
+
+    async def spy_tts(session, text, websocket, **kw):
+        order.append(f"speak:{text[:20]}")
+        return await original_tts(session, text, websocket, **kw)
+
+    service.synthesize_and_send_audio = spy_tts
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "Please stop calling me."
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert order[0] == "purge", order
+    assert order[1].startswith("speak:"), order
+    assert "Understood" in order[1]
+
+
+@pytest.mark.asyncio
+async def test_failed_dnc_write_is_not_confirmed_aloud(monkeypatch):
+    from app.domain.services.dialer import opt_out as opt_out_mod
+
+    async def failing_purge(session, **_kw):
+        return False
+
+    monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", failing_purge)
+
+    service = _make_service_for_disposition(["Understood."])
+    spoken: list[str] = []
+
+    async def spy_tts(session, text, websocket, **kw):
+        spoken.append(text)
+        return False
+
+    service.synthesize_and_send_audio = spy_tts
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "Please stop calling me."
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert spoken, "a farewell is still spoken"
+    assert "off the list" not in spoken[0].lower()
+    assert "removed" not in spoken[0].lower()
+    # The flag stays set so teardown retries the purge.
+    assert getattr(session, "_caller_opted_out", False) is True
+
+
+# --- Complete model responses reach speech without a sentence quota -------
+
+@pytest.mark.asyncio
+async def test_model_followup_question_reaches_speech():
+    """The caller hears the model's complete response, including its question."""
+    service = _make_service_for_disposition([
+        "Got it. ", "That's the common one. ", "Most folks say the same. ",
+        "What would fix it for you?",
+    ])
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "It's just been unreliable lately."
+    session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Hi, Sarah here from Acme — got a minute?"))
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    spoken = " ".join(getattr(session, "_spoken_sentences", []))
+    assert "What would fix it for you?" in spoken
+    last = session.conversation_history[-1]
+    assert last.role == MessageRole.ASSISTANT
+    assert last.content.rstrip().endswith("?")
+
+
+@pytest.mark.asyncio
+async def test_all_model_statements_reach_speech():
+    service = _make_service_for_disposition([
+        "Got it. ", "That's the common one. ", "Most folks say the same. ",
+        "We also do same-day payouts. ", "And weekend support.",
+    ])
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "It's just been unreliable lately."
+    session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Hi, Sarah here from Acme — got a minute?"))
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    spoken = " ".join(getattr(session, "_spoken_sentences", []))
+    assert "same-day" in spoken
+    assert "weekend" in spoken
+    assert "same-day" in session.conversation_history[-1].content
+
+
+# --- NON-NEGOTIABLES reaches the model exactly once, last (2026-09-02) -------
+
+class _CapturingLLMProvider(_StreamingLLMProvider):
+    def __init__(self, chunks):
+        super().__init__(chunks)
+        self.system_prompts: list[str] = []
+
+    async def stream_chat_with_timeout(self, *args, **kwargs):
+        sp = kwargs.get("system_prompt")
+        if sp is None and len(args) > 1:
+            sp = args[1]
+        self.system_prompts.append(sp or "")
+        async for c in super().stream_chat_with_timeout(*args, **kwargs):
+            yield c
+
+
+@pytest.mark.asyncio
+async def test_live_turn_prompt_carries_current_boundaries_once():
+    """The composed base ends with the full NON-NEGOTIABLES floor; per-turn
+    blocks landed after it, so a compact copy was re-appended every turn. Now
+    the base floor is relocated to the end and there is exactly one copy."""
+    from app.services.scripts.prompts.composer import compose_prompt
+
+    service = _make_service_for_disposition(["Sure — what's the best email?"])
+    llm = _CapturingLLMProvider(["Sure — what's the best email?"])
+    service.llm_provider = llm
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.system_prompt = compose_prompt(
+        "lead_gen", "Sarah", "Acme", {}, knowledge_driven=True,
+        additional_instructions="Call UK retailers about card terminals.",
+    )
+    session.current_user_input = "Can you send me something?"
+    session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
+    session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Sarah here from Acme — got a minute?"))
+
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert llm.system_prompts, "the LLM was not called"
+    sp = llm.system_prompts[-1]
+    assert sp.count("## NON-NEGOTIABLES") == 1
+    assert "You are Sarah, an AI assistant for Acme" in sp
+    assert "Call UK retailers about card terminals." in sp
+    assert "failed work" in sp and "is not complete" in sp
+    assert "## THIS TURN" not in sp
+
+
+@pytest.mark.asyncio
+async def test_unbacked_json_opt_out_does_not_play_a_removal_farewell(monkeypatch):
+    # The caller said goodbye (the call may end), but the model's do_not_call
+    # has no quote of the caller: its "I'll take you off our list" must not play.
+    from app.domain.services.end_session_action import DEFAULT_FAREWELL
+    service = _make_service_for_disposition(
+        ['{"action":"end_session","reason":"user_done","do_not_call":true,'
+         '"farewell":"Understood, I will take you off our list."}']
+    )
+    spoken = []
+    original = service.synthesize_and_send_audio
+
+    async def record(session, text, *args, **kwargs):
+        spoken.append(text)
+        return await original(session, text, *args, **kwargs)
+
+    monkeypatch.setattr(service, "synthesize_and_send_audio", record)
+    session = _make_session()
+    session.campaign_id = "campaign-123"
+    session.current_user_input = "Okay, goodbye."
+    await service.handle_turn_end(session, AsyncMock())
+
+    assert getattr(session, "_caller_opted_out", False) is False
+    assert session.state == CallState.ENDED
+    assert DEFAULT_FAREWELL in spoken
+    assert not any("off our list" in text for text in spoken)

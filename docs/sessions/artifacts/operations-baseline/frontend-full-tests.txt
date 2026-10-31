@@ -1,0 +1,1281 @@
+✔ view and save preserve deepgram_flux/en profile with available voice (1724.1898ms)
+✔ view and save preserve deepgram_flux/en profile with missing voice (634.3493ms)
+✔ view and save preserve deepgram_nova/es profile with available voice (829.8094ms)
+✔ view and save preserve deepgram_flux/es profile with available voice (868.9923ms)
+✔ late save from account A cannot replace B's draft or play audio (1132.7192ms)
+✔ late preview from account A cannot replace B's draft or play audio (1178.5779ms)
+✔ late overlapping_preview from account A cannot replace B's draft or play audio (1823.0211ms)
+✔ late playing_preview from account A cannot replace B's draft or play audio (1415.1448ms)
+▶ AiVoicesPage
+  ✔ renders voices after fetching (1260.017ms)
+  ✔ handles fetch error (437.7224ms)
+  ✔ toggles play state on button click (701.6465ms)
+✔ AiVoicesPage (2405.9421ms)
+✔ accepts configured public origin behind an internal Next URL without trusting forwarded host (196.6973ms)
+✔ fails closed for invalid canonical public origin missing (4.5946ms)
+✔ fails closed for invalid canonical public origin null (3.9439ms)
+✔ fails closed for invalid canonical public origin https://user:pass@app.example (5.1958ms)
+✔ fails closed for invalid canonical public origin https://app.example/contact (3.4124ms)
+✔ fails closed for invalid canonical public origin https://app.example?x=1 (2.6574ms)
+✔ forwards only normalized data and validated origin to the configured backend (15.1965ms)
+✔ canonicalizes an uppercase request UUID and recognizes its lowercase receipt (9.8786ms)
+✔ rejects untrusted Origin missing before forwarding (4.2005ms)
+✔ rejects untrusted Origin null before forwarding (2.8315ms)
+✔ rejects untrusted Origin https://other.example before forwarding (2.1678ms)
+✔ fails closed for missing or unsafe backend configuration  (2.2266ms)
+✔ fails closed for missing or unsafe backend configuration file:///api/v1 (2.0593ms)
+✔ fails closed for missing or unsafe backend configuration https://app.example/api/v1 (7.7539ms)
+✔ fails closed for missing or unsafe backend configuration https://u:p@backend.example/api/v1 (1.6641ms)
+✔ fails closed for missing or unsafe backend configuration https://backend.example/api/v1?url=elsewhere (5.0238ms)
+✔ fails closed for missing or unsafe backend configuration https://backend.example/other (2.0069ms)
+✔ rejects oversized, invalid and extra-field requests without forwarding (11.5828ms)
+✔ rejects an internal self-proxy even when canonical public origin differs (3.4092ms)
+✔ does not turn malformed upstream success or an exception into acceptance (8.7238ms)
+✔ preserves a safe throttling response without leaking upstream content (5.8825ms)
+✔ duplicate signup shows sign-in guidance and leaves the email editable (1256.3591ms)
+✔ wrong login password remains an invalid-credentials error, not duplicate signup (585.4785ms)
+✔ an unconfirmed logout is explained without claiming server revocation (115.659ms)
+✔ a failed transfer leg is visible with the server's status and reason (648.8257ms)
+✔ a held transfer leg shows the reconciliation status rather than a raw token (26.109ms)
+✔ an undeclared leg status is shown verbatim, never hidden or guessed at (21.7297ms)
+✔ nothing renders when the server sent no transfer legs (20.2701ms)
+✔ a leg's null fields render nothing at all — no placeholder, no invented copy (27.8956ms)
+✔ every leg the server sent is listed, including a still-live one (56.8789ms)
+✔ a failed call load offers a retry that re-runs the request (129.3026ms)
+✔ a failed load offers no retry control when the caller cannot re-run it (9.1765ms)
+✔ the billing panel shows the settled seconds the server sent, in the wire's unit (203.0332ms)
+✔ a held call shows why settlement was withheld (19.2615ms)
+✔ an undeclared billing value reaches the operator verbatim (16.925ms)
+✔ a call the server has not settled shows no billed figure at all (11.8597ms)
+✔ nothing renders when the server sent no billing fields (4.4869ms)
+✔ a billed zero is a real settled figure and is shown, not swallowed (16.6012ms)
+✔ an inbound call shows Caller ANI and the Called DID the wire sent (18.1394ms)
+✔ an outbound call shows Phone Number, never a Called DID row (10.0975ms)
+✔ the route snapshot renders nothing without inbound:read/inbound:manage, even for an inbound call (4.8707ms)
+✔ the route snapshot renders the fields the server sent once the capability is granted (67.8024ms)
+✔ the campaign link renders only when the wire carries an inbound campaign id (35.5713ms)
+✔ no campaign link renders without an id (15.2775ms)
+✔ the consent and media panel renders nothing without the capability (4.5879ms)
+✔ nothing renders when the server sent none of the consent or media fields (3.7484ms)
+✔ the consent and media panel renders the fields the server sent, capability granted (29.5343ms)
+✔ a failed call-history load offers a retry that re-runs the request (276.6233ms)
+✔ a failed call-history load offers no retry when the caller cannot re-run it (10.4591ms)
+✔ the DID filter lists only the DIDs the wire actually sent, deduplicated and sorted (3.7388ms)
+✔ an outbound call with no DID contributes nothing to the filter (0.9035ms)
+✔ the campaign filter is labeled by the wire's own campaign_name (1.9334ms)
+✔ a campaign with no name falls back to its own id, never an invented label (1.0919ms)
+✔ no campaign filter option renders without the wire carrying an inbound campaign id (11.8057ms)
+✔ MeetingRow shows participant summary when participants exist (6.7196ms)
+✔ MeetingRow omits participant summary when empty (1.2701ms)
+✔ the sessions section no longer claims revoking ends the session immediately (3.5282ms)
+✔ the sessions section states, in the always-visible text, that the device is not signed out (1.3172ms)
+✔ the tooltip states the rolling window and the remedy in plain language (1.47ms)
+✔ the password form states the window rather than implying an instant sign-out (0.6249ms)
+▶ RadialKnob
+  ✔ exposes its formatted value and purpose to assistive technology (501.0087ms)
+  ✔ supports stepped keyboard changes (94.3151ms)
+  ✔ can shrink below its desktop size and retains a visible focus treatment (46.5593ms)
+✔ RadialKnob (649.2599ms)
+✔ saved unknown actions expose their reference and preserve status filters without a resend control (1238.5953ms)
+✔ an unavailable history does not imply failed execution or an empty successful result (155.3042ms)
+✔ pagination follows the server total and does not claim a whole-history export (432.3602ms)
+✔ a completed callback receipt only proves queue handoff and a legacy completion never gains proof (2.863ms)
+✔ all actual durable action states remain distinct in the frontend (10.4851ms)
+✔ an unknown provider result stays unresolved without an Apply or retry button (210.1632ms)
+✔ provider-accepted email is not presented as delivered (48.2257ms)
+✔ scheduled callback is not presented as a completed call (20.3488ms)
+✔ unknown receipt state takes precedence over an optimistic applied flag (5.2818ms)
+✔ status lookup uses the same proposal and cannot invoke Apply (395.8791ms)
+✔ a missing receipt after a lost response stays uncertain without inviting another submission (2.022ms)
+✔ a saved reminder keeps its reference and scheduled status without claiming delivery (33.5674ms)
+✔ a workflow receipt keeps the saved plan reference while incomplete proof stays unknown (21.8091ms)
+[auth] local sign-out completed; server revocation is unconfirmed Error: synthetic server unavailable
+    at ApiClient.import_api.api.logout (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\auth\logout-controls.test.tsx:64:47)
+    at <anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-context.tsx:425:23)
+    at handleLogout (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\auth\logout-button.tsx:38:28)
+    at executeDispatch (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19116:9)
+    at runWithFiberInDEV (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:871:30)
+    at processDispatchQueue (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19166:19)
+    at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19767:9
+    at batchedUpdates$1 (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19320:7)
+    at dispatchEvent (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:23585:11)
+✔ button uses AuthContext and distinguishes confirmed versus unconfirmed server logout (763.3472ms)
+✔ button confirmed logout navigates only after acknowledgment (111.0745ms)
+✔ button delayed A logout cannot navigate or clear a newly logged-in B (79.7046ms)
+[auth] local sign-out completed; server revocation is unconfirmed Error: synthetic server unavailable
+    at ApiClient.import_api.api.logout (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\auth\logout-controls.test.tsx:64:47)
+    at <anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\auth-context.tsx:425:23)
+    at handleLogout (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\layout\sidebar.tsx:274:14)
+    at executeDispatch (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19116:9)
+    at runWithFiberInDEV (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:871:30)
+    at processDispatchQueue (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19166:19)
+    at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19767:9
+    at batchedUpdates$1 (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:19320:7)
+    at dispatchEvent (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\react-dom\cjs\react-dom-client.development.js:23585:11)
+✔ sidebar uses AuthContext and distinguishes confirmed versus unconfirmed server logout (575.6522ms)
+✔ sidebar confirmed logout navigates only after acknowledgment (384.4742ms)
+✔ sidebar delayed A logout cannot navigate or clear a newly logged-in B (448.6571ms)
+✔ a failed billing request renders the error state, never '0 of 0 minutes used' (855.2188ms)
+✔ a genuinely empty successful response renders the empty state, not an error (293.8391ms)
+✔ current purchased terms come from the subscription snapshot and cancellation is not a promised invoice (155.3302ms)
+✔ loading is distinct from both the error and the empty state (22.4984ms)
+✔ a failed invoices request never renders 'No invoices yet.' (132.2162ms)
+✔ a failed daily-usage request never renders zeroed call stats (146.1998ms)
+✔ a failed overage-alerts request is surfaced instead of silently showing no alerts (152.4292ms)
+✔ unlimited minutes keep actual usage without a false zero allowance or percentage (142.7908ms)
+✔ usage without a contracted rate does not invent an estimated charge (147.5103ms)
+✔ linked refund movement preserves negative accounting amounts without a bank-refund claim (156.985ms)
+✔ malformed successful usage is a load failure instead of zero consumption (62.3947ms)
+✔ an unlimited subscription does not duplicate a false zero remaining or percentage meter (142.3463ms)
+✔ a missing subscription allowance is a read failure rather than an inferred unlimited plan (38.4854ms)
+✔ average settled time preserves a recorded 59-second call instead of reconstructing rounded minutes (98.6887ms)
+✔ missing exact daily seconds is an unavailable call-stat read, never a guessed zero (116.8062ms)
+✔ actual PostgreSQL ledger endpoints agree and render signed linked accounting movements (221.1785ms)
+✔ zero subscription allocation with state known is not inferred unlimited (116.7699ms)
+✔ zero subscription allocation with state undefined is not inferred unlimited (107.475ms)
+✔ yearly selection displays the server amount and submits that option only (917.2494ms)
+✔ unapproved annual offers expose neither a yearly control nor saving claim (63.2669ms)
+✔ interval choices are keyboard-operable and yearly charge does not change monthly allowance (218.5241ms)
+✔ blocked session storage prevents an unrecoverable new purchase (81.322ms)
+✔ synchronous duplicate clicks create one request and do not redirect before receipt (91.2679ms)
+✔ lost response survives reload and retries the identical tenant-scoped request (332.9235ms)
+✔ browser cancellation keeps the saved request frozen until confirmed terminal (156.6091ms)
+✔ forged success without a saved receipt never activates or starts a purchase (13.3088ms)
+✔ rejects wrong option without redirecting or discarding the saved request (121.6153ms)
+✔ rejects wrong amount without redirecting or discarding the saved request (159.5575ms)
+✔ rejects mock without redirecting or discarding the saved request (128.6783ms)
+✔ rejects unsafe URL without redirecting or discarding the saved request (122.6611ms)
+✔ rejects unapproved HTTPS host without redirecting or discarding the saved request (135.5666ms)
+✔ only the typed pre-provider rejection unlocks a saved purchase (157.51ms)
+✔ an offer error without explicit pre-insert proof preserves the uncertain request (124.7063ms)
+✔ generic 400 and a later missing receipt keep the original purchase frozen (171.1971ms)
+✔ generic 403 and a later missing receipt keep the original purchase frozen (164.8816ms)
+✔ generic 409 and a later missing receipt keep the original purchase frozen (160.877ms)
+✔ generic 503 and a later missing receipt keep the original purchase frozen (140.9095ms)
+✔ a verified delayed receipt activates on explicit status check after return (67.1291ms)
+✔ current paid subscriptions use the existing portal with server-owned return URL (96.2489ms)
+✔ leaving the account aborts checkout and ignores a delayed response (98.2762ms)
+✔ leaving the account aborts portal and ignores a delayed response (86.5151ms)
+✔ explicit 403 pre-insert rejection releases the unsent request without automatic retry (104.692ms)
+✔ explicit 409 pre-insert rejection releases the unsent request without automatic retry (86.8737ms)
+✔ another tab's verified outstanding purchase is adopted and only explicitly resumed (141.5897ms)
+✔ malformed outstanding receipt cannot erase the saved request even with pre-insert proof (160.3955ms)
+✔ an explicit free option activates without a payment URL or fabricated yearly cost (98.2245ms)
+✔ missing backend configuration never submits or creates an uncertain request (114.4268ms)
+✔ paid detail separates original total and zero remaining, retains captured lines and provider documents (1346.5786ms)
+✔ partial detail preserves known totals but never fills absent tax, lines or credits with zero (200.3282ms)
+✔ recorded zero line and credit/refund facts are visible without claiming bank receipt (255.0517ms)
+✔ recent invoice list formats JPY and KWD from their actual minor-unit precision (151.8656ms)
+✔ forbidden stays a load failure, not a missing or zero-valued invoice (82.578ms)
+✔ outage stays a load failure, not a missing or zero-valued invoice (85.0109ms)
+✔ malformed success stays a load failure, not a missing or zero-valued invoice (55.2764ms)
+✔ empty success stays a load failure, not a missing or zero-valued invoice (51.8042ms)
+✔ unsafe document URL stays a load failure, not a missing or zero-valued invoice (106.9617ms)
+✔ only a server 404 renders invoice not found (49.2978ms)
+✔ actual synthetic-provider PostgreSQL API capture renders its recorded historical facts (155.3913ms)
+✔ topup=success never establishes payment or nonpayment from a browser return (679.0551ms)
+✔ topup=cancelled never establishes payment or nonpayment from a browser return (107.5051ms)
+✔ topup=success&mock=true never establishes payment or nonpayment from a browser return (76.1506ms)
+✔ an unrelated aggregate increase cannot confirm this returned purchase; previously saved order is visible (151.6221ms)
+✔ an unknown order reference from the URL is not presented as a saved order (98.7551ms)
+✔ recorded refund accounting and captured provider pending state do not promise bank settlement (349.1473ms)
+✔ a partial empty refund capture remains visible on a paid order (74.7946ms)
+✔ failed balance loading does not claim nothing was charged (76.2029ms)
+✔ malformed successful history is an error instead of no purchases (78.3881ms)
+✔ actionable AI classifications receive a visible needs-review signal (729.0023ms)
+✔ a summary with no actionable classification does not invent confidence (85.7396ms)
+✔ a failed summary offers a retry that re-runs the request (65.7513ms)
+✔ a failed summary offers no retry when the caller cannot re-run it (13.1061ms)
+✔ leadTypeAccent gives each lead type its own ring colour matching the select (5.2945ms)
+✔ formSummaryLines lists only the filled post-call fields, in reading order (4.6133ms)
+✔ lead dropdown exposes cold, warm, hot, and follow-up color states (1089.7844ms)
+✔ completing the post-call form persists its values and turns its trigger green (3561.0409ms)
+✔ call review opens as a pop-up and saves a thumbs-up through the review API (631.677ms)
+✔ a stale critical failure is labelled with its age instead of reading as live (12.1013ms)
+✔ the banner only asks the server for the last day of critical call issues (1.5645ms)
+✔ the row shows only a clock icon — no visible date or time text (553.7387ms)
+✔ duration formatting used by the hover card (1.1591ms)
+✔ a read-only account is told it cannot review instead of being shown the form (586.4667ms)
+✔ calls:create renders the review form (691.3166ms)
+✔ a failed permission lookup is reported as unchecked, not as a refusal (61.7315ms)
+✔ teammates' reviews stay visible to an account that cannot write one (195.7957ms)
+✔ a 403 on submit does not offer a Try again that would be refused identically (685.1268ms)
+✔ a server fault still offers Try again, and it re-sends (1012.6394ms)
+✔ the review form promises no points, rewards or credits — even with rewards reported ON (629.3811ms)
+✔ a saved review confirms the save without announcing an award (545.9888ms)
+✔ an existing review can be edited without any wording about awards (200.2318ms)
+✔ checking a route cannot start a call and a blocked route disables confirmation (1196.4193ms)
+✔ ready route submits once and shows the queue receipt without claiming connection (458.2302ms)
+✔ inbound and active calls have no reattempt control (38.2757ms)
+✔ a pending queue handoff can explicitly retry the same saved request (605.7368ms)
+✔ post rejection stays visible and cannot claim the call was queued (427.6906ms)
+✔ an existing receipt displays its saved destination rather than a changed preview (366.461ms)
+✔ lead notes preserve negation and show review evidence separately from confirmed contacts (554.2778ms)
+✔ failed or historical analysis is not presented as a conversation with no captured facts (88.8282ms)
+✔ CRM success and uncertain delivery remain separate for each provider (159.8708ms)
+✔ uncertain CRM delivery retains the original account and provider references for review (516.3254ms)
+✔ an empty awaiting_confirmation contact does not invent a caller refusal (128.8916ms)
+✔ an empty needs_clarification contact does not invent a caller refusal (126.4217ms)
+✔ an empty invalid contact does not invent a caller refusal (114.1937ms)
+✔ an empty cancelled contact does not invent a caller refusal (109.9791ms)
+✔ an empty legacy contact does not invent a caller refusal (136.1405ms)
+✔ a parsed contact is visible without being labeled confirmed (96.4014ms)
+✔ manual removal is not labeled a verified contact (66.482ms)
+✔ completed analysis does not hide partial transcript evidence (61.5042ms)
+✔ completed analysis does not hide failed transcript evidence (23.9501ms)
+✔ completed analysis does not hide unknown transcript evidence (21.736ms)
+✔ the source revision and confirmation turn are separate evidence (85.5548ms)
+✔ a contact with no calls does not show a transcript warning (9.3872ms)
+✔ incomplete legacy source metadata cannot hide the saved field or fabricate a revision (77.4178ms)
+✔ withdrawal evidence does not present the old confirmation as current (90.1764ms)
+✔ a failed manual save keeps the original evidence visible and shows the error (720.8343ms)
+✔ the API client serializes inbound direction on the issues request (14.292ms)
+✔ an inbound issues panel requests the inbound durable issue feed (413.2576ms)
+✔ a superseded campaign poll cannot replace the current issue feed (101.2051ms)
+✔ switching campaigns immediately removes an already-loaded issue feed (178.6298ms)
+✔ direction-aware preview does not mislabel inbound agent-first as callee-first (663.8687ms)
+✔ campaign brief fields expose every structured control with accessible names (1341.4936ms)
+✔ prompt preview renders ordered keyboard-toggleable collapsed layers (299.6216ms)
+✔ new campaign defaults include useful conversational fields only (15.5391ms)
+✔ the picker makes field access and requiredness explicit (17942.9579ms)
+✔ start is disabled until the server proves readiness, including cloud routes (966.1838ms)
+✔ a failed refresh disables previously ready start and offers a successful retry (428.9372ms)
+✔ bulk resume waits for every selected route and shows the server reason (97.5434ms)
+✔ a closed or nonlaunch surface performs no readiness request (25.1769ms)
+✖ table row resume is disabled but viewing details stays available (1571.4196ms)
+✔ command-bar keyboard execution cannot bypass unavailable resume routes (440.28ms)
+✔ call this list is disabled before a ready route without asking to place calls (1160.886ms)
+✔ call-list success applies the server's authoritative active state without a parent callback (494.5599ms)
+✔ partial 503 applies is_active from structured server details (284.6657ms)
+✔ a pending account-A call-list response cannot publish its private message into B's history (541.5841ms)
+✔ read-only knowledge hides every mutation control (1367.6648ms)
+✔ a superseded knowledge request cannot replace the current campaign tree (306.3615ms)
+✔ switching campaigns immediately removes already-loaded knowledge while the next request is pending (261.5851ms)
+✔ empty inbound panel asks for an incoming test call, never an outbound start (397.808ms)
+✔ empty outbound panel keeps its outbound start instruction (168.8454ms)
+✔ hangup responses require the confirmation-aware contract (17.6741ms)
+✔ termination presentation remains pending until the call itself is terminal (2.9438ms)
+✔ inbound live rows show direction, ANI, DID, admission, and consent (455.6191ms)
+✔ an inbound campaign panel scopes every poll by campaign and direction (30.5386ms)
+✔ a superseded campaign poll cannot replace the current live calls (249.5669ms)
+✔ switching campaigns immediately clears loaded rows and their local action state (1166.9351ms)
+✔ a hangup request shows Ending without optimistically ending the row or allowing a duplicate (461.2843ms)
+✔ a failed or unconfirmed hangup exposes the provider error and allows retry (449.0301ms)
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ an HTTP unconfirmed response surfaces its structured provider detail (335.1024ms)
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to LiveCallsPanelScope inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ without download permission the recording object URL is revoked when playback stops (5403.3004ms)
+✔ with download permission playback pausing keeps the loaded recording (489.9819ms)
+✔ polling a terminal call clears Ending and uses the server's final status (1602.5765ms)
+✔ shows durable denials and after-hours calls without exposing private ANI (747.6578ms)
+✔ shows a healthy empty state (210.6205ms)
+✔ a superseded campaign request cannot replace the current rejection feed (189.419ms)
+✔ switching campaigns immediately removes an already-loaded rejection feed (224.8933ms)
+✔ the browser test is always an OUTBOUND test, whoever opens (12.7788ms)
+✔ the opening description never implies the tester called in (1.795ms)
+✔ barge-in is only requested when the tester says they wear headphones (1.7281ms)
+✔ the campaign id is URL-encoded (1.0597ms)
+✔ ConnectorCard enables only Connect when disconnected (875.9881ms)
+✔ ConnectorCard enables Disconnect when connected (179.3628ms)
+✔ ConnectorCard shows Expired status and allows reconnect (154.539ms)
+✔ ConnectorCard exposes an unavailable server capability without a dead OAuth button (92.8085ms)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+✔ ConnectorCard calls authorize and shows loading state (3365.947ms)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+The current testing environment is not configured to support act(...)
+✔ ConnectorCard confirms and calls disconnect (426.4727ms)
+✔ disconnected Salesforce shows guidance instead of settings (295.6194ms)
+✔ server without a Connected App explains what an operator must add (30.8955ms)
+✔ connected view shows masked webhook URLs and a Reveal button (857.0086ms)
+✔ Save is disabled until a setting changes, then sends only the diff (435.5094ms)
+✔ clearing the callback campaign sends clear_callback_campaign (746.688ms)
+✔ Reveal and Test connection call their handlers and show the probe result (306.3473ms)
+✔ Import sends the chosen object, campaign and clamped limit and shows counts (476.1334ms)
+▶ ContactSection
+  ✔ renders the contact form and info section (613.4198ms)
+  ✔ submits once despite synchronous duplicate events and waits for a durable receipt (1038.8256ms)
+  ✔ retains and retries the identical payload after network (572.372ms)
+  ✔ retains and retries the identical payload after invalid receipt (488.7919ms)
+  ✔ retains and retries the identical payload after 503 (517.4075ms)
+  ✔ retains and retries the identical payload after 429 (339.4901ms)
+  ✔ retains and retries the identical payload after 409 (476.9645ms)
+  ✔ restores both an unsent draft and an unknown request on reload without auto-submitting (514.4605ms)
+  ✔ supports safe in-memory retry when session storage is blocked (436.3615ms)
+  ✔ removes expired personal data but does not create a new ID for an unknown request (110.7431ms)
+  ✔ keeps a verified receipt successful even when clearing the local draft fails (282.283ms)
+  ✔ validates trimmed required fields and bounds before requesting (192.3751ms)
+✔ ContactSection (5596.1175ms)
+✔ src\components\home\navbar.test.tsx (15131.7772ms)
+✔ inbound form requires a verified DID, AI campaign and inbound trunk (162.7061ms)
+✔ inbound form enforces recording disclosure and E.164 transfer destinations (3.3149ms)
+✔ after-hours UI exposes only runtime-backed actions (2.4341ms)
+✔ AI message intake fails closed without its pinned opening message (2.061ms)
+✔ saved transfer policies can only be disabled while runtime proof is incomplete (2.5794ms)
+✔ after-hours transfer is accepted only in the server-approved proof window (2.2421ms)
+✔ cached open transfer capability fails closed after a refresh error (1.1453ms)
+✔ E.164 and duration validation match the server boundary contract (2.296ms)
+✔ only server-visible eligible campaigns and runtime-ready inbound trunks can be selected (3.0903ms)
+✔ inbound-specific overrides start neutral and inherit the base campaign (2.5015ms)
+✔ every qualification_config key is one of the five runtime-supported names (159.3596ms)
+✔ the supported override set still matches inbound_overrides.py (9.6125ms)
+✔ agent_first requires a greeting and caller_first does not (3.1322ms)
+✔ weekly_schedule day 0 is Monday on both the form and the backend scheduler (10.8898ms)
+✔ a new inbound form can be seeded with the campaign just created for it (2.1561ms)
+✔ a saved inbound campaign ignores a stray preselect (1.7788ms)
+✔ step 2 of the inbound creator locks the step-1 campaign instead of offering a picker (5.5311ms)
+✔ inbound detail mounts exactly one campaign-owned knowledge editor (9.1786ms)
+✔ free-form inbound purpose wraps unbroken references instead of bleeding into other fields (1.4428ms)
+✔ inbound identifiers keep their original casing and test guidance is available (1.1941ms)
+✔ inbound route errors wrap rather than cover neighboring cards (10.7641ms)
+✔ tenant control references wrap while the action keeps its width (1.1037ms)
+✔ real inbound form allows loaded IP trunks despite outbound timeout and rejects missing inbound proof (4305.7449ms)
+✔ scoped saved lead IDs suppress repeats while fresh leads create in-app alerts (426.7077ms)
+✔ a first load seeds silently without adopting legacy or another identity's seen IDs (158.8313ms)
+✔ stale unseen leads are absorbed silently while fresh ones toast (107.9957ms)
+✔ an initially empty stream still alerts on the next newly qualified lead (207.2918ms)
+✔ late A event response cannot populate B's query or notifications after an identity switch (235.6289ms)
+✔ another tab's scoped seen update prevents a repeated alert (142.3085ms)
+✔ no verified identity means no lead polling or alert hydration (32.4167ms)
+✔ a response with missing owner cannot enter A's cache before the account marker arrives (126.8374ms)
+✔ a response with same user in another tenant cannot enter A's cache before the account marker arrives (101.4691ms)
+✔ a response with another user in the same tenant cannot enter A's cache before the account marker arrives (116.8323ms)
+✔ Realtime controls keep traditional settings intact and preserve each prompt field (908.2489ms)
+✔ Unavailable Realtime reports its reason and disables controls (435.566ms)
+✔ Campaign inherits Realtime defaults and retains its prompt across engine switches (393.019ms)
+✔ playback is lazy and download uses a separate request (1738.9132ms)
+✔ recording controls fail closed for each missing permission (49.1163ms)
+✔ delete retries retain one key and lock the audited reason (3766.3192ms)
+✔ legal hold keeps the row and disables further deletion (1698.2066ms)
+✔ an absent policy is shown as recording OFF (458.8988ms)
+✔ non-admins see the policy but cannot save (277.038ms)
+✔ changing retention enables Save and sends the full policy (538.9715ms)
+✔ two-party fields are disabled unless the mode is two-party (119.8978ms)
+✔ registration and a successful old probe do not claim calling readiness (1432.9121ms)
+✔ editing a saved trunk preserves credentials without asking for its password (2064.7882ms)
+✔ switching to IP authentication clears credentials and registration together (1585.8979ms)
+✔ changing username without a replacement password is blocked (998.5331ms)
+✔ delete explicitly disables first and retains the server conflict in the dialog (601.0977ms)
+✔ IP trunk can be ready without registration or credentials (236.0275ms)
+✔ an inbound-only IP trunk uses inbound proof despite an unanswered outbound probe (208.772ms)
+✔ ErrorState renders message and supports retry (5312.6716ms)
+✔ ErrorState renders support action when provided (190.7652ms)
+✔ EmptyState renders CTA when provided (147.5183ms)
+✔ EmptyState supports primary and secondary actions (169.0222ms)
+✔ LoadingSkeleton renders requested number of lines (27.3592ms)
+✔ LoadingSkeleton list variant renders rows (65.526ms)
+✔ ConfirmDialog focuses Cancel and traps tab navigation (4404.7725ms)
+✔ ConfirmDialog calls onConfirm and closes on success (321.3339ms)
+✔ ConfirmDialog closes on Escape (126.1342ms)
+✔ ConfirmDialog shows error when confirm fails and stays open (190.3555ms)
+✔ ConfirmDialog clears the inline error when the parent closes it directly (213.8339ms)
+✔ ConfirmDialog clears the pending spinner when the parent closes it directly (236.1407ms)
+✔ ConfirmDialog intent=cancel uses default copy (59.8795ms)
+✔ ConfirmDialog intent=delete uses default copy (53.7778ms)
+✔ the trigger is a real button carrying the label as its accessible name (692.7427ms)
+✔ each trigger gets its own accessible name rather than a shared 'more info' (125.5873ms)
+✔ a tap opens the tip and renders its content (818.84ms)
+✔ tapping the trigger again closes the tip (532.2685ms)
+✔ a tap outside dismisses a pinned tip (629.6929ms)
+An update to InfoTip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ the tip is reachable by keyboard — Tab focuses the trigger, Enter opens it (354.0738ms)
+An update to InfoTip inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+✔ Space opens the tip too, because the trigger is a button (278.9207ms)
+✔ Escape dismisses a tip opened from the keyboard (392.748ms)
+✔ an open tip is announced: the trigger describes itself with the tip content (329.6675ms)
+✔ the trigger reflects its open state for styling and for assistive tech (293.6753ms)
+✔ optional Learn more renders as a real link to the given href (358.3449ms)
+✔ no Learn more link when no href is given (308.0188ms)
+✔ rich content is rendered, not stringified (256.8521ms)
+✔ the panel carries the viewport width cap (258.0411ms)
+✔ LabelWithInfo shows the label and derives an accessible name from it (42.0942ms)
+✔ LabelWithInfo opens the same tip its label describes (244.5545ms)
+✔ Input updates value (326.5855ms)
+✔ StatusPill renders connected with tooltip (1548.8438ms)
+✔ StatusPill renders disconnected with tooltip (418.4519ms)
+✔ StatusPill renders expired with tooltip (394.0983ms)
+✔ StatusPill renders error with tooltip (203.4315ms)
+✔ isPlatformAdminRole recognizes platform_admin and admin roles (8.2334ms)
+✔ isPartnerAdminRole recognizes partner_admin role (1.0537ms)
+✔ isTenantScopedRole recognizes tenant-scoped roles (1.1461ms)
+✔ getAdminUiCapabilities grants full access to platform_admin (1.7098ms)
+✔ getAdminUiCapabilities grants full access to admin role (1.012ms)
+✔ getAdminUiCapabilities grants scoped access to partner_admin (1.1317ms)
+✔ getAdminUiCapabilities restricts access for tenant_admin (0.8879ms)
+✔ getAdminUiCapabilities restricts access for user role (0.7911ms)
+✔ getAdminUiCapabilities handles null user (1.1604ms)
+✔ getAdminUiCapabilities ignores whitespace-only IDs (1.585ms)
+✔ roleLabel returns correct labels for all roles (1.1433ms)
+✔ AI Options GET and save response preserve all tuning including explicit null eager mode (25.7335ms)
+✔ Chrome and Firefox get Opus in WebM (7.365ms)
+✔ Safari below 18.4 gets MP4, never WebM (0.9891ms)
+✔ Safari 18.4+ can do WebM and is given the better container (1.0605ms)
+✔ a browser that supports nothing we asked about yields no preference (0.8919ms)
+✔ a throwing isTypeSupported does not abort the search (2.0131ms)
+✔ every candidate we would request is one the backend accepts (4.7018ms)
+✔ the recorder's own mimeType wins over what we requested (1.453ms)
+✔ codec parameters are stripped, matching the backend's normalisation (1.0395ms)
+✔ a blank recorder mimeType falls back to the request, then to WebM (2.2251ms)
+✔ filenames carry an extension that agrees with the container (2.074ms)
+✔ each microphone failure gets its own remedy (3.294ms)
+✔ a named error always beats environment sniffing (1.5323ms)
+✔ an unrecognised failure still yields something actionable (0.8495ms)
+✔ every microphone message tells the user what to do next (1.5105ms)
+✔ the duration cap is 30s and matches the API's Form(le=30) (0.8166ms)
+✔ the minimum length rejects a mis-click but not a short sentence (0.7479ms)
+✔ the mirrored accept-list matches the backend's _MIME_EXTENSIONS (5.4423ms)
+✔ durations render as m:ss (0.8969ms)
+✔ local GET /auth cannot authenticate or mutate legacy identity (65.43ms)
+✔ local GET /auth/me cannot authenticate or mutate legacy identity (3.5433ms)
+✔ local GET /me cannot authenticate or mutate legacy identity (20.8126ms)
+✔ local POST /auth/register cannot authenticate or mutate legacy identity (26.1202ms)
+✔ local POST /auth/login cannot authenticate or mutate legacy identity (29.2303ms)
+✔ local POST /auth/refresh cannot authenticate or mutate legacy identity (2.6919ms)
+✔ local POST /auth/mfa/verify cannot authenticate or mutate legacy identity (2.528ms)
+✔ local DELETE /auth/passkeys/synthetic cannot authenticate or mutate legacy identity (2.3791ms)
+✔ local PATCH /auth/profile cannot authenticate or mutate legacy identity (4.3777ms)
+✔ backendApi.admin.auditLogs.list encodes filters and pagination (770.4984ms)
+✔ backendApi.admin.tenants.suspend posts to suspension endpoint (42.8307ms)
+✔ action history reads the actual actions envelope and retains an unknown result (626.1217ms)
+✔ an invalid history envelope fails visibly instead of appearing as an empty success (27.3208ms)
+✔ unsupported generic plan, execution and blind retry clients are not exposed (25.9571ms)
+✔ backendApi.calendarEvents.list calls calendar events list endpoint (740.3329ms)
+✔ backendApi.calendarEvents.list supports pagination query params (54.7812ms)
+✔ backendApi.calendarEvents.create posts event payload to create endpoint (41.2256ms)
+✔ backendApi.calendarEvents.update patches event by id (48.7524ms)
+✔ backendApi.calendarEvents.cancel deletes event by id (29.2667ms)
+✔ backendApi.connectors.authorize calls authorize endpoint with redirect_uri (1370.3059ms)
+✔ backendApi.connectors.disconnect calls disconnect endpoint via POST (37.1538ms)
+✔ backendApi.connectors.status parses connector statuses (12.1544ms)
+✔ backendApi.email.templates.list parses templates and maps fields (1165.9164ms)
+✔ backendApi.email.send posts template_id and returns normalized messageId (77.2777ms)
+✔ backendApi.salesforce.settings parses the settings envelope (681.819ms)
+✔ backendApi.salesforce.updateSettings PUTs the diff (24.6717ms)
+✔ backendApi.salesforce.rotateWebhookToken POSTs and importPeople sends the body (19.5751ms)
+✔ backendApi.voiceCalls.guard posts guarded call payload and parses allow response (755.5326ms)
+✔ backendApi.voiceCalls.start posts start payload and parses active session response (16.7146ms)
+✔ a 403 on the usage endpoint surfaces as isError, not as empty data (540.0759ms)
+✔ a 500 on the invoices endpoint surfaces as isError, not as an empty list (101.0466ms)
+✔ a network failure on the invoices endpoint surfaces as isError (67.9864ms)
+✔ a successful empty invoice list stays an ordinary empty result (49.8844ms)
+✔ a 404 for one invoice by id is 'not found', not a load failure (40.8525ms)
+✔ a 403 for one invoice by id is still a load failure (33.0553ms)
+✔ local billing/plans fails before auth, body/idempotency work, or webhook acknowledgment (44.7797ms)
+✔ local billing/subscription fails before auth, body/idempotency work, or webhook acknowledgment (8.8001ms)
+✔ local billing/create-checkout-session fails before auth, body/idempotency work, or webhook acknowledgment (5.7649ms)
+✔ local billing/webhooks/stripe fails before auth, body/idempotency work, or webhook acknowledgment (3.43ms)
+✔ amount formatting honors server currency exponent rather than a cents assumption (128.1157ms)
+✔ pending provider outcome keeps the same request and does not invent a checkout URL (14.5345ms)
+✔ actual shared auth client refreshes one 401 without changing the purchase identity (176.2225ms)
+✔ invoice money respects zero-, two- and three-decimal currencies (125.2738ms)
+✔ unknown invoice amounts are unavailable; recorded zero and negative credits stay real amounts (2.3014ms)
+✔ safe minor integers retain every minor unit and unsafe or fractional totals are rejected (1.5392ms)
+✔ formatted international numbers discard separators before regrouping (11.0526ms)
+✔ AI outcomes seed useful lead types without replacing a saved choice (2.4242ms)
+✔ a caller who left a phone or email is a hot lead whatever the verdict says (2.8192ms)
+✔ review polling treats answered calls as live until a terminal state arrives (2.0021ms)
+✔ workflow notes, lead type, and form state round-trip within an identity scope (11.3247ms)
+✔ malformed saved workflow is ignored safely (3.6246ms)
+✔ post-call form is complete only when all three key fields have content (1.6846ms)
+✔ a contact the caller said but never confirmed is listed and labelled (2.6111ms)
+✔ a finished answered call counts as answered (status ended, outcome answered) (2.9445ms)
+✔ contact numbers are shown in full, grouped the way people read them (2.9008ms)
+✔ operator-approved messages and form destination survive editing and save (17.5643ms)
+✔ buildCampaignBrief creates the saved nested contract from canonical UI state (2.002ms)
+✔ campaign brief validation blocks missing objective and incomplete transfer approval (1.2437ms)
+✔ structured guidance is explicit text and therefore shares the one prompt budget (4.6405ms)
+✔ structured values use the same one-line normalization as the backend (2.0776ms)
+✔ a campaign created for an inbound number continues to the number-and-routing step (5.2068ms)
+✔ any other creation opens the campaign page as before (0.9064ms)
+✔ an inbound campaign is never an outbound campaign (17.516ms)
+✔ historical campaigns with no direction are outbound (the column default) (1.1037ms)
+✔ malformed or future direction values fail closed (0.9331ms)
+✔ outboundCampaignsOnly drops inbound rows and keeps order (6.7739ms)
+✔ an inbound base campaign resolves only to its dedicated config route (1.5508ms)
+✔ the default budget matches the backend's TELEPHONY_TENANT_PROMPT_MAX_CHARS default (17.6676ms)
+✔ guidance under budget is fine and reports what is left (1.331ms)
+✔ guidance over budget is flagged with the numbers, and never trimmed (150.9349ms)
+✔ a server-supplied budget overrides the default (1.2951ms)
+✔ guidance is compulsory: empty or whitespace is invalid with a clear message (1.33ms)
+✔ guidance shorter than the minimum is invalid and says how much is needed (1.1606ms)
+✔ guidance at the minimum and under budget is valid (0.9083ms)
+✔ over budget is never valid (0.7891ms)
+✔ normalizeCampaignStatus maps known statuses (6.8423ms)
+✔ campaignProgressPct clamps and handles zero leads (4.1718ms)
+✔ campaignSuccessRatePct uses completed / (completed+failed) (1.3651ms)
+✔ applyCampaignFilters supports status, success range, and query (5.7727ms)
+✔ applyCampaignSort supports multi-column and stable tiebreak (68.9564ms)
+✔ paginate returns correct range and pageCount (1.611ms)
+✔ parseCommandInput reads prefixes and query (1.5225ms)
+✔ groupEventTime buckets dates into groups (1.7582ms)
+✔ the inbound detail page exposes campaign-scoped operational panels (15.6936ms)
+✔ generic campaign detail and edit pages redirect inbound rows before outbound work (14.4795ms)
+✔ the dashboard filters the mixed campaign response before rendering it (6.6438ms)
+✔ the outbound detail surface is explicit and never renders inbound rejections (6.1979ms)
+✔ the open outbound detail route redirects if polling observes conversion (6.5109ms)
+✔ campaign detail initial loads discard superseded responses before navigation or state writes (5.7684ms)
+✔ a successful analytics reload clears a prior request error (7.0619ms)
+✔ production local GET /partners cannot use a historical legacy session (41.9514ms)
+✔ production local POST /tenants/synthetic/users cannot use a historical legacy session (7.4709ms)
+✔ production local POST /email/send cannot use a historical legacy session (4.9777ms)
+✔ production local POST /calls cannot use a historical legacy session (4.4869ms)
+✔ explicit development keeps the existing unauthenticated health path (23.1738ms)
+✔ connectorCardActionFromStatus maps all states (10.9369ms)
+✔ connectorCardActionLabel renders user-facing labels (1.0387ms)
+✔ extractAuthorizationUrl accepts multiple response shapes (4.2788ms)
+✔ parseConnectorsCallback handles success and failure (2.6212ms)
+✔ parseConnectorsCallback uses default providerType when missing from query (0.9025ms)
+✔ formatLastSync is stable for empty and invalid values (155.7179ms)
+✔ anonymous submission never sends cookies/tokens or refreshes on 401 (160.9165ms)
+✔ aborts a lost response without retrying or mutating request identity (25.8236ms)
+✔ expires an unsubmitted draft without retaining personal data (13.3052ms)
+✔ an unrelated valid receipt is still an unconfirmed outcome (13.737ms)
+✔ matches the same UUID regardless of letter case (5.0221ms)
+✔ allows correction after known request rejection 400 (2.9142ms)
+✔ allows correction after known request rejection 413 (2.5821ms)
+✔ allows correction after known request rejection 415 (1.9077ms)
+✔ allows correction after known request rejection 422 (20.343ms)
+✔ keeps an expired unknown reference blocked in memory even if storage becomes read-only (5.1366ms)
+✔ contactPayload drops empty optional strings and trims the rest (9.0865ms)
+✔ every optional field offered by the dropdown is a ContactMutation key the API accepts (1.9375ms)
+✔ manual contact payload carries every operational contact field (4.8036ms)
+✔ the server's own out-of-minutes sentence is what the user is shown (5.4236ms)
+✔ a refusal carrying no server message falls back to the transport error (1.0024ms)
+✔ a failure carrying nothing at all still states what failed, and invents no reason (0.9088ms)
+✔ inbound call list and detail preserve direction and caller/DID parties (424.5635ms)
+✔ call detail passes the server's transfer legs through untouched (13.8521ms)
+✔ call detail leaves transfer legs undefined when the server sends none (14.1948ms)
+✔ transferLegTerminalReason reads the server's reason and returns null otherwise (6.0256ms)
+✔ call detail carries the server's billed seconds through untouched (17.0676ms)
+✔ a metered tenant with no minutes left is exhausted (4.2416ms)
+✔ a metered tenant with minutes remaining is not exhausted (0.9009ms)
+✔ an unlimited plan is never exhausted, even if the server marks it so (0.8725ms)
+✔ a status that has not loaded yet is treated as not exhausted, never guessed (0.7044ms)
+✔ dashboard layout removes theme toggle and removes global sidebar toggle (14.7037ms)
+✔ createAttempt records pending entry and persists to storage (20.702ms)
+✔ markSuccess and markFailed update the audit entry (2.5114ms)
+✔ exportHistoryJson includes exportedAt and items (2.8677ms)
+✔ clearAll removes items and clears storage (2.0106ms)
+✔ splitEmailInput splits by whitespace, commas, semicolons, and newlines (5.1355ms)
+✔ isValidEmail accepts simple valid addresses and rejects invalid ones (1.2934ms)
+✔ normalizeEmailList trims and de-duplicates case-insensitively (1.19ms)
+✔ buildResponsiveHtmlDocument wraps fragments and injects viewport meta (1.6863ms)
+✔ buildResponsiveHtmlDocument injects viewport into existing head (0.9871ms)
+✔ buildResponsiveHtmlDocument does not duplicate viewport meta (0.4943ms)
+✔ isPublicEnvKey only allows NEXT_PUBLIC client-safe keys (2.7697ms)
+✔ publicAppConfig exposes only public configuration metadata (1.4461ms)
+✔ call analytics names the real outbound population by default (108.121ms)
+✔ call analytics can request an explicit inbound population (3.8841ms)
+✔ recording playback and download use distinct authorized endpoints (107.0897ms)
+✔ recording delete sends the reason and caller-owned idempotency key (6.4833ms)
+✔ recording delete preserves the backend legal-hold error code (4.0741ms)
+✔ review reward display is sourced from the verified ledger balance endpoint (75.1217ms)
+✔ JSON request cannot retry as the account that logged in while it was pending (97.4775ms)
+✔ binary request cannot retry as the account that logged in while it was pending (3.5098ms)
+✔ an old failed response cannot clear the newer token or fire its session-expired handler (3.8292ms)
+✔ an old successful response is discarded after the local identity changes (3.1403ms)
+✔ late API logout completion cannot erase a later sign-in (7.6399ms)
+✔ unverified account transition stops protected writes until the new identity is checked (8.7586ms)
+✔ wrong login credentials do not refresh or sign out an existing session (5.2798ms)
+✔ same-identity parallel requests share rotation and retry with the new bearer and expected tenant (35.141ms)
+✔ logout endpoint absence remains unconfirmed instead of reporting success (2.6249ms)
+✔ a delayed blob body cannot expose the previous account after response headers arrive (9.8005ms)
+✔ a delayed json body cannot expose the previous account after response headers arrive (2.3546ms)
+✔ 401 fires the registered session-expired handler and clears the token (133.392ms)
+✔ multiple parallel 401s fire the handler only ONCE (idempotent) (9.1074ms)
+✔ resetSessionExpiredLatch re-arms the handler after a successful login (48.3451ms)
+✔ non-401 errors do NOT fire the session-expired handler (5.3417ms)
+✔ a thrown handler does not derail the request rejection (3.7541ms)
+✔ http client injects Authorization header when token present (108.9192ms)
+✔ http client refreshes on 401 then retries the original request (13.8461ms)
+✔ http client surfaces 401 when refresh also fails (8.5839ms)
+✔ http client maps 429 response to rate_limited with retryAfterMs (6.3068ms)
+✔ requestRaw refreshes on 401 then retries and returns the raw binary Response (17.5128ms)
+✔ requestRaw surfaces the backend error detail on a non-OK response (4.628ms)
+✔ http client preserves structured FastAPI detail codes (7.8966ms)
+✔ requestRaw preserves canonical error codes for binary endpoints (6.0629ms)
+✔ inbound parser accepts the production envelope and masks the DID (52.425ms)
+✔ verified phone inventory excludes assigned and unverified numbers (2.0716ms)
+✔ readiness fails closed without an explicit server ready flag (1.8154ms)
+✔ transfer capability parsing requires all explicit server gates (7.4145ms)
+✔ transfer capability request is scoped to the edited inbound config (128.9853ms)
+✔ verified inventory is masked from e164, the only key that carries the number (23.2377ms)
+✔ archived campaign inventory is requested only for the archived view (12.061ms)
+✔ create sends only the confirmed inbound contract and an idempotency key (27.9043ms)
+✔ an ambiguous retry reuses its idempotency key and a later operation gets a fresh key (29.6539ms)
+✔ an expired ambiguous retry is blocked before the server claim can roll over (8.3577ms)
+✔ update uses PUT and includes the stale-edit token (22.1572ms)
+✔ assignment uses the explicit audited endpoint and optimistic version (6.6929ms)
+✔ archive uses the confirmed lifecycle endpoint and optimistic version (7.6235ms)
+✔ create emits the selected opening_mode verbatim for both caller_first and agent_first (21.7977ms)
+✔ effective permissions keep inbound capabilities distinct (5.2987ms)
+✔ capabilities fail closed when server permission discovery is unavailable (0.9778ms)
+✔ every state in the frozen register is declared in inbound-types.ts (35.4298ms)
+✔ every state declared in inbound-types.ts appears in the frozen register (17.8684ms)
+✔ the register holds exactly 23 states: 18 carried from 1.0.0, 5 added at 2.0.0 (3.7542ms)
+✔ INBOUND_OPERATION_STATES matches the InboundOperationState union (6.1253ms)
+✔ every mapped backend code resolves to exactly one state (1.7452ms)
+✔ conflict, readiness and authorization codes are not conflated (0.7825ms)
+✔ an unrecognised failure falls through to error rather than being guessed (0.8034ms)
+✔ status alone is enough when the body carries no code (0.9238ms)
+✔ campaign lead-field reads and writes use the campaign-scoped contract (136.4637ms)
+✔ positive lead verdicts produce the interested state (6.0101ms)
+✔ captured-detail-adjacent negative verdicts never produce an interested badge (1.7337ms)
+✔ missing and telephony-only outcomes remain unknown (1.0745ms)
+✔ recording permissions stay independent (9.015ms)
+✔ broader call permissions do not grant recording access (1.9384ms)
+✔ platform admin is an explicit bypass and missing discovery fails closed (1.0148ms)
+✔ splitAndSortMeetings splits by start time and sorts correctly (9.2047ms)
+✔ meetingLeadLabel prefers explicit leadName, else participant name/email (1.0739ms)
+✔ meetingStatusLabel normalizes status values (0.6407ms)
+✔ meetingParticipantSummary returns first two and extra count (1.0234ms)
+✔ sortMeetings can sort by title and startTime (52.1324ms)
+✔ sanitizeMeetingNotesHtml removes scripts and event handlers (76.7507ms)
+✔ login and profile preserve known allowance without inventing a balance (9.7318ms)
+✔ login and profile preserve unlimited allowance without inventing a balance (1.3086ms)
+✔ login and profile preserve unavailable allowance without inventing a balance (1.6089ms)
+✔ an older response with a number but no state is explicitly unavailable (1.7476ms)
+✔ dashboard displays actual overage without clipping settled usage to allowance (94.3752ms)
+✔ dashboard distinguishes missing, unavailable and unlimited data (2.3116ms)
+✔ actual auth context keeps authentication while rendering unknown then unlimited allowance (199.2911ms)
+✔ a delayed mutation success cannot notify B after observer callbacks are replaced (27.7818ms)
+✔ a delayed mutation failure cannot notify B after observer callbacks are replaced (8.2533ms)
+✔ the cache captures mutation origin before its first await, including immediate switches (5.0661ms)
+✔ same-owner completion preserves onMutate context, rollback, and notification (23.0291ms)
+✔ verified same-identity refresh preserves the pending operation origin (5.5682ms)
+✔ logout followed by the same user logging in does not revive old operation callbacks (4.3185ms)
+✔ a delayed global query error is silent after a tenant switch, then a fresh B fetch notifies (11.1714ms)
+✔ global mutation errors without local notification hooks remain bound to their start (3.9301ms)
+✔ health failures and unverified identities cannot publish global errors (6.1192ms)
+✔ the actual Salesforce hook drops a delayed A error after rerender in B (166.0644ms)
+✔ the actual inbound mutation drops a stale success and preserves the new tenant cache (48.5418ms)
+✔ AuthProvider pins verified cookie-only tenant on writes and blocks them during account verification (443.6584ms)
+✔ a failed logout marker never submits an unbound logout for the next browser session (24.2979ms)
+✔ a legacy optimistic login verifies its missing tenant without pinning it to no tenant (72.1079ms)
+✔ refresh rotation updates the token owned by AuthProvider before retrying (51.7848ms)
+✔ callback token commitment reaches the live HTTP owner before its profile lookup (21.1342ms)
+✔ confirmed B scope loads and creates normally without importing legacy A history or destination (57.3475ms)
+✔ logout clears notifications before server response and stale bootstrap cannot reactivate them (17.774ms)
+✔ late A profile refresh cannot overwrite a newly verified B login (56.4209ms)
+✔ same verified identity refresh (silent=true) preserves notifications, settings and bound callback (32.3163ms)
+✔ same verified identity refresh (silent=false) preserves notifications, settings and bound callback (30.3991ms)
+✔ foreground refresh preserves scope and latest read (silent=true) settles loading and identity (40.1575ms)
+✔ foreground refresh preserves scope and latest read (silent=false) settles loading and identity (44.4647ms)
+✔ cross-tab non-null token change masks A immediately and verifies B before enabling notifications (54.8011ms)
+✔ unverified same-account token rotation aborts old work but restores saved history after verification (56.8727ms)
+✔ cookie-only logout broadcasts an identity boundary even with no stored bearer token (42.3861ms)
+✔ cross-tab cookie logout fences an outstanding profile response without a bearer-key event (43.5526ms)
+✔ a verified user without tenant identity remains unscoped and cannot create notifications (25.6371ms)
+✔ logout then login as A creates a new generation that rejects pre-logout A work (69.0066ms)
+✔ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (49.653ms)
+✔ blocked storage still receives cookie logout over BroadcastChannel and fences delayed profile reads (50.4538ms)
+✔ blocked-storage account change uses verified B scope and duplicate channel/storage marker verifies only once (57.9956ms)
+✔ local cookie logout and login publish secret-free BroadcastChannel markers when storage writes fail (56.8079ms)
+✔ notifications remain unscoped when neither storage nor BroadcastChannel can synchronize cookie identity (31.585ms)
+✔ unverified identity cannot hydrate or publish an owned notification (15.47ms)
+✔ same-owner create, dismiss, read, reload and clear retain their existing behavior (21.7078ms)
+✔ history, settings and exports isolate tenant-b/bob (9.9612ms)
+✔ history, settings and exports isolate tenant-a/another-user (8.6606ms)
+✔ history, settings and exports isolate another-tenant/alice (8.0919ms)
+✔ logout and verification revoke old callbacks, while a same-identity refresh preserves them (8.3558ms)
+✔ legacy unowned records are removed and malformed scoped records never become valid history (6.619ms)
+✔ hydration rejects non-array history and enforces retention and bounded history (42.0725ms)
+✔ SecurityError degrades to memory without carrying history into another account (8.6188ms)
+✔ QuotaExceededError degrades to memory without carrying history into another account (3.0157ms)
+✔ same-owner tabs cannot resurrect cleared history before a delayed storage event (15.8273ms)
+✔ privacy opt-out and storage events remain scoped and prevent old-tab persistence (9.1029ms)
+✔ storage recovery respects another tab's clear and privacy opt-out before writing (5.2385ms)
+✔ browser webhook settings neither send HTTP nor retain an external destination (5.4134ms)
+✔ clear reaches another tab when privacy is off and history/settings writes are browser no-ops (9.9519ms)
+✔ every customer role lands on the customer dashboard (6.3393ms)
+✔ white-label admins land on their dashboard (1.3386ms)
+✔ registration hydrates auth state before performing a hard dashboard navigation (6.6709ms)
+✔ every authenticated entry point ignores return URLs and opens a dashboard (11.8453ms)
+✔ AI Options refetches all tenant catalogs on account switch and never reuses A's cached profile (559.4527ms)
+✔ late A response cannot become B's config or repopulate the departing cache (215.8181ms)
+✔ unverified or tenantless identities cannot start AI Options queries or prefetch (77.0035ms)
+✔ post-login prefetch reruns for a different tenant even when the user ID is unchanged and no editor is mounted (110.7059ms)
+✔ Strict Mode effect replay with an already verified account leaves active query observers usable (146.0851ms)
+✔ campaign cache commits never rewrite capability objects (24.7122ms)
+✔ a 503 authorization_unavailable is not rendered as no-permission (1.6988ms)
+✔ sanitizeFailureReason strips dangerous characters and truncates (7.3833ms)
+✔ groupReminders groups by meeting id then contact id (77.6274ms)
+✔ sortReminders sorts by scheduledAt asc/desc (7.215ms)
+✔ retryGuidance returns actionable strings for failed reminders (65.0219ms)
+✔ calls:read alone can read reviews but not write one (5.8889ms)
+✔ the readonly role's real permission set cannot write a review (0.9892ms)
+✔ calls:create grants write (0.8963ms)
+✔ platform:admin grants both (0.7091ms)
+✔ permissions are matched case- and whitespace-insensitively (0.8585ms)
+✔ a missing permission set fails closed and says so (0.732ms)
+✔ authorization and validation refusals are not retryable (0.9309ms)
+✔ transport, rate-limit and server faults are retryable (0.7209ms)
+✔ new routes use DashboardLayout (24.4596ms)
+✔ SSR verifies canonical talky_at cookies with the current backend (71.0744ms)
+✔ SSR verifies canonical talky_sid cookies with the current backend (9.558ms)
+✔ SSR verifies canonical talky_at cookies with the current backend (8.4105ms)
+✔ SSR does not authenticate from a legacy mirror alone or without configured backend (7.1861ms)
+✔ SSR 401 cannot fall back to another identity authority (6.997ms)
+✔ SSR 403 cannot fall back to another identity authority (4.0125ms)
+✔ SSR 404 cannot fall back to another identity authority (4.5247ms)
+✔ SSR 503 cannot fall back to another identity authority (3.4033ms)
+✔ SSR successive request scopes see revocation, with no persistent principal cache (8.1563ms)
+✔ SSR failed or malformed principal responses do not grant a principal (19.8657ms)
+✔ revoking other sessions cannot report success when one outcome is unconfirmed (9.8516ms)
+✔ aggregate success requires all requested revocations, and excludes current session (1.4139ms)
+✔ no other sessions needs no revoke; failed inventory cannot claim success (1.3202ms)
+✔ hydrate reads collapsed state from localStorage (4.3823ms)
+✔ setCollapsed persists payload (3.14ms)
+✔ storage event updates snapshot in current tab (1.071ms)
+✔ termination_pending is graded as in-flight, not as a failure (4.8881ms)
+✔ callStatusLabel maps the declared status and leaves every other value raw (0.6739ms)
+✔ callStatusLabel returns an undeclared status verbatim rather than guessing (0.4282ms)
+✔ callStatusLabel renders nothing for a null or empty status (0.518ms)
+✔ transferLegStatusLabel maps every declared call_legs status (0.4638ms)
+✔ transferLegStatusLabel returns an undeclared leg status verbatim (0.3113ms)
+✔ transferLegStatusLabel renders nothing for a null or empty leg status (0.5196ms)
+✔ a held transfer leg is graded as needing attention, not as a failure (0.3865ms)
+✔ every billing status the CHECK constraint declares gets a label (0.7755ms)
+✔ a billing status this map has not seen is shown exactly as the server sent it (0.7472ms)
+✔ every billing hold reason the CHECK constraint declares gets a label (0.528ms)
+✔ a hold reason this map has not seen is shown exactly as the server sent it (0.2985ms)
+✔ only auth-context (and allowlisted bridges) read the canonical token (1649.5255ms)
+✔ no bare fetch() to /api/v1 outside the shared HttpClient (1080.7358ms)
+✔ only api.ts (and the server-side route) call createHttpClient (1113.9921ms)
+✔ api.getMe() callers are limited to AuthContext (+ OAuth callback) (1003.9872ms)
+▶ Theme Implementation Verification
+  ✔ globals.css defines theme variables and transitions (8.9217ms)
+  ✔ public mobile drawer uses the homepage card gradient in both themes (7.4712ms)
+  ✔ theme-provider.tsx implements localStorage and context (2.5287ms)
+  ✔ navbar.tsx includes theme toggle (5.537ms)
+  ✔ sidebar.tsx inherits theme (2.7981ms)
+✔ Theme Implementation Verification (35.8258ms)
+✔ an unlimited plan is never offered a top-up (5.1425ms)
+✔ a metered plan is offered a top-up (0.6703ms)
+✔ nothing is offered before the balance is known (0.5966ms)
+✔ under 15% remaining reads as low (0.7464ms)
+✔ exactly 15% remaining is not low yet (0.6211ms)
+✔ an unlimited plan is never low (0.5004ms)
+✔ a zero allocation does not divide by zero (0.5302ms)
+✔ prices render from minor units, not major (93.2874ms)
+✔ a sub-penny per-minute rate keeps its precision (1.8142ms)
+✔ the currency comes from the package, not a hardcoded default (1.9033ms)
+✔ a missing currency is unavailable rather than an assumed GBP amount (0.9331ms)
+✔ every order status the backend defines has a label and a tone (1.0985ms)
+✔ a pending order states uncertainty rather than proving no charge (1.1862ms)
+✔ passkey login preserves the backend RP, allowed key, timeout and required verification (649.185ms)
+✔ request-option decoder passes credential IDs as bytes without mutating the server record (2.3773ms)
+✔ registration decodes excluded existing keys and preserves server requirements (3.6726ms)
+✔ proxy role lookup is canonical, uncached, and observes a later revocation (55.4805ms)
+✔ proxy does not retry an alternate /me authority or the unconfigured local catchall (9.5872ms)
+✔ serves public contact anonymously and with existing auth without role lookup or redirection (39.4613ms)
+✔ does not expand contact permission to the authenticated contacts dashboard (15.6847ms)
+✔ every page route redirects to its trailing-slashed form (5.3397ms)
+✔ page route count matches the app router page count (0.6733ms)
+✔ already-canonical paths are not redirected again (1.556ms)
+✔ api routes are never redirected (0.5158ms)
+✔ build assets and static files are never redirected (0.496ms)
+✔ a dot in a non-final segment does not exempt the path (0.6185ms)
+✔ non-absolute input is ignored (0.4975ms)
+✔ sanitizeUnknown removes prototype pollution keys (10.5691ms)
+✔ parseStripeSignatureHeader extracts timestamp and v1 signatures (5.8123ms)
+✔ verifyStripeWebhookSignature accepts valid signature and rejects invalid (5.9124ms)
+✔ password strength validator rejects weak passwords (5.0972ms)
+✔ argon2 hashes and verifies passwords (375.5692ms)
+✔ auth token is extracted from Authorization header (82.2477ms)
+✔ auth token is extracted from cookie header (2.2992ms)
+✔ session cookies are httpOnly and sameSite (1.3371ms)
+﹣ sessions enforce absolute expiry, idle timeout, binding, and rotation (db) (1.3754ms) # SKIP
+﹣ sessions rotate on role/scope change and include usage/billing mapping (db) (1.1161ms) # SKIP
+✔ RFC 6238 SHA1 test vectors match (10.6717ms)
+✔ webauthn config falls back to request host and origin in non-production (56.1197ms)
+✔ webauthn config requires rp id and allowed origins in production (3.4215ms)
+✔ webauthn config uses explicit allowlist when configured (2.1442ms)
+✔ platform_admin can access any partner and tenant (4.007ms)
+✔ partner_admin is restricted to their partner (0.8228ms)
+✔ tenant users cannot access other tenants or partners (0.6146ms)
+✔ permission checks always allow platform_admin (0.7664ms)
+✔ call_guard allows valid calls and lifecycle updates counters (22.9569ms)
+✔ startGuardedVoiceCallSessionWithService makes call_guard non-bypassable for start flow (2.3181ms)
+✔ call_guard enforces concurrency limits and supports overage reservations (4.4534ms)
+✔ call_guard enforces dedicated call rate limits per tenant (2.646ms)
+✔ call_guard rejects disallowed features and then blocks repeated failed attempts (5.2635ms)
+✔ call_guard rejects callers outside the tenant scope (1.5111ms)
+✔ the test query client does not schedule five-minute garbage-collection timers (67.3099ms)
+✔ computeFittedFontPx stays within bounds and fits container (4.8802ms)
+✔ computeFittedFontPx decreases with longer text (0.766ms)
+✔ computeMinutesUsageFontPx fits both halves across value ranges (1.7135ms)
+✔ renders ellipsis fallback for extremely small segment (2.9033ms)
+✔ scales font size with segment area within bounds (0.7214ms)
+✔ wraps to two lines and truncates with ellipsis when space is limited (0.4836ms)
+✔ produces stable snapshot for a typical segment (1.8459ms)
+ℹ tests 776
+ℹ suites 3
+ℹ pass 773
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 2
+ℹ todo 0
+ℹ duration_ms 546286.8829
+
+✖ failing tests:
+
+test at src\components\campaigns\campaign-readiness.test.tsx:2:5988
+✖ table row resume is disabled but viewing details stays available (1571.4196ms)
+  Error [TestingLibraryElementError]: Unable to find an accessible element with the role "button" and name "Row actions"
+
+  Here are the accessible roles:
+
+    textbox:
+
+    Name "":
+    [36m<input[39m
+      [33mclass[39m=[32m"flex h-10 w-full rounded-md border-input dark:border-foreground/20 dark:bg-accent/20 px-3 py-2 text-sm ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground focus-visible:outline-none focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 mt-1 border-0 bg-background/50 text-foreground placeholder:text-muted-foreground hover:bg-background focus-visible:ring-0 focus-visible:ring-offset-0"[39m
+      [33mplaceholder[39m=[32m"Search campaigns…"[39m
+      [33mvalue[39m=[32m""[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    button:
+
+    Name "All statuses":
+    [36m<button[39m
+      [33maria-expanded[39m=[32m"false"[39m
+      [33maria-haspopup[39m=[32m"listbox"[39m
+      [33mclass[39m=[32m"mt-1 flex h-10 w-full items-center justify-between rounded-md border border-input bg-background/50 px-3 text-sm text-foreground hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Export":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border px-4 py-2 h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "New Campaign":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border px-4 py-2 h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "First":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Prev":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Next":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Last":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Sort by Campaign":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Campaign"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Sort by Status":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Status"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-start"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Sort by Completion":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Completion"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Sort by Success Rate":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Success Rate"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Sort by Leads":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Leads"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Sort by Completed":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Completed"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Sort by Failed":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Failed"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Expand row details":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Expand row details"[39m
+      [33mclass[39m=[32m"rounded-md p-1 text-muted-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    Name "Example campaign —":
+    [36m<button[39m
+      [33mclass[39m=[32m"min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    spinbutton:
+
+    Name "Minimum success rate":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Minimum success rate"[39m
+      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+      [33mmax[39m=[32m"100"[39m
+      [33mmin[39m=[32m"0"[39m
+      [33mtype[39m=[32m"number"[39m
+      [33mvalue[39m=[32m"0"[39m
+    [36m/>[39m
+
+    Name "Maximum success rate":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Maximum success rate"[39m
+      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+      [33mmax[39m=[32m"100"[39m
+      [33mmin[39m=[32m"0"[39m
+      [33mtype[39m=[32m"number"[39m
+      [33mvalue[39m=[32m"100"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    link:
+
+    Name "New Campaign":
+    [36m<a[39m
+      [33mclass[39m=[32m"shrink-0"[39m
+      [33mhref[39m=[32m"/campaigns/new"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    combobox:
+
+    Name "Rows per page":
+    [36m<select[39m
+      [33maria-label[39m=[32m"Rows per page"[39m
+      [33mclass[39m=[32m"h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    option:
+
+    Name "10":
+    [36m<option[39m
+      [33mvalue[39m=[32m"10"[39m
+    [36m/>[39m
+
+    Name "25":
+    [36m<option[39m
+      [33mvalue[39m=[32m"25"[39m
+    [36m/>[39m
+
+    Name "50":
+    [36m<option[39m
+      [33mvalue[39m=[32m"50"[39m
+    [36m/>[39m
+
+    Name "100":
+    [36m<option[39m
+      [33mvalue[39m=[32m"100"[39m
+    [36m/>[39m
+
+    Name "All":
+    [36m<option[39m
+      [33mvalue[39m=[32m"All"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    rowgroup:
+
+    Name "":
+    [36m<div[39m
+      [33mclass[39m=[32m"scrollbar-gutter-stable relative max-h-[520px] overflow-y-auto overflow-x-auto overscroll-contain"[39m
+      [33mdata-testid[39m=[32m"campaigns-performance-table"[39m
+      [33mrole[39m=[32m"rowgroup"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    row:
+
+    Name "Select all visible campaigns Campaign ↕ Status ↕ Completion ↕ Success Rate ↕ Leads ↕ Completed ↕ Failed ↕":
+    [36m<div[39m
+      [33mclass[39m=[32m"sticky top-0 z-20 grid gap-2 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-muted-foreground grid-cols-[36px_minmax(10rem,1.6fr)_110px_170px_120px_90px_90px_90px] min-w-[59.125rem]"[39m
+      [33mrole[39m=[32m"row"[39m
+    [36m/>[39m
+
+    Name "Select Example campaign Example campaign — Paused 0.0% 0.0% 1 0 0":
+    [36m<div[39m
+      [33mclass[39m=[32m"grid items-center gap-2 px-3 py-2 text-sm text-foreground grid-cols-[36px_minmax(10rem,1.6fr)_110px_170px_120px_90px_90px_90px]"[39m
+      [33mrole[39m=[32m"row"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+    checkbox:
+
+    Name "Select all visible campaigns":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Select all visible campaigns"[39m
+      [33mclass[39m=[32m"h-4 w-4 rounded border-input bg-background accent-primary"[39m
+      [33mtype[39m=[32m"checkbox"[39m
+    [36m/>[39m
+
+    Name "Select Example campaign":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Select Example campaign"[39m
+      [33mclass[39m=[32m"h-4 w-4 rounded border-input bg-background accent-primary"[39m
+      [33mtype[39m=[32m"checkbox"[39m
+    [36m/>[39m
+
+    --------------------------------------------------
+
+  Ignored nodes: comments, script, style
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"content-card relative"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] md:items-start"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mFilters[0m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 grid grid-cols-1 gap-4 md:grid-cols-3 md:items-start"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"relative flex min-w-0 flex-col"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"text-xs font-semibold text-muted-foreground"[39m
+                  [36m>[39m
+                    [0mCampaign name[0m
+                  [36m</label>[39m
+                  [36m<input[39m
+                    [33mclass[39m=[32m"flex h-10 w-full rounded-md border-input dark:border-foreground/20 dark:bg-accent/20 px-3 py-2 text-sm ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground focus-visible:outline-none focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 mt-1 border-0 bg-background/50 text-foreground placeholder:text-muted-foreground hover:bg-background focus-visible:ring-0 focus-visible:ring-offset-0"[39m
+                    [33mplaceholder[39m=[32m"Search campaigns…"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"relative flex min-w-0 flex-col"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"text-xs font-semibold text-muted-foreground"[39m
+                  [36m>[39m
+                    [0mStatus[0m
+                  [36m</label>[39m
+                  [36m<button[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"mt-1 flex h-10 w-full items-center justify-between rounded-md border border-input bg-background/50 px-3 text-sm text-foreground hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"truncate"[39m
+                    [36m>[39m
+                      [0mAll statuses[0m
+                    [36m</span>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-chevron-down h-4 w-4 text-muted-foreground"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"m6 9 6 6 6-6"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex min-w-0 flex-col"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"text-xs font-semibold text-muted-foreground"[39m
+                  [36m>[39m
+                    [0mSuccess rate[0m
+                  [36m</label>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"mt-1 flex h-10 items-center gap-2 rounded-md border-0 bg-background/50 px-2"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33maria-label[39m=[32m"Minimum success rate"[39m
+                      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"0"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"0"[39m
+                    [36m/>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"text-sm text-muted-foreground"[39m
+                    [36m>[39m
+                      [0mto[0m
+                    [36m</span>[39m
+                    [36m<input[39m
+                      [33maria-label[39m=[32m"Maximum success rate"[39m
+                      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"0"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"100"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex items-center justify-end gap-2 md:flex-col md:items-end md:justify-between md:self-stretch"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border px-4 py-2 h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mExport[0m
+              [36m</button>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"shrink-0"[...
+      at Object.getElementError (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\config.js:37:19)
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:76:38
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:52:17
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:95:19
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\campaigns\campaign-readiness.test.tsx:87:28)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)

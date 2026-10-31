@@ -27,6 +27,8 @@ Output contract MATCHES DeepgramFluxSTTProvider so the pipeline is unchanged:
 import asyncio
 import logging
 import os
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
+import time
 from typing import AsyncIterator, Callable, Optional
 
 from app.domain.interfaces.stt_provider import STTProvider
@@ -36,11 +38,17 @@ from app.infrastructure.stt.transcript_compose import compose_turn_text
 
 logger = logging.getLogger(__name__)
 
+# How long a SpeechStarted stays armed waiting for the caller's first words.
+# Nova's first interim lands a few hundred ms into speech; noise never yields
+# words, so an armed barge-in with no words simply lapses.
+_BARGE_WORD_WINDOW_S = float(os.getenv("NOVA_BARGE_WORD_WINDOW_S", "2.0"))
+
 
 class DeepgramNovaSTTProvider(STTProvider):
     """Deepgram nova-3 streaming via /v1/listen with VAD + endpointing turn detection."""
 
     def __init__(self) -> None:
+        self._observation_context = None
         self._api_key: Optional[str] = None
         self._model: str = "nova-3"
         self._sample_rate: int = 16000
@@ -53,6 +61,7 @@ class DeepgramNovaSTTProvider(STTProvider):
         self._guard = get_provider_guard("deepgram")
 
     async def initialize(self, config: dict) -> None:
+        self._observation_context = config.get("observation_context")
         self._api_key = config.get("api_key") or os.getenv("DEEPGRAM_API_KEY")
         if not self._api_key:
             raise ValueError("Deepgram API key not found in config or environment")
@@ -93,7 +102,17 @@ class DeepgramNovaSTTProvider(STTProvider):
         # the full turn = these joined). Reset after each end-of-turn.
         finals: list[str] = []
         last_interim: list[str] = [""]  # newest interim (fallback if stream closes before a final)
+        send_error: list[Optional[BaseException]] = [None]  # why the audio sender stopped, if it failed
         grace: list[int] = [0]          # consecutive idle ticks after the audio stream ends
+        pending_barge: list[Optional[float]] = [None]  # SpeechStarted awaiting words
+        # Same gate Flux applies to its StartOfTurn transcript (imported here,
+        # as deepgram_flux does, to keep infrastructure free of a module-level
+        # dependency on the voice pipeline).
+        from app.domain.services.voice_pipeline.backchannel import (
+            is_backchannel,
+            is_disfluency,
+            is_hard_interrupt,
+        )
 
         def turn_text() -> str:
             """
@@ -122,8 +141,12 @@ class DeepgramNovaSTTProvider(STTProvider):
             if self._numerals:
                 connect_kwargs["numerals"] = "true"
 
+            observation = ProviderAttempt("stt", "deepgram_nova", self._api_key, self._observation_context)
+            recognition = ProviderAttempt("stt", "deepgram_nova", self._api_key, self._observation_context)
             try:
                 async with self._client.listen.v1.connect(**connect_kwargs) as conn:
+                    observation.accepted()
+                    recognition.accepted()
                     def on_message(m) -> None:
                         try:
                             mtype = getattr(m, "type", None)
@@ -140,9 +163,23 @@ class DeepgramNovaSTTProvider(STTProvider):
                                     return
                                 text = (getattr(alts[0], "transcript", "") or "").strip()
                                 conf = getattr(alts[0], "confidence", None)
+                                alternatives = tuple(
+                                    (getattr(item, "transcript", "") or "").strip()
+                                    for item in alts[1:]
+                                    if (getattr(item, "transcript", "") or "").strip()
+                                )
                                 is_final = bool(getattr(m, "is_final", False))
+                                if is_final and text and not observation.closed:
+                                    observation.recognized()
+                                    recognition.recognized()
+                                    recognition.finish(outcome="recognized")
                                 speech_final = bool(getattr(m, "speech_final", False))
-                                queue.put_nowait(("results", (text, is_final, speech_final, conf)))
+                                queue.put_nowait(
+                                    (
+                                        "results",
+                                        (text, is_final, speech_final, conf, alternatives),
+                                    )
+                                )
                         except asyncio.QueueFull:
                             pass  # drop on backpressure rather than block the socket
                         except Exception as exc:  # noqa: BLE001
@@ -160,7 +197,12 @@ class DeepgramNovaSTTProvider(STTProvider):
                             async for audio_chunk in audio_stream:
                                 await conn.send_media(audio_chunk.data)
                         except Exception as exc:  # noqa: BLE001
-                            logger.debug("nova send_audio ended: %s", exc)
+                            # A send failure means the socket is gone while the
+                            # caller's audio is still flowing. Remember it so the
+                            # loop below raises instead of ending "cleanly".
+                            send_error[0] = exc
+                            observation.finish(exc)
+                            logger.warning("nova send_audio ended: %s", exc)
 
                     sender_task = asyncio.create_task(send_audio())
 
@@ -181,6 +223,14 @@ class DeepgramNovaSTTProvider(STTProvider):
                                             yield TranscriptChunk(text=ft, is_final=True, confidence=None)
                                             yield TranscriptChunk(text="", is_final=True, confidence=1.0)
                                             finals.clear()
+                                        if send_error[0] is not None:
+                                            # Not a call teardown: the socket died
+                                            # under live caller audio. A clean return
+                                            # would leave the call up and deaf.
+                                            raise RuntimeError(
+                                                "Deepgram nova socket ended while caller "
+                                                f"audio was still active: {send_error[0]}"
+                                            )
                                         break
                                 continue
 
@@ -235,12 +285,21 @@ class DeepgramNovaSTTProvider(STTProvider):
                                 # backchannels interrupt. If Nova ever becomes a
                                 # primary engine rather than a fallback, this must be
                                 # revisited — gate on the first interim there.
-                                if on_barge_in is not None:
-                                    try:
-                                        on_barge_in()
-                                    except Exception as exc:  # noqa: BLE001
-                                        logger.debug("nova on_barge_in error: %s", exc)
-                                yield BargeInSignal(text="")
+                                #
+                                # REVISITED 2026-09-28 — the "rare over-interrupt"
+                                # was not rare. Nova takes over on exactly the calls
+                                # whose line is loud (the primary is failed over
+                                # there), and its VAD fires on that noise: on call
+                                # d3a21591 (09-27 19:42-19:44) SpeechStarted cut ten
+                                # replies off within 1-2 s and almost none had any
+                                # caller words behind them, so the caller heard
+                                # nothing for 90 s. "Too eager to stop talking" meant
+                                # never talking. SpeechStarted now only ARMS a
+                                # barge-in; the first words that arrive within
+                                # _BARGE_WORD_WINDOW_S fire it, through the same
+                                # hard-interrupt / backchannel / disfluency rules
+                                # Flux applies to its StartOfTurn transcript.
+                                pending_barge[0] = time.monotonic()
                                 continue
 
                             if kind == "utterance_end":
@@ -254,7 +313,21 @@ class DeepgramNovaSTTProvider(STTProvider):
                                 continue
 
                             # kind == "results"
-                            text, is_final, speech_final, conf = payload
+                            text, is_final, speech_final, conf, alternatives = payload
+                            if pending_barge[0] is not None and text:
+                                armed_at, pending_barge[0] = pending_barge[0], None
+                                if time.monotonic() - armed_at <= _BARGE_WORD_WINDOW_S and (
+                                    is_hard_interrupt(text)
+                                    or not (is_backchannel(text) or is_disfluency(text))
+                                ):
+                                    if on_barge_in is not None:
+                                        try:
+                                            on_barge_in(text)
+                                        except TypeError:
+                                            on_barge_in()
+                                        except Exception as exc:  # noqa: BLE001
+                                            logger.debug("nova on_barge_in error: %s", exc)
+                                    yield BargeInSignal(text=text)
                             if is_final:
                                 if text:
                                     finals.append(text)
@@ -263,7 +336,12 @@ class DeepgramNovaSTTProvider(STTProvider):
                                     # End of turn: full transcript, then the empty marker.
                                     ft = turn_text()
                                     if ft:
-                                        yield TranscriptChunk(text=ft, is_final=True, confidence=conf)
+                                        yield TranscriptChunk(
+                                            text=ft,
+                                            is_final=True,
+                                            confidence=conf,
+                                            metadata={"alternatives": alternatives},
+                                        )
                                     yield TranscriptChunk(text="", is_final=True, confidence=1.0)
                                     finals.clear()
                                 else:
@@ -291,7 +369,13 @@ class DeepgramNovaSTTProvider(STTProvider):
                         except (asyncio.CancelledError, Exception):  # noqa: BLE001
                             pass
             except Exception as exc:  # noqa: BLE001
+                observation.finish(exc)
                 raise RuntimeError(f"Deepgram nova transcription failed: {exc}")
+            except BaseException as exc:
+                observation.finish(exc)
+                raise
+            finally:
+                observation.finish(outcome="recognized" if observation.output_seen else "connected")
 
     async def cleanup(self) -> None:
         self._client = None

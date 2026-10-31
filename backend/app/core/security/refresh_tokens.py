@@ -24,6 +24,9 @@ logger = logging.getLogger(__name__)
 
 REFRESH_TOKEN_LIFETIME_DAYS = 7
 _TOKEN_BYTES = 32
+# A second tab or an in-flight request presenting the same cookie a moment
+# after it was rotated is a race, not a theft (Okta/Auth0 grace periods).
+REFRESH_REUSE_GRACE_SECONDS = 10
 
 
 def _now_utc() -> datetime:
@@ -45,8 +48,13 @@ async def issue_initial_refresh_token(
     tenant_id: Optional[str] = None,
     ip: Optional[str] = None,
     user_agent: Optional[str] = None,
+    session_id: Optional[str] = None,
 ) -> tuple[str, UUID, UUID]:
     """Issue the first refresh token in a new family. Called at login/signup.
+
+    ``session_id`` is the security_sessions row this login created. It is
+    carried through every rotation so a refreshed access JWT keeps its ``sid``
+    claim — without it the binding was lost 15 minutes after login (0045).
 
     Returns ``(raw_token, token_id, family_id)``. The raw token is returned
     to the caller exactly once and must be placed in the httpOnly refresh
@@ -61,8 +69,8 @@ async def issue_initial_refresh_token(
         """
         INSERT INTO refresh_tokens
             (family_id, user_id, tenant_id, token_hash, parent_id,
-             issued_at, expires_at, ip, user_agent)
-        VALUES (uuid_generate_v4(), $1, $2, $3, NULL, $4, $5, $6, $7)
+             issued_at, expires_at, ip, user_agent, session_id)
+        VALUES (uuid_generate_v4(), $1, $2, $3, NULL, $4, $5, $6, $7, $8)
         RETURNING id, family_id
         """,
         user_id,
@@ -72,6 +80,7 @@ async def issue_initial_refresh_token(
         expires_at,
         ip,
         user_agent,
+        session_id,
     )
     return raw, row["id"], row["family_id"]
 
@@ -94,7 +103,8 @@ async def rotate_refresh_token(
 
     row = await conn.fetchrow(
         """
-        SELECT id, family_id, user_id, tenant_id, expires_at, used_at, revoked_at
+        SELECT id, family_id, user_id, tenant_id, expires_at, used_at, revoked_at,
+               session_id
         FROM refresh_tokens
         WHERE token_hash = $1
         """,
@@ -106,8 +116,29 @@ async def rotate_refresh_token(
 
     # Reuse detection runs first: a token whose used_at is set has already
     # been rotated. Seeing it again means either a replay or a leaked
-    # successor chain — revoke the whole family.
-    if row["used_at"] is not None:
+    # successor chain — revoke the whole family. The one exception is a
+    # concurrent refresh that lost by moments while the winner's successor
+    # is still unused: revoking then logged out the session the winner had
+    # just extended, so the loser gets a sibling successor instead.
+    concurrent_loser = row["used_at"] is not None and (
+        row["revoked_at"] is None
+        and row["expires_at"] > now
+        and now - row["used_at"] <= timedelta(seconds=REFRESH_REUSE_GRACE_SECONDS)
+        and await conn.fetchval(
+            """
+            SELECT EXISTS (SELECT 1 FROM refresh_tokens WHERE parent_id = $1
+                           AND used_at IS NULL AND revoked_at IS NULL)
+            """,
+            row["id"],
+        )
+    )
+    if concurrent_loser:
+        logger.info(
+            "refresh.concurrent_rotation family=%s user=%s — sibling issued",
+            row["family_id"],
+            row["user_id"],
+        )
+    elif row["used_at"] is not None:
         await conn.execute(
             """
             UPDATE refresh_tokens
@@ -166,21 +197,22 @@ async def rotate_refresh_token(
     expires_at = now + timedelta(days=REFRESH_TOKEN_LIFETIME_DAYS)
 
     async with conn.transaction():
-        await conn.execute(
-            """
-            UPDATE refresh_tokens
-            SET used_at = $2
-            WHERE id = $1
-            """,
-            row["id"],
-            now,
-        )
+        if not concurrent_loser:  # keep the first use: the grace must not slide
+            await conn.execute(
+                """
+                UPDATE refresh_tokens
+                SET used_at = $2
+                WHERE id = $1
+                """,
+                row["id"],
+                now,
+            )
         await conn.execute(
             """
             INSERT INTO refresh_tokens
                 (family_id, user_id, tenant_id, token_hash, parent_id,
-                 issued_at, expires_at, ip, user_agent)
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                 issued_at, expires_at, ip, user_agent, session_id)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             """,
             row["family_id"],
             row["user_id"],
@@ -191,12 +223,15 @@ async def rotate_refresh_token(
             expires_at,
             ip,
             user_agent,
+            row.get("session_id"),
         )
 
+    session_id = row.get("session_id")
     return new_raw, {
         "user_id": str(row["user_id"]),
         "tenant_id": str(row["tenant_id"]) if row["tenant_id"] else None,
         "family_id": str(row["family_id"]),
+        "session_id": str(session_id) if session_id else None,
     }
 
 

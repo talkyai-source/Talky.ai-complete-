@@ -1,0 +1,60 @@
+...F.....F............F                                                  [100%]
+================================== FAILURES ===================================
+_ test_regular_inflection_preserves_authored_evidence[False-delivery-deliveries] _
+
+singular = 'delivery', plural = 'deliveries', reverse = False
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [], 'status': 'no_match', 'text': ''}
+E       assert 'no_match' == 'matched'
+E         - matched
+E         + no_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_ test_regular_inflection_preserves_authored_evidence[True-delivery-deliveries] _
+
+singular = 'delivery', plural = 'deliveries', reverse = True
+
+    @pytest.mark.parametrize("singular,plural", PAIRS)
+    @pytest.mark.parametrize("reverse", [False, True])
+    def test_regular_inflection_preserves_authored_evidence(singular, plural, reverse):
+        query, source_word = (singular, plural) if reverse else (plural, singular)
+        source = f"The {source_word} is described in this document."
+        result = evidence(query, source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [], 'status': 'no_match', 'text': ''}
+E       assert 'no_match' == 'matched'
+E         - matched
+E         + no_match
+
+tests\unit\test_ag02_normalization_boundary.py:26: AssertionError
+_______ test_long_source_inflection_keeps_answer_and_adjacent_exclusion _______
+
+    def test_long_source_inflection_keeps_answer_and_adjacent_exclusion():
+        qualifier = "Deliveries take five days. This excludes remote islands."
+        source = "General administration information. " * 25 + qualifier
+        result = evidence("Delivery", source)
+>       assert result["status"] == "matched", result
+E       AssertionError: {'passages': [], 'status': 'no_match', 'text': ''}
+E       assert 'no_match' == 'matched'
+E         - matched
+E         + no_match
+
+tests\unit\test_ag02_normalization_boundary.py:58: AssertionError
+============================== warnings summary ===============================
+..\..\..\backend\.venv\Lib\site-packages\_pytest\config\__init__.py:1204
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\_pytest\config\__init__.py:1204: PytestAssertRewriteWarning: Module already imported so cannot be rewritten: anyio
+    self._mark_plugins_for_rewrite(hook)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[False-delivery-deliveries]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_regular_inflection_preserves_authored_evidence[True-delivery-deliveries]
+FAILED tests/unit/test_ag02_normalization_boundary.py::test_long_source_inflection_keeps_answer_and_adjacent_exclusion
+3 failed, 20 passed, 1 warning in 0.49s

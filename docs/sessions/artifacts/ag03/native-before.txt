@@ -1,0 +1,30 @@
+FFFFF                                                                    [100%]
+================================== FAILURES ===================================
+______ test_explicit_denial_survives_thirty_later_ordinary_caller_turns _______
+backend\tests\unit\test_realtime_relationship_ownership.py:57: in test_explicit_denial_survives_thirty_later_ordinary_caller_turns
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+____________ test_delayed_old_final_cannot_overwrite_newer_denial _____________
+backend\tests\unit\test_realtime_relationship_ownership.py:66: in test_delayed_old_final_cannot_overwrite_newer_denial
+    assert not await admitted(bridge, "You are our existing customer.")
+E   assert not True
+__________ test_duplicate_final_does_not_become_another_caller_turn ___________
+backend\tests\unit\test_realtime_relationship_ownership.py:75: in test_duplicate_final_does_not_become_another_caller_turn
+    assert bridge._live_user_turn_seq == 1
+E   assert 2 == 1
+E    +  where 2 = <app.realtime.bridge.RealtimeBridge object at 0x0000017B34D7C770>._live_user_turn_seq
+_ test_provider_keeps_speech_item_identity_and_commit_order[OpenAIRealtimeSession] _
+backend\tests\unit\test_realtime_relationship_ownership.py:86: in test_provider_keeps_speech_item_identity_and_commit_order
+    assert interruption.raw["item_id"] == "caller-1"
+E   KeyError: 'item_id'
+_ test_provider_keeps_speech_item_identity_and_commit_order[XAIRealtimeSession] _
+backend\tests\unit\test_realtime_relationship_ownership.py:86: in test_provider_keeps_speech_item_identity_and_commit_order
+    assert interruption.raw["item_id"] == "caller-1"
+E   KeyError: 'item_id'
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_realtime_relationship_ownership.py::test_explicit_denial_survives_thirty_later_ordinary_caller_turns
+FAILED backend\tests\unit\test_realtime_relationship_ownership.py::test_delayed_old_final_cannot_overwrite_newer_denial
+FAILED backend\tests\unit\test_realtime_relationship_ownership.py::test_duplicate_final_does_not_become_another_caller_turn
+FAILED backend\tests\unit\test_realtime_relationship_ownership.py::test_provider_keeps_speech_item_identity_and_commit_order[OpenAIRealtimeSession]
+FAILED backend\tests\unit\test_realtime_relationship_ownership.py::test_provider_keeps_speech_item_identity_and_commit_order[XAIRealtimeSession]
+5 failed in 1.11s

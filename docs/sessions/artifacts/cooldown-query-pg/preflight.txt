@@ -1,0 +1,290 @@
+{
+  "head": "0061_dnc_runtime_contract",
+  "tables": [
+    {
+      "nspname": "public",
+      "relname": "calls",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "owner": "talky"
+    },
+    {
+      "nspname": "public",
+      "relname": "dialer_jobs",
+      "relrowsecurity": true,
+      "relforcerowsecurity": true,
+      "owner": "talky"
+    }
+  ],
+  "required_columns": [
+    {
+      "table_name": "calls",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO",
+      "column_default": "uuid_generate_v4()"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "calls",
+      "column_name": "phone_number",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "calls",
+      "column_name": "status",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": "'initiated'::character varying"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "goal_achieved",
+      "data_type": "boolean",
+      "is_nullable": "YES",
+      "column_default": "false"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "detected_intents",
+      "data_type": "jsonb",
+      "is_nullable": "YES",
+      "column_default": "'[]'::jsonb"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "action_results",
+      "data_type": "jsonb",
+      "is_nullable": "YES",
+      "column_default": "'{}'::jsonb"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES",
+      "column_default": "now()"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES",
+      "column_default": "now()"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "is_test",
+      "data_type": "boolean",
+      "is_nullable": "NO",
+      "column_default": "false"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "direction",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": "'outbound'::character varying"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "route_snapshot",
+      "data_type": "jsonb",
+      "is_nullable": "NO",
+      "column_default": "'{}'::jsonb"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "admission_status",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": "'pending'::character varying"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "caller_ani_private",
+      "data_type": "boolean",
+      "is_nullable": "NO",
+      "column_default": "false"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "consent_status",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": "'unknown'::character varying"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "processing_status",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": "'pending'::character varying"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "billing_status",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": "'none'::character varying"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "reserved_seconds",
+      "data_type": "integer",
+      "is_nullable": "NO",
+      "column_default": "0"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "lead_details_status",
+      "data_type": "text",
+      "is_nullable": "NO",
+      "column_default": "'pending'::text"
+    },
+    {
+      "table_name": "calls",
+      "column_name": "transcript_save_state",
+      "data_type": "text",
+      "is_nullable": "NO",
+      "column_default": "'unknown'::text"
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "id",
+      "data_type": "uuid",
+      "is_nullable": "NO",
+      "column_default": "uuid_generate_v4()"
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "tenant_id",
+      "data_type": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "campaign_id",
+      "data_type": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "lead_id",
+      "data_type": "uuid",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "phone_number",
+      "data_type": "character varying",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "priority",
+      "data_type": "integer",
+      "is_nullable": "YES",
+      "column_default": "5"
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "status",
+      "data_type": "character varying",
+      "is_nullable": "YES",
+      "column_default": "'pending'::character varying"
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "attempt_number",
+      "data_type": "integer",
+      "is_nullable": "YES",
+      "column_default": "1"
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "scheduled_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES",
+      "column_default": "now()"
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "created_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES",
+      "column_default": "now()"
+    },
+    {
+      "table_name": "dialer_jobs",
+      "column_name": "updated_at",
+      "data_type": "timestamp with time zone",
+      "is_nullable": "YES",
+      "column_default": "now()"
+    }
+  ],
+  "checks": [
+    {
+      "relation": "dialer_jobs",
+      "conname": "dialer_jobs_priority_check",
+      "definition": "CHECK (((priority >= 1) AND (priority <= 10)))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_direction_valid",
+      "definition": "CHECK (((direction)::text = ANY ((ARRAY['outbound'::character varying, 'inbound'::character varying])::text[])))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_admission_status_valid",
+      "definition": "CHECK (((admission_status)::text = ANY ((ARRAY['pending'::character varying, 'allowed'::character varying, 'denied'::character varying, 'released'::character varying])::text[])))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_consent_status_valid",
+      "definition": "CHECK (((consent_status)::text = ANY ((ARRAY['unknown'::character varying, 'not_required'::character varying, 'pending'::character varying, 'granted'::character varying, 'declined'::character varying])::text[])))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_processing_status_valid",
+      "definition": "CHECK (((processing_status)::text = ANY ((ARRAY['pending'::character varying, 'active'::character varying, 'completed'::character varying, 'failed'::character varying, 'released'::character varying])::text[])))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_billing_status_valid",
+      "definition": "CHECK (((billing_status)::text = ANY ((ARRAY['none'::character varying, 'reserved'::character varying, 'held'::character varying, 'finalized'::character varying, 'released'::character varying, 'reversed'::character varying])::text[])))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_reserved_seconds_nonnegative",
+      "definition": "CHECK ((reserved_seconds >= 0))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_billing_hold_reason_valid",
+      "definition": "CHECK (((billing_hold_reason IS NULL) OR (((direction)::text = 'inbound'::text) AND ((billing_status)::text = 'held'::text) AND ((billing_hold_reason)::text = ANY ((ARRAY['settlement_switch_disabled'::character varying, 'usage_exceeded_reservation'::character varying, 'provider_answer_ambiguous'::character varying])::text[])))))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_transcript_save_state_check",
+      "definition": "CHECK ((transcript_save_state = ANY (ARRAY['unknown'::text, 'partial'::text, 'complete'::text, 'failed'::text])))"
+    },
+    {
+      "relation": "calls",
+      "conname": "calls_dialer_attempt_number_positive",
+      "definition": "CHECK (((dialer_attempt_number IS NULL) OR (dialer_attempt_number >= 1)))"
+    }
+  ]
+}

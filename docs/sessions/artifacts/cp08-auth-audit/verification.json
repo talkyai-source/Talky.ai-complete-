@@ -1,0 +1,74 @@
+{
+  "as_of": "2026-10-05",
+  "base_sha": "25c5c779ea871d3820457d434b6ed3e8ea11cbce",
+  "source_sha": "995abceb84a883342f2f49d11a7c659c1742ece4",
+  "scope": "test-only obsolete auth-audit exemptions; no application authorization changes",
+  "application_files_changed": [],
+  "test_files_changed": [
+    "backend/tests/unit/test_endpoint_auth_audit.py"
+  ],
+  "route_introspection": {
+    "existing_exempt_routes": 17,
+    "all_chain_to_get_current_user": true,
+    "stale_exempt_routes": [
+      "DELETE /api/v1/rbac/roles/{role_id}/permissions/{permission_id}"
+    ],
+    "intentional_public_auth_webhook_exceptions_unchanged": 25
+  },
+  "pytest_args": [
+    "tests/unit/test_endpoint_auth_audit.py",
+    "tests/unit/test_auth_dependency_availability.py",
+    "tests/unit/test_api_endpoints.py",
+    "-q",
+    "-rs"
+  ],
+  "pythonpath_order": [
+    "tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+    "tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  ],
+  "observed_versions": {
+    "PyJWT": "2.15.1",
+    "urllib3": "2.8.0",
+    "fastapi": "0.139.0",
+    "pytest": "7.4.4"
+  },
+  "baseline": {
+    "passed": 41,
+    "skipped": 1,
+    "warnings": 4,
+    "log": "baseline.txt"
+  },
+  "final": {
+    "passed": 42,
+    "skipped": 0,
+    "warnings": 4,
+    "log": "final.txt"
+  },
+  "initial_harness_failure": {
+    "reason": "Socket deny guard also blocked Windows asyncio internal socketpair; corrected runner only",
+    "failed": 12,
+    "passed": 3,
+    "skipped": 1,
+    "errors": 52,
+    "log": "harness-socket-failure.txt"
+  },
+  "network": "Ordinary connect/DNS denied; Windows internal socketpair allowed; no DB/provider calls",
+  "lint_command": "python -m ruff check backend/tests/unit/test_endpoint_auth_audit.py --select F --ignore F401,F841",
+  "independent_review": {
+    "reviewer": "/root/realtime_audit",
+    "kind": "read-only diff review",
+    "material_findings": [],
+    "tests_run": false
+  },
+  "sha256": {
+    "baseline.txt": "dd0e652e8a2edbe66bd0cc524bc2abc54f7ead22a5df35696741c78a38450af6",
+    "final.txt": "d22af82d59fe282fd86275be7a53a732a530d83a73d1e97820330cf5768f2e65",
+    "harness-socket-failure.txt": "bbecb410849cb02a8a05d58633a435c8de388a809e9db0b86e472105a8895c4e",
+    "lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+  },
+  "limitations": [
+    "Dependency/source inventory is not every endpoint authorization behavior",
+    "Existing audit/security permission strings are absent from Permission enum; no entitlement/grant change authorized",
+    "No production or live-user verification"
+  ]
+}

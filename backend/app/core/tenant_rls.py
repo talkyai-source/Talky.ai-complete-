@@ -18,13 +18,17 @@ async def apply_tenant_rls_context(
 ) -> None:
     if not tenant_id:
         raise ValueError("tenant_id is required to apply RLS context")
-    await conn.execute("SELECT set_config('app.current_tenant_id', $1, false)", str(tenant_id))
+    # Transaction-local only. Session-scoped GUCs survive pool release and can
+    # make the next request run as the previous tenant. Callers must invoke
+    # this helper from inside ``conn.transaction()``; new code should prefer
+    # ``acquire_with_tenant`` which establishes that boundary automatically.
+    await conn.execute("SELECT set_config('app.current_tenant_id', $1, true)", str(tenant_id))
     await conn.execute(
-        "SELECT set_config('app.current_user_id', $1, false)",
+        "SELECT set_config('app.current_user_id', $1, true)",
         str(user_id) if user_id else "",
     )
     normalized_request_id = str(request_id).strip()[:128] if request_id else ""
     await conn.execute(
-        "SELECT set_config('app.current_request_id', $1, false)",
+        "SELECT set_config('app.current_request_id', $1, true)",
         normalized_request_id,
     )

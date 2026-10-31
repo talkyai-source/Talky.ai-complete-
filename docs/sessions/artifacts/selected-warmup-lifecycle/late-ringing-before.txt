@@ -1,0 +1,13 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+________ test_late_ringing_callback_cannot_rebuild_lost_owned_profile _________
+tests\unit\test_selected_warmup_lifecycle.py:293: in test_late_ringing_callback_cannot_rebuild_lost_owned_profile
+    answered.orchestrator.create_voice_session.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.telephony_session_config:telephony_session_config.py:83 company_name_fallback tenant=- campaign=- source=script_config.company_name � no company name is configured, so the agent will say 'our office' on this call instead of a real brand; set the campaign's company_name
+=========================== short test summary info ===========================
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_late_ringing_callback_cannot_rebuild_lost_owned_profile
+1 failed, 19 deselected in 3.97s

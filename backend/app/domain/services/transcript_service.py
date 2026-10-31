@@ -3,11 +3,16 @@ Transcript Service
 Handles transcript accumulation and storage for call conversations.
 Provider-agnostic - works with any voice pipeline.
 """
+import asyncio
+import hashlib
 import json
 import logging
+import time
+from collections import OrderedDict
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
+from weakref import WeakValueDictionary
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +51,120 @@ class TranscriptTurn:
         }
 
 
+def effective_turn(turn: Dict[str, Any]) -> Dict[str, Any]:
+    """Project a bound ASR revision while retaining the original audit text.
+
+    A truncated/corrupt revision is unavailable evidence, not permission to
+    silently resurrect its older assertion. This function is idempotent and
+    never mutates the raw buffer or stored historical row.
+    """
+    result = dict(turn)
+    role = str(turn.get("role") or turn.get("speaker") or "").lower()
+    result["role"] = {"caller": "user", "customer": "user", "agent": "assistant"}.get(role, role)
+    if "content" not in result:
+        result["content"] = turn.get("text", "")
+    metadata = turn.get("metadata")
+    if result["role"] != "user" or not isinstance(metadata, dict) or "asr_latest_revision" not in metadata:
+        return result
+    result["original_content"] = turn.get("original_content", result.get("content", ""))
+    revision = metadata.get("asr_latest_revision")
+    valid = isinstance(revision, dict)
+    if valid:
+        content = revision.get("content")
+        order = revision.get("caller_turn_order")
+        number = revision.get("revision")
+        item = revision.get("provider_item_id")
+        valid = (
+            isinstance(content, str) and len(content) <= 4096
+            and isinstance(item, str) and bool(item.strip()) and len(item) <= 256
+            and item == metadata.get("provider_item_id")
+            and isinstance(order, int) and not isinstance(order, bool) and order >= 0
+            and isinstance(metadata.get("caller_turn_order"), int) and not isinstance(metadata.get("caller_turn_order"), bool)
+            and order == metadata.get("caller_turn_order")
+            and isinstance(number, int) and not isinstance(number, bool) and number > 0
+            and revision.get("truncated") is False
+            and isinstance(revision.get("characters"), int) and not isinstance(revision.get("characters"), bool)
+            and revision.get("characters") == len(content)
+            and revision.get("retracted") is (not bool(content.strip()))
+            and revision.get("content_sha256") == hashlib.sha256(content.encode("utf-8")).hexdigest()
+        )
+    result["content"] = content.strip() if valid else ""
+    result["effective_content_status"] = (
+        "revised" if valid and result["content"] else "retracted" if valid else "unavailable"
+    )
+    if not result["content"]:
+        result["include_in_plaintext"] = False
+    return result
+
+
+def conversation_turns(turns: Optional[List[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    """The conversation as people read it: one row per spoken line.
+
+    The buffer records every STT interim as its own caller row
+    (``is_final=False``, event_type ``update``) so live consumers can react to
+    partial speech. Stored and shown as-is, a caller who said one number read
+    "It's", "It's plus", "It's plus nine", ... as a dozen lines (2026-09-28,
+    call b847f447: 132 rows for 24 turns).
+
+    Within each run of consecutive caller rows for the same turn: keep the
+    final recognitions (dropping exact repeats), or — if the line never
+    finalised, e.g. the caller hung up mid-sentence — the latest partial.
+    Rows with no ``is_final`` (older calls, agent lines) count as final.
+    """
+    if isinstance(turns, dict):
+        turns = turns.get("turns")
+    if not isinstance(turns, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    group: List[Dict[str, Any]] = []
+
+    def flush() -> None:
+        if not group:
+            return
+        finals = [t for t in group if t.get("is_final") is not False]
+        kept = finals or [group[-1]]
+        for turn in kept:
+            text = str(turn.get("content") or "").strip()
+            previous = out[-1] if out else None
+            metadata = turn.get("metadata") if isinstance(turn.get("metadata"), dict) else {}
+            previous_metadata = previous.get("metadata") if previous and isinstance(previous.get("metadata"), dict) else {}
+            if (
+                previous is not None
+                and previous.get("effective_content_status") == turn.get("effective_content_status")
+                and previous.get("role") == turn.get("role")
+                and previous_metadata.get("provider_item_id") == metadata.get("provider_item_id")
+                and previous_metadata.get("caller_turn_order") == metadata.get("caller_turn_order")
+                and previous_metadata.get("asr_latest_revision") == metadata.get("asr_latest_revision")
+                and str(previous.get("content") or "").strip() == text
+            ):
+                continue
+            out.append(turn)
+        group.clear()
+
+    for turn in turns or []:
+        if not isinstance(turn, dict):
+            continue
+        turn = effective_turn(turn)
+        if turn.get("role") != "user":
+            flush()
+            out.append(turn)
+            continue
+        if group and group[-1].get("turn_index") != turn.get("turn_index"):
+            flush()
+        group.append(turn)
+    flush()
+    return out
+
+
+def transcript_text_from_turns(turns) -> str:
+    """One canonical readable projection shared by storage, APIs and summaries."""
+    return "\n".join(
+        f"{'User' if turn.get('role') == 'user' else 'Assistant'}: {turn['content']}"
+        for turn in conversation_turns(turns)
+        if turn.get("include_in_plaintext", True) and str(turn.get("content") or "").strip()
+    )
+
+
 class TranscriptService:
     """
     Handles transcript accumulation and storage.
@@ -61,6 +180,55 @@ class TranscriptService:
     # This allows multiple instances to share the same data
     _buffers: Dict[str, List[TranscriptTurn]] = {}
     _call_bindings: Dict[str, str] = {}
+    # Calls whose final transcript the hangup persister has written. Live call
+    # 4291700f (2026-09-24 11:18:14): the hangup save wrote 34 turns / 399
+    # words, then 44 ms later a late STT final ("Yes. But") started a fresh
+    # buffer and the per-turn flush wrote that ONE line over the whole
+    # transcript — so the lead gate then saw caller_turns=1 and refused to
+    # mark a qualified lead. Same shape on 08-12, 08-20 and 09-10. Once
+    # sealed, a call's buffer takes no more turns and flushes nothing.
+    _sealed: Dict[str, None] = {}
+    _SEALED_MAX = 5000
+    _persist_locks = WeakValueDictionary()
+    _failed_finalizations: OrderedDict[str, float] = OrderedDict()
+    _FAILED_RETAIN_MAX = 64
+    _FAILED_RETAIN_TTL_S = 300.0
+    _FAILED_RETAIN_MAX_CHARS = 2_000_000
+
+    def persistence_lock(self, call_id: str):
+        lock = self._persist_locks.get(call_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._persist_locks[call_id] = lock
+        return lock
+
+    def freeze(self, call_id: str) -> None:
+        """Stop late ASR intake without discarding the final snapshot."""
+        self._sealed[call_id] = None
+        if len(self._sealed) > self._SEALED_MAX:
+            self._sealed.pop(next(iter(self._sealed)), None)
+
+    def _evict_failed_finalizations(self) -> None:
+        now = time.monotonic()
+        def size():
+            return sum(len(turn.content) + len(str(turn.metadata))
+                       for key in self._failed_finalizations
+                       for turn in self._buffers.get(key, ()))
+        while self._failed_finalizations:
+            oldest, timestamp = next(iter(self._failed_finalizations.items()))
+            if (now - timestamp <= self._FAILED_RETAIN_TTL_S
+                    and len(self._failed_finalizations) <= self._FAILED_RETAIN_MAX
+                    and size() <= self._FAILED_RETAIN_MAX_CHARS):
+                break
+            self._failed_finalizations.pop(oldest, None)
+            self.clear_buffer(oldest)
+            logger.warning("unsaved_transcript_memory_evicted call=%s durable_recovery=false", oldest)
+
+    def retain_failed_finalization(self, call_id: str) -> None:
+        self.freeze(call_id)
+        self._failed_finalizations[call_id] = time.monotonic()
+        self._failed_finalizations.move_to_end(call_id)
+        self._evict_failed_finalizations()
 
     @staticmethod
     def _resolve_pool(db_client, db_pool):
@@ -83,48 +251,70 @@ class TranscriptService:
         return None
 
     async def _write_calls_transcript(
-        self,
-        pool,
-        row_id: str,
-        transcript_text: str,
-        transcript_json: List[Dict[str, Any]],
-        talklee_call_id: Optional[str],
-    ) -> None:
-        """UPDATE ``calls`` with the current transcript over a POOLED asyncpg
-        connection.
+        self, pool, row_id: str, transcript_text: str,
+        transcript_json: List[Dict[str, Any]], talklee_call_id: Optional[str],
+        *, tenant_id: str, final: bool = False, metrics=None,
+    ) -> Optional[str]:
+        """Commit an explicitly owned snapshot; return its durable row identity.
 
-        Root-cause note (2026-07): the previous path went through
-        ``postgres_adapter`` (``db_client.table(...).update(...).execute()``),
-        whose ``execute()`` hopped onto a thread-pool and BLOCKED the event
-        loop on ``.result()`` while opening a brand-new unpooled
-        ``asyncpg.connect`` per turn — stalling every concurrent live call.
-        This uses the shared pool and a single ``UPDATE`` inside one implicit
-        transaction, mirroring recording.py / call_status.py.
-
-        RLS: this is a platform-internal write with no request-scoped JWT (the
-        pipeline task carries no tenant context), so — exactly like the
-        authoritative hangup persister ``save_call_transcript_on_hangup`` — we
-        bypass RLS for the single scoped transaction via
-        ``acquire_with_tenant(pool, None)``. The connection is held only for
-        this one UPDATE; ``json.dumps`` runs beforehand, so no slow / network
-        await happens while the connection is checked out.
+        The calls-row lock serializes final jobs across workers. A completed
+        snapshot fences late incremental writes. Historical duplicate child
+        rows are retained; subsequent finalization updates the newest child.
         """
         from app.core.db_utils import acquire_with_tenant
 
+        if not tenant_id:
+            return None
         turns_jsonb = json.dumps(transcript_json)
-        async with acquire_with_tenant(pool, None) as conn:
-            if talklee_call_id:
-                await conn.execute(
-                    "UPDATE calls SET transcript = $1, transcript_json = $2::jsonb, "
-                    "talklee_call_id = $3, updated_at = NOW() WHERE id = $4",
-                    transcript_text, turns_jsonb, talklee_call_id, row_id,
+        async with acquire_with_tenant(pool, tenant_id) as conn:
+            row = await conn.fetchrow(
+                "SELECT id, transcript_save_state FROM calls "
+                "WHERE id=$1::uuid AND tenant_id=$2::uuid FOR UPDATE",
+                row_id, tenant_id,
+            )
+            if row is None:
+                return None
+            if row["transcript_save_state"] == "complete":
+                return str(row["id"]) if final else None
+            if not transcript_json:
+                return None  # no in-memory evidence is not a complete empty call
+            written = await conn.fetchval(
+                "UPDATE calls SET transcript=$1, transcript_json=$2::jsonb, "
+                "talklee_call_id=COALESCE($3,talklee_call_id), "
+                "transcript_save_state=$4, updated_at=NOW() "
+                "WHERE id=$5::uuid AND tenant_id=$6::uuid RETURNING id",
+                transcript_text, turns_jsonb, talklee_call_id,
+                "complete" if final else "partial", row_id, tenant_id,
+            )
+            if written is None:
+                return None
+            if not final:
+                return str(written)
+            child = await conn.fetchval(
+                "SELECT id FROM transcripts WHERE call_id=$1::uuid AND tenant_id=$2::uuid "
+                "ORDER BY updated_at DESC, id DESC LIMIT 1 FOR UPDATE", row_id, tenant_id,
+            )
+            metrics = metrics or {}
+            args = [turns_jsonb, transcript_text, metrics.get("word_count", 0),
+                    metrics.get("turn_count", 0), metrics.get("user_word_count", 0),
+                    metrics.get("assistant_word_count", 0)]
+            if child:
+                saved = await conn.fetchval(
+                    "UPDATE transcripts SET turns=$1::jsonb,full_text=$2,word_count=$3,"
+                    "turn_count=$4,user_word_count=$5,assistant_word_count=$6,updated_at=NOW() "
+                    "WHERE id=$7::uuid AND tenant_id=$8::uuid AND call_id=$9::uuid RETURNING id",
+                    *args, str(child), tenant_id, row_id,
                 )
             else:
-                await conn.execute(
-                    "UPDATE calls SET transcript = $1, transcript_json = $2::jsonb, "
-                    "updated_at = NOW() WHERE id = $3",
-                    transcript_text, turns_jsonb, row_id,
+                saved = await conn.fetchval(
+                    "INSERT INTO transcripts(turns,full_text,word_count,turn_count,"
+                    "user_word_count,assistant_word_count,call_id,tenant_id) "
+                    "VALUES($1::jsonb,$2,$3,$4,$5,$6,$7::uuid,$8::uuid) RETURNING id",
+                    *args, row_id, tenant_id,
                 )
+            if saved is None:
+                raise RuntimeError("Transcript child write was not acknowledged")
+            return str(saved)
 
     def accumulate_turn(
         self, 
@@ -140,7 +330,7 @@ class TranscriptService:
         audio_window_end: Optional[str] = None,
         include_in_plaintext: bool = True,
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> None:
+    ) -> Optional[TranscriptTurn]:
         """
         Add a turn to the transcript buffer.
         
@@ -150,9 +340,26 @@ class TranscriptService:
             content: The spoken/generated text
             confidence: Optional STT confidence score
         """
-        if not content or not content.strip():
-            return  # Skip empty content
-        
+        if not isinstance(content, str):
+            return None
+        from app.domain.services.explicit_secrets import sanitize_explicit_secrets, sanitize_transcript_metadata
+        content = sanitize_explicit_secrets(content)
+        metadata = sanitize_transcript_metadata(metadata)
+        if not content.strip():
+            # Keep an owned empty final as audit evidence so a later revision
+            # can amend that exact provider item, without inventing speech.
+            owner = metadata if isinstance(metadata, dict) else {}
+            item, order = owner.get("provider_item_id"), owner.get("caller_turn_order")
+            if not (role == "user" and is_final is True
+                    and isinstance(item, str) and 0 < len(item.strip()) <= 256
+                    and isinstance(order, int) and not isinstance(order, bool) and order >= 0):
+                return None
+        if call_id in self._sealed:
+            # The hangup persister already wrote the final transcript. A late
+            # STT final landing here would start a fresh one-line buffer that
+            # the next per-turn flush writes OVER the full transcript.
+            return
+
         if call_id not in self._buffers:
             self._buffers[call_id] = []
 
@@ -181,8 +388,89 @@ class TranscriptService:
         
         logger.debug(
             f"Transcript turn added for call {call_id}: "
-            f"{role}: {content[:50]}..."
+            f"{role}: characters={len(content)}"
         )
+        return turn
+
+    def bind_caller_turn(self, call_id: str, turn: Optional[TranscriptTurn], *, caller_turn_order: int) -> bool:
+        """Bind the exact accumulated final object at synchronous acceptance.
+
+        Text matching is deliberately insufficient: repeated identical caller
+        utterances and coalesced queued finals must retain separate identities.
+        """
+        if (call_id in self._sealed or turn is None
+                or not any(item is turn for item in self._buffers.get(call_id, ()))
+                or turn.role != "user" or turn.is_final is False
+                or not isinstance(caller_turn_order, int) or isinstance(caller_turn_order, bool)
+                or caller_turn_order < 0):
+            return False
+        identity = f"traditional:{caller_turn_order}"
+        if turn.metadata.get("provider_item_id") not in (None, identity):
+            return False
+        turn.metadata.update(provider_item_id=identity, caller_turn_order=caller_turn_order)
+        return True
+
+    def caller_source(self, call_id: str, caller_turn_order: int) -> Optional[dict]:
+        """Resolve a traditional accepted order to one actual saved caller row."""
+        evidence = self.caller_evidence(call_id, caller_turn_order)
+        return evidence["source"] if evidence is not None else None
+
+    def caller_evidence(self, call_id: str, caller_turn_order: int) -> Optional[dict]:
+        """Resolve text and source together before any conversational cleanup."""
+        identity = f"traditional:{caller_turn_order}"
+        matches = [turn for turn in self.get_transcript_json(call_id)
+                   if turn.get("role") == "user" and turn.get("is_final") is not False
+                   and (turn.get("metadata") or {}).get("provider_item_id") == identity
+                   and (turn.get("metadata") or {}).get("caller_turn_order") == caller_turn_order]
+        if len(matches) != 1:
+            return None
+        projected = matches[0]
+        if not projected.get("content") or projected.get("effective_content_status") == "unavailable":
+            return None
+        return {"text": projected["content"], "source": {
+            "provider_item_id": identity, "caller_turn_order": caller_turn_order,
+            "revision_sha256": hashlib.sha256(projected["content"].encode("utf-8")).hexdigest(),
+        }}
+
+    def annotate_turn_revision(
+        self, call_id: str, *, turn_index: int, provider_item_id: str,
+        caller_turn_order: int, content: str,
+    ) -> bool:
+        """Retain the latest ASR revision as evidence, without rewriting speech.
+
+        Canonical consumers validate and apply this metadata, retaining the
+        original capture separately. Empty retractions are not utterances.
+        """
+        if (call_id in self._sealed or not isinstance(content, str)
+                or not isinstance(provider_item_id, str)
+                or not provider_item_id.strip() or len(provider_item_id) > 256
+                or isinstance(turn_index, bool) or not isinstance(turn_index, int) or turn_index < 0
+                or isinstance(caller_turn_order, bool) or not isinstance(caller_turn_order, int)
+                or caller_turn_order < 0):
+            return False
+        from app.domain.services.explicit_secrets import sanitize_explicit_secrets
+        originally_truncated = len(content) > 4096
+        content = sanitize_explicit_secrets(content)
+        for turn in reversed(self._buffers.get(call_id, ())):
+            if (turn.role != "user" or turn.turn_index != turn_index
+                    or turn.metadata.get("provider_item_id") != provider_item_id
+                    or turn.metadata.get("caller_turn_order") != caller_turn_order):
+                continue
+            previous = turn.metadata.get("asr_latest_revision") or {}
+            revision = previous.get("revision", 0) if isinstance(previous, dict) else 0
+            revision = revision if isinstance(revision, int) and not isinstance(revision, bool) else 0
+            turn.metadata["asr_latest_revision"] = {
+                "revision": max(0, revision) + 1,
+                "provider_item_id": provider_item_id,
+                "caller_turn_order": caller_turn_order,
+                "content": content[:4096],
+                "content_sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+                "characters": len(content),
+                "truncated": originally_truncated or len(content) > 4096,
+                "retracted": not content.strip(),
+            }
+            return True
+        return False
 
     def bind_call_identity(self, call_id: str, talklee_call_id: Optional[str]) -> None:
         """Bind call_id to talklee_call_id for transcript integrity checks."""
@@ -206,6 +494,7 @@ class TranscriptService:
     
     def get_turns(self, call_id: str) -> List[TranscriptTurn]:
         """Get all turns for a call."""
+        self._evict_failed_finalizations()
         return self._buffers.get(call_id, [])
     
     def get_transcript_text(self, call_id: str) -> str:
@@ -226,14 +515,7 @@ class TranscriptService:
         if not turns:
             return ""
         
-        lines = []
-        for turn in turns:
-            if not turn.include_in_plaintext:
-                continue
-            role_label = "User" if turn.role == "user" else "Assistant"
-            lines.append(f"{role_label}: {turn.content}")
-        
-        return "\n".join(lines)
+        return transcript_text_from_turns([turn.to_dict() for turn in turns])
     
     def get_transcript_json(self, call_id: str) -> List[Dict[str, Any]]:
         """
@@ -246,7 +528,7 @@ class TranscriptService:
             List of turn dictionaries
         """
         turns = self.get_turns(call_id)
-        return [turn.to_dict() for turn in turns]
+        return conversation_turns([turn.to_dict() for turn in turns])
     
     def get_metrics(self, call_id: str) -> Dict[str, int]:
         """
@@ -258,14 +540,14 @@ class TranscriptService:
         Returns:
             Dictionary with word counts and turn counts
         """
-        turns = self.get_turns(call_id)
-        turns_for_text = [t for t in turns if t.include_in_plaintext]
+        turns_for_text = [t for t in self.get_transcript_json(call_id)
+                          if t.get("include_in_plaintext", True) and t.get("content")]
         
         user_words = sum(
-            len(t.content.split()) for t in turns_for_text if t.role == "user"
+            len(t["content"].split()) for t in turns_for_text if t["role"] == "user"
         )
         assistant_words = sum(
-            len(t.content.split()) for t in turns_for_text if t.role == "assistant"
+            len(t["content"].split()) for t in turns_for_text if t["role"] == "assistant"
         )
         
         return {
@@ -320,213 +602,93 @@ class TranscriptService:
         }
     
     async def flush_to_database(
-        self,
-        call_id: str,
-        db_client=None,
-        tenant_id: Optional[str] = None,
-        talklee_call_id: Optional[str] = None,
-        *,
-        target_call_id: Optional[str] = None,
+        self, call_id: str, db_client=None, tenant_id: Optional[str] = None,
+        talklee_call_id: Optional[str] = None, *, target_call_id: Optional[str] = None,
         db_pool=None,
-    ) -> None:
+    ) -> bool:
+        """Save current progress under its tenant; never report a zero-row success.
+
+        Snapshot inside the lock so queued flushes cannot overwrite a later
+        revision with text captured before waiting. Failed writes keep memory
+        for the next turn/finalizer; they are not a durable recovery promise.
         """
-        Incrementally update calls.transcript with current buffer.
-
-        Day 17: Called after each completed turn to persist progress.
-        Does NOT clear the buffer (unlike save_transcript).
-
-        Args:
-            call_id: Buffer key (the voice-session UUID the transcript is
-                accumulated under).
-            db_client: Legacy postgres-adapter client (its ``.pool`` is used).
-            tenant_id: Optional tenant identifier (kept for signature/back-compat;
-                the write bypasses RLS like the hangup persister — see
-                ``_write_calls_transcript``).
-            talklee_call_id: Human-friendly call id, stamped only onto the
-                session's own row (see ``target_call_id`` note below).
-            target_call_id: The REAL ``calls.id`` to update. For outbound
-                campaign calls ``call_id`` (the voice-session UUID) does NOT
-                equal ``calls.id`` — the dialer inserted the row under its own
-                UUID keyed to the PBX channel via ``external_call_uuid`` — so a
-                ``WHERE id = call_id`` UPDATE matched ZERO rows and the
-                incremental transcript never landed. The caller resolves the
-                dialer's ``calls.id`` (from ``VoiceSession._dialer_call_id``,
-                itself the result of recording.py-style
-                ``WHERE external_call_uuid`` lookup) and passes it here. When
-                ``None`` (browser / ask_ai / standalone), we fall back to
-                ``call_id`` — the historical target, correct for those flows
-                where ``calls.id == call_id``.
-            db_pool: Explicit asyncpg pool (preferred; the pooled async path).
-        """
-        turns = self.get_turns(call_id)
-        if not turns:
-            return
-
         pool = self._resolve_pool(db_client, db_pool)
-        if pool is None:
-            logger.warning("flush_to_database: no DB pool available for %s", call_id)
-            return
+        if pool is None or not tenant_id:
+            return False
+        async with self.persistence_lock(call_id):
+            if call_id in self._sealed or not self.get_turns(call_id):
+                return False
+            try:
+                saved = await asyncio.wait_for(self._write_calls_transcript(
+                    pool, str(target_call_id or call_id), self.get_transcript_text(call_id),
+                    self.get_transcript_json(call_id),
+                    self._resolve_talklee_call_id(call_id, talklee_call_id) if not target_call_id else None,
+                    tenant_id=str(tenant_id),
+                ), timeout=3.0)
+                return bool(saved)
+            except Exception as exc:
+                logger.warning("transcript_flush_failed call=%s error_type=%s", call_id, type(exc).__name__)
+                return False
 
-        try:
-            transcript_text = self.get_transcript_text(call_id)
-            transcript_json = self.get_transcript_json(call_id)
-            resolved_talklee_call_id = self._resolve_talklee_call_id(call_id, talklee_call_id)
-
-            row_id = str(target_call_id) if target_call_id else str(call_id)
-            # Only stamp talklee_call_id on the session's OWN row. When writing
-            # to the dialer's calls row (target_call_id set) we must NOT clobber
-            # its talklee_call_id — the dialer minted that independently and the
-            # authoritative hangup persister writes transcript columns only.
-            talklee_to_write = resolved_talklee_call_id if not target_call_id else None
-
-            await self._write_calls_transcript(
-                pool, row_id, transcript_text, transcript_json, talklee_to_write,
-            )
-
-            logger.debug(
-                "Flushed transcript for call %s -> calls.id=%s: %d turns",
-                call_id, row_id, len(turns),
-            )
-
-        except Exception as e:
-            logger.warning(f"Failed to flush transcript for {call_id}: {e}")
-    
     async def save_transcript(
-        self,
-        call_id: str,
-        db_client=None,
-        tenant_id: Optional[str] = None,
-        talklee_call_id: Optional[str] = None,
-        *,
-        target_call_id: Optional[str] = None,
+        self, call_id: str, db_client=None, tenant_id: Optional[str] = None,
+        talklee_call_id: Optional[str] = None, *, target_call_id: Optional[str] = None,
         db_pool=None,
     ) -> Optional[str]:
+        """Atomically save the final call and child snapshot, retrying boundedly.
+
+        Successful commit seals and clears memory. Exhausted retries freeze and
+        retain a bounded in-memory copy for another existing finalizer attempt.
+        Eviction/process death loses unsaved text; the DB remains partial or
+        unknown, never falsely complete.
         """
-        Save accumulated transcript to database.
-
-        Performs:
-        1. Insert into transcripts table (structured)
-        2. Update calls.transcript (plain text)
-        3. Update calls.transcript_json (JSONB)
-
-        Uses the same POOLED async path as ``flush_to_database`` (no blocking
-        adapter). ``target_call_id`` follows the same semantics documented on
-        ``flush_to_database``.
-
-        Args:
-            call_id: Call identifier
-            db_client: Legacy postgres-adapter client (its ``.pool`` is used)
-            tenant_id: Optional tenant identifier
-            db_pool: Explicit asyncpg pool (preferred)
-
-        Returns:
-            Transcript ID if successful, None otherwise
-        """
-        turns = self.get_turns(call_id)
-
-        if not turns:
-            logger.warning(f"No transcript to save for call {call_id}")
-            return None
-
         pool = self._resolve_pool(db_client, db_pool)
-        if pool is None:
-            logger.error("save_transcript: no DB pool available for %s", call_id)
-            return None
+        async with self.persistence_lock(call_id):
+            self.freeze(call_id)
+            try:
+                if pool is None or not tenant_id:
+                    self.retain_failed_finalization(call_id)
+                    return None
+                row_id = str(target_call_id or call_id)
+                for attempt in range(3):
+                    try:
+                        saved = await asyncio.wait_for(self._write_calls_transcript(
+                            pool, row_id, self.get_transcript_text(call_id),
+                            self.get_transcript_json(call_id),
+                            self._resolve_talklee_call_id(call_id, talklee_call_id) if not target_call_id else None,
+                            tenant_id=str(tenant_id), final=True, metrics=self.get_metrics(call_id),
+                        ), timeout=2.0)
+                        if saved:
+                            self.seal(call_id)
+                            return saved
+                        if not self.get_turns(call_id):
+                            self.seal(call_id)
+                            return None
+                        break  # missing/foreign row is not a transient write error
+                    except Exception as exc:
+                        logger.warning("transcript_final_save_failed call=%s attempt=%d error_type=%s",
+                                       call_id, attempt + 1, type(exc).__name__)
+                        if attempt < 2:
+                            await asyncio.sleep(0.05 * (attempt + 1))
+                self.retain_failed_finalization(call_id)
+                try:
+                    from app.core.db_utils import acquire_with_tenant
+                    async def mark_failed():
+                        async with acquire_with_tenant(pool, str(tenant_id)) as conn:
+                            await conn.execute(
+                                "UPDATE calls SET transcript_save_state='failed' "
+                                "WHERE id=$1::uuid AND tenant_id=$2::uuid AND transcript_save_state<>'complete'",
+                                row_id, str(tenant_id),
+                            )
+                    await asyncio.wait_for(mark_failed(), timeout=1.0)
+                except Exception:
+                    pass  # prior partial/unknown is already the truthful durable floor
+                return None
+            finally:
+                # Cancellation also retains only bounded, frozen process memory.
+                if self._buffers.get(call_id):
+                    self.retain_failed_finalization(call_id)
 
-        try:
-            # Get transcript data
-            transcript_text = self.get_transcript_text(call_id)
-            transcript_json = self.get_transcript_json(call_id)
-            metrics = self.get_metrics(call_id)
-            resolved_talklee_call_id = self._resolve_talklee_call_id(call_id, talklee_call_id)
-            turns_jsonb = json.dumps(transcript_json)
-            row_id = str(target_call_id) if target_call_id else str(call_id)
-
-            transcript_id = await self._insert_transcript_row(
-                pool,
-                call_id=str(call_id),
-                tenant_id=tenant_id,
-                turns_jsonb=turns_jsonb,
-                transcript_text=transcript_text,
-                metrics=metrics,
-                talklee_call_id=resolved_talklee_call_id,
-            )
-
-            # Step 2 & 3: Update calls table with transcript
-            talklee_to_write = resolved_talklee_call_id if not target_call_id else None
-            await self._write_calls_transcript(
-                pool, row_id, transcript_text, transcript_json, talklee_to_write,
-            )
-
-            logger.info(
-                f"Transcript saved for call {call_id}: "
-                f"{metrics['turn_count']} turns, {metrics['word_count']} words"
-            )
-
-            return transcript_id
-
-        except Exception as e:
-            logger.error(f"Failed to save transcript for call {call_id}: {e}")
-            return None
-
-    async def _insert_transcript_row(
-        self,
-        pool,
-        *,
-        call_id: str,
-        tenant_id: Optional[str],
-        turns_jsonb: str,
-        transcript_text: str,
-        metrics: Dict[str, int],
-        talklee_call_id: Optional[str],
-    ) -> Optional[str]:
-        """INSERT a structured ``transcripts`` row (pooled async). Retries once
-        without ``talklee_call_id`` on a fresh transaction if that column is
-        absent (older schemas) — preserving the legacy fallback behaviour."""
-        from app.core.db_utils import acquire_with_tenant
-
-        base_cols = (
-            "call_id, tenant_id, turns, full_text, word_count, turn_count, "
-            "user_word_count, assistant_word_count"
-        )
-        base_args = [
-            call_id,
-            tenant_id,
-            turns_jsonb,
-            transcript_text,
-            metrics["word_count"],
-            metrics["turn_count"],
-            metrics["user_word_count"],
-            metrics["assistant_word_count"],
-        ]
-
-        async def _do_insert(include_talklee: bool):
-            if include_talklee:
-                cols = base_cols + ", talklee_call_id"
-                args = base_args + [talklee_call_id]
-            else:
-                cols = base_cols
-                args = base_args
-            # $3 (turns) is jsonb; the rest bind positionally in order.
-            placeholders = ", ".join(
-                f"${i + 1}::jsonb" if i == 2 else f"${i + 1}"
-                for i in range(len(args))
-            )
-            sql = (
-                f"INSERT INTO transcripts ({cols}) VALUES ({placeholders}) "
-                f"RETURNING id"
-            )
-            async with acquire_with_tenant(pool, None) as conn:
-                row = await conn.fetchrow(sql, *args)
-            return row["id"] if row else None
-
-        try:
-            return await _do_insert(include_talklee=bool(talklee_call_id))
-        except Exception as insert_error:
-            if talklee_call_id and "talklee_call_id" in str(insert_error):
-                return await _do_insert(include_talklee=False)
-            raise
-    
     def clear_buffer(self, call_id: str) -> None:
         """
         Clear transcript buffer for a call.
@@ -536,13 +698,22 @@ class TranscriptService:
         Args:
             call_id: Call identifier
         """
+        self._failed_finalizations.pop(call_id, None)
         if call_id in self._buffers:
             del self._buffers[call_id]
             self._call_bindings.pop(call_id, None)
             logger.debug(f"Transcript buffer cleared for call {call_id}")
     
+    def seal(self, call_id: str) -> None:
+        """Mark a call's transcript final and drop its buffer (see _sealed)."""
+        self.clear_buffer(call_id)
+        self.freeze(call_id)
+
     @classmethod
     def clear_all_buffers(cls) -> None:
         """Clear all transcript buffers (for testing/cleanup)."""
         cls._buffers.clear()
         cls._call_bindings.clear()
+        cls._sealed.clear()
+        cls._failed_finalizations.clear()
+        cls._persist_locks.clear()

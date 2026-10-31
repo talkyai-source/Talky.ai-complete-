@@ -1,16 +1,16 @@
 "use client";
 
 /**
- * Campaign knowledge panel — the vectorless-RAG knowledge tree.
+ * Campaign knowledge panel — source sections and a source-search diagnostic.
  *
  * Upload a .md/.txt doc; the backend parses it into a heading tree, LLM-enriches
- * each node, and retrieves it into the agent's prompt on calls. This panel lets
+ * each node. On calls, the AI selects and reads authored source sections. This panel lets
  * the owner:
- *   - "Test a question" → see exactly which node(s) the retriever returns,
+ *   - "Test a question" → inspect source-search results, not live AI selection,
  *   - search/filter the tree, expand/collapse all,
  *   - tune nodes: enable/disable, pin (priority), and edit heading / spoken
  *     answer / content inline,
- *   - watch which nodes get used (hit_count) + the active retrieval mode.
+ *   - inspect recorded search hits (hit_count) and source availability.
  *
  * Behind CAMPAIGN_KNOWLEDGE_ENABLED on the backend; when off the GET 404s and
  * this renders nothing.
@@ -25,7 +25,7 @@ import {
 
 import { Button } from "@/components/ui/button";
 import {
-    api, CampaignKnowledge, KnowledgeHit, KnowledgeNode, KnowledgeSource,
+    api, CampaignKnowledge, KnowledgeTestResponse, KnowledgeNode, KnowledgeSource,
 } from "@/lib/api";
 import { ApiClientError } from "@/lib/http-client";
 
@@ -36,11 +36,11 @@ type NodeEdit = { heading: string; voice_answer: string; content: string };
 function modeLook(mode: string | null | undefined): { label: string; desc: string; cls: string } {
     switch (mode) {
         case "inline":
-            return { label: "Inline", desc: "Small enough that the whole tree rides in every call's prompt.", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" };
+            return { label: "AI-selected sources", desc: "On calls, the AI selects source sections from the campaign's knowledge catalog and reads their content.", cls: "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300" };
         case "map_retrieve":
-            return { label: "Map + retrieve", desc: "The agent always sees the outline; details are fetched per question.", cls: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" };
+            return { label: "AI-selected sources", desc: "On calls, the AI selects source sections from the campaign's knowledge catalog and reads their content.", cls: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" };
         case "retrieve":
-            return { label: "Retrieve", desc: "Large KB — the best-matching sections are searched in per question.", cls: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300" };
+            return { label: "AI-selected sources", desc: "On calls, the AI selects source sections from the campaign's knowledge catalog and reads their content.", cls: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300" };
         default:
             return { label: "No knowledge", desc: "Upload a document to give this campaign a knowledge base.", cls: "bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300" };
     }
@@ -80,6 +80,7 @@ function filterTree(nodes: KnowledgeNode[], term: string): KnowledgeNode[] {
 
 type TreeNodeProps = {
     node: KnowledgeNode;
+    readOnly: boolean;
     collapsed: Set<string>;
     busy: Set<string>;
     editingId: string | null;
@@ -93,7 +94,7 @@ type TreeNodeProps = {
 };
 
 function KnowledgeTreeNode(props: TreeNodeProps) {
-    const { node, collapsed, busy, editingId, forceExpand } = props;
+    const { node, readOnly, collapsed, busy, editingId, forceExpand } = props;
     const hasChildren = node.children.length > 0;
     const isCollapsed = !forceExpand && collapsed.has(node.id);
     const isBusy = busy.has(node.id);
@@ -102,6 +103,10 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
 
     const [draft, setDraft] = useState<NodeEdit>({ heading: "", voice_answer: "", content: "" });
     useEffect(() => {
+        // Seed the editable draft from the live node when edit mode is entered;
+        // after that the draft is user-typed local state, so it can't be
+        // computed inline during render without clobbering keystrokes.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- initializes edit-mode draft on isEditing transition, not derivable during render
         if (isEditing) setDraft({
             heading: node.heading ?? "",
             voice_answer: node.voice_answer ?? "",
@@ -118,27 +123,27 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                     <button
                         type="button"
                         onClick={() => hasChildren && props.onToggleCollapse(node.id)}
-                        className={`mt-0.5 shrink-0 text-muted-foreground ${hasChildren ? "" : "invisible"}`}
+                        className={`-mt-0.5 -mb-1 -ml-1 -mr-1 shrink-0 p-1 text-muted-foreground ${hasChildren ? "" : "invisible"}`}
                         aria-label={isCollapsed ? "Expand" : "Collapse"}
                     >
                         {isCollapsed ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                     </button>
 
                     <div className="min-w-0 flex-1">
-                        {!isEditing && (
+                        {(!isEditing || readOnly) && (
                             <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-sm font-medium text-gray-900 dark:text-zinc-100">{node.heading}</span>
-                                {isPinned && <span title="Pinned (prioritised in retrieval)"><Pin className="h-3 w-3 text-amber-500 fill-amber-500" /></span>}
+                                {isPinned && <span title="Pinned (source-search priority)"><Pin className="h-3 w-3 text-amber-500 fill-amber-500" /></span>}
                                 {node.hit_count > 0 && (
-                                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.5 text-[10px] font-medium text-orange-700 dark:text-orange-300" title={`Used in ${node.hit_count} call turn(s)`}>
+                                    <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 dark:bg-orange-950/60 px-1.5 py-0.5 text-[10px] font-medium text-orange-700 dark:text-orange-300" title={`Recorded source-search hits: ${node.hit_count}`}>
                                         <TrendingUp className="h-2.5 w-2.5" />{node.hit_count}
                                     </span>
                                 )}
                             </div>
                         )}
 
-                        {!isEditing && answer && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-3">{answer}</p>}
-                        {!isEditing && node.keywords && node.keywords.length > 0 && (
+                        {(!isEditing || readOnly) && answer && <p className="mt-0.5 text-xs text-muted-foreground line-clamp-3">{answer}</p>}
+                        {(!isEditing || readOnly) && node.keywords && node.keywords.length > 0 && (
                             <div className="mt-1 flex flex-wrap gap-1">
                                 {node.keywords.slice(0, 8).map((k) => (
                                     <span key={k} className="rounded bg-gray-100 dark:bg-white/10 px-1.5 py-0.5 text-[10px] text-gray-600 dark:text-zinc-400">{k}</span>
@@ -146,7 +151,7 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                             </div>
                         )}
 
-                        {isEditing && (
+                        {isEditing && !readOnly && (
                             <div className="mt-1.5 space-y-1.5">
                                 <input
                                     value={draft.heading}
@@ -158,14 +163,14 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                                     value={draft.voice_answer}
                                     onChange={(e) => setDraft((d) => ({ ...d, voice_answer: e.target.value }))}
                                     rows={2}
-                                    placeholder="Spoken answer — what the agent says for this topic"
+                                    placeholder="Saved answer note (for reference, not a live-call script)"
                                     className="w-full rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1.5 text-xs text-gray-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                 />
                                 <textarea
                                     value={draft.content}
                                     onChange={(e) => setDraft((d) => ({ ...d, content: e.target.value }))}
                                     rows={3}
-                                    placeholder="Full content (used for retrieval matching)"
+                                    placeholder="Source content (read when the AI selects this section)"
                                     className="w-full rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-2 py-1.5 text-xs text-muted-foreground focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                 />
                                 <div className="flex gap-1.5">
@@ -180,11 +185,14 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
                         )}
                     </div>
 
-                    {!isEditing && (
-                        <div className="flex shrink-0 items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
-                            <button type="button" onClick={() => props.onStartEdit(node)} className="rounded p-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
-                            <button type="button" onClick={() => props.onTogglePin(node)} disabled={isBusy} className={`rounded p-1 hover:bg-gray-100 dark:hover:bg-white/10 ${isPinned ? "text-amber-500" : "text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100"}`} title={isPinned ? "Unpin" : "Pin (prioritise)"}><Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-amber-500" : ""}`} /></button>
-                            <button type="button" onClick={() => props.onToggleEnabled(node)} disabled={isBusy} className="rounded p-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title={node.enabled ? "Disable" : "Enable"}>
+                    {!readOnly && !isEditing && (
+                        /* Always visible (2026-10): hover-revealed actions were
+                           invisible to touch users, who could only tap them blind.
+                           p-2/-m-1 = 30px hit boxes occupying the original 22px. */
+                        <div className="flex shrink-0 items-center gap-0.5">
+                            <button type="button" onClick={() => props.onStartEdit(node)} className="rounded p-2 -m-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
+                            <button type="button" onClick={() => props.onTogglePin(node)} disabled={isBusy} className={`rounded p-2 -m-1 hover:bg-gray-100 dark:hover:bg-white/10 ${isPinned ? "text-amber-500" : "text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100"}`} title={isPinned ? "Unpin" : "Pin (source-search priority)"}><Pin className={`h-3.5 w-3.5 ${isPinned ? "fill-amber-500" : ""}`} /></button>
+                            <button type="button" onClick={() => props.onToggleEnabled(node)} disabled={isBusy} className="rounded p-2 -m-1 text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100 hover:bg-gray-100 dark:hover:bg-white/10" title={node.enabled ? "Disable" : "Enable"}>
                                 {isBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : node.enabled ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
                             </button>
                         </div>
@@ -203,9 +211,22 @@ function KnowledgeTreeNode(props: TreeNodeProps) {
     );
 }
 
-export type KnowledgePanelProps = { campaignId: string };
+export type KnowledgePanelProps = {
+    campaignId: string;
+    /** Readers can inspect and test knowledge without seeing mutation controls. */
+    readOnly?: boolean;
+};
 
-export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
+export function KnowledgePanel(props: KnowledgePanelProps) {
+    return (
+        <KnowledgePanelScope
+            key={`${props.campaignId}:${props.readOnly ? "read-only" : "manage"}`}
+            {...props}
+        />
+    );
+}
+
+function KnowledgePanelScope({ campaignId, readOnly = false }: KnowledgePanelProps) {
     const [data, setData] = useState<CampaignKnowledge | null>(null);
     const [loading, setLoading] = useState(true);
     const [disabled, setDisabled] = useState(false);
@@ -217,31 +238,64 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
     const [deletingSourceId, setDeletingSourceId] = useState<string | null>(null);
     const [search, setSearch] = useState("");
     const fileRef = useRef<HTMLInputElement>(null);
+    const requestGeneration = useRef(0);
+    const activeCampaignId = useRef(campaignId);
 
     // Test-a-question
     const [testQuery, setTestQuery] = useState("");
     const [testing, setTesting] = useState(false);
-    const [testHits, setTestHits] = useState<KnowledgeHit[] | null>(null);
+    const [testResult, setTestResult] = useState<KnowledgeTestResponse | null>(null);
+    const testGeneration = useRef(0);
+
+    const clearTest = () => {
+        testGeneration.current += 1;
+        setTestResult(null);
+        setTesting(false);
+    };
 
     const refresh = useCallback(async () => {
+        const requestedCampaignId = campaignId;
+        const generation = ++requestGeneration.current;
         try {
             const res = await api.getCampaignKnowledge(campaignId);
+            if (
+                generation !== requestGeneration.current
+                || requestedCampaignId !== activeCampaignId.current
+            ) return;
             setData(res);
+            setDisabled(false);
             setError(null);
         } catch (err) {
+            if (
+                generation !== requestGeneration.current
+                || requestedCampaignId !== activeCampaignId.current
+            ) return;
             if (err instanceof ApiClientError && err.status === 404) { setDisabled(true); return; }
             setError(err instanceof Error ? err.message : "Failed to load knowledge");
         } finally {
-            setLoading(false);
+            if (
+                generation === requestGeneration.current
+                && requestedCampaignId === activeCampaignId.current
+            ) setLoading(false);
         }
     }, [campaignId]);
 
-    useEffect(() => { void refresh(); }, [refresh]);
+    useEffect(() => {
+        activeCampaignId.current = campaignId;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- async knowledge fetch on mount/campaignId change, not derivable during render
+        void refresh();
+        return () => {
+            requestGeneration.current += 1;
+            testGeneration.current += 1;
+        };
+    }, [campaignId, refresh]);
 
     const markBusy = (id: string, on: boolean) =>
         setBusy((prev) => { const n = new Set(prev); if (on) n.add(id); else n.delete(id); return n; });
 
     const onUpload = async (file: File) => {
+        if (readOnly) return;
+        clearTest();
         setUploading(true); setError(null);
         try { await api.uploadCampaignKnowledge(campaignId, file); await refresh(); }
         catch (err) { setError(err instanceof Error ? err.message : "Upload failed"); }
@@ -249,7 +303,8 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
     };
 
     const mutateNode = async (node: KnowledgeNode, patch: Partial<KnowledgeNode>) => {
-        if (!data) return;
+        if (readOnly || !data) return;
+        clearTest();
         const prevTree = data.tree;
         setData({ ...data, tree: patchNode(data.tree, node.id, patch) });
         markBusy(node.id, true);
@@ -271,6 +326,8 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
     };
 
     const onDeleteSource = async (source: KnowledgeSource) => {
+        if (readOnly) return;
+        clearTest();
         setDeletingSourceId(source.id); setError(null);
         try { await api.deleteKnowledgeSource(campaignId, source.id); await refresh(); }
         catch (err) { setError(err instanceof Error ? err.message : "Delete failed"); }
@@ -279,11 +336,17 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
 
     const runTest = async () => {
         const q = testQuery.trim();
-        if (!q) return;
-        setTesting(true); setTestHits(null); setError(null);
-        try { const res = await api.testCampaignKnowledge(campaignId, q, 3); setTestHits(res.hits); }
-        catch (err) { setError(err instanceof Error ? err.message : "Test failed"); }
-        finally { setTesting(false); }
+        if (!q || testing || uploading || busy.size > 0 || deletingSourceId) return;
+        const generation = ++testGeneration.current;
+        setTesting(true); setTestResult(null); setError(null);
+        try {
+            const res = await api.testCampaignKnowledge(campaignId, q, 3);
+            if (generation === testGeneration.current) setTestResult(res);
+        } catch (err) {
+            if (generation === testGeneration.current) setError(err instanceof Error ? err.message : "Test failed");
+        } finally {
+            if (generation === testGeneration.current) setTesting(false);
+        }
     };
 
     const toggleCollapse = (id: string) =>
@@ -297,7 +360,7 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
 
     return (
         <div className="rounded-2xl border border-gray-200 dark:border-white/10 bg-white dark:bg-white/5 shadow-sm overflow-hidden">
-            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-gray-200 dark:border-white/10">
+            <div className="flex flex-col gap-2 px-4 py-3 border-b border-gray-200 dark:border-white/10 sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-2 min-w-0">
                     <BookOpen className="h-4 w-4 text-emerald-500 shrink-0" />
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Knowledge base</h3>
@@ -306,11 +369,15 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                 </div>
                 <div className="flex items-center gap-2">
                     {error && <span className="text-xs text-red-600 dark:text-red-400 truncate max-w-[30%]" title={error}>{error}</span>}
-                    <input ref={fileRef} type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
-                    <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading} className="h-8 px-2.5 text-xs">
-                        {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
-                        {uploading ? "Processing…" : "Upload .md / .txt"}
-                    </Button>
+                    {!readOnly && (
+                        <>
+                            <input ref={fileRef} type="file" accept=".md,.txt,text/markdown,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) void onUpload(f); }} />
+                            <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()} disabled={uploading} className="h-8 w-full shrink-0 px-2.5 text-xs sm:w-auto">
+                                {uploading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Upload className="h-3.5 w-3.5" />}
+                                {uploading ? "Processing…" : "Upload .md / .txt"}
+                            </Button>
+                        </>
+                    )}
                 </div>
             </div>
 
@@ -320,37 +387,40 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                 <div className="px-4 py-8 text-center">
                     <BookOpen className="mx-auto h-8 w-8 text-muted-foreground/40" />
                     <p className="mt-2 text-sm font-medium text-gray-900 dark:text-zinc-100">No knowledge yet</p>
-                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">Upload a Markdown or text doc — pricing, FAQs, services. We&apos;ll parse it into sections, write a spoken answer for each, and the agent will use it on calls.</p>
+                    <p className="mt-1 text-xs text-muted-foreground max-w-md mx-auto">{readOnly ? "No knowledge has been added to this campaign." : "Upload a Markdown or text doc — pricing, FAQs, services. We'll organize it into source sections for the AI to select and read during calls."}</p>
                 </div>
             ) : (
                 <div className="divide-y divide-gray-200 dark:divide-white/10">
                     {/* Test a question */}
                     <div className="px-4 py-3 bg-gray-50/60 dark:bg-white/[0.02]">
+                        <p className="mb-2 text-xs text-muted-foreground">On calls, the AI selects and reads source sections. The source-search diagnostic below does not run the AI.</p>
                         <div className="flex items-center gap-2">
                             <input
                                 value={testQuery}
-                                onChange={(e) => setTestQuery(e.target.value)}
+                                onChange={(e) => { clearTest(); setTestQuery(e.target.value); }}
                                 onKeyDown={(e) => { if (e.key === "Enter") void runTest(); }}
-                                placeholder="Test a question — e.g. “how much does it cost?”"
+                                placeholder="Test a question with source search — e.g. “how much does it cost?”"
                                 className="flex-1 rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
-                            <Button size="sm" onClick={runTest} disabled={testing || !testQuery.trim()} className="h-8 px-3 text-xs">
+                            <Button size="sm" onClick={runTest} disabled={testing || uploading || busy.size > 0 || !!deletingSourceId || !testQuery.trim()} className="h-8 px-3 text-xs">
                                 {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} Test
                             </Button>
                         </div>
-                        {testHits !== null && (
-                            <div className="mt-2 space-y-1.5">
-                                {testHits.length === 0 ? (
-                                    <p className="text-xs text-muted-foreground">No match — the agent would say it&apos;ll follow up. Try rephrasing, or add/enable a section for this.</p>
-                                ) : testHits.map((h, i) => (
-                                    <div key={h.id} className="rounded-md border border-gray-200 dark:border-white/10 bg-white dark:bg-zinc-900 px-2.5 py-1.5">
-                                        <div className="flex items-center gap-2">
-                                            <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-emerald-100 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">{i + 1}</span>
-                                            <span className="text-xs font-medium text-gray-900 dark:text-zinc-100">{h.heading}</span>
-                                        </div>
-                                        {(h.voice_answer || h.summary) && <p className="mt-0.5 pl-6 text-xs text-muted-foreground">{h.voice_answer || h.summary}</p>}
+                        {testResult !== null && (
+                            <div className="mt-2 space-y-1.5" role="region" aria-label="Knowledge test result">
+                                <p className="text-xs font-medium">{testResult.evidence.status === "matched" ? "Source passages found" : "No strong source-search match"}</p>
+                                {testResult.evidence.status === "weak_match" && <p className="text-xs text-muted-foreground">Source search found related passages; review their relevance to your question.</p>}
+                                {testResult.evidence.status === "no_match" && <p className="text-xs text-muted-foreground">No source passage matched this search. This does not determine which sections the AI would select.</p>}
+                                {testResult.evidence.passages.map((passage, i) => (
+                                    <div key={`${passage.node_id}:${i}`} className="rounded-md border border-gray-200 dark:border-white/10 bg-white dark:bg-zinc-900 px-2.5 py-1.5">
+                                        <p className="text-xs whitespace-pre-wrap text-gray-900 dark:text-zinc-100">{passage.text}</p>
+                                        <p className="mt-1 text-[11px] text-muted-foreground break-all">
+                                            Source: {passage.source_id ?? "unavailable"} · Revision: {passage.source_version ?? "unavailable"}
+                                            <br />Section: {passage.node_id || "unavailable"} · Version: {passage.version ?? "unavailable"}
+                                        </p>
                                     </div>
                                 ))}
+                                <p className="text-xs text-muted-foreground">Source-search diagnostic only. Review whether the source answers your question; this does not test AI section selection, a generated answer, or a call.</p>
                             </div>
                         )}
                     </div>
@@ -367,9 +437,11 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                                         <span className={`inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-medium ${look.cls}`}>{look.spin && <Loader2 className="h-2.5 w-2.5 animate-spin" />}{s.status}</span>
                                         <span className="text-muted-foreground">~{s.token_count} tokens</span>
                                         {s.status === "failed" && s.error && <span className="inline-flex items-center gap-1 text-red-600 dark:text-red-400 truncate" title={s.error}><AlertCircle className="h-3 w-3" /> {s.error}</span>}
-                                        <button type="button" onClick={() => void onDeleteSource(s)} disabled={deletingSourceId === s.id} className="ml-auto rounded p-1 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40" title="Delete this source and its sections">
-                                            {deletingSourceId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
-                                        </button>
+                                        {!readOnly && (
+                                            <button type="button" onClick={() => void onDeleteSource(s)} disabled={deletingSourceId === s.id} className="ml-auto rounded p-2 -my-1 -mr-1 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/40" title="Delete this source and its sections">
+                                                {deletingSourceId === s.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                                            </button>
+                                        )}
                                     </div>
                                 );
                             })}
@@ -389,8 +461,8 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                                         className="w-full rounded-md border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 pl-7 pr-2 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-emerald-500"
                                     />
                                 </div>
-                                <button type="button" onClick={() => setCollapsed(new Set(allIds(data.tree)))} className="inline-flex items-center gap-1 rounded p-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Collapse all"><ChevronsDownUp className="h-3.5 w-3.5" /></button>
-                                <button type="button" onClick={() => setCollapsed(new Set())} className="inline-flex items-center gap-1 rounded p-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Expand all"><ChevronsUpDown className="h-3.5 w-3.5" /></button>
+                                <button type="button" onClick={() => setCollapsed(new Set(allIds(data.tree)))} className="inline-flex items-center gap-1 rounded p-2 -m-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Collapse all"><ChevronsDownUp className="h-3.5 w-3.5" /></button>
+                                <button type="button" onClick={() => setCollapsed(new Set())} className="inline-flex items-center gap-1 rounded p-2 -m-1 text-xs text-muted-foreground hover:text-gray-900 dark:hover:text-zinc-100" title="Expand all"><ChevronsUpDown className="h-3.5 w-3.5" /></button>
                             </div>
                             {visibleTree.length === 0 ? (
                                 <p className="px-2 py-4 text-xs text-muted-foreground">No sections match “{search}”.</p>
@@ -398,6 +470,7 @@ export function KnowledgePanel({ campaignId }: KnowledgePanelProps) {
                                 <KnowledgeTreeNode
                                     key={node.id}
                                     node={node}
+                                    readOnly={readOnly}
                                     collapsed={collapsed}
                                     busy={busy}
                                     editingId={editingId}

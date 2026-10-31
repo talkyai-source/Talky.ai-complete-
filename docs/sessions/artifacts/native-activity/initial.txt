@@ -1,0 +1,90 @@
+FFFFFFFF........................                                         [100%]
+================================== FAILURES ===================================
+_ test_current_caller_and_completed_response_are_not_classified_inactive[openai] _
+tests\unit\test_native_caller_activity.py:81: in test_current_caller_and_completed_response_are_not_classified_inactive
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 11, 777905) > datetime.datetime(2026, 10, 5, 19, 41, 11, 777905)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 11, 777905) = CallSession(call_id='ag04-synthetic-0566fce9658d40219640af5e6c4d42c3', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-0566fce9658d40219640af5e6c4d42c3', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC8075A00>.session
+_ test_current_caller_and_completed_response_are_not_classified_inactive[xai] _
+tests\unit\test_native_caller_activity.py:81: in test_current_caller_and_completed_response_are_not_classified_inactive
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 13, 329506) > datetime.datetime(2026, 10, 5, 19, 41, 13, 329506)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 13, 329506) = CallSession(call_id='ag04-synthetic-3d72ea7bc521446c80f1f0724c439107', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-3d72ea7bc521446c80f1f0724c439107', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC80E3020>.session
+_________ test_nonempty_current_correction_refreshes_activity[openai] _________
+tests\unit\test_native_caller_activity.py:90: in test_nonempty_current_correction_refreshes_activity
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 13, 381262) > datetime.datetime(2026, 10, 5, 19, 41, 13, 381262)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 13, 381262) = CallSession(call_id='ag04-synthetic-0f0947d125ec423ba97750a5c47e4997', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-0f0947d125ec423ba97750a5c47e4997', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC81E0C20>.session
+__________ test_nonempty_current_correction_refreshes_activity[xai] ___________
+tests\unit\test_native_caller_activity.py:90: in test_nonempty_current_correction_refreshes_activity
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 13, 424672) > datetime.datetime(2026, 10, 5, 19, 41, 13, 424672)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 13, 424672) = CallSession(call_id='ag04-synthetic-6f0319ce29a7494eb963ebb0f90bdc64', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-6f0319ce29a7494eb963ebb0f90bdc64', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC822CE30>.session
+__ test_legacy_unanchored_admitted_final_uses_same_activity_boundary[openai] __
+tests\unit\test_native_caller_activity.py:99: in test_legacy_unanchored_admitted_final_uses_same_activity_boundary
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 13, 476650) > datetime.datetime(2026, 10, 5, 19, 41, 13, 476650)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 13, 476650) = CallSession(call_id='ag04-synthetic-f2a2bd898a224d3c8d3c1096ed5b6b6d', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-f2a2bd898a224d3c8d3c1096ed5b6b6d', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC81806B0>.session
+___ test_legacy_unanchored_admitted_final_uses_same_activity_boundary[xai] ____
+tests\unit\test_native_caller_activity.py:99: in test_legacy_unanchored_admitted_final_uses_same_activity_boundary
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 13, 517566) > datetime.datetime(2026, 10, 5, 19, 41, 13, 517566)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 13, 517566) = CallSession(call_id='ag04-synthetic-5902485bc402422ca87753e42a93d182', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-5902485bc402422ca87753e42a93d182', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC8180C20>.session
+_________ test_real_activity_cannot_extend_absolute_duration[openai] __________
+tests\unit\test_native_caller_activity.py:108: in test_real_activity_cannot_extend_absolute_duration
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 13, 553168) > datetime.datetime(2026, 10, 5, 19, 41, 13, 553168)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 13, 553168) = CallSession(call_id='ag04-synthetic-f9f56e22802f46e4b8a0be6c912cbcdc', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-f9f56e22802f46e4b8a0be6c912cbcdc', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC80C37D0>.session
+___________ test_real_activity_cannot_extend_absolute_duration[xai] ___________
+tests\unit\test_native_caller_activity.py:108: in test_real_activity_cannot_extend_absolute_duration
+    assert native.session.last_activity_at > old
+E   AssertionError: assert datetime.datetime(2026, 10, 5, 19, 41, 13, 598933) > datetime.datetime(2026, 10, 5, 19, 41, 13, 598933)
+E    +  where datetime.datetime(2026, 10, 5, 19, 41, 13, 598933) = CallSession(call_id='ag04-synthetic-0049bac94c03483db2c271b1af240264', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)).last_activity_at
+E    +    where CallSession(call_id='ag04-synthetic-0049bac94c03483db2c271b1af240264', campaign_id='synthetic-campaign', lead_id='synt...declined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=True, line_phone=None)) = <tests.qualification.ag04_native.NativeReplay object at 0x000001DFC824F530>.session
+============================== warnings summary ===============================
+tests/unit/test_native_caller_activity.py: 32 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\native-activity-20261006\backend\tests\unit\test_native_caller_activity.py:30: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    old = datetime.utcnow() - timedelta(seconds=301)
+
+tests/unit/test_native_caller_activity.py: 26 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\native-activity-20261006\backend\app\domain\services\transcript_service.py:372: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_native_caller_activity.py::test_nonempty_current_correction_refreshes_activity[openai]
+tests/unit/test_native_caller_activity.py::test_nonempty_current_correction_refreshes_activity[xai]
+tests/unit/test_native_caller_activity.py::test_current_retraction_does_not_prolong_inactivity[openai]
+tests/unit/test_native_caller_activity.py::test_current_retraction_does_not_prolong_inactivity[xai]
+tests/unit/test_native_caller_activity.py::test_duplicate_provider_final_does_not_prolong_inactivity[openai]
+tests/unit/test_native_caller_activity.py::test_duplicate_provider_final_does_not_prolong_inactivity[xai]
+tests/unit/test_native_caller_activity.py::test_older_revision_does_not_prolong_inactivity[openai]
+tests/unit/test_native_caller_activity.py::test_older_revision_does_not_prolong_inactivity[xai]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\native-activity-20261006\backend\tests\unit\test_native_caller_activity.py:59: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    old = datetime.utcnow() - timedelta(seconds=301)
+
+tests/unit/test_native_caller_activity.py::test_real_activity_cannot_extend_absolute_duration[openai]
+tests/unit/test_native_caller_activity.py::test_real_activity_cannot_extend_absolute_duration[xai]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\native-activity-20261006\backend\tests\unit\test_native_caller_activity.py:105: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    native.session.started_at = datetime.utcnow() - timedelta(seconds=601)
+
+tests/unit/test_native_caller_activity.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\native-activity-20261006\backend\app\domain\models\session.py:229: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    elapsed = (datetime.utcnow() - self.last_activity_at).total_seconds()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_native_caller_activity.py::test_current_caller_and_completed_response_are_not_classified_inactive[openai]
+FAILED tests/unit/test_native_caller_activity.py::test_current_caller_and_completed_response_are_not_classified_inactive[xai]
+FAILED tests/unit/test_native_caller_activity.py::test_nonempty_current_correction_refreshes_activity[openai]
+FAILED tests/unit/test_native_caller_activity.py::test_nonempty_current_correction_refreshes_activity[xai]
+FAILED tests/unit/test_native_caller_activity.py::test_legacy_unanchored_admitted_final_uses_same_activity_boundary[openai]
+FAILED tests/unit/test_native_caller_activity.py::test_legacy_unanchored_admitted_final_uses_same_activity_boundary[xai]
+FAILED tests/unit/test_native_caller_activity.py::test_real_activity_cannot_extend_absolute_duration[openai]
+FAILED tests/unit/test_native_caller_activity.py::test_real_activity_cannot_extend_absolute_duration[xai]
+8 failed, 24 passed, 78 warnings in 21.88s

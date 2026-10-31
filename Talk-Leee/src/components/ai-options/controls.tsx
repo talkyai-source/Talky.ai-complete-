@@ -8,6 +8,7 @@
  */
 import { useCallback, useId, useRef } from "react";
 import { motion } from "framer-motion";
+import { InfoTip } from "@/components/ui/info-tip";
 
 export const ACCENT = "#10b981"; // single theme accent (emerald)
 
@@ -27,11 +28,18 @@ function arcPath(cx: number, cy: number, r: number, from: number, to: number) {
 
 export function RadialKnob({
     label, value, min, max, step, onChange,
-    color = ACCENT, format, hint, size = 112,
+    color = ACCENT, format, hint, size = 112, tip,
 }: {
     label: string; value: number; min: number; max: number; step: number;
     onChange: (v: number) => void; color?: string;
     format?: (v: number) => string; hint?: string; size?: number;
+    /**
+     * goals.md §8 — an explanation of what this dial does, shown next to the
+     * hint. A knob labelled "Temp" with a range of 0-2 is meaningless to
+     * anyone who has not used an LLM API before, and guessing is expensive
+     * here: it changes what every future call sounds like.
+     */
+    tip?: React.ReactNode;
 }) {
     const ref = useRef<SVGSVGElement | null>(null);
     const cx = 50, cy = 50, r = 38, START = -135, END = 135;
@@ -52,7 +60,7 @@ export function RadialKnob({
         let deg = (Math.atan2(dx, -dy) * 180) / Math.PI;
         deg = Math.min(END, Math.max(START, deg));
         onChange(clampSnap(min + ((deg - START) / (END - START)) * (max - min)));
-    }, [onChange, clampSnap, min, max]);
+    }, [onChange, clampSnap, min, max, START, END]);
 
     const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
         (e.target as Element).setPointerCapture?.(e.pointerId);
@@ -72,12 +80,14 @@ export function RadialKnob({
     const gid = useId();
 
     return (
-        <div className="flex flex-col items-center gap-1 select-none text-foreground">
+        <div className="flex w-full min-w-0 flex-col items-center gap-1 select-none text-foreground">
             <svg
                 ref={ref} width={size} height={size} viewBox="0 0 100 100"
-                role="slider" tabIndex={0} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value} aria-label={label}
+                role="slider" tabIndex={0} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value}
+                aria-valuetext={hint ? `${display} (${hint})` : display} aria-label={label}
                 onPointerDown={onPointerDown} onPointerMove={onPointerMove} onKeyDown={onKeyDown}
-                className="cursor-pointer touch-none text-foreground outline-none"
+                className="aspect-square h-auto w-full cursor-pointer touch-none rounded-full text-foreground outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                style={{ maxWidth: size }}
             >
                 <defs>
                     <radialGradient id={`kg-${gid}`} cx="50%" cy="34%" r="75%">
@@ -92,7 +102,12 @@ export function RadialKnob({
                 <text x={cx} y={cy} textAnchor="middle" fill="currentColor" style={{ fontSize: 15, fontWeight: 700 }}>{display}</text>
                 <text x={cx} y={cy + 11} textAnchor="middle" fill="currentColor" fillOpacity={0.5} style={{ fontSize: 6.5, letterSpacing: 0.5 }}>{label.toUpperCase()}</text>
             </svg>
-            {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
+            {(hint || tip) && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                    {hint}
+                    {tip && <InfoTip label={`About ${label}`}>{tip}</InfoTip>}
+                </span>
+            )}
         </div>
     );
 }
@@ -170,3 +185,17 @@ export const ACCENT_META: Record<AccentBucket, { flag: string; label: string }> 
 };
 
 export const ACCENT_ORDER: AccentBucket[] = ["US", "UK", "AU", "IN", "INTL"];
+
+// ── Who may change AI settings ────────────────────────────────
+// Mirrors the backend Permission.TENANTS_UPDATE grant (core/security/rbac.py):
+// only tenant_admin, partner_admin and platform_admin hold it. The backend
+// first maps legacy names (ROLE_ALIASES: admin/owner -> tenant_admin,
+// super_admin -> platform_admin), so those are accepted here too. An unknown role
+// (not loaded yet) is not treated as a restriction; the backend still enforces.
+const AI_OPTIONS_EDIT_ROLES = ["tenant_admin", "partner_admin", "platform_admin", "admin", "owner", "super_admin"];
+export const AI_OPTIONS_READ_ONLY_NOTICE = "Only a workspace admin can change AI settings.";
+
+export function canEditAiOptions(role: string | null | undefined): boolean {
+    if (!role) return true;
+    return AI_OPTIONS_EDIT_ROLES.includes(role);
+}

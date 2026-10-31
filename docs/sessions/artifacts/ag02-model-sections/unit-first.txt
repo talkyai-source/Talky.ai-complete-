@@ -1,0 +1,36 @@
+........................................................................ [ 24%]
+........................................................................ [ 48%]
+....FF....................................F............................. [ 72%]
+........................................................................ [ 96%]
+.........                                                                [100%]
+================================== FAILURES ===================================
+______ test_campaign_preview_matches_independent_runtime_prompt[inbound] ______
+tests\unit\test_realtime_independent.py:268: in test_campaign_preview_matches_independent_runtime_prompt
+    assert preview.system_prompt == config.system_prompt
+E   AssertionError: assert 'WHO YOU ARE\...UCTURED STATE' == 'WHO YOU ARE\...ompany facts.'
+E     Skipping 6450 identical leading characters in diff, use -v to show
+E     - TURED STATE
+E     ?            -
+E     + TURED STATE
+E     - 
+E     - Company source knowledge is unavailable for this call; do not invent company facts.
+_____ test_campaign_preview_matches_independent_runtime_prompt[outbound] ______
+tests\unit\test_realtime_independent.py:268: in test_campaign_preview_matches_independent_runtime_prompt
+    assert preview.system_prompt == config.system_prompt
+E   AssertionError: assert 'WHO YOU ARE\...UCTURED STATE' == 'WHO YOU ARE\...ompany facts.'
+E     Skipping 6237 identical leading characters in diff, use -v to show
+E     - TURED STATE
+E     ?            -
+E     + TURED STATE
+E     - 
+E     - Company source knowledge is unavailable for this call; do not invent company facts.
+__________ test_browser_test_applies_campaign_knowledge_like_prewarm __________
+tests\unit\test_campaign_test_ws.py:801: in test_browser_test_applies_campaign_knowledge_like_prewarm
+    assert args[0] is ended.call_session
+E   AssertionError: assert VoiceSessionConfig(pipeline_mode='cascaded', realtime_prompt=None, realtime_model='gpt-realtime-2', realtime_voice='ma...act_phone_region=None, event_logging_enabled=False, callee_first_name=None, callee_last_name=None, callee_company=None) is namespace(conversation_history=[], _first_speaker='user', persona_type=None, agent_config=None, config=None, system_pr...rsonality, knowledge, and rules below for the rest of the call.', _enable_silence_monitor=True, _mute_during_tts=False)
+E    +  where namespace(conversation_history=[], _first_speaker='user', persona_type=None, agent_config=None, config=None, system_pr...rsonality, knowledge, and rules below for the rest of the call.', _enable_silence_monitor=True, _mute_during_tts=False) = namespace(call_id='call-xyz', media_gateway=<MagicMock id='2270192698720'>, realtime_bridge=None, call_session=namespa...silence_monitor=True, _mute_during_tts=False), pipeline_task=None, _first_speaker='user', _enable_silence_monitor=True).call_session
+=========================== short test summary info ===========================
+FAILED tests/unit/test_realtime_independent.py::test_campaign_preview_matches_independent_runtime_prompt[inbound]
+FAILED tests/unit/test_realtime_independent.py::test_campaign_preview_matches_independent_runtime_prompt[outbound]
+FAILED tests/unit/test_campaign_test_ws.py::test_browser_test_applies_campaign_knowledge_like_prewarm
+3 failed, 294 passed, 117 warnings in 6.21s

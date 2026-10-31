@@ -1,0 +1,28 @@
+{
+  "source_commit": "4bb26dab6c7f0b6b9218d5e2db05ce195f7cd178",
+  "base_commit": "0b2a7e130e103da4f1328dbee60ba682d9e67db3",
+  "source_hashes": {
+    "backend/app/domain/services/call_feedback_service.py": "ce13406adb5222ae0a8d75928af0bfd69972f64fb738cbe212a6ab3bee48e7bf",
+    "backend/tests/unit/test_feedback_local_privacy.py": "91ba376b0517c09a24b8ee00ddf2bff297b124d923ddfa5b79365e81d27d33f9",
+    "backend/app/domain/services/recording_service.py": "9fc0cf816cfb0350a1cc5c649e7cd4822d016a9a10785283ca1fe65dc69927f4",
+    "backend/tests/unit/test_op11_recording_file_privacy.py": "1ff63112fbe61622810af8287e3542c90ca3a5c83981499ed279af7f3eeb58f5"
+  },
+  "source_commit_matches_final_test_snapshot": true,
+  "final_tests": {
+    "passed": 129,
+    "failed": 0,
+    "skipped": 9,
+    "warnings": 66,
+    "seconds": 15.23,
+    "modules": 10
+  },
+  "limits": [
+    "Eight POSIX-mode checks skipped on Windows",
+    "One FFmpeg check skipped",
+    "No deployed ACL, persistent-volume, provider or PostgreSQL acceptance"
+  ],
+  "reviewers": [
+    "/root/llm_audit: unavailable-root finding",
+    "/root/audio_audit: final bounded source review clear"
+  ]
+}

@@ -32,6 +32,12 @@ class _FakeConn:
         self._raise_exc = raise_exc
         self.fetchrow_calls = 0
 
+    def transaction(self):
+        return _FakeAcquireCtx(self)
+
+    async def execute(self, *_a, **_k):
+        return "SELECT 1"
+
     async def fetchrow(self, *a, **k):
         self.fetchrow_calls += 1
         if self._raise_exc is not None:
@@ -197,7 +203,10 @@ async def test_dnc_check_never_reads_or_writes_the_subscription_cache():
     redis = _FakeRedis()
     guard = _guard(conn, redis)
 
-    result = await guard._check_dnc(tenant_id="t6", phone_number="+15551234567")
+    result = await guard._check_dnc(
+        tenant_id="00000000-0000-0000-0000-000000000106",
+        phone_number="+15551234567",
+    )
 
     assert result.passed is True
     assert redis.get_calls == [], "DNC check must never read from Redis at all"
@@ -212,7 +221,10 @@ async def test_dnc_check_still_fails_closed_on_db_error_uncached():
     redis = _FakeRedis()
     guard = _guard(conn, redis)
 
-    result = await guard._check_dnc(tenant_id="t7", phone_number="+15551234567")
+    result = await guard._check_dnc(
+        tenant_id="00000000-0000-0000-0000-000000000107",
+        phone_number="+15551234567",
+    )
 
     assert result.passed is False
     assert redis.get_calls == []

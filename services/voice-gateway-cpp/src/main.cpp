@@ -3,7 +3,6 @@
 #include <atomic>
 #include <csignal>
 #include <cstdint>
-#include <cstdlib>
 #include <chrono>
 #include <iostream>
 #include <string>
@@ -67,6 +66,15 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Refuse before binding unless callback credentials and the complete
+    // backend origin are pinned. The validator never returns secret material
+    // in its error text.
+    std::string security_error;
+    if (!voice_gateway::validate_gateway_security_environment(security_error)) {
+        std::cerr << security_error << "; refusing startup" << std::endl;
+        return 2;
+    }
+
     voice_gateway::SessionRegistry registry;
     voice_gateway::HttpServer server(host, port, registry);
 
@@ -87,6 +95,7 @@ int main(int argc, char** argv) {
     std::cout << "voice-gateway-cpp started"
               << " host=" << host
               << " port=" << port
+              << " build_sha=" << VOICE_GATEWAY_BUILD_SHA
               << " codec=pcmu"
               << " ptime_ms=20"
               << std::endl;

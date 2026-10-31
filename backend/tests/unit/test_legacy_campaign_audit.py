@@ -5,6 +5,7 @@ returns a count + small sample of running/scheduled/paused/draft
 campaigns missing `script_config.persona_type`, and never raises
 into the startup path.
 """
+
 from __future__ import annotations
 
 from typing import Any
@@ -22,8 +23,11 @@ from app.core.legacy_campaign_audit import (
 # Fake DB pool (asyncpg-shaped)
 # ──────────────────────────────────────────────────────────────────────────
 
+
 class _FakeConn:
-    def __init__(self, *, total: int, missing_count: int, sample: list[str], raise_on: str | None = None):
+    def __init__(
+        self, *, total: int, missing_count: int, sample: list[str], raise_on: str | None = None
+    ):
         self._total = total
         self._missing = missing_count
         self._sample = sample
@@ -34,6 +38,13 @@ class _FakeConn:
 
     async def __aexit__(self, *_):
         return False
+
+    def transaction(self):
+        return self
+
+    async def execute(self, _sql: str, *_args):
+        # RLS context setup performed by acquire_with_tenant.
+        return "SELECT 1"
 
     async def fetchval(self, sql: str, *args):
         if self._raise == "fetchval":
@@ -62,6 +73,7 @@ class _FakePool:
 # ──────────────────────────────────────────────────────────────────────────
 # Audit
 # ──────────────────────────────────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_no_pool_returns_unprobed():
@@ -114,7 +126,10 @@ async def test_zero_total_zero_missing_is_fully_migrated():
 
 def test_to_dict_round_trip():
     r = LegacyCampaignAuditResult(
-        probed=True, total_active=5, missing_persona=2, sample_ids=["a", "b"],
+        probed=True,
+        total_active=5,
+        missing_persona=2,
+        sample_ids=["a", "b"],
     )
     d = r.to_dict()
     assert d == {
@@ -129,6 +144,7 @@ def test_to_dict_round_trip():
 # ──────────────────────────────────────────────────────────────────────────
 # Log emission — confirm the right log levels fire
 # ──────────────────────────────────────────────────────────────────────────
+
 
 def test_log_summary_skipped_when_unprobed(caplog: pytest.LogCaptureFixture):
     result = LegacyCampaignAuditResult(probed=False, error="no_db_pool")
@@ -148,7 +164,9 @@ def test_log_summary_ok_when_fully_migrated(caplog: pytest.LogCaptureFixture):
 
 def test_log_summary_warns_when_unmigrated_present(caplog: pytest.LogCaptureFixture):
     result = LegacyCampaignAuditResult(
-        probed=True, total_active=10, missing_persona=3,
+        probed=True,
+        total_active=10,
+        missing_persona=3,
         sample_ids=["x", "y", "z"],
     )
     with caplog.at_level("WARNING", logger="app.core.legacy_campaign_audit"):

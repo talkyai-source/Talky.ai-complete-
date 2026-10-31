@@ -1,0 +1,13 @@
+........................................................................ [ 56%]
+........................................................                 [100%]
+============================== warnings summary ===============================
+tests/unit/test_model_driven_voice_turn.py: 24 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\backend\.venv\Lib\site-packages\pydantic\main.py:250: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    validated_self = self.__pydantic_validator__.validate_python(data, self_instance=self)
+
+tests/unit/test_assistant_knowledge_authorization.py::test_streaming_dispatch_threads_authenticated_actor
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\agent-catalog-repairs-20261007\backend\app\infrastructure\assistant\streaming.py:340: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    system_prompt = SYSTEM_PROMPT.format(current_time=datetime.utcnow().isoformat())
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+128 passed, 25 warnings in 15.56s

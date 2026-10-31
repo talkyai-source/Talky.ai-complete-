@@ -20,7 +20,15 @@ import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
 import { apiBaseUrl } from "@/lib/env";
 import { useAuth } from "@/lib/auth-context";
-import { getBrowserAuthToken } from "@/lib/auth-token";
+import { useAccessToken } from "@/lib/auth-hooks";
+import { sharedHttpClient } from "@/lib/api";
+import {
+    buildCampaignTestWsUrl,
+    describeReplyTime,
+    describeTestSession,
+    parseTurnLatency,
+    type TurnLatency,
+} from "@/components/campaigns/test-agent-session";
 
 function resolveBackendWsBaseUrl(): string {
     try {
@@ -45,17 +53,27 @@ type Phase = "idle" | "connecting" | "listening" | "processing" | "speaking";
 export function TestAgentButton({
     campaignId,
     disabled,
+    agentName,
 }: {
     campaignId: string;
     disabled?: boolean;
+    /** First configured agent name, for the "who opens" description. */
+    agentName?: string;
 }) {
     const { status: authStatus } = useAuth();
+    const accessToken = useAccessToken();
     const isAuthed = authStatus === "authenticated";
 
     const [modalOpen, setModalOpen] = useState(false);
     const [firstSpeaker, setFirstSpeaker] = useState<"agent" | "user">("agent");
+    // OFF by default: without a carrier's echo cancellation the laptop mic hears
+    // the agent and cuts it off every turn. Headphones make barge-in testable.
+    const [allowBargeIn, setAllowBargeIn] = useState(false);
+    const [activeEngine, setActiveEngine] = useState("");
     const [phase, setPhase] = useState<Phase>("idle");
     const [error, setError] = useState<string | null>(null);
+    // How fast the agent answered the last turn (from the end of your speech).
+    const [lastReply, setLastReply] = useState<TurnLatency | null>(null);
     const inCall = phase !== "idle";
 
     // WebSocket + audio refs (same shape as voice-agent-popup).
@@ -71,8 +89,13 @@ export function TestAgentButton({
     const jitterRef = useRef<ArrayBuffer[]>([]);
     const playbackStartedRef = useRef<boolean>(false);
     const awaitingPlaybackRef = useRef<boolean>(false);
+    const playbackUtteranceRef = useRef<string | undefined>(undefined);
     const dropAudioRef = useRef<boolean>(false);
     const genRef = useRef<number>(0);
+    // Bumped by every connect() and by endSession()/unmount. Every await in the
+    // connect and microphone paths re-checks it, so a session the user ended
+    // (or left the page on) can never open a socket or keep a microphone.
+    const sessionRef = useRef<number>(0);
     const JITTER_MS = 40;
 
     const mountedRef = useRef(true);
@@ -82,16 +105,16 @@ export function TestAgentButton({
     }, []);
 
     // ── Playback ────────────────────────────────────────────────────────
-    const queueAudioChunk = useCallback((buf: ArrayBuffer, rate: number) => {
+    const queueAudioChunk = useCallback((buf: ArrayBuffer, rate: number, flush = false) => {
         const ctx = playCtxRef.current;
         if (!ctx) return;
-        if (new Int16Array(buf).length === 0) return;
-        jitterRef.current.push(buf);
+        if (new Int16Array(buf).length === 0 && !flush) return;
+        if (buf.byteLength) jitterRef.current.push(buf);
 
         const totalSamples = jitterRef.current.reduce((s, b) => s + new Int16Array(b).length, 0);
         const bufferedMs = (totalSamples / rate) * 1000;
         if (!playbackStartedRef.current) {
-            if (bufferedMs < JITTER_MS) return;
+            if (bufferedMs < JITTER_MS && !flush) return;
             playbackStartedRef.current = true;
         }
         const chunks = [...jitterRef.current];
@@ -107,7 +130,10 @@ export function TestAgentButton({
             src.buffer = ab;
             src.connect(ctx.destination);
             const startAt = Math.max(ctx.currentTime + 0.01, nextPlayTimeRef.current || 0);
+            const generation = genRef.current;
+            const utterance = playbackUtteranceRef.current;
             src.onended = () => {
+                if (generation !== genRef.current || utterance !== playbackUtteranceRef.current) return;
                 playSourcesRef.current.delete(src);
                 if (
                     awaitingPlaybackRef.current &&
@@ -115,7 +141,7 @@ export function TestAgentButton({
                     wsRef.current?.readyState === WebSocket.OPEN
                 ) {
                     awaitingPlaybackRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: utterance }));
                 }
             };
             playSourcesRef.current.add(src);
@@ -124,8 +150,20 @@ export function TestAgentButton({
         }
     }, []);
 
+    // Pause-then-decide barge-in: the server holds the agent the moment the
+    // caller starts talking (tts_pause) and either continues it (tts_resume) or
+    // interrupts it for good (tts_interrupted). Suspending the player freezes
+    // every scheduled chunk in place, so a resume picks up mid-word.
+    const setPlayerRunning = useCallback((running: boolean) => {
+        const ctx = playCtxRef.current;
+        const action = ctx ? (running ? ctx.resume : ctx.suspend) : undefined;
+        if (!ctx || typeof action !== "function") return;
+        void action.call(ctx).catch(() => undefined);
+    }, []);
+
     const resetPlayback = useCallback(() => {
         awaitingPlaybackRef.current = false;
+        playbackUtteranceRef.current = undefined;
         genRef.current += 1;
         playSourcesRef.current.forEach((s) => { try { s.stop(); } catch { /* */ } });
         playSourcesRef.current.clear();
@@ -135,9 +173,21 @@ export function TestAgentButton({
     }, []);
 
     // ── Microphone (started AFTER `ready`, at the backend's input rate) ──
-    const startMicrophone = useCallback(async (inputRate: number): Promise<boolean> => {
+    const startMicrophone = useCallback(async (inputRate: number, session: number): Promise<boolean> => {
+        let stream: MediaStream | null = null;
+        let ctx: AudioContext | null = null;
+        // True once the session this microphone was requested for has ended.
+        // Release only what THIS call acquired: a newer session may own the refs.
+        const abandoned = () => {
+            if (sessionRef.current === session) return false;
+            stream?.getTracks().forEach((t) => t.stop());
+            if (ctx) { try { void ctx.close(); } catch { /* */ } }
+            if (micStreamRef.current === stream) micStreamRef.current = null;
+            if (micCtxRef.current === ctx) micCtxRef.current = null;
+            return true;
+        };
         try {
-            const stream = micStreamRef.current ?? await navigator.mediaDevices.getUserMedia({
+            stream = micStreamRef.current ?? await navigator.mediaDevices.getUserMedia({
                 audio: {
                     sampleRate: inputRate,
                     channelCount: 1,
@@ -146,18 +196,21 @@ export function TestAgentButton({
                     autoGainControl: true,
                 },
             });
+            if (abandoned()) return false;
             micStreamRef.current = stream;
 
             // AudioContext at the required rate: the browser resamples the mic
             // to `inputRate`, so the worklet emits PCM16 at exactly that rate.
-            const ctx = new AudioContext({ sampleRate: inputRate });
-            if (ctx.state === "suspended") await ctx.resume();
-            micCtxRef.current = ctx;
-            const source = ctx.createMediaStreamSource(stream);
+            const audioCtx = new AudioContext({ sampleRate: inputRate });
+            ctx = audioCtx;
+            if (audioCtx.state === "suspended") await audioCtx.resume();
+            if (abandoned()) return false;
+            micCtxRef.current = audioCtx;
+            const source = audioCtx.createMediaStreamSource(stream);
 
             const startScriptProcessor = () => {
-                const proc = ctx.createScriptProcessor(1024, 1, 1);
-                const silent = ctx.createGain();
+                const proc = audioCtx.createScriptProcessor(1024, 1, 1);
+                const silent = audioCtx.createGain();
                 silent.gain.value = 0;
                 micNodeRef.current = proc;
                 proc.onaudioprocess = (ev) => {
@@ -172,14 +225,15 @@ export function TestAgentButton({
                 };
                 source.connect(proc);
                 proc.connect(silent);
-                silent.connect(ctx.destination);
+                silent.connect(audioCtx.destination);
             };
 
-            if (ctx.audioWorklet) {
+            if (audioCtx.audioWorklet) {
                 try {
                     const url = new URL(MIC_WORKLET_PATH, window.location.origin).toString();
-                    await ctx.audioWorklet.addModule(url);
-                    const node = new AudioWorkletNode(ctx, "pcm16-processor");
+                    await audioCtx.audioWorklet.addModule(url);
+                    if (abandoned()) return false;
+                    const node = new AudioWorkletNode(audioCtx, "pcm16-processor");
                     micNodeRef.current = node;
                     node.port.onmessage = (evt: MessageEvent<ArrayBuffer>) => {
                         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -229,6 +283,7 @@ export function TestAgentButton({
     }, []);
 
     const endSession = useCallback(() => {
+        sessionRef.current += 1;
         stopMicrophone();
         dropAudioRef.current = false;
         playRateRef.current = 24000;
@@ -268,6 +323,7 @@ export function TestAgentButton({
 
         switch (data.type) {
             case "ready": {
+                setActiveEngine(data.pipeline_mode === "realtime" ? "GPT Realtime" : "Traditional pipeline");
                 playRateRef.current = typeof data.sample_rate === "number" && data.sample_rate > 0
                     ? data.sample_rate : 24000;
                 const inRate = typeof data.input_sample_rate === "number" && data.input_sample_rate > 0
@@ -276,7 +332,7 @@ export function TestAgentButton({
                 // Start capturing the moment the agent is ready (also lets the
                 // user barge-in through an agent-first greeting).
                 setPhase(firstSpeaker === "agent" ? "speaking" : "listening");
-                void startMicrophone(inRate);
+                void startMicrophone(inRate, sessionRef.current);
                 break;
             }
             case "transcript":
@@ -286,35 +342,58 @@ export function TestAgentButton({
                 dropAudioRef.current = false;
                 setPhase("speaking");
                 break;
-            case "turn_complete":
+            case "turn_complete": {
                 setPhase("listening");
+                const latency = parseTurnLatency(data.latency);
+                if (latency) setLastReply(latency);
+                break;
+            }
+            case "playback_start":
+                resetPlayback();
+                setPlayerRunning(true);
+                playbackUtteranceRef.current = typeof data.utterance_id === "string" ? data.utterance_id : undefined;
+                dropAudioRef.current = false;
+                break;
+            case "tts_pause":
+                setPlayerRunning(false);
+                break;
+            case "tts_resume":
+                setPlayerRunning(true);
                 break;
             case "tts_audio_complete":
+                if (data.utterance_id !== playbackUtteranceRef.current) break;
+                queueAudioChunk(new ArrayBuffer(0), playRateRef.current, true);
                 awaitingPlaybackRef.current = true;
                 if (playSourcesRef.current.size === 0 && wsRef.current?.readyState === WebSocket.OPEN) {
                     awaitingPlaybackRef.current = false;
-                    wsRef.current.send(JSON.stringify({ type: "playback_complete" }));
+                    wsRef.current.send(JSON.stringify({ type: "playback_complete", utterance_id: playbackUtteranceRef.current }));
                 }
                 break;
             case "barge_in":
             case "tts_interrupted":
                 dropAudioRef.current = true;
                 resetPlayback();
+                // A hold may have suspended the player; the next reply must play.
+                setPlayerRunning(true);
                 setPhase("listening");
                 break;
             case "error":
                 setError(typeof data.message === "string" ? data.message : "Voice error");
                 dropAudioRef.current = true;
                 resetPlayback();
-                setPhase("idle");
+                // A server error frame is usually followed by a close, but not
+                // always: end the session so the socket and mic never outlive it.
+                endSession();
                 break;
             default:
                 break;
         }
-    }, [firstSpeaker, queueAudioChunk, resetPlayback, startMicrophone]);
+    }, [endSession, firstSpeaker, queueAudioChunk, resetPlayback, setPlayerRunning, startMicrophone]);
 
     const connect = useCallback(async (fs: "agent" | "user") => {
+        const session = ++sessionRef.current;
         setError(null);
+        setLastReply(null);
         setPhase("connecting");
 
         const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
@@ -329,50 +408,121 @@ export function TestAgentButton({
             return;
         }
 
-        const wsUrl = `${resolveBackendWsBaseUrl()}/ws/campaign-test/${campaignId}?first_speaker=${fs}`;
-        const ws = new WebSocket(wsUrl);
-        ws.binaryType = "arraybuffer";
-        wsRef.current = ws;
+        // THE PAGE AND THIS SOCKET DO NOT SHARE AN AUTH SURFACE (2026-08-23)
+        //
+        // REST can send `Authorization: Bearer …` and, on a 401, transparently
+        // refreshes and retries. A browser cannot put a header on a WebSocket
+        // upgrade, so this socket has exactly ONE credential — the talky_at
+        // cookie — and exactly ONE attempt. talky_at lives 15 minutes
+        // (ACCESS_TOKEN_MAX_AGE).
+        //
+        // So "I'm signed in" — the page renders, every other button works — does
+        // not imply the cookie is still alive at the moment you click. Measured
+        // in prod: a session connected fine at 21:57 and was refused at 22:01,
+        // four minutes later, with nothing changed but the clock.
+        //
+        // Two defences, because one is not enough:
+        //   1. a cheap authenticated call first, which rotates a stale cookie;
+        //   2. one refresh-and-retry if the server still refuses — because (1)
+        //      can be satisfied by the Bearer header WITHOUT ever touching the
+        //      cookie, so a passing pre-flight does not prove the cookie is live.
+        try {
+            await sharedHttpClient().request({ path: "/auth/me", method: "GET" });
+        } catch {
+            /* refresh happens inside the client; a failure here is not fatal */
+        }
+        // End test / unmount while the pre-flight was in flight: stop here.
+        if (sessionRef.current !== session) return;
 
-        let accepted = false;
-        const fail = (message: string) => {
-            try { ws.onclose = null; ws.onerror = null; ws.close(); } catch { /* */ }
-            wsRef.current = null;
-            stopMicrophone();
-            cleanupPlayback();
-            setError(message);
-            setPhase("idle");
-        };
-        const timeout = window.setTimeout(() => {
-            if (!accepted) fail("Connection timeout. Is the backend running?");
-        }, 10000);
+        const openSocket = (attempt: number) => {
+            const wsUrl = buildCampaignTestWsUrl(resolveBackendWsBaseUrl(), campaignId, {
+                firstSpeaker: fs,
+                allowBargeIn,
+            });
+            const ws = new WebSocket(wsUrl);
+            ws.binaryType = "arraybuffer";
+            wsRef.current = ws;
 
-        ws.onopen = () => {
-            // Cookie auth rides the handshake automatically. When a bearer token
-            // is available (cookie-less environments) send it as the first frame
-            // — the backend reads the cookie first and ignores this otherwise.
-            const token = getBrowserAuthToken();
-            if (token) {
-                try { ws.send(JSON.stringify({ type: "auth", token })); } catch { /* */ }
-            }
+            let accepted = false;
+            const fail = (message: string) => {
+                try { ws.onclose = null; ws.onerror = null; ws.close(); } catch { /* */ }
+                wsRef.current = null;
+                stopMicrophone();
+                cleanupPlayback();
+                setError(message);
+                setPhase("idle");
+            };
+            const timeout = window.setTimeout(() => {
+                if (!accepted) fail("Connection timeout. Is the backend running?");
+            }, 10000);
+
+            ws.onopen = () => {
+                // Cookie auth rides the handshake automatically. When a bearer
+                // token is available (cookie-less environments) send it as the
+                // first frame — the backend reads the cookie first and ignores
+                // this otherwise.
+                if (accessToken) {
+                    try { ws.send(JSON.stringify({ type: "auth", token: accessToken })); } catch { /* */ }
+                }
+            };
+
+            ws.onmessage = (event) => {
+                // Frames that race an End test (socket close is asynchronous).
+                if (sessionRef.current !== session) return;
+                // An auth refusal arrives as an error FRAME and only then a
+                // close(1008), so by the time onclose runs the socket already
+                // counts as accepted and a close-code check never fires. Catch
+                // it here, on the server's stable `code` slug rather than on
+                // message text that any reword would break.
+                if (attempt === 0 && typeof event.data === "string") {
+                    let parsed: { type?: unknown; code?: unknown } | null = null;
+                    try {
+                        parsed = JSON.parse(event.data) as { type?: unknown; code?: unknown };
+                    } catch {
+                        parsed = null;
+                    }
+                    if (parsed?.type === "error" && parsed?.code === "auth_required") {
+                        clearTimeout(timeout);
+                        try {
+                            ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close();
+                        } catch { /* */ }
+                        wsRef.current = null;
+                        void (async () => {
+                            // Explicit rotation, not another /auth/me: this is
+                            // the case where the cookie specifically is stale.
+                            try {
+                                await sharedHttpClient().request({ path: "/auth/refresh", method: "POST" });
+                            } catch {
+                                /* the retry below reports the real outcome */
+                            }
+                            if (mountedRef.current && sessionRef.current === session) openSocket(1);
+                        })();
+                        return;
+                    }
+                }
+                clearTimeout(timeout);
+                accepted = true;
+                void handleMessage(event);
+            };
+
+            ws.onerror = () => { /* onclose decides the message */ };
+            ws.onclose = (ev) => {
+                if (!accepted) {
+                    // Without this the 10s timer still fires and overwrites a
+                    // precise message with "Connection timeout".
+                    clearTimeout(timeout);
+                    if (ev.code === 1008) { fail("You need to be signed in to test the agent."); return; }
+                    if (ev.code === 1013) { fail("The test service is busy — try again shortly."); return; }
+                    fail(`Could not start the test (code ${ev.code}).`);
+                    return;
+                }
+                clearTimeout(timeout);
+                endSession();
+            };
         };
-        ws.onmessage = (event) => {
-            clearTimeout(timeout);
-            accepted = true;
-            void handleMessage(event);
-        };
-        ws.onerror = () => { /* onclose decides the message */ };
-        ws.onclose = (ev) => {
-            if (!accepted) {
-                if (ev.code === 1008) { fail("You need to be signed in to test the agent."); return; }
-                if (ev.code === 1013) { fail("The test service is busy — try again shortly."); return; }
-                fail(`Could not start the test (code ${ev.code}).`);
-                return;
-            }
-            clearTimeout(timeout);
-            endSession();
-        };
-    }, [campaignId, handleMessage, endSession, stopMicrophone, cleanupPlayback]);
+
+        openSocket(0);
+    }, [accessToken, allowBargeIn, campaignId, handleMessage, endSession, stopMicrophone, cleanupPlayback]);
 
     const handleStart = useCallback(() => {
         setModalOpen(false);
@@ -408,7 +558,13 @@ export function TestAgentButton({
                 </Button>
             )}
 
-            {error && !inCall && (
+            {activeEngine && <p className="text-xs text-muted-foreground">Running: {activeEngine}</p>}
+            {lastReply && (
+                <p className="text-xs text-muted-foreground" data-testid="test-reply-time">
+                    {describeReplyTime(lastReply)}
+                </p>
+            )}
+                {error && !inCall && (
                 <span role="alert" className="text-xs text-red-600 dark:text-red-400 max-w-[220px]">
                     {error}
                 </span>
@@ -418,7 +574,7 @@ export function TestAgentButton({
                 open={modalOpen}
                 onOpenChange={setModalOpen}
                 title="Test this campaign's agent"
-                description="Talk to the exact agent a real call runs — same AI Options (pipeline, LLM, STT, TTS, persona). Pick who opens the conversation."
+                description="Talk to the exact agent a real outbound call runs — same AI Options (pipeline, LLM, STT, TTS, persona, Company knowledge). Pick who opens the conversation."
                 size="sm"
                 footer={
                     <div className="flex justify-end gap-2">
@@ -435,6 +591,22 @@ export function TestAgentButton({
                 }
             >
                 <div className="space-y-2">
+                    {(() => {
+                        const d = describeTestSession({ firstSpeaker, agentName: agentName ?? "" });
+                        return (
+                            <div
+                                className="flex flex-wrap items-center gap-2 rounded-lg border border-border bg-muted/30 px-3 py-2 text-xs"
+                                data-testid="test-session-summary"
+                            >
+                                <span className="rounded bg-primary/15 px-2 py-0.5 font-semibold tracking-wide text-primary">
+                                    {d.badge}
+                                </span>
+                                <span className="text-muted-foreground">
+                                    Opening: <span className="text-foreground">{d.opening}</span>
+                                </span>
+                            </div>
+                        );
+                    })()}
                     <label
                         className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
                             firstSpeaker === "agent" ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"
@@ -470,9 +642,30 @@ export function TestAgentButton({
                             className="mt-1"
                         />
                         <div>
-                            <div className="text-sm font-medium text-foreground">You speak first</div>
+                            <div className="text-sm font-medium text-foreground">You say hello first</div>
                             <div className="text-xs text-muted-foreground">
-                                The agent waits for you to say &ldquo;hello&rdquo; before responding. Same as caller-first.
+                                The agent waits for your &ldquo;hello&rdquo;, then introduces itself and why it is calling.
+                                Still an outbound call &mdash; it will not answer like a receptionist.
+                            </div>
+                        </div>
+                    </label>
+
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border border-border p-3 hover:bg-muted/40">
+                        <input
+                            type="checkbox"
+                            checked={allowBargeIn}
+                            onChange={(e) => setAllowBargeIn(e.target.checked)}
+                            className="mt-1"
+                            data-testid="allow-barge-in"
+                        />
+                        <div>
+                            <div className="text-sm font-medium text-foreground">
+                                I&rsquo;m wearing headphones &mdash; allow interruption
+                            </div>
+                            <div className="text-xs text-muted-foreground">
+                                Lets you talk over the agent, like on a real phone line. On speakers the microphone
+                                hears the agent&rsquo;s own voice and it will interrupt itself &mdash; leave this off, and
+                                don&rsquo;t judge interruption quality from a speaker test.
                             </div>
                         </div>
                     </label>

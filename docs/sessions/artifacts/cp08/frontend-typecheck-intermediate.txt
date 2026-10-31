@@ -1,0 +1,5 @@
+
+> frontend@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+src/proxy.auth.test.ts(12,40): error TS2704: The operand of a 'delete' operator cannot be a read-only property.

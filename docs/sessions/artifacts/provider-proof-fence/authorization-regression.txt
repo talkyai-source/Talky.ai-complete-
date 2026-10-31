@@ -1,0 +1,25 @@
+..............................................                           [100%]
+============================== warnings summary ===============================
+tests/unit/test_telephony_bridge_auth.py::test_telephony_stop_remains_running_when_any_call_is_unconfirmed
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\api\v1\endpoints\admin\health\_shared.py:16: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    _server_start_time = datetime.utcnow()
+
+tests/unit/test_telephony_bridge_auth.py::test_telephony_stop_remains_running_when_any_call_is_unconfirmed
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\api\v1\endpoints\abuse_monitoring.py:147: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
+
+tests/unit/test_telephony_bridge_auth.py::test_telephony_stop_remains_running_when_any_call_is_unconfirmed
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\api\v1\endpoints\abuse_monitoring.py:684: FastAPIDeprecationWarning: `regex` has been deprecated, please use `pattern` instead
+    min_severity: str = Query("high", regex="^(medium|high|critical)$"),
+
+tests/unit/test_campaign_service_direction_race.py::test_outbound_start_status_update_fails_if_campaign_changed_direction
+tests/unit/test_campaign_service_direction_race.py::test_outbound_start_status_update_accepts_one_outbound_row
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\domain\services\campaign_service.py:1163: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "started_at": datetime.utcnow().isoformat()
+
+tests/unit/test_campaign_service_direction_race.py::test_outbound_lifecycle_refuses_conversion_winner_before_side_effects[stop]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\provider-proof-fence-20261005\backend\app\domain\services\campaign_service.py:665: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    "completed_at": datetime.utcnow().isoformat()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+46 passed, 6 warnings in 8.14s

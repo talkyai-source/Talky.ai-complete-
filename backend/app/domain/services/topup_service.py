@@ -1,0 +1,629 @@
+"""Minute top-ups (goals.md §9). Credit exactly once, only after payment.
+
+THE ONE INVARIANT
+-----------------
+A verified successful payment credits its minutes exactly once. Everything in
+this module exists to hold that under the conditions that actually occur:
+
+  * Stripe REDELIVERS webhooks. A delivery that times out is redelivered by
+    contract, not by accident. Two deliveries of one event must credit once.
+  * Two deliveries can arrive CONCURRENTLY, so the guard cannot be
+    "SELECT then INSERT" — it has to be a uniqueness constraint the database
+    enforces. That is ``billing_ledger.provider_event_id``, and it is why the
+    credit path treats a conflict as a no-op rather than an error.
+  * A checkout that is created is not a checkout that is paid. Minutes are
+    credited on the PAID event only.
+
+EVERY WRITE HERE GOES THROUGH acquire_with_tenant
+--------------------------------------------------
+``topup_orders`` and ``billing_ledger`` carry FORCE row-level security. A bare
+``pool.acquire()`` has no tenant GUC set, so the policy evaluates to NULL, the
+row is invisible, and an UPDATE touches nothing — and **a zero-row UPDATE is a
+success in PostgreSQL**. It returns no error. That exact shape silently dropped
+call transcripts on this codebase before, so the webhook paths take the bypass
+connection explicitly (a webhook has no user session to derive a tenant from —
+the tenant is read *from the order*) and the tenant-facing reads take the
+tenant-scoped one.
+
+WHERE BOUGHT MINUTES LIVE (2026-10-27)
+-------------------------------------
+``tenants.minutes_allocated`` is the plan's monthly minutes only. Bought minutes
+live ONLY in ``billing_ledger``: a credit, a refund, a dispute and each closed
+month's usage (``topup_usage``) are rows there, and the meter adds the balance
+to the plan's minutes. A credit or reversal therefore never touches the
+allocation, so a refund can never be blocked, floored or pushed into the
+``<= 0`` unlimited sentinel, and a plan change cannot lose or duplicate minutes.
+Top-ups never expire (owner decision): they carry over until used.
+"""
+
+from __future__ import annotations
+
+import logging
+from contextlib import asynccontextmanager
+from typing import Optional
+
+from app.core.db_utils import acquire_with_tenant
+from app.domain.services.minutes_quota import minutes_unlimited
+from app.domain.services.payg import PAYG, PAYG_PLAN_ID, SUBSCRIBER
+
+logger = logging.getLogger(__name__)
+
+TERMINAL_FAILURE_STATES = {"failed", "cancelled"}
+
+# A tenant clicking Buy repeatedly creates a pending row each time. That is
+# harmless until a script does it in a loop, so the open-order count is capped.
+MAX_OPEN_ORDERS = 20
+
+
+def public_ledger_entry(row) -> dict:
+    """One exact read contract for both billing ledger surfaces."""
+    from app.domain.services.billing_catalog import _EXPONENTS
+
+    return {
+        "id": str(row["id"]),
+        "order_id": str(row["order_id"]) if row["order_id"] else None,
+        "provider_event_id": row["provider_event_id"],
+        "provider_payment_id": row["provider_payment_id"],
+        "kind": row["kind"],
+        "minutes_delta": row["minutes_delta"],
+        "amount_cents": row["amount_cents"],
+        "currency": row["currency"],
+        "currency_exponent": _EXPONENTS.get(str(row["currency"]).lower()),
+        "note": row["note"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+    }
+
+
+class TopupError(RuntimeError):
+    """Refused before any money or minutes moved."""
+
+
+class BillingTopupReviewRequired(TopupError):
+    def __init__(self, code: str, tenant_id=None):
+        self.code = code
+        self.tenant_id = str(tenant_id) if tenant_id else None
+        super().__init__(code)
+
+
+@asynccontextmanager
+async def _mutation_connection(pool, conn):
+    if conn is not None:
+        if hasattr(conn, "is_in_transaction") and not conn.is_in_transaction():
+            raise RuntimeError("Top-up mutation requires the caller's transaction")
+        yield conn
+    else:
+        async with acquire_with_tenant(pool, None) as acquired:
+            yield acquired
+
+
+async def _unlimited(conn, tenant_id) -> bool:
+    row = await conn.fetchrow(
+        """SELECT t.minutes_allocated, p.minutes AS plan_minutes, p.billing_model
+             FROM tenants t LEFT JOIN plans p ON p.id = t.plan_id WHERE t.id = $1::uuid""",
+        str(tenant_id),
+    )
+    return row is not None and minutes_unlimited(
+        row.get("minutes_allocated"), row.get("plan_minutes"), row.get("billing_model"))
+
+
+def _rows_affected(tag: str) -> int:
+    """asyncpg returns 'UPDATE 3'. Zero is the case worth catching."""
+    try:
+        return int(str(tag).strip().rsplit(" ", 1)[-1])
+    except (ValueError, IndexError):
+        return -1
+
+
+class TopupService:
+    def __init__(self, pool) -> None:
+        self._pool = pool
+
+    # ── catalogue ───────────────────────────────────────────────────────────
+
+    async def packages(self, audience: str = SUBSCRIBER) -> list[dict]:
+        """The approved list for one audience (subscriber top-ups or pay as you
+        go). A client never names a price or a minute count — it names a package
+        CODE and everything else is read from here."""
+        async with self._pool.acquire() as conn:
+            rows = await conn.fetch(
+                """
+                SELECT code, name, minutes, price_cents, currency, expires_days, audience
+                  FROM topup_packages
+                 WHERE is_active AND audience = $1
+                 ORDER BY sort_order, minutes
+                """,
+                audience,
+            )
+        return [dict(r) for r in rows]
+
+    async def _package(self, conn, code: str, audience: str = SUBSCRIBER) -> dict:
+        row = await conn.fetchrow(
+            "SELECT code, name, minutes, price_cents, currency, expires_days, audience FROM topup_packages "
+            " WHERE code = $1 AND is_active",
+            code,
+        )
+        if not row:
+            raise TopupError(f"Unknown or inactive top-up package {code!r}")
+        if (row.get("audience") or SUBSCRIBER) != audience:
+            # Subscribers buy top-ups, everyone else buys pay-as-you-go bundles.
+            raise TopupError(f"Package {code!r} is not offered to this account")
+        if row.get("expires_days") is not None:
+            # Bought minutes carry over until used; the meter has no expiry.
+            raise TopupError(f"Top-up package {code!r} expires, which is not supported")
+        return dict(row)
+
+    # ── order ───────────────────────────────────────────────────────────────
+
+    async def create_order(
+        self,
+        *,
+        tenant_id: str,
+        user_id: Optional[str],
+        package_code: str,
+        audience: str = SUBSCRIBER,
+    ) -> dict:
+        """Record the intent to buy, BEFORE sending anyone to a payment page.
+
+        The order exists first so the webhook has something to match against. A
+        payment arriving for an order we never created is a signal worth having,
+        not a row to invent on the fly.
+
+        Price and minutes are SNAPSHOTTED here. If the package is repriced next
+        month, this customer is still owed exactly what they were quoted.
+        """
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            pkg = await self._package(conn, package_code, audience)
+
+            # An unlimited allowance ignores the ledger: selling minutes to such
+            # a tenant takes money for nothing, so refuse before any order or
+            # Stripe session. A prepaid plan's zero is not unlimited.
+            if await _unlimited(conn, tenant_id):
+                raise TopupError(
+                    "This account has no capped minute allowance, so a top-up "
+                    "would add nothing. No payment was started."
+                )
+
+            open_orders = await conn.fetchval(
+                "SELECT count(*) FROM topup_orders "
+                " WHERE tenant_id = $1::uuid AND status = 'pending' "
+                "   AND created_at > NOW() - INTERVAL '1 hour'",
+                str(tenant_id),
+            )
+            if (open_orders or 0) >= MAX_OPEN_ORDERS:
+                raise TopupError(
+                    "Too many top-up checkouts started without completing one. "
+                    "Finish or cancel the open one before starting another."
+                )
+
+            row = await conn.fetchrow(
+                """
+                INSERT INTO topup_orders
+                    (tenant_id, user_id, package_code, minutes, price_cents,
+                     currency, status)
+                VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, 'pending')
+                RETURNING id, package_code, minutes, price_cents, currency, status
+                """,
+                str(tenant_id),
+                str(user_id) if user_id else None,
+                pkg["code"],
+                pkg["minutes"],
+                pkg["price_cents"],
+                pkg["currency"],
+            )
+        out = dict(row)
+        out["name"] = pkg["name"]
+        logger.info(
+            "topup_order_created tenant=%s order=%s package=%s minutes=%d",
+            str(tenant_id)[:8],
+            str(row["id"])[:8],
+            package_code,
+            pkg["minutes"],
+        )
+        return out
+
+    async def attach_session(self, order_id: str, session_id: str) -> None:
+        """Link the order to the provider's checkout session.
+
+        If this write is lost the order can never be matched to its payment, so
+        a zero-row result raises rather than passing quietly.
+        """
+        async with acquire_with_tenant(self._pool, None) as conn:
+            tag = await conn.execute(
+                "UPDATE topup_orders SET provider_session_id = $2, updated_at = NOW() "
+                " WHERE id = $1::uuid",
+                str(order_id),
+                session_id,
+            )
+        if _rows_affected(tag) == 0:
+            raise TopupError(
+                f"Order {order_id} vanished before its checkout session could be "
+                "attached — the payment could not have been matched to it."
+            )
+
+    # ── credit ──────────────────────────────────────────────────────────────
+
+    async def credit_paid_order(
+        self,
+        *,
+        session_id: str,
+        event_id: str,
+        payment_id: Optional[str] = None,
+        conn=None,
+    ) -> bool:
+        """Credit minutes for a paid checkout session. True if minutes moved.
+
+        IDEMPOTENT BY CONSTRAINT, NOT BY CHECK. The ledger insert carries the
+        provider's event id under a UNIQUE index, so a redelivered webhook
+        collides in the database. That holds even when two deliveries are
+        processed at the same instant, which a SELECT-then-INSERT would not.
+
+        The whole thing is ONE transaction: order status, ledger row and the
+        allocation move together or not at all. A crash between them would
+        otherwise leave minutes credited with nothing recording why, or a
+        record with no minutes.
+        """
+        async with _mutation_connection(self._pool, conn) as conn:
+            order = await conn.fetchrow(
+                "SELECT id, tenant_id, minutes, price_cents, currency, status "
+                "  FROM topup_orders WHERE provider_session_id = $1 FOR UPDATE",
+                session_id,
+            )
+            if not order:
+                logger.warning(
+                    "topup_webhook_unknown_session session=%s event=%s — a payment "
+                    "arrived for an order we never created",
+                    session_id[:16],
+                    event_id[:24],
+                )
+                return False
+
+            # Different Stripe event IDs can describe the same payment. The
+            # immutable credit survives refund/dispute and stale order status.
+            already_credited = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='topup')",
+                order["id"],
+            )
+            if already_credited or order["status"] in {"paid", "refunded", "disputed"}:
+                logger.info(
+                    "topup_already_paid order=%s event=%s — redelivery, no-op",
+                    str(order["id"])[:8],
+                    event_id[:24],
+                )
+                return False
+
+            ledger = await conn.fetchrow(
+                """
+                INSERT INTO billing_ledger
+                    (tenant_id, order_id, kind, minutes_delta, amount_cents,
+                     currency, provider_event_id, note)
+                VALUES ($1, $2, 'topup', $3, $4, $5, $6, $7)
+                ON CONFLICT (provider_event_id) DO NOTHING
+                RETURNING id
+                """,
+                order["tenant_id"],
+                order["id"],
+                order["minutes"],
+                order["price_cents"],
+                order["currency"],
+                event_id,
+                "top-up {} minutes".format(order["minutes"]),
+            )
+            if ledger is None:
+                # The constraint refused it: this exact event already credited.
+                # Not an error — this is the guard doing its job.
+                logger.info(
+                    "topup_duplicate_event event=%s order=%s — already credited, "
+                    "no minutes added",
+                    event_id[:24],
+                    str(order["id"])[:8],
+                )
+                return False
+
+            # The ledger row IS the credit: the meter adds the ledger balance
+            # to the plan's minutes. The allocation is never changed here.
+            if await _unlimited(conn, order["tenant_id"]):
+                logger.warning(
+                    "topup_on_unlimited_tenant tenant=%s order=%s minutes=%d — "
+                    "money recorded; an unlimited allowance does not use it. This "
+                    "tenant should not have been offered a top-up.",
+                    str(order["tenant_id"])[:8],
+                    str(order["id"])[:8],
+                    order["minutes"],
+                )
+
+            # A LEGACY CEILING KEPT IN STEP.
+            #
+            # The ledger row (above) is what the meter, the dialer gate and
+            # every screen read. An older minutes check read a
+            # DIFFERENT column in a DIFFERENT table —
+            # `tenant_call_limits.monthly_minutes_allocated`, read by
+            # ``call_guard._check_minutes_quota`` — and nothing syncs the two. A
+            # tenant with an admin-set ceiling could buy 250 minutes, watch the
+            # balance rise everywhere, and still be refused at origination
+            # against the old ceiling.
+            #
+            # `> 0` guard: 0 there means "no quota configured" and the guard
+            # passes. Writing 250 into it would CREATE a cap for a tenant who
+            # had none — the same trap as the unlimited sentinel above. So this
+            # only ever RAISES a ceiling that already exists, and it runs in
+            # this transaction so a crash cannot leave minutes bought that
+            # cannot be dialled.
+            await conn.execute(
+                "UPDATE tenant_call_limits "
+                "   SET monthly_minutes_allocated = monthly_minutes_allocated + $2, "
+                "       updated_at = NOW() "
+                " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
+                order["tenant_id"],
+                order["minutes"],
+            )
+
+            # The first paid pay-as-you-go bundle puts an account that has no
+            # plan and no subscription on the prepaid plan, in this transaction.
+            await conn.execute(
+                """UPDATE tenants SET plan_id = $2
+                    WHERE id = $1 AND plan_id IS NULL AND stripe_subscription_id IS NULL
+                      AND EXISTS (SELECT 1 FROM topup_orders o JOIN topup_packages p ON p.code = o.package_code
+                                  WHERE o.id = $3 AND p.audience = $4)""",
+                order["tenant_id"], PAYG_PLAN_ID, order["id"], PAYG,
+            )
+
+            await conn.execute(
+                "UPDATE topup_orders SET status='paid', paid_at=NOW(), updated_at=NOW(), "
+                "       provider_payment_id=COALESCE($2, provider_payment_id) "
+                " WHERE id = $1",
+                order["id"],
+                payment_id,
+            )
+
+        logger.info(
+            "topup_credited tenant=%s order=%s minutes=%d event=%s",
+            str(order["tenant_id"])[:8],
+            str(order["id"])[:8],
+            order["minutes"],
+            event_id[:24],
+        )
+        return True
+
+    async def mark_failed(self, *, session_id: str, status: str, conn=None) -> None:
+        """A failed or expired checkout. NO ledger entry and NO minutes —
+        nothing happened financially, so nothing is recorded."""
+        if status not in TERMINAL_FAILURE_STATES:
+            raise TopupError(f"{status!r} is not a failure state")
+        async with _mutation_connection(self._pool, conn) as conn:
+            await conn.execute(
+                "UPDATE topup_orders SET status=$2, updated_at=NOW() "
+                " WHERE provider_session_id = $1 AND status = 'pending'",
+                session_id,
+                status,
+            )
+        logger.info("topup_order_%s session=%s", status, session_id[:16])
+
+    async def reverse(
+        self,
+        *,
+        event_id: str,
+        kind: str = "refund",
+        payment_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        conn=None,
+    ) -> bool:
+        """Claw minutes back after a refund or a chargeback.
+
+        Matched on the PAYMENT id, because that is what ``charge.refunded`` and
+        ``charge.dispute.created`` carry — a refund event has no checkout
+        session on it.
+
+        A NEW NEGATIVE ROW, never an edit to the original. The original entry is
+        what the customer was charged; rewriting it to represent a refund
+        destroys the only evidence of what actually happened.
+
+        The reversal is the ledger row alone; the allocation (plan minutes)
+        is untouched, so it can never be blocked or reach the unlimited
+        sentinel. Minutes already used from a refunded top-up leave a negative
+        balance that the meter takes from the next allowance.
+        """
+        if kind not in ("refund", "dispute"):
+            raise TopupError(f"{kind!r} is not a reversal")
+        if not payment_id and not session_id:
+            raise TopupError("reverse() needs a payment id or a session id")
+
+        async with _mutation_connection(self._pool, conn) as conn:
+            order = await conn.fetchrow(
+                "SELECT id, tenant_id, minutes, price_cents, currency, status "
+                "  FROM topup_orders "
+                " WHERE ($2::text IS NOT NULL AND provider_session_id = $2 "
+                "        AND ($1::text IS NULL OR provider_payment_id = $1 OR provider_payment_id IS NULL)) "
+                "    OR ($2::text IS NULL AND $1::text IS NOT NULL AND provider_payment_id = $1) "
+                " FOR UPDATE",
+                payment_id,
+                session_id,
+            )
+            if not order or order["status"] != "paid":
+                # Most refunds on this account are subscription refunds, which
+                # have no top-up order. Nothing to reverse is the normal case.
+                logger.info(
+                    "topup_reverse_skipped ref=%s kind=%s — no paid top-up order",
+                    (payment_id or session_id or "")[:16],
+                    kind,
+                )
+                return False
+
+            if await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind IN ('refund','dispute'))",
+                order["id"],
+            ):
+                return False
+
+            entry = await conn.fetchrow(
+                """
+                INSERT INTO billing_ledger
+                    (tenant_id, order_id, kind, minutes_delta, amount_cents,
+                     currency, provider_event_id, note)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                ON CONFLICT (provider_event_id) DO NOTHING
+                RETURNING id
+                """,
+                order["tenant_id"],
+                order["id"],
+                kind,
+                -order["minutes"],
+                -order["price_cents"],
+                order["currency"],
+                event_id,
+                "{}: reversed {} minutes".format(kind, order["minutes"]),
+            )
+            if entry is None:
+                return False
+
+            # The legacy ceiling moves back with the credit that raised it, but
+            # never to 0 ("no quota configured" there).
+            await conn.execute(
+                "UPDATE tenant_call_limits "
+                "   SET monthly_minutes_allocated = "
+                "           GREATEST(1, monthly_minutes_allocated - $2), "
+                "       updated_at = NOW() "
+                " WHERE tenant_id = $1 AND monthly_minutes_allocated > 0",
+                order["tenant_id"],
+                order["minutes"],
+            )
+            await conn.execute(
+                "UPDATE topup_orders SET status=$2, updated_at=NOW() WHERE id=$1",
+                order["id"],
+                "refunded" if kind == "refund" else "disputed",
+            )
+        logger.info(
+            "topup_reversed tenant=%s order=%s kind=%s minutes=-%d",
+            str(order["tenant_id"])[:8],
+            str(order["id"])[:8],
+            kind,
+            order["minutes"],
+        )
+        return True
+
+    async def reinstate_dispute(self, conn, *, payment_id: str, dispute_id: str, event_id: str) -> bool:
+        """A dispute the business won returns the reversed minutes, once.
+
+        Caller owns the transaction (the signed webhook receipt). True when this
+        payment belongs to a disputed top-up order, whether or not it moved now.
+        """
+        order = await conn.fetchrow(
+            "SELECT id, tenant_id, minutes, status FROM topup_orders WHERE provider_payment_id=$1 FOR UPDATE",
+            payment_id,
+        )
+        if not order:
+            return False
+        if order["status"] != "disputed" or not await conn.fetchval(
+            "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='dispute')", order["id"],
+        ):
+            return True
+        inserted = await conn.fetchval(
+            """INSERT INTO billing_ledger
+                   (tenant_id, order_id, kind, minutes_delta, amount_cents, provider_event_id, note)
+               VALUES ($1, $2, 'adjustment', $3, 0, $4, $5)
+               ON CONFLICT (provider_event_id) DO NOTHING RETURNING id""",
+            order["tenant_id"], order["id"], order["minutes"], f"dispute-won:{dispute_id}",
+            "dispute won: {} minutes restored".format(order["minutes"]),
+        )
+        if inserted:
+            await conn.execute(
+                "UPDATE topup_orders SET status='paid', updated_at=NOW() WHERE id=$1", order["id"],
+            )
+            logger.info("topup_dispute_won order=%s minutes=%d event=%s",
+                        str(order["id"])[:8], order["minutes"], str(event_id)[:24])
+        return True
+
+    # ── read ────────────────────────────────────────────────────────────────
+
+    async def history(self, tenant_id: str, limit: int = 25) -> list[dict]:
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            rows = await conn.fetch(
+                """
+                SELECT o.id, o.package_code, o.minutes, o.price_cents, o.currency,
+                       o.status, o.created_at, o.paid_at, o.provider_payment_id,
+                       s.projection AS refund_projection,
+                       s.captured_at AS refund_captured_at,
+                       s.source_event_id AS refund_source_event_id
+                  FROM topup_orders o
+             LEFT JOIN LATERAL (
+                       SELECT projection,captured_at,source_event_id
+                         FROM billing_refund_snapshots s
+                        WHERE s.order_id=o.id AND s.tenant_id=o.tenant_id
+                        ORDER BY s.id DESC LIMIT 1
+                       ) s ON TRUE
+                 WHERE o.tenant_id = $1::uuid
+                 ORDER BY o.created_at DESC
+                 LIMIT $2
+                """,
+                str(tenant_id),
+                limit,
+            )
+        from app.domain.services.billing_refund_projection import public_refund_details
+
+        return [{**dict(r), "refund_details": public_refund_details(r)} for r in rows]
+
+    async def ledger(self, tenant_id: str, limit: int = 100) -> list[dict]:
+        """The reconciliation view §9 asks for — every movement, signed."""
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            rows = await conn.fetch(
+                """
+                SELECT l.id,l.order_id,l.provider_event_id,o.provider_payment_id,
+                       l.kind,l.minutes_delta,l.amount_cents,l.currency,l.note,l.created_at
+                  FROM billing_ledger l
+             LEFT JOIN topup_orders o ON o.id=l.order_id AND o.tenant_id=l.tenant_id
+                 WHERE l.tenant_id = $1::uuid
+                 ORDER BY l.created_at DESC,l.id DESC
+                 LIMIT $2
+                """,
+                str(tenant_id),
+                limit,
+            )
+        return [dict(r) for r in rows]
+
+    async def reconciliation(
+        self,
+        *,
+        since: Optional[str] = None,
+        until: Optional[str] = None,
+        limit: int = 5000,
+    ) -> list[dict]:
+        """Cross-tenant ledger for admin reconciliation (goals.md §9).
+
+        Deliberately reads the LEDGER and not ``topup_orders``: the ledger is
+        what actually moved, and an order can sit in a state that never became
+        money. Reconciling against intent rather than record is how a set of
+        books stops matching the payment provider's.
+        """
+        async with acquire_with_tenant(self._pool, None) as conn:
+            rows = await conn.fetch(
+                """
+                SELECT l.id, l.tenant_id, t.business_name, l.kind,
+                       l.minutes_delta, l.amount_cents, l.currency,
+                       l.provider_event_id, l.note, l.created_at,
+                       o.package_code, o.provider_payment_id, o.status AS order_status
+                  FROM billing_ledger l
+             LEFT JOIN topup_orders o ON o.id = l.order_id
+             LEFT JOIN tenants t ON t.id = l.tenant_id
+                 WHERE ($1::timestamptz IS NULL OR l.created_at >= $1::timestamptz)
+                   AND ($2::timestamptz IS NULL OR l.created_at < $2::timestamptz)
+                 ORDER BY l.created_at DESC
+                 LIMIT $3
+                """,
+                since,
+                until,
+                limit,
+            )
+        return [dict(r) for r in rows]
+
+    async def purchased_total(self, tenant_id: str) -> int:
+        """Net minutes this tenant has bought: credits less refunds/disputes.
+
+        Monthly usage rows (``topup_usage``) are not purchases; the unused
+        balance is reported separately as ``topup_minutes_left``.
+        """
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            total = await conn.fetchval(
+                "SELECT COALESCE(SUM(minutes_delta), 0) FROM billing_ledger "
+                " WHERE tenant_id = $1::uuid AND kind IN ('topup', 'refund', 'dispute')",
+                str(tenant_id),
+            )
+        return int(total or 0)

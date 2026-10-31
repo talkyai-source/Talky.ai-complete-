@@ -1,0 +1,6 @@
+
+C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\ag06-admin-dom-validation-online-20261006\src\lib\auth.tsx
+  222:8  warning  React Hook useEffect has a missing dependency: 'checkAuth'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+✖ 1 problem (0 errors, 1 warning)
+

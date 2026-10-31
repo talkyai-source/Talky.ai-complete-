@@ -4,10 +4,18 @@
 
 providers:
   # ──────────────────────────────────────────────────────────────
-  # STT — Deepgram Flux
+  # STT — tenant-selected Deepgram Flux or AssemblyAI Universal-3.6 Pro
   # ──────────────────────────────────────────────────────────────
   stt:
     active: "flux"
+
+    assemblyai:
+      api_key: ${ASSEMBLYAI_API_KEY}
+      model: "universal-3-6-pro"
+      encoding: "pcm_s16le"
+      sample_rate: 16000
+      language: "en"
+      # The saved tenant assemblyai_settings supply mode and advanced controls.
 
     flux:
       api_key: ${DEEPGRAM_API_KEY}
@@ -104,22 +112,17 @@ providers:
     groq:
       api_key: ${GROQ_API_KEY}
 
-      # LATENCY FIX 6: model llama-3.3-70b-versatile → llama-3.1-8b-instant
-      # llama-3.1-8b-instant: 560 tokens/sec on Groq
-      # llama-3.3-70b-versatile: ~280 tokens/sec
-      # For a dental receptionist the 8b model is more than capable.
-      # The system prompt constrains it tightly — intelligence gap is invisible.
-      model: "llama-3.1-8b-instant"
+      # Both legacy Llama ids return 404 on the production Groq account.
+      # Keep this aligned with GroqModel.GPT_OSS_20B and the worker's boot
+      # warm-up so loading this config can never reintroduce the dead model.
+      model: "openai/gpt-oss-20b"
 
-      # LATENCY FIX 7: temperature 0.7 → 0.4
-      # Lower temperature = faster token selection + more predictable dental
-      # responses. No creative variation needed for "confirm/reschedule/cancel".
+      # Legacy fallback settings. Voice sessions supply the effective saved
+      # AI/campaign settings; temperature controls response variation.
       temperature: 0.4
 
-      # LATENCY FIX 8: max_tokens 150 → 60
-      # Dental answers are short: "Your appointment is confirmed for Tuesday
-      # at 2 PM. See you then!" = 15 tokens. 60 tokens is ample headroom.
-      # Lower ceiling = Groq returns faster (less buffering before stream end).
+      # Preserve the legacy fallback budget. A lower ceiling may truncate an
+      # answer; it does not guarantee faster first-token delivery.
       max_tokens: 60
 
   # ──────────────────────────────────────────────────────────────

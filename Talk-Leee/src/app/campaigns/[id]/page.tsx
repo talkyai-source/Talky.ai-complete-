@@ -5,17 +5,25 @@ import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
+import { dashboardApi, campaignStartErrorMessage, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
+import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
+import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPages, type OptionalContactFieldKey } from "@/lib/contact-fields";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
 import { LiveCallsPanel } from "@/components/campaigns/live-calls-panel";
 import { CallIssuesPanel } from "@/components/campaigns/call-issues-panel";
+import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { TestAgentButton } from "@/components/campaigns/test-agent-button";
+import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 import { Modal } from "@/components/ui/modal";
 import { checkCallingWindow } from "@/lib/calling-window";
+import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
+import { inboundApi } from "@/lib/inbound-api";
+import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 import {
     ArrowLeft,
     Play,
@@ -51,6 +59,56 @@ function getStatusStyle(status: string) {
     }
 }
 
+// Normal pacing between calls (mirrors the backend's SELF_CLEARING_CODES): the
+// campaign IS dialing, so these never earn a "Not dialing" banner.
+const PACING_BLOCK_CODES = new Set([
+    "batch_capacity", "call_gap", "tenant_gap", "call_guard_throttled", "call_guard_queued",
+]);
+
+// Reasons that stop the WHOLE campaign. The block state is per campaign and
+// last-writer-wins, so a per-contact reason (one number's cooldown, DNC, daily
+// cap or guard block) must not read as "the campaign is not dialing".
+const CAMPAIGN_LEVEL_BLOCK_CODES = new Set([
+    "schedule_day_not_allowed", "schedule_outside_window", "out_of_minutes", "metering_unavailable",
+    "max_concurrent_calls", "voice_pipeline_unavailable", "caller_id_not_verified", "line_not_ready",
+    "telephony_unavailable", "testing_mode_schedule_bypassed",
+]);
+
+type DialBlock = { message: string; testing: boolean; error: boolean; nextEligibleAt: string | null };
+
+/** Why a RUNNING campaign is not placing calls, from the stats the page polls. */
+function dialBlockFor(
+    status: string | undefined,
+    reason: CampaignBlockingReason | null | undefined,
+    activity: CampaignActivity | null | undefined,
+    minutesExhausted?: boolean,
+): DialBlock | null {
+    if (status !== "running" && status !== "active") return null;
+    const code = reason?.code ?? activity?.reason_code ?? null;
+    if (code && PACING_BLOCK_CODES.has(code)) return null;
+    // Left over from before a Start/Resume: the block state is only cleared
+    // by the next placed call, so trust the campaign status instead.
+    if (code === "campaign_not_running") return null;
+    // Stale after a top-up: the page's own minutes status is fresher.
+    if (code === "out_of_minutes" && minutesExhausted === false) return null;
+    const waiting = activity?.waiting_on_schedule === true || activity?.state === "waiting_for_calling_window";
+    if (code && !waiting && !CAMPAIGN_LEVEL_BLOCK_CODES.has(code)) return null;
+    const message = reason?.message?.trim() || (waiting ? "Waiting for the calling window to open." : code);
+    if (!message) return null;
+    return {
+        message,
+        testing: code === "testing_mode_schedule_bypassed",
+        error: reason?.severity === "error",
+        nextEligibleAt: reason?.next_eligible_at ?? activity?.next_eligible_at ?? null,
+    };
+}
+
+function fmtNextAttempt(iso: string | null): string {
+    const t = iso ? Date.parse(iso) : NaN;
+    if (Number.isNaN(t)) return "";
+    return new Date(t).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
 function getContactStatusStyle(result: string) {
     switch (result) {
         case "goal_achieved":
@@ -64,8 +122,18 @@ function getContactStatusStyle(result: string) {
 
 export default function CampaignDetailPage() {
     const params = useParams();
-    const router = useRouter();
     const campaignId = params.id as string;
+
+    return <CampaignDetailScope key={campaignId} campaignId={campaignId} />;
+}
+
+function CampaignDetailScope({ campaignId }: { campaignId: string }) {
+    const router = useRouter();
+    const permissions = useEffectivePermissions();
+    const canManageKnowledge = permissions.isSuccess && (
+        permissions.data.role?.toLowerCase() === "platform_admin"
+        || permissions.data.permissions.includes("campaigns:update")
+    );
 
     const [campaign, setCampaign] = useState<Campaign | null>(null);
     const [contacts, setContacts] = useState<Contact[]>([]);
@@ -75,15 +143,28 @@ export default function CampaignDetailPage() {
         goals_achieved: number;
         job_status_counts: Record<string, number>;
         call_outcome_counts: Record<string, number>;
+        blocking_reason?: CampaignBlockingReason | null;
+        activity?: CampaignActivity | null;
     } | null>(null);
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState(false);
     const [error, setError] = useState("");
     const [minutes, setMinutes] = useState<MinutesStatus | null>(null);
+    const loadGeneration = useRef(0);
+    const scopeActive = useRef(true);
+    // Why the last Start attempt was refused, in the server's own words.
+    // Empty until something is actually refused; never pre-populated.
+    const [startError, setStartError] = useState("");
+    const canStart = Boolean(campaign && ["draft", "paused", "stopped"].includes(campaign.status));
+    const readiness = useCampaignReadiness([campaignId], canStart);
 
     // Out of plan minutes ⇒ the backend will 402 a Start, so we disable the
     // button up front and explain why. `unlimited` plans are never blocked.
     const outOfMinutes = !!minutes && !minutes.unlimited && minutes.exhausted;
+    const dialBlock = dialBlockFor(
+        campaign?.status, stats?.blocking_reason, stats?.activity,
+        minutes ? outOfMinutes : undefined,
+    );
 
     // CSV Upload (smart import modal)
     const [csvModalOpen, setCsvModalOpen] = useState(false);
@@ -108,12 +189,15 @@ export default function CampaignDetailPage() {
 
     // Add contact form
     const [showAddContact, setShowAddContact] = useState(false);
-    const [contactForm, setContactForm] = useState({
+    const [contactForm, setContactForm] = useState<ContactMutation>({
         phone_number: "",
         first_name: "",
         last_name: "",
         email: "",
     });
+    // Optional contact details the user chooses to add from a dropdown (the
+    // backend already accepts every one of these on POST/PATCH contacts).
+    const [extraContactFields, setExtraContactFields] = useState<OptionalContactFieldKey[]>([]);
     const [addingContact, setAddingContact] = useState(false);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
@@ -133,51 +217,80 @@ export default function CampaignDetailPage() {
     });
 
     const loadData = useCallback(async () => {
+        const generation = ++loadGeneration.current;
+        const superseded = () => !scopeActive.current || generation !== loadGeneration.current;
         try {
             setLoading(true);
-            const [campaignData, contactsData, statsData, minutesData] = await Promise.all([
-                dashboardApi.getCampaign(campaignId),
-                dashboardApi.listContacts(campaignId),
+            const campaignData = await dashboardApi.getCampaign(campaignId);
+            if (superseded()) return;
+            if (!isOutboundCampaign(campaignData.campaign)) {
+                const inboundCampaigns = await inboundApi.list({ includeArchived: true });
+                if (superseded()) return;
+                router.replace(
+                    inboundCampaignHrefForBase(campaignId, inboundCampaigns),
+                );
+                return;
+            }
+
+            const [contactsData, statsData, minutesData] = await Promise.all([
+                fetchAllPages((page, size) => dashboardApi.listContacts(campaignId, page, size)),
                 dashboardApi.getCampaignStats(campaignId),
                 // Best-effort — a quota hiccup must not blank the whole page.
                 dashboardApi.getMinutesStatus().catch(() => null),
             ]);
+            if (superseded()) return;
+            setError("");
             setCampaign(campaignData.campaign);
             setContacts(contactsData.items);
             setStats(statsData);
             setMinutes(minutesData);
         } catch (err) {
+            if (superseded()) return;
             setError(err instanceof Error ? err.message : "Failed to load campaign");
         } finally {
-            setLoading(false);
+            if (!superseded()) setLoading(false);
         }
-    }, [campaignId]);
+    }, [campaignId, router]);
+
+    useEffect(() => {
+        scopeActive.current = true;
+        return () => {
+            scopeActive.current = false;
+            loadGeneration.current += 1;
+        };
+    }, []);
 
     useEffect(() => {
         if (campaignId) {
+            // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches and stores campaign data when the route's campaignId changes
             void loadData();
         }
     }, [campaignId, loadData]);
 
-    // Live-sync campaign status + stats while it's running. Without this the
-    // page loads once and never refreshes, so a Stop issued on another device
-    // (or the campaign finishing on its own) leaves this view stuck showing
-    // "running". Poll is lightweight — only the campaign row + stats, never the
-    // full contacts list — and stops itself once the campaign is no longer
-    // running.
+    // Live-sync running campaigns and unused drafts. Draft polling is required
+    // because a draft can be converted to inbound from another tab; without it
+    // this outbound route keeps rendering controls for a campaign whose
+    // lifecycle has changed. The poll remains lightweight (row + stats only).
     useEffect(() => {
         const status = campaign?.status;
-        if (status !== "running" && status !== "active") return;
+        if (status !== "running" && status !== "active" && status !== "draft") return;
         let cancelled = false;
         const tick = async () => {
             try {
-                const [c, s] = await Promise.all([
-                    dashboardApi.getCampaign(campaignId),
-                    dashboardApi.getCampaignStats(campaignId).catch(() => null),
-                ]);
+                const c = await dashboardApi.getCampaign(campaignId);
+                if (cancelled) return;
+                if (!isOutboundCampaign(c.campaign)) {
+                    const inboundCampaigns = await inboundApi.list({ includeArchived: true });
+                    if (cancelled) return;
+                    router.replace(inboundCampaignHrefForBase(campaignId, inboundCampaigns));
+                    return;
+                }
+                const s = await dashboardApi.getCampaignStats(campaignId).catch(() => null);
                 if (cancelled) return;
                 setCampaign(c.campaign);
                 if (s) setStats(s);
+                // A successful tick proves the backend is reachable again.
+                setError("");
             } catch {
                 /* transient network hiccup — the next tick retries */
             }
@@ -187,18 +300,20 @@ export default function CampaignDetailPage() {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, [campaign?.status, campaignId]);
+    }, [campaign?.status, campaignId, router]);
 
     function handleStartClick() {
+        if (!readiness.ready) return;
         // Out of plan minutes — don't even open the modal; the backend
         // would 402 anyway. The banner above the button explains why.
         if (outOfMinutes) {
-            alert(
+            setStartError(
                 `You're out of plan minutes (${minutes?.used_minutes}/${minutes?.allocated} used this month). ` +
                 "Add minutes or upgrade your plan to start campaigns.",
             );
             return;
         }
+        setStartError("");
         // Default back to "agent" every time so a previous choice doesn't
         // silently carry over into the next Start.
         setFirstSpeaker("agent");
@@ -214,6 +329,7 @@ export default function CampaignDetailPage() {
     }
 
     async function handleConfirmStart() {
+        if (!readiness.ready || actionLoading) return;
         try {
             setActionLoading(true);
             setStartModalOpen(false);
@@ -222,15 +338,15 @@ export default function CampaignDetailPage() {
                 batch_size: batchSize,
                 call_gap_seconds: callGap,
             });
+            setStartError("");
             await loadData();
         } catch (err) {
             // The backend's out-of-minutes 402 ships a structured detail
             // ({ message, ... }) the http client exposes as `.details`.
-            const detail = (err as { details?: { message?: string } })?.details;
-            const msg =
-                (detail && typeof detail.message === "string" && detail.message) ||
-                (err instanceof Error ? err.message : "Failed to start campaign");
-            alert(msg);
+            // Shown in the page rather than an alert(): the quota figures next
+            // to it refresh underneath, so the reason stays readable beside the
+            // numbers that explain it instead of vanishing on acknowledge.
+            setStartError(campaignStartErrorMessage(err));
             // Refresh quota so the button/banner reflect reality after a 402.
             void loadData();
         } finally {
@@ -241,8 +357,11 @@ export default function CampaignDetailPage() {
     async function handlePause() {
         try {
             setActionLoading(true);
-            await dashboardApi.pauseCampaign(campaignId);
+            const result = await dashboardApi.pauseCampaign(campaignId);
             await loadData();
+            if (result.termination_summary.status !== "confirmed") {
+                alert(result.message);
+            }
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to pause campaign");
         } finally {
@@ -253,8 +372,11 @@ export default function CampaignDetailPage() {
     async function handleStop() {
         try {
             setActionLoading(true);
-            await dashboardApi.stopCampaign(campaignId);
+            const result = await dashboardApi.stopCampaign(campaignId);
             await loadData();
+            if (result.termination_summary.status !== "confirmed") {
+                alert(result.message);
+            }
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to stop campaign");
         } finally {
@@ -267,12 +389,16 @@ export default function CampaignDetailPage() {
         e.preventDefault();
         try {
             setAddingContact(true);
+            const payload = editingContact
+                ? contactEditPayload(contactForm)
+                : contactPayload(contactForm);
             if (editingContact) {
-                await dashboardApi.updateContact(campaignId, editingContact.id, contactForm);
+                await dashboardApi.updateContact(campaignId, editingContact.id, payload);
             } else {
-                await dashboardApi.addContact(campaignId, contactForm);
+                await dashboardApi.addContact(campaignId, payload);
             }
             setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" });
+            setExtraContactFields([]);
             setShowAddContact(false);
             setEditingContact(null);
             await loadData();
@@ -289,11 +415,14 @@ export default function CampaignDetailPage() {
 
     function startEditContact(contact: Contact) {
         setEditingContact(contact);
+        const present = OPTIONAL_CONTACT_FIELDS.filter((f) => Boolean(contact[f.key])).map((f) => f.key);
+        setExtraContactFields(present);
         setContactForm({
             phone_number: contact.phone_number || "",
             first_name: contact.first_name || "",
             last_name: contact.last_name || "",
             email: contact.email || "",
+            ...Object.fromEntries(present.map((key) => [key, String(contact[key] ?? "")])),
         });
         setShowAddContact(true);
     }
@@ -329,25 +458,35 @@ export default function CampaignDetailPage() {
                 </button>
             </motion.div>
 
-            {loading ? (
+            {/* Keep the last good data on screen during a reload or after a
+                failed one: Pause/Stop must stay reachable while the campaign runs. */}
+            {loading && !campaign ? (
                 <div className="flex items-center justify-center h-64">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" />
                 </div>
-            ) : error ? (
+            ) : error && !campaign ? (
                 <div className="content-card border-red-500/30 text-red-400">
                     {error}
                 </div>
             ) : campaign ? (
                 <div className="space-y-6">
+                    {error ? (
+                        <div role="alert" className="content-card border-red-500/30 bg-red-500/5 flex items-center justify-between gap-3">
+                            <p className="text-sm text-red-400">Could not refresh this campaign: {error}</p>
+                            <Button variant="outline" onClick={() => { void loadData(); }} disabled={loading}>
+                                Retry
+                            </Button>
+                        </div>
+                    ) : null}
                     {/* Header */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
-                        className="flex items-start justify-between"
+                        className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between"
                     >
-                        <div>
-                            <div className="flex items-center gap-3">
-                                <h2 className="text-2xl font-semibold text-foreground">{campaign.name}</h2>
+                        <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-3">
+                                <h2 className="break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>
                                 <span className={`px-3 py-1 text-sm font-medium rounded-full ${getStatusStyle(campaign.status)}`}>
                                     {campaign.status}
                                 </span>
@@ -357,7 +496,7 @@ export default function CampaignDetailPage() {
                             )}
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
                             {/* Live minutes remaining — visible right next to the
                                 control that consumes them. Amber when low, red at 0. */}
                             {minutes && !minutes.unlimited && (
@@ -375,7 +514,11 @@ export default function CampaignDetailPage() {
                                     {minutes.remaining_minutes} min left
                                 </span>
                             )}
-                            <TestAgentButton campaignId={campaignId} disabled={actionLoading} />
+                            <TestAgentButton
+                                campaignId={campaignId}
+                                disabled={actionLoading}
+                                agentName={campaign.script_config?.agent_names?.[0]}
+                            />
                             <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
                                 <Pencil className="w-4 h-4" />
                                 Edit
@@ -383,7 +526,7 @@ export default function CampaignDetailPage() {
                             {campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
                                 <Button
                                     onClick={handleStartClick}
-                                    disabled={actionLoading || outOfMinutes}
+                                    disabled={actionLoading || outOfMinutes || !readiness.ready}
                                     title={outOfMinutes ? "Out of plan minutes — add minutes to start" : undefined}
                                 >
                                     <Play className="w-4 h-4" />
@@ -403,6 +546,33 @@ export default function CampaignDetailPage() {
                             ) : null}
                         </div>
                     </motion.div>
+                    {canStart && <CampaignReadinessNotice readiness={readiness} />}
+
+                    {/* Running but not placing calls: say why, in the dialer's own
+                        words, and when it will try again. */}
+                    {dialBlock && (
+                        <div
+                            role="status"
+                            className={`content-card flex items-start gap-3 ${
+                                dialBlock.error ? "border-red-500/30 bg-red-500/5" : "border-amber-500/30 bg-amber-500/5"
+                            }`}
+                        >
+                            <AlertTriangle
+                                className={`w-5 h-5 shrink-0 mt-0.5 ${dialBlock.error ? "text-red-500" : "text-amber-500"}`}
+                                aria-hidden
+                            />
+                            <div className="text-sm">
+                                <p className={`font-medium ${dialBlock.error ? "text-red-600 dark:text-red-400" : "text-amber-700 dark:text-amber-400"}`}>
+                                    {`${dialBlock.testing ? "Testing mode" : "Not dialing"}: ${dialBlock.message}`}
+                                </p>
+                                {fmtNextAttempt(dialBlock.nextEligibleAt) ? (
+                                    <p className="text-muted-foreground mt-0.5">
+                                        {`Next attempt: ${fmtNextAttempt(dialBlock.nextEligibleAt)}`}
+                                    </p>
+                                ) : null}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Out-of-minutes banner — the campaign can't be started
                         until the tenant has plan minutes again. */}
@@ -420,6 +590,15 @@ export default function CampaignDetailPage() {
                             </div>
                         </div>
                     )}
+
+                    {/* Why the last Start was refused, in the server's words —
+                        beside the quota figures, which refresh underneath it. */}
+                    {startError ? (
+                        <div role="alert" className="content-card border-red-500/30 bg-red-500/5 flex items-start gap-3">
+                            <AlertTriangle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" aria-hidden />
+                            <p className="text-sm text-muted-foreground">{startError}</p>
+                        </div>
+                    ) : null}
 
                     {/* Active-contacts summary — which lists get dialed on Start.
                         "View more" scrolls to the full lists row below. */}
@@ -522,7 +701,7 @@ export default function CampaignDetailPage() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.3 }}
                     >
-                        <LiveCallsPanel campaignId={campaignId} />
+                        <LiveCallsPanel campaignId={campaignId} direction="outbound" />
                     </motion.div>
 
                     {/* Call issues — why calls aren't going through (only
@@ -532,7 +711,7 @@ export default function CampaignDetailPage() {
                         animate={{ opacity: 1, y: 0 }}
                         transition={{ delay: 0.35 }}
                     >
-                        <CallIssuesPanel campaignId={campaignId} />
+                        <CallIssuesPanel campaignId={campaignId} direction="outbound" />
                     </motion.div>
 
                     {/* Contact lists row — toggle active/inactive + call a whole list. */}
@@ -552,9 +731,9 @@ export default function CampaignDetailPage() {
                         transition={{ delay: 0.3 }}
                         className="content-card"
                     >
-                        <div className="flex items-center justify-between mb-4">
+                        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <h3 className="text-lg font-semibold text-foreground">Contacts</h3>
-                            <div className="flex gap-2">
+                            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
                                 <Button size="sm" variant="outline" onClick={() => setCsvModalOpen(true)}>
                                     <Upload className="w-4 h-4" />
                                     Import CSV
@@ -614,11 +793,82 @@ export default function CampaignDetailPage() {
                                         />
                                     </div>
                                 </div>
+                                <div className="mb-4 rounded-lg border border-border/70 bg-background/60 p-3" data-testid="contact-more-details">
+                                    <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+                                        <div>
+                                            <div className="text-sm font-semibold text-foreground">More details</div>
+                                            <div className="text-xs text-muted-foreground">
+                                                Pick any extra field to store with this contact. The agent sees company, title and notes on the call.
+                                            </div>
+                                        </div>
+                                        <div className="w-full sm:w-64">
+                                            <Select
+                                                value=""
+                                                ariaLabel="Add a contact detail"
+                                                onChange={(key) => {
+                                                    const k = key as OptionalContactFieldKey;
+                                                    if (!k || extraContactFields.includes(k)) return;
+                                                    setExtraContactFields((prev) => [...prev, k]);
+                                                }}
+                                            >
+                                                <option value="">Add a detail…</option>
+                                                {OPTIONAL_CONTACT_FIELDS.filter((f) => !extraContactFields.includes(f.key)).map((f) => (
+                                                    <option key={f.key} value={f.key}>{f.label}</option>
+                                                ))}
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    {extraContactFields.length > 0 ? (
+                                        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                                            {extraContactFields.map((key) => {
+                                                const field = OPTIONAL_CONTACT_FIELDS.find((f) => f.key === key)!;
+                                                return (
+                                                    <div key={key}>
+                                                        <div className="flex items-center justify-between">
+                                                            <Label htmlFor={`contact-${key}`}>{field.label}</Label>
+                                                            <button
+                                                                type="button"
+                                                                className="text-xs text-muted-foreground hover:text-foreground"
+                                                                aria-label={`Remove ${field.label}`}
+                                                                onClick={() => {
+                                                                    setExtraContactFields((prev) => prev.filter((k) => k !== key));
+                                                                    setContactForm((prev) => ({ ...prev, [key]: "" }));
+                                                                }}
+                                                            >
+                                                                Remove
+                                                            </button>
+                                                        </div>
+                                                        {field.options ? (
+                                                            <Select
+                                                                value={String(contactForm[key] ?? "")}
+                                                                ariaLabel={field.label}
+                                                                onChange={(v) => setContactForm((prev) => ({ ...prev, [key]: v }))}
+                                                            >
+                                                                <option value="">Choose…</option>
+                                                                {field.options.map((o) => (
+                                                                    <option key={o} value={o}>{o}</option>
+                                                                ))}
+                                                            </Select>
+                                                        ) : (
+                                                            <Input
+                                                                id={`contact-${key}`}
+                                                                value={String(contactForm[key] ?? "")}
+                                                                onChange={(e) => setContactForm((prev) => ({ ...prev, [key]: e.target.value }))}
+                                                                placeholder={field.placeholder}
+                                                                maxLength={field.maxLength}
+                                                            />
+                                                        )}
+                                                    </div>
+                                                );
+                                            })}
+                                        </div>
+                                    ) : null}
+                                </div>
                                 <div className="flex gap-2">
                                     <Button type="submit" size="sm" disabled={addingContact}>
                                         {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                                     </Button>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); }}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); }}>
                                         Cancel
                                     </Button>
                                 </div>
@@ -688,6 +938,7 @@ export default function CampaignDetailPage() {
                                                     {contact.first_name || contact.last_name
                                                         ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim()
                                                         : "--"}
+                                                    <ContactCapturedDetails leadId={contact.id} />
                                                 </td>
                                                 <td className="px-4 py-3 text-sm whitespace-nowrap">
                                                     {contact.is_lead ? (
@@ -708,6 +959,11 @@ export default function CampaignDetailPage() {
                                                         <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getContactStatusStyle(contact.last_call_result)}`}>
                                                             {contact.last_call_result}
                                                         </span>
+                                                    )}
+                                                    {contact.latest_analysis_note && (
+                                                        <p className="mt-1 max-w-xs whitespace-normal text-xs text-muted-foreground">
+                                                            Latest call analysis: {contact.latest_analysis_note}
+                                                        </p>
                                                     )}
                                                 </td>
                                                 <td className="px-4 py-3 text-right text-sm text-muted-foreground tabular-nums whitespace-nowrap">{contact.call_attempts}</td>
@@ -749,7 +1005,7 @@ export default function CampaignDetailPage() {
                     </motion.div>
 
                     {/* Knowledge base — vectorless-RAG tree the agent answers from */}
-                    <KnowledgePanel campaignId={campaignId} />
+                    <KnowledgePanel campaignId={campaignId} readOnly={!canManageKnowledge} />
 
                     {/* Script Card — transcripts of every call with timestamps */}
                     <ScriptCard campaignId={campaignId} />
@@ -771,7 +1027,7 @@ export default function CampaignDetailPage() {
                         >
                             Cancel
                         </Button>
-                        <Button onClick={handleConfirmStart} disabled={actionLoading}>
+                        <Button onClick={handleConfirmStart} disabled={actionLoading || !readiness.ready}>
                             {actionLoading ? (
                                 <Loader2 className="w-4 h-4 animate-spin" />
                             ) : (
@@ -783,6 +1039,7 @@ export default function CampaignDetailPage() {
                 }
             >
                 <div className="space-y-2">
+                    <CampaignReadinessNotice readiness={readiness} />
                     {(() => {
                         const sched = campaign?.calling_config;
                         if (!sched) return null;

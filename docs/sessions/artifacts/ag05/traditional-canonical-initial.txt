@@ -1,0 +1,67 @@
+FFFFFFFFF.                                                               [100%]
+================================== FAILURES ===================================
+_________ test_latest_revision_is_readable_and_original_is_preserved __________
+tests\unit\test_ag05_transcript_evidence.py:32: in test_latest_revision_is_readable_and_original_is_preserved
+    assert row["content"] == "My provider is CurrentCo."
+E   AssertionError: assert 'My provider is FormerCo.' == 'My provider is CurrentCo.'
+E     - My provider is CurrentCo.
+E     ?                ^^  ---
+E     + My provider is FormerCo.
+E     ?                ^^ ++
+_________ test_retraction_retains_audit_evidence_but_not_an_utterance _________
+tests\unit\test_ag05_transcript_evidence.py:43: in test_retraction_retains_audit_evidence_but_not_an_utterance
+    assert row["content"] == ""
+E   AssertionError: assert 'My provider is FormerCo.' == ''
+E     + My provider is FormerCo.
+_ test_invalid_revision_cannot_become_current_financial_or_caller_evidence[provider_item_id-other-item] _
+tests\unit\test_ag05_transcript_evidence.py:60: in test_invalid_revision_cannot_become_current_financial_or_caller_evidence
+    assert row["content"] == ""
+E   AssertionError: assert 'My provider is FormerCo.' == ''
+E     + My provider is FormerCo.
+_ test_invalid_revision_cannot_become_current_financial_or_caller_evidence[caller_turn_order-3] _
+tests\unit\test_ag05_transcript_evidence.py:60: in test_invalid_revision_cannot_become_current_financial_or_caller_evidence
+    assert row["content"] == ""
+E   AssertionError: assert 'My provider is FormerCo.' == ''
+E     + My provider is FormerCo.
+_ test_invalid_revision_cannot_become_current_financial_or_caller_evidence[revision-True] _
+tests\unit\test_ag05_transcript_evidence.py:60: in test_invalid_revision_cannot_become_current_financial_or_caller_evidence
+    assert row["content"] == ""
+E   AssertionError: assert 'My provider is FormerCo.' == ''
+E     + My provider is FormerCo.
+_ test_invalid_revision_cannot_become_current_financial_or_caller_evidence[content_sha256-bad] _
+tests\unit\test_ag05_transcript_evidence.py:60: in test_invalid_revision_cannot_become_current_financial_or_caller_evidence
+    assert row["content"] == ""
+E   AssertionError: assert 'My provider is FormerCo.' == ''
+E     + My provider is FormerCo.
+_ test_invalid_revision_cannot_become_current_financial_or_caller_evidence[truncated-True] _
+tests\unit\test_ag05_transcript_evidence.py:60: in test_invalid_revision_cannot_become_current_financial_or_caller_evidence
+    assert row["content"] == ""
+E   AssertionError: assert 'My provider is FormerCo.' == ''
+E     + My provider is FormerCo.
+_ test_invalid_revision_cannot_become_current_financial_or_caller_evidence[characters-999] _
+tests\unit\test_ag05_transcript_evidence.py:60: in test_invalid_revision_cannot_become_current_financial_or_caller_evidence
+    assert row["content"] == ""
+E   AssertionError: assert 'My provider is FormerCo.' == ''
+E     + My provider is FormerCo.
+_____________ test_business_quotes_use_effective_current_revision _____________
+tests\unit\test_ag05_transcript_evidence.py:68: in test_business_quotes_use_effective_current_revision
+    assert not verified_details([{"field_key": "current_provider", "value": "FormerCo",
+E   AssertionError: assert not [{'evidence': {'extraction': 'post_call', 'source_quote': 'My provider is FormerCo.', 'status': 'needs_review', 'subject': 'unverified', ...}, 'field_key': 'current_provider', 'value': 'My provider is FormerCo.'}]
+E    +  where [{'evidence': {'extraction': 'post_call', 'source_quote': 'My provider is FormerCo.', 'status': 'needs_review', 'subject': 'unverified', ...}, 'field_key': 'current_provider', 'value': 'My provider is FormerCo.'}] = verified_details([{'field_key': 'current_provider', 'source_quote': 'My provider is FormerCo.', 'value': 'FormerCo'}], [{'audio_window_end': None, 'audio_window_start': None, 'confidence': None, 'content': 'My provider is FormerCo.', ...}])
+============================== warnings summary ===============================
+tests/unit/test_ag05_transcript_evidence.py: 10 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_latest_revision_is_readable_and_original_is_preserved
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_retraction_retains_audit_evidence_but_not_an_utterance
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_invalid_revision_cannot_become_current_financial_or_caller_evidence[provider_item_id-other-item]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_invalid_revision_cannot_become_current_financial_or_caller_evidence[caller_turn_order-3]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_invalid_revision_cannot_become_current_financial_or_caller_evidence[revision-True]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_invalid_revision_cannot_become_current_financial_or_caller_evidence[content_sha256-bad]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_invalid_revision_cannot_become_current_financial_or_caller_evidence[truncated-True]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_invalid_revision_cannot_become_current_financial_or_caller_evidence[characters-999]
+FAILED tests/unit/test_ag05_transcript_evidence.py::test_business_quotes_use_effective_current_revision
+9 failed, 1 passed, 10 warnings in 2.40s

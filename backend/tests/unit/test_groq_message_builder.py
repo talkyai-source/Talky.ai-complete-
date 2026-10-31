@@ -63,8 +63,14 @@ def test_leading_assistant_original_greeting_preserved():
 
 # ── Normal case: history already starts with user ────────────────────────────
 
-def test_normal_case_instructions_injected_into_first_user():
-    """When history starts with user, instructions go into that first user message."""
+def test_instructions_ride_on_the_latest_user_message():
+    """Changed 2026-09-02. The block used to be stitched onto the FIRST user
+    message — the oldest turn. The per-turn parts of the system prompt (LIVE
+    STATE, CAPTURED, "ACTION THIS TURN: read the email back") therefore sat
+    next to "hello" while the caller's current words were at the far end, and
+    because that first message changed every turn the cacheable prefix was
+    destroyed. Groq's guidance is "instructions in the user message"; the user
+    message that matters is the current one."""
     messages = [
         {"role": "user", "content": "Hello there."},
         {"role": "assistant", "content": "Hi! How can I help?"},
@@ -74,9 +80,36 @@ def test_normal_case_instructions_injected_into_first_user():
         system_prompt=SYSTEM_PROMPT,
         messages=messages,
     )
-    assert result[0]["role"] == "user"
-    assert SYSTEM_PROMPT in result[0]["content"]
-    assert "Hello there." in result[0]["content"]
+    assert result[0] == messages[0]  # oldest turn untouched
+    assert result[1] == messages[1]
+    assert result[-1]["role"] == "user"
+    assert SYSTEM_PROMPT in result[-1]["content"]
+    assert "What are your plans?" in result[-1]["content"]
+    assert SYSTEM_PROMPT not in result[0]["content"]
+
+
+def test_prefix_is_stable_across_turns_for_caching():
+    """Everything before the current user message must be byte-identical
+    between turn N and turn N+1, or the provider can never cache the prefix."""
+    turn_n = [
+        {"role": "user", "content": "Hello there."},
+        {"role": "assistant", "content": "Hi! How can I help?"},
+        {"role": "user", "content": "What are your plans?"},
+    ]
+    turn_n1 = turn_n + [
+        {"role": "assistant", "content": "Two plans — starter and pro."},
+        {"role": "user", "content": "Price of pro?"},
+    ]
+    r_n = GroqLLMProvider._inject_instructions_for_reasoning_model(
+        system_prompt=SYSTEM_PROMPT, messages=turn_n,
+    )
+    r_n1 = GroqLLMProvider._inject_instructions_for_reasoning_model(
+        system_prompt=SYSTEM_PROMPT + " LIVE STATE: turn 2", messages=turn_n1,
+    )
+    # The first three raw messages of turn N+1 equal the first two of turn N
+    # plus the ORIGINAL third message (instructions have moved on).
+    assert r_n1[:2] == r_n[:2]
+    assert r_n1[2] == turn_n[2]
 
 
 def test_normal_case_message_count_unchanged():
@@ -119,11 +152,10 @@ def test_no_system_prompt_returns_messages_unchanged():
     assert result == messages
 
 
-def test_result_first_two_roles_when_leading_assistant():
-    """
-    After injection with leading assistant, the first two messages must be
-    user then assistant (the prepended instruction + the original greeting).
-    """
+def test_leading_assistant_gets_a_neutral_user_lead_in_and_instructions_last():
+    """GPT-OSS wants a user message first. When history opens with the agent's
+    greeting, a short neutral user lead-in is prepended; the instructions still
+    ride on the LATEST user message, not on that lead-in."""
     messages = [
         {"role": "assistant", "content": "Hi there!"},
         {"role": "user", "content": "What plans do you offer?"},
@@ -132,5 +164,8 @@ def test_result_first_two_roles_when_leading_assistant():
         system_prompt=SYSTEM_PROMPT,
         messages=messages,
     )
-    assert result[0]["role"] == "user"
-    assert result[1]["role"] == "assistant"
+    assert [m["role"] for m in result] == ["user", "assistant", "user"]
+    assert SYSTEM_PROMPT not in result[0]["content"]
+    assert result[1] == messages[0]
+    assert SYSTEM_PROMPT in result[-1]["content"]
+    assert "What plans do you offer?" in result[-1]["content"]

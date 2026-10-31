@@ -1,0 +1,154 @@
+{
+  "as_of": "2026-10-05",
+  "package": "OP07 / native DNC speech receipt follow-up",
+  "base_commit": "e00633be52e2de436b85da638d3ece58378dfe8b",
+  "source_commit": "51c36aa675eda4323509779a0b4d2bff260683bc",
+  "scope": "Actual native event parser, bridge, response guards and playback with synthetic persistence/WebSocket/media ports only; no provider/network/PostgreSQL/phone calls in this follow-up.",
+  "dependencies": [
+    "cc5af3fc8a0d3bda805f4f0fac44884fb5d55859",
+    "0061_dnc_runtime_contract"
+  ],
+  "files": [
+    {
+      "path": "backend/app/realtime/bridge.py",
+      "sha256_normalized_utf8_lf": "d4865727e2a0f4211deaa000d7a976c162cf3cada9e0f133558ea8173921fc84"
+    },
+    {
+      "path": "backend/app/realtime/openai.py",
+      "sha256_normalized_utf8_lf": "abf05cc6a2953d0a266cd63ecf1cd2e3caedfa9259d7c2b2cf7ad101bcec162d"
+    },
+    {
+      "path": "backend/app/realtime/xai.py",
+      "sha256_normalized_utf8_lf": "1b33ccdda11f4e823e296e44bd906799be71916320fcc196dea5fc9b7a005740"
+    },
+    {
+      "path": "backend/tests/unit/test_op07_native_dnc_speech.py",
+      "sha256_normalized_utf8_lf": "97317676b318fefce8819ba0863a0b2f8ba2b31f2d80c58dfc048309685b2055"
+    },
+    {
+      "path": "backend/tests/unit/test_realtime_end_call_ownership.py",
+      "sha256_normalized_utf8_lf": "af3eee4080a91f0978ca5c700f3da4c6bf5e47e478a503acf1cddbf458efbfd0"
+    }
+  ],
+  "observations": [
+    {
+      "artifact": "speech-initial.txt",
+      "passed": 4,
+      "failed": 11,
+      "note": "Before speech fix; original generated removal claim was admitted without DNC acknowledgement; optional repair contract absent."
+    },
+    {
+      "artifact": "late-asr-initial.txt",
+      "passed": 0,
+      "failed": 2,
+      "note": "Reviewer barrier repro: final DNC during begin/send await admitted all three chunks."
+    },
+    {
+      "artifact": "related-initial.txt",
+      "passed": 303,
+      "failed": 1,
+      "note": "Old close-ownership fixture supplied neither acknowledged DNC nor safe-repair provider. Made its intended successful-persistence prerequisite explicit; failure preserved."
+    },
+    {
+      "artifact": "related-interim.txt",
+      "passed": 309,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 254,
+      "note": "Before additional parser-to-bridge and legacy completion-control controls."
+    },
+    {
+      "artifact": "speech-final.txt",
+      "passed": 30,
+      "failed": 0,
+      "skipped": 0
+    },
+    {
+      "artifact": "legacy-completion-initial.txt",
+      "passed": 0,
+      "failed": 1,
+      "note": "Root review: legacy tts_audio_complete await used owns-only early return, omitting clear/truncate and interrupted partial history."
+    },
+    {
+      "artifact": "related-final.txt",
+      "passed": 311,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 254,
+      "owned_speech_cases_included": 31,
+      "note": "Final exact source and all31 owned speech controls included in12-module regression."
+    }
+  ],
+  "commands": {
+    "cwd": "backend",
+    "related": [
+      "python",
+      "-m",
+      "pytest",
+      "tests/unit/test_op07_native_dnc_speech.py",
+      "tests/unit/test_op07_native_dnc_durability.py",
+      "tests/unit/test_opt_out_purge.py",
+      "tests/unit/test_dnc_service.py",
+      "tests/unit/test_caller_authorized_end_call.py",
+      "tests/unit/test_realtime_end_call_ownership.py",
+      "tests/unit/test_realtime_lifecycle_repairs.py",
+      "tests/unit/test_realtime_relationship_ownership.py",
+      "tests/unit/test_realtime_independent.py",
+      "tests/unit/test_xai_realtime.py",
+      "tests/unit/test_realtime_knowledge_evidence.py",
+      "tests/unit/test_realtime_session_type_0930.py",
+      "-q",
+      "--tb=short"
+    ],
+    "owned": [
+      "python",
+      "-m",
+      "pytest",
+      "tests/unit/test_op07_native_dnc_speech.py",
+      "-q",
+      "--tb=short"
+    ],
+    "lint": [
+      "python",
+      "-m",
+      "ruff",
+      "check",
+      "--select",
+      "F",
+      "--extend-ignore",
+      "F401,F841",
+      "app/realtime/bridge.py",
+      "app/realtime/openai.py",
+      "app/realtime/xai.py",
+      "tests/unit/test_op07_native_dnc_speech.py",
+      "tests/unit/test_realtime_end_call_ownership.py"
+    ],
+    "hygiene": "git diff --check"
+  },
+  "primary_sources": [
+    {
+      "url": "https://developers.openai.com/api/docs/guides/realtime-conversations",
+      "verified": "2026-10-05",
+      "supports": "response.create metadata and response.done.response.metadata echo correlation; per-response instructions"
+    },
+    {
+      "url": "https://docs.x.ai/developers/model-capabilities/audio/speech-to-speech",
+      "verified": "2026-10-05",
+      "supports": "Per-response instructions only; response metadata echo not established, capability explicitly disabled"
+    }
+  ],
+  "independent_review": {
+    "reviewer_role": "native realtime owner",
+    "status": "clear after final rereview",
+    "scope": "Read-only design and source review; found late-ASR race, reproduced and repaired by implementation owner. Reread root-identified legacy complete-control correction too. No independent suite count."
+  },
+  "limits": [
+    "No live provider, real audio/hearing, legal-consent, profile-quality or commercial acceptance proof.",
+    "Native speech is degraded to one exact truthful acknowledgement while DNC is unacknowledged. A new accepted final caller turn can coalesce one idempotent persistence retry; no retry per delta/duplicate or durable recovery queue.",
+    "OpenAI repair token, response ID, epoch and current caller revision are checked; xAI metadata echo is unverified. An interrupted unresolved xAI repair remains speech-unavailable and diagnosed, not silently treated as recovered.",
+    "Audio already submitted before delayed final DNC cannot be recalled. The remainder is cancelled/truncated and partial delivery remains interrupted/unknown; no full reply replay or invented unheard/heard claim.",
+    "Exact transcript admission trusts the existing complete provider audio/transcript pairing; synthetic tests cannot prove acoustic fidelity.",
+    "DNC acknowledgement means the durable suppression row was acknowledged, separately from full queue/lead cleanup. Existing schema/runtime tests remain separate evidence.",
+    "Persistent DB failure, process death, unfinished recording expiry/export/delete acceptance, and real provider/profile qualification remain open."
+  ]
+}

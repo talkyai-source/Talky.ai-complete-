@@ -1,251 +1,22 @@
-"""Deterministic spoken-email *syntax* normalizer (the small half of the hybrid).
+"""Shared number normalization and contact display helpers.
 
-Voice transcripts say things like:
-  "bob at gmail dot com"                      -> bob@gmail.com         (pinned)
-  "mary underscore smith at gmail dot com"    -> mary_smith@gmail.com  (pinned)
-  "you can send me on all state estimation at gmail dot com" -> None   (LLM's job)
-
-Design (2026-06-24): this layer owns ONLY the fixed email syntax — "at" / "at the
-rate" -> @, "dot" -> ., "underscore" -> _, and gluing the domain. It pins an
-address ONLY when the local part is a single, unambiguous token. The instant the
-local part is several spoken words that must be *joined* ("all state estimation"),
-or is preceded by carrier words ("you can send me on …"), it returns None and the
-LLM assembles it and reads it back to confirm. We deliberately keep NO hand-written
-carrier-word list — it mangled real local parts ("me@", "iphone@", "yes2024@").
-Email is a core field; correctness lives in the read-back loop, not in a guess.
-
-Pure function — no I/O. Safe to call per-turn.
+Used by action authorization and technical-disclosure exemptions, not to
+extract caller contacts or prescribe dialogue.
 """
 from __future__ import annotations
-
 import re
 from typing import Optional
 
-# Spoken -> written substitutions, applied in order. Longer phrases first
-# so "at the rate" wins over "at".
-_SUBSTITUTIONS: list[tuple[str, str]] = [
-    (r"\s+at\s+the\s+rate\s+", " @ "),
-    (r"\s+at\s+sign\s+", " @ "),
-    (r"\s+at\s+", " @ "),
-    (r"\s+dot\s+", " . "),
-    (r"\s+period\s+", " . "),
-    (r"\s+underscore\s+", " _ "),
-    (r"\s+(?:dash|hyphen|minus)\s+", " - "),
-    # Spoken digits (limited to 0-9 single-token — multi-digit "twenty three"
-    # is out of scope; real-world voice transcripts already convert to "23").
+_SUBSTITUTIONS = [
     (r"\bzero\b", "0"), (r"\bone\b", "1"), (r"\btwo\b", "2"),
     (r"\bthree\b", "3"), (r"\bfour\b", "4"), (r"\bfive\b", "5"),
     (r"\bsix\b", "6"), (r"\bseven\b", "7"), (r"\beight\b", "8"),
     (r"\bnine\b", "9"),
 ]
-
-_EMAIL_RE = re.compile(
-    r"[a-z0-9][a-z0-9._+\-]*@[a-z0-9][a-z0-9\-]*(?:\.[a-z0-9\-]+)+",
-    re.IGNORECASE,
-)
-
-def extract_email_from_speech(utterance: str) -> Optional[str]:
-    """Pin a canonical email ONLY when it is unambiguous; else return None and
-    let the LLM assemble it.
-
-    The hybrid split (see the module docstring): this layer converts the spoken
-    email *syntax* and pins the address only when the local part is a single,
-    unambiguous token —
-
-      * a written address ("my email is john@gmail.com"), or
-      * a clean spoken local ("bob at gmail dot com",
-        "mary underscore smith at gmail dot com", "john dot smith at gmail dot com").
-
-    When the local part is several spoken words that would have to be *joined*
-    ("all state estimation"), or is preceded by carrier words ("you can send me
-    on …"), we DO NOT guess a boundary — we return None and let the LLM
-    understand it and read it back to confirm. Idempotent for written emails.
-    """
-    if not utterance or not utterance.strip():
-        return None
-
-    original_had_at = "@" in utterance
-    s = f" {utterance.lower().strip()} "
-    for pattern, repl in _SUBSTITUTIONS:
-        s = re.sub(pattern, repl, s)
-
-    s = re.sub(r"\s*@\s*", "@", s)
-    s = re.sub(r"\s*\.\s*", ".", s)
-    s = re.sub(r"\s*_\s*", "_", s)
-    s = re.sub(r"\s*-\s*", "-", s)
-
-    if "@" not in s:
-        return None
-
-    local, _, rest = s.partition("@")
-    local_tokens = local.split()
-    if original_had_at:
-        # Written email — the literal "@" is the anchor; the token immediately
-        # before it is the local part. Unambiguous, so pin it.
-        local = local_tokens[-1] if local_tokens else ""
-    else:
-        # Spoken email — the "@" came from "at"/"at the rate". Pin ONLY a single
-        # unambiguous token. Multi-word locals and carrier words are the LLM's
-        # job (it joins them and reads the result back to confirm).
-        if len(local_tokens) != 1:
-            return None
-        local = local_tokens[0]
-
-    # The domain: take the longest DOMAIN-SYNTAX prefix of `rest` — not
-    # everything left in the utterance. Once the "dot"/"period" substitutions
-    # above collapse a legitimate spoken domain into one token (e.g.
-    # "gmail . com" -> "gmail.com", "yahoo . co . uk" -> "yahoo.co.uk"), that
-    # token never contains a raw space or word character outside
-    # [a-z0-9.-]; a leftover word after a space ("please", "thanks",
-    # "cheers", "yeah", "okay", the next sentence) is conversational filler,
-    # not part of the domain, and must never fuse onto the TLD. Anchoring on
-    # domain syntax (must end in ".<label>") rather than blanket whitespace
-    # removal is what stops "bob at gmail dot com please" from becoming
-    # bob@gmail.complease. This mirrors the longest-valid-domain match
-    # extract_email_from_agent_readback already uses below.
-    rest = rest.strip()
-    domain_match = re.match(r"[a-z0-9][a-z0-9.\-]*\.[a-z0-9\-]+", rest)
-    if not domain_match:
-        return None
-    candidate = f"{local}@{domain_match.group(0)}"
-
-    match = _EMAIL_RE.search(candidate)
-    if not match:
-        return None
-    return match.group(0).lower()
-
-
-# ── multi-word email: parse the AGENT's own assembled read-back ──────────────
-#
-# The deterministic user-turn extractor above returns None for a multi-word /
-# carrier-prefixed spoken local ("all state estimation at gmail dot com") — it
-# refuses to guess a word boundary. That left the HARDEST emails OUTSIDE the
-# confirm-before-commit gate entirely (they never entered CallState, so the
-# read-back/verdict/commit loop never ran over them).
-#
-# This closes that gap from the other side: when the LLM has ASSEMBLED such an
-# address and read it back in its OWN turn, we parse that assembled address out
-# of the agent's read-back (deterministic text we control the shape of) and seed
-# it into CallState as UNCONFIRMED — so the same gate runs. Conservative by
-# design: we only parse when the turn is unmistakably a read-back (a confirm
-# question) anchored on a recognizable read-back preamble, and we bail on any
-# ambiguity (multiple "at"s, no preamble) rather than commit a mis-parsed local.
-
-# The turn must actually ASK the caller to confirm — otherwise it's the agent
-# merely mentioning an address, not reading it back for confirmation.
-_READBACK_CONFIRM_RE = re.compile(
-    r"\b(did\s+i\s+(get|say|hear)\s+(that|it|this)|is\s+(that|this|it)\s+(right|correct)|"
-    r"got\s+(that|it)\s+right|that\s+right\?|is\s+that\s+ok(ay)?\?|"
-    r"sounds?\s+right|correct\?|right\?)",
-    re.IGNORECASE,
-)
-
-# Recognizable read-back preambles. The local part is exactly the words BETWEEN
-# the preamble and the "@" — anchoring on a known preamble is far safer than a
-# heuristic filler list, which broke on lead-ins like "the address you gave me".
-_READBACK_PREAMBLE_RE = re.compile(
-    r"\b(so\s+that'?s|so\s+that\s+is|that'?s|so\s+it'?s|it'?s|"
-    r"so\s+i\s+have|i\s+have|i'?ve\s+got|i\s+got|"
-    r"let\s+me\s+confirm|just\s+to\s+confirm|to\s+confirm|"
-    r"reading\s+(that|it)\s+back|read\s+(that|it)\s+back|"
-    r"your\s+email(\s+address)?\s+is|the\s+email\s+is|so\s+your\s+email\s+is)\b",
-    re.IGNORECASE,
-)
-
-
-def extract_email_from_agent_readback(text: str) -> Optional[str]:
-    """Parse an ASSEMBLED email out of the agent's own read-back turn.
-
-    Returns the address ONLY when the turn is clearly a read-back-for-confirmation
-    (contains a confirm question), has exactly one spoken "@" (so we don't cross
-    two separate "at"s), and the local part sits after a recognizable preamble
-    ("so that's …", "your email is …"). Everything between that preamble and the
-    "@" is joined into the local part; the domain is read as words after it.
-
-    Deliberately conservative — a mis-parsed local that the caller then confirms
-    would commit a value they never actually approved. When the boundary is not
-    unambiguous we return None (the agent simply re-reads it back next turn).
-    """
-    if not text or not text.strip():
-        return None
-    low = text.lower().strip()
-    if not _READBACK_CONFIRM_RE.search(low):
-        return None
-
-    s = f" {low} "
-    for pattern, repl in _SUBSTITUTIONS:
-        s = re.sub(pattern, repl, s)
-    s = re.sub(r"\s*@\s*", "@", s)
-    s = re.sub(r"\s*\.\s*", ".", s)
-    s = re.sub(r"\s*_\s*", "_", s)
-    s = re.sub(r"\s*-\s*", "-", s)
-
-    # Exactly one spoken "@": more than one means two "at"s in the sentence and we
-    # can't tell which is the address — bail rather than guess.
-    if s.count("@") != 1:
-        return None
-
-    at = s.index("@")
-    before, after = s[:at], s[at + 1:]
-
-    dm = re.match(r"[a-z0-9][a-z0-9.\-]*\.[a-z0-9\-]+", after)
-    if not dm:
-        return None
-    domain = dm.group(0).rstrip(".?!,;:")
-
-    pre = list(_READBACK_PREAMBLE_RE.finditer(before))
-    if not pre:
-        return None
-    local_tokens = before[pre[-1].end():].split()
-    if not local_tokens or "@" in "".join(local_tokens):
-        return None
-    local = "".join(local_tokens)
-
-    candidate = f"{local}@{domain}"
-    match = _EMAIL_RE.search(candidate)
-    if not match:
-        return None
-    return match.group(0).lower()
-
-
-# ── spoken phone / callback number (mirrors the email hybrid) ────────────────
-#
-# A callback / reference number is a CORE field just like email — a single mis-
-# heard digit makes it useless. It gets the SAME deterministic confirm-before-
-# commit gate. This pins a candidate number ONLY when the turn is unambiguously
-# about a number (a phone-context cue, or a clearly-formatted number), and never
-# when the turn is actually an email (its digits belong to the local part).
-
-_PHONE_CONTEXT_RE = re.compile(
-    r"\b(phone|number|numbers|call\s+me|callback|call\s+back|reach\s+me|"
-    r"cell|mobile|text\s+me|contact\s+me|my\s+(cell|mobile|line)|dial)\b",
-    re.IGNORECASE,
-)
-# If the turn is an email, its digits are NOT a phone — skip phone capture.
-_EMAIL_CUE_RE = re.compile(
-    r"@|\bdot\s+com\b|\b(g\s*mail|gmail|yahoo|hotmail|outlook|icloud|proton|aol)\b|"
-    r"\bemail\b|\bat\s+the\s+rate\b|\bat\s+sign\b",
-    re.IGNORECASE,
-)
-# A run of digits with optional phone formatting (spaces, dashes, dots, parens).
-_PHONE_CANDIDATE_RE = re.compile(r"\+?\d[\d\s().\-]{5,}\d")
-_MIN_PHONE_DIGITS = 7
-_MAX_PHONE_DIGITS = 15  # E.164 maximum
-
-# Extra spoken forms that only make sense for phone numbers, not email: "oh"
-# read as the digit zero ("oh seven..." -> "0 7..."), and "double"/"triple"
-# doubling/tripling the digit that immediately follows ("double two" -> "22",
-# "triple five" -> "555"). Kept phone-only and NOT folded into the shared
-# _SUBSTITUTIONS table above: "oh" is an ordinary interjection in speech ("oh,
-# and also send it to..."), and extract_email_from_speech /
-# extract_email_from_agent_readback apply every entry in _SUBSTITUTIONS
-# unconditionally, so adding it there would corrupt email parsing. "double"/
-# "triple" expansion runs AFTER the digit-word substitution below so it can
-# match either a spoken digit word ("double seven") or a literal digit
-# ("double 7") the same way.
 _PHONE_OH_RE = re.compile(r"\boh\b")
 _PHONE_DOUBLE_RE = re.compile(r"\bdouble\s+(\d)\b")
 _PHONE_TRIPLE_RE = re.compile(r"\btriple\s+(\d)\b")
+_SEPARATOR_WORDS = {".": "dot", "_": "underscore", "-": "dash", "+": "plus"}
 
 
 def _expand_phone_repeats(s: str) -> str:
@@ -259,108 +30,88 @@ def _expand_phone_repeats(s: str) -> str:
     return s
 
 
-def extract_phone_from_speech(utterance: str) -> Optional[str]:
-    """Pin a canonical phone/callback number ONLY when it is unambiguous.
-
-    Returns a digit string (optionally "+"-prefixed) when the turn clearly names
-    a number — a phone-context cue ("call me", "my number is …") or an already-
-    formatted number ("555-123-4567") — and the digit count is a plausible phone
-    length (7–15). Returns None for an email turn, an address, or a stray short
-    number, so it never fires where it shouldn't. Correctness lives in the read-
-    back loop (like email), not in a greedy guess.
-
-    Handles the common spoken phone forms beyond bare "zero"–"nine" (2026-07-14
-    fix — a probe found "oh seven..." losing its leading zero and "double"
-    collapsing entirely): "oh" reads as digit zero, "double <digit>" repeats
-    that digit twice, "triple <digit>" repeats it three times. So "oh seven
-    double two triple five" -> "0722555...". "double"/"triple" not immediately
-    followed by a digit (e.g. "double check") is left as ordinary words.
+def spoken_digits_to_numerals(utterance: str) -> str:
+    """Turn a spoken number into numerals: "zero three one two, zero seven
+    five" -> "0312 075". Digit words, "oh", "double"/"triple" and a leading
+    "plus" are converted; a comma BETWEEN digits is just a pause. Everything
+    else is left as it was.
     """
-    if not utterance or not utterance.strip():
-        return None
-    if _EMAIL_CUE_RE.search(utterance):
-        return None
-
-    s = f" {utterance.lower().strip()} "
-    # Reuse ONLY the spoken-digit substitutions (0–9). Slicing keeps this in sync
-    # with the email normalizer's digit map without re-declaring it.
+    s = f" {str(utterance or '').lower()} "
     for pattern, repl in _SUBSTITUTIONS:
         if repl.isdigit():
             s = re.sub(pattern, repl, s)
-    # Phone-only spoken forms (see _expand_phone_repeats docstring for why
-    # these stay out of _SUBSTITUTIONS): "oh" as zero, then "double"/"triple"
-    # digit doubling/tripling. Must run AFTER the digit-word substitution above
-    # so "double seven" / "double 7" both resolve the same way.
     s = _PHONE_OH_RE.sub("0", s)
     s = _expand_phone_repeats(s)
-    # A leading spoken "plus" is the international "+" prefix; glue it to the digits.
     s = re.sub(r"\bplus\b\s*", "+", s)
+    s = re.sub(r"(?<=\d)\s*,\s*(?=\d)", " ", s)
+    return s.strip()
 
-    best: Optional[str] = None
-    best_len = 0
-    had_format = False
-    for m in _PHONE_CANDIDATE_RE.finditer(s):
-        raw = m.group(0)
-        digits = re.sub(r"\D", "", raw)
-        n = len(digits)
-        if not (_MIN_PHONE_DIGITS <= n <= _MAX_PHONE_DIGITS):
-            continue
-        if re.search(r"[()\-]", raw) or raw.strip().startswith("+"):
-            had_format = True
-        if n > best_len:
-            best_len = n
-            best = ("+" + digits) if raw.strip().startswith("+") else digits
 
-    if best is None:
-        return None
-    # Require an explicit signal that this really is a number: a context cue, or a
-    # phone-formatted token. A bare digit run with neither is left alone.
-    if not (had_format or _PHONE_CONTEXT_RE.search(utterance)):
-        return None
-    return best
+def _phone_groups(phone: str, digits: str) -> list[str]:
+    """Split a number into the chunks people say it in, for its own country.
+
+    Uses the international layout libphonenumber prints ("+92 312 0750496",
+    "+44 7429 916656", "+1 647-347-6870"), then breaks any chunk longer than
+    four digits into threes with the last chunk up to four -- how a person
+    actually reads seven digits aloud ("075, 0496"). Falls back to the same
+    3/4 rule from the end when the number can't be parsed.
+    """
+    groups: list[str] = []
+    if phone.strip().startswith("+"):
+        try:
+            import phonenumbers
+
+            parsed = phonenumbers.parse(phone, None)
+            printed = phonenumbers.format_number(
+                parsed, phonenumbers.PhoneNumberFormat.INTERNATIONAL
+            )
+            groups = [g for g in re.split(r"[\s\-()]+", printed.lstrip("+")) if g]
+        except Exception:
+            groups = []
+    if not groups or "".join(groups) != digits:
+        groups = [digits]
+
+    def _split(chunk: str) -> list[str]:
+        n = len(chunk)
+        if n <= 5:
+            return [chunk]
+        if n == 6:
+            return [chunk[:3], chunk[3:]]
+        if n == 8:
+            return [chunk[:4], chunk[4:]]
+        head, tail = chunk[:-4], chunk[-4:]
+        out = [head[i:i + 3] for i in range(0, len(head), 3)]
+        if len(out) > 1 and len(out[-1]) == 1:
+            out[-2:] = [out[-2] + out[-1]]
+        return out + [tail]
+
+    result: list[str] = []
+    for g in groups:
+        result.extend(_split(g))
+    return result
 
 
 def natural_phone_readback(phone: Optional[str]) -> str:
-    """A spoken read-back of a phone number: each digit said individually so the
-    caller can catch a single wrong one. "+" is spoken as "plus".
+    """A spoken read-back of a phone number, in natural chunks.
 
-      "5551234567"  -> "5 5 5 1 2 3 4 5 6 7"
-      "+441234567"  -> "plus 4 4 1 2 3 4 5 6 7"
+    Every digit is still said on its own (so the caller can catch a single
+    wrong one), but in the groups people use for their country, with a comma
+    -- a short pause in TTS -- between groups, instead of one flat run of
+    digits that sounds like a machine (2026-09-29, owner feedback on call
+    b847f447). "+" is spoken as "plus".
+
+      "+923120750496" -> "plus 9 2, 3 1 2, 0 7 5, 0 4 9 6"
+      "+447429916656" -> "plus 4 4, 7 4 2 9, 9 1 6, 6 5 6"
+      "+16473476870"  -> "plus 1, 6 4 7, 3 4 7, 6 8 7 0"
+      "5551234567"    -> "5 5 5, 1 2 3, 4 5 6 7"
     """
     if not phone:
         return ""
     digits = re.sub(r"\D", "", phone)
     if not digits:
         return ""
-    spoken = " ".join(digits)
+    spoken = ", ".join(" ".join(group) for group in _phone_groups(phone, digits))
     return f"plus {spoken}" if phone.strip().startswith("+") else spoken
-
-
-def spell_out_email(email: Optional[str]) -> str:
-    """Render a canonical email as a letter-by-letter spoken read-back string.
-
-    "bob@gmail.com" -> "b-o-b at gmail dot com".
-
-    The local part is spelled character by character (hyphen-joined so TTS reads
-    each letter distinctly); "@" becomes "at" and "." becomes "dot". This gives
-    the LLM the EXACT words to say when confirming an email, so it never
-    re-derives a messy version from the raw transcript (the #1 lead-capture bug:
-    gluing carrier words in, or dropping/adding letters). Returns "" for a
-    missing or malformed address.
-    """
-    if not email or "@" not in email:
-        return ""
-    local, _, domain = email.partition("@")
-    if not local or not domain:
-        return ""
-    local_spelled = "-".join(local)
-    domain_spoken = domain.replace(".", " dot ")
-    return f"{local_spelled} at {domain_spoken}".strip()
-
-
-# Spoken forms for local-part separators (matches how people dictate emails).
-# Unknown symbols render as "" — better a tiny gap than TTS reading a glyph name.
-_SEPARATOR_WORDS = {".": "dot", "_": "underscore", "-": "dash", "+": "plus"}
 
 
 def _is_pronounceable(word: str) -> bool:
@@ -384,9 +135,8 @@ def natural_email_readback(email: Optional[str]) -> str:
     yes-confirm jsmith@ when they meant j.smith@ — the read-back must make the
     separator audible for the confirmation to mean anything.
 
-    Replaces the old letter-by-letter ``spell_out_email`` on the read-back path so
-    the agent doesn't sound like a robot spelling every character. The LLM is
-    separately instructed to tag-question ONLY genuinely-variable names.
+    This formatting is shared by action authorization and disclosure exemptions;
+    it does not prescribe a live contact-confirmation script.
     """
     if not email or "@" not in email:
         return ""

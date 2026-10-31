@@ -1,0 +1,17 @@
+........................................................................ [ 81%]
+................                                                         [100%]
+============================== warnings summary ===============================
+tests/unit/test_realtime_relationship_ownership.py::test_current_asr_revision_is_evidence_on_original_row_not_a_new_turn[Actually I am your customer.]
+tests/unit/test_realtime_relationship_ownership.py::test_current_asr_revision_is_evidence_on_original_row_not_a_new_turn[]
+tests/unit/test_realtime_relationship_ownership.py::test_revision_annotation_respects_identity_sealing_and_bounded_metadata
+tests/unit/test_ag03_relationship_acceptance.py::test_revision_annotation_never_adopts_unowned_legacy_transcript
+tests/unit/test_ag03_relationship_acceptance.py::test_revision_annotation_is_bounded_preserves_original_evidence_and_respects_sealing
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+tests/unit/test_realtime_lifecycle_repairs.py::test_actual_browser_receipt_rejects_stale_and_uncorrelated_ack
+tests/unit/test_realtime_lifecycle_repairs.py::test_twilio_mark_protocol_and_clear_cannot_confirm_readback
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+88 passed, 7 warnings in 1.75s

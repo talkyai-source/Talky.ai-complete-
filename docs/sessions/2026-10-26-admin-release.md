@@ -1,0 +1,212 @@
+# Admin release candidate — 26 October 2026
+
+The user has authorized deployment and another QA pass. This record describes release preparation; it does not certify production activation or full paid-use acceptance.
+
+## Current release status
+
+### Remaining-limitations follow-up — 27 October, Asia/Karachi
+
+[The follow-up record](2026-10-27-admin-remaining-limitations.md) closes dashboard
+PBX visibility and 360 px keyboard/touch table access. API-web now runs `5470521a`
+and displays that version; the call owner remains on `2739eea`. The wider read
+audit confirms five live Admin contract/CORS failures and a latent enquiry revision
+mismatch requiring the paired backend/schema release. The new read-only release
+observer measured all four call counters at zero without claiming a traffic freeze
+or owner approval. Provider publication, old-process fallback and full Admin
+acceptance remain open under the existing coordinated-release contract.
+
+### Live monitoring maintenance — 27 October, Asia/Karachi
+
+[The monitoring activation record](2026-10-27-admin-monitoring-live.md) supersedes
+the six-endpoint incompatibility below. Production-based backend `80f011d4` is
+running in the independent API-web service; call/worker/gateway processes remain
+on their previous source and schema 0070. All six direct/public reads, anonymous
+access rejection, three fresh role heartbeats, measured queues/database, normal
+login and session retirement passed. The deployed Admin frontend `6a8d5afc` also
+fixes clipped worker columns; actual default-alias browser reads, reload and
+programmatic final-column access at 1280/768 pixels pass. This closes the reported
+dashboard/monitoring contract error and worker-table clipping for the tested
+protected address. Provider/PBX observations, legacy port-8000 fallback and broader
+Admin/provider/MFA/customer acceptance remain explicitly open. Vercel protection,
+customer production, full-release drain requirements and the feature freeze remain.
+
+The sections below preserve the earlier reproduction and release history; their
+six-read failure and old Admin deployment references are superseded by this entry.
+
+### Confirmed monitoring incompatibility — 27 October, Asia/Karachi
+
+After the login repair, an authenticated read of all six dashboard/monitoring endpoints returned HTTP 200 with the correct default Admin CORS header, but each response lacked fields required by the hosted Admin validators. The production backend still implements the older contract; this is a confirmed incomplete frontend/backend release, not a failed sign-in or a remaining CORS error for these requests.
+
+| Endpoint | Required fields absent from the actual response |
+|---|---|
+| `/admin/dashboard/stats` | `failed_calls_24h`, `total_calls_24h`, `failed_call_rate_24h`, `observed_at` |
+| `/admin/system-health` | Provider `scope`, `detail`, `last_check` |
+| `/admin/health/detailed` | `checked_at`, `metrics_scope` |
+| `/admin/health/workers` | `checked_at`, `scope`; worker `age_seconds`, `detail` |
+| `/admin/health/queues` | `checked_at`; queue `status`, `scope`, `detail` |
+| `/admin/health/database` | `scope`, `error` |
+
+The source comparison confirms that several old measurements are also semantically unsuitable: provider status/latencies are hardcoded, call failures are labelled API errors and include no-answer, the zero-active-tenant fallback counts all tenants, and worker/queue/database responses contain synthetic defaults or constants. Merely renaming fields, filling absent values or relaxing the UI validators would misrepresent these observations. The corresponding corrected collectors are already in the tested release candidate, but that backend release has not been activated. A matching deployment and real monitoring-page acceptance are still necessary; the CORS repair only established authentication/session behavior.
+
+The read-only investigation made no monitoring source/configuration change. Its temporary authentication session was logged out and the retired token returned 401. Only response shapes were retained, without tokens, passwords or customer rows. Private receipts: `output/admin-health-contract-local/live-response-shapes.json`, SHA-256 `2d379b74ad98ffc6a0bde4d326ed75d466649bad2df76249733e37e8c8f6c76f`; required-field comparison `output/admin-health-contract-local/contract-gaps.json`, SHA-256 `88faaaab92826e42a1ebfe7b4e3de5d81138f728298aa5912caef523e1940555`. Missing-field checks establish incompatibility; no separate direct validator execution or passing dashboard-browser journey is claimed.
+
+### Admin login configuration repair — 27 October, Asia/Karachi
+
+The default Admin address reached its login page but session verification failed with `Failed to fetch`: the live API rejected its preflight with HTTP 400 `Disallowed CORS origin`. The exact origin `https://talkleeai-admin.vercel.app` was appended to the existing `CORS_ORIGINS` list. All other environment values and file permissions were preserved; the already-configured `SameSite=None` cookie policy and `talkleeai.com` cookie domain were unchanged. A root-private rollback copy remains on the server; it is excluded from exported evidence.
+
+Only `talky-api-web` was restarted. Live unit and nginx configuration matched the deployed source: this worker has `TELEPHONY_ENABLED=false`, listens on loopback 8001, and serves authentication/dashboard requests. The call API, gateway, Asterisk and three workers retained their PIDs and start times. Source, schema and nginx were not changed. This uses the existing independent dashboard-worker configuration mechanism; the full source release/deployment procedure was not invoked.
+
+After startup, seven public HTTP checks pass: Admin preflights for session, login, refresh and logout; a browser-readable anonymous 401; preserved customer-origin access; and rejection of an unrelated origin. Both loopback 8001 and the public API return healthy responses with the exact Admin allow-origin header. The initial probe during restart still reached the old fallback process and failed; it remains recorded separately from the stable passing result.
+
+Actual browser acceptance now passes on the protected default Admin address: the initial session check produces a readable signed-out response and no network-error banner; UI password sign-in resolves the expected account and canonical `platform_admin` role; page reload succeeds; a cookie-authenticated refresh returns a new token whose identity check succeeds; UI logout removes the stored bearer, and both cookie-only and retired-bearer requests return 401. Refresh was an explicit browser request, not a forced-expiry test of automatic UI renewal. A separate pre-logout cookie-only identity read was not performed. Cookie metadata captured the legacy session cookie only because the inspection URL used the root path; access/refresh-cookie attributes are not claimed as independently inspected. Business/data requests were blocked before dispatch, no customer rows or authenticated screenshots were captured, and this account has no enrolled MFA. These are bounded password/session checks, not full Admin or MFA acceptance.
+
+The running call process retains its old in-memory allowlist, so this login repair does not certify separately routed inbound/call-control actions or CORS during dashboard-worker failover. The custom Admin domain and coordinated source/schema release remain pending. No full-feature acceptance is inferred from the configuration or authentication checks.
+
+Private evidence: `output/admin-cors-fix-local/stable-cors-probes.json`, SHA-256 `a6f0e411236d86ac76aa78c965440da96f1705c5b95066097ef59d84f57a111c`; selected server metadata manifest `output/admin-cors-fix-local/server-evidence/manifest.json`, SHA-256 `7e9901bd5eb975b0bf4f59b7d0cce598121e4d23ee56de32701e08f90a26019f`; browser result `output/playwright/admin-cors-auth-live-local/authentication-v1.json`, SHA-256 `f1680d43f198ba346388407bd4462471abfebc07364d70e238f1252261e9ab83`. All three exported metadata files were rehashed successfully; no environment backup or secret values were exported. The temporary browser state and privileged SSH session were closed after verification.
+
+### Earlier release and alias checkpoints
+
+At 18:56 UTC, the reported `https://talkleeai-admin.vercel.app/` access problem was repaired. Its exact HTTP response had been 404 `DEPLOYMENT_NOT_FOUND`, and the Vercel alias API also returned 404: the default address was not assigned. Only that alias was attached to the existing reviewed READY Admin deployment `dpl_HN2UKGDzsvnmtxcnetk9vb9dwSCg`. Fresh root, login and connector-path requests now return 302 to Vercel Authentication. All-deployment protection remains enabled, the project's production target remains empty, and the customer production alias is unchanged. This restores protected staging reachability; it does not activate the backend, change CORS, or establish application login. The default Vercel origin is not the planned custom Admin origin. The local receipt is `output/admin-url-access-local/after.json`, SHA-256 `af0f31ea52c0f2bd9e214ddf71630aaef20d71f58b8d57fb7821323d0a21d676`.
+
+The latest validated executable source is **`d5d6cf1dc66b3308807cb6978634b75a0cece256`**, pushed to [draft PR 22](https://github.com/talkyai-source/Talky.ai-complete-/pull/22). RSA SSH and interactive sudo now work. The new backend and public Admin **have not been activated**. At 16:37 UTC, the existing customer site and API health returned HTTP 200; all eight application/telephony services were active. Backend production remained clean at `2739eeabf7d091ffa63b7dc0695019da77f972f9`, schema `0070_trunk_soft_delete`.
+
+Main independently advanced to `c364e337b1a28fcfe610338acd6d53c6c992c13f` and published the customer deployment `dpl_FVACeir72YWzMgtb9Wma9oNS1iBi`. Merge `388b3ba7f62e52ec0053df2866c372513fd57ce4` preserves all five of those main changes, including the docs navigation and image cache repairs. This session did not move the production aliases or merge the release into main.
+
+### Fresh release validation
+
+- [Main CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40357494780), [voice CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40357494986), and [C++ CI](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40357494777) all finish successfully for d5d6cf1; all 13 recorded checks pass.
+- The actual combined Admin PostgreSQL gate passes **666 tests, zero skips**, across 50 explicit modules. This includes the new 23-case legacy-incidents module; no separate standalone run or downloaded XML is claimed. The existing CI XML/no-skip guard passes.
+- Admin frontend passes **932 tests, zero skips**. Customer frontend passes **1,292 tests, two existing optional database skips**. Their lint, type/build and dependency-audit gates pass. Main backend passes **15,317 tests, 174 existing skips**; the separate voice selection passes **15,271 tests, 220 existing skips**, plus 18 subtests. These selections overlap and must not be summed.
+- C++ production/sanitizer checks, image build, configured Trivy gate and Compose build pass. The ingress selection still has 25 static passes and 14 opt-in Docker skips. The existing Trivy policy and scan-artifact limits described below still apply; this is not live provider acceptance.
+- The exact d5d6cf1 [customer preview](https://talkleeai-m46fzypjh-allestateestimation-9391s-projects.vercel.app), `dpl_EB7CteRcB6NCZEwiNTqEqXFobRoP`, is READY. Fresh 388b3ba7 preview QA covered five pages, 37 directly referenced assets, desktop docs-sidebar scrolling and mobile navigation without page exceptions or overflow. All 761 tracked Next source paths and the complete Next/Admin/application/gateway trees are unchanged from 388b3ba7 to d5d6cf1, allowing scoped reuse of that QA. This does not assert identical emitted bundles or a new browser pass against d5d6cf1. The one auth probe was blocked before dispatch; no production login is claimed.
+- An isolated server checkout passed application import, an actual gateway build and **4/4 CTest checks**, Asterisk reconciliation check-only and inbound synthetic configuration validation. Gateway source is unchanged in d5d6cf1. All 64 installed Python requirements satisfy the candidate, including 43 exact pins; pip check passes. No dependencies were installed, service binary published, or synthetic call placed.
+
+### Real backup rehearsal and migration repair
+
+A fresh 24,702,915-byte production dump containing 121 table-data archive entries was checksum-verified and retained at `/var/backups/talky/releases/admin-20261026/talky-20261026T150109Z.dump`. A full, unfiltered ownership-preserving restoration into an isolated PostgreSQL 15.17 instance passed. The instance had no network and no published ports; only its own new volume and a read-only backup mount were used. Captured metadata, extension ownership/ACLs, role flags, locale, schema head and five table counts matched. Counts were captured after the dump rather than in its transaction and are not complete content hashes.
+
+The restored database exposed a genuine release blocker: migration 0072 tried to create `incidents`, which the July 2026 manual migration had already created. The original 388b3ba7 upgrade failed with `DuplicateTableError` and rolled back to 0070. d5d6cf1 now strictly recognizes and adopts that known legacy layout in place, preserves its history/owner/indexes, adds canonical constraints and platform RLS, and rejects unknown layouts or unrepresentable data without partial changes. Downgrade refuses to drop the adopted history table. The new module covers 23 acceptance/rejection/rollback cases within the 666-case CI gate.
+
+The actual restored backup subsequently upgraded **0070 to 0077** on d5d6cf1. Runtime privilege checks, application compatibility checks and the configured SIP-hook privilege contract all passed using the application role without SUPERUSER or BYPASSRLS. The real legacy incidents table was empty; its `created_at`, owner and three legacy indexes remained, and RLS/FORCE RLS became enabled. No pre-migration table-OID snapshot was captured for this clone; direct in-place OID continuity is covered by the CI cases instead.
+
+A separate recovery limitation remains: restoring into a disposable database within the existing production cluster failed while creating `pg_trgm` with `permission denied for language c`. Its bootstrap role is no longer a superuser, and no database superuser role exists. The successful fresh-cluster rehearsal does not repair that maintenance path or establish off-host/object-store/key recovery. Production roles were not changed. Earlier diagnostic-helper failures and the original migration failure remain preserved as failed evidence.
+
+All owned temporary recovery containers, volumes, generated init-password files, disposable databases, server worktrees and candidate binaries were removed after identity checks. The verified backup and private evidence remain. No live schema upgrade, service restart, application-account grant or password reset occurred. The privileged SSH session was closed after exporting and checking the selected evidence.
+
+### Remaining activation and acceptance
+
+1. **DNS:** `admin.talkleeai.com` still does not resolve; the GoDaddy browser session is signed out. The recorded Vercel CNAME and verification TXT must be added through the authoritative DNS account. Protected Admin staging remains `dpl_HN2UKGDzsvnmtxcnetk9vb9dwSCg`, with Vercel Authentication for all deployments and no public production/custom-domain activation.
+2. **CORS and coordinated release:** the production Admin-origin preflight returns HTTP 400 without an allow-origin header. The prepared additive configuration preserves the five existing origins and adds only `https://admin.talkleeai.com`; it has not been applied. Deploy the matching backend/schema/gateway and production-environment frontend builds before protected authenticated acceptance. Do not assume a preview promotion has production contact-origin configuration.
+3. **Real traffic drain:** [the existing deployment contract](../DEPLOYMENT.md#production-drain-manifest-contract) requires verified ingress and outbound-origination freezes, four measured zero counters, topology/change references and distinct telephony/release approvers. There is no repository-owned freeze command for this Asterisk-only topology. Only gateway sessions and Asterisk calls were observed at zero; Redis/database counters, an actual freeze and the approval record were not established. The earlier backup rehearsal is not a drain manifest. A compatible rollback/code-forward/verified-restore disposition and the post-migration check under the actual service identity also remain required.
+4. **Accounts and production journeys:** two existing active, verified `platform_admin` accounts have passwords configured. No identities, hashes or credentials are published here. MFA is off on both, and new Admin creation does not force enrolment. The intended account owner must complete authenticator enrolment and a fresh hosted login; role, session cutoff, business mutations and real provider effects remain to be accepted after activation. Full application authority still preserves audit and distinct-person billing safeguards.
+5. **Scope still open:** authoritative supplier spending and finance reconciliation remain unimplemented/unaccepted. Designated provider/PBX/media resources, monitoring/recovery/load and historical/partner policy acceptance remain in CP09. The feature freeze stays active.
+
+Feature percentages below are **evidence-checklist completion, not reliability or the fraction of working code**. Each applicable stage has one point: implementation, bounded local acceptance, hosted UI, authenticated production, and real provider/operating acceptance. Not-applicable stages are excluded. A hosted login screen proves only that screen. No row should be averaged into an overall functional percentage.
+
+| Existing area | Accepted stages | Evidence index | Main remaining proof |
+|---|---:|---:|---|
+| Login and sessions | 3/4 | 75% | Real hosted login, MFA and session/cookie behavior |
+| Command Center | 2/5 | 40% | Deployed fleet/worker and PBX effects |
+| Tenants | 2/4 | 50% | Production writes, grants and history |
+| Users and roles | 2/4 | 50% | Real operator authority and credential cutoff |
+| Formal holds, appeals and expiry | 2/5 | 40% | Actual scheduler and assistant/PBX enforcement |
+| Website enquiries | 2/4 | 50% | Public intake through authenticated handling |
+| Calls | 2/5 | 40% | Real routing, all-leg termination and CRM evidence |
+| Call media and feedback | 2/5 | 40% | Storage, retention and transcription acceptance |
+| Inbound Control | 2/5 | 40% | Real DID admission and settlement effects |
+| Actions | 2/5 | 40% | Original-account provider effects and inspection |
+| Connectors | 2/5 | 40% | Real OAuth, rotation and revoke/reauthorization |
+| Usage and legacy cost estimates | 2/4 | 50% | Hosted reconciliation; estimates are not supplier spending |
+| Authoritative supplier spending | 0/5 | 0% | Capability, retained source and finance reconciliation |
+| Incidents | 2/5 | 40% | Real delivery, recovery and outage/restart behavior |
+| System Health | 2/5 | 40% | Nonzero provider/worker traffic and fallback/restart |
+| Shared UI and companion audit/security | 2/4 | 50% | Hosted protected, mobile and partner-policy journeys |
+| Release and recovery | 2/4 | 50% | Coordinated activation/drain and operating acceptance |
+
+The 17 rows represent the existing 16-area inventory with usage/cost split to expose the missing supplier capability. Private source-bound evidence includes `output/release-0072-ci-local/candidate-ci-checkpoint-v1.json` (SHA-256 `621412c5b33eaa3abcb66d1936554f003f3706279ac881f144a22b15332eadb6`), the reused browser manifest (SHA-256 `4f3e4ea05fb210b6a2c8d4d5046c955c64d12bad3853fd0c27bf7c928dd61066`), and `output/admin-recovery-local/server-evidence/manifest.json` (SHA-256 `eff515fc8ff9083716bb06635ea3ede0d234c109e3cb6468c2eac1938cf10649`). All 12 exported metadata files were rehashed after copying; the dump, passwords and raw customer rows were excluded. The successful candidate upgrade report hashes to `4b8421a9b54180a059df9d901a60c006f5c1debd83e7caf84d696c427941480b`.
+
+This final record update changes documentation only. Executable-source CI and recovery evidence remain bound to d5d6cf1; a later documentation commit is not described as a new completed CI run. The following sections are chronological historical evidence; current observations above supersede earlier status statements without changing the outcomes of earlier failed runs.
+
+## Earlier release checkpoint — before sudo access and the real-backup rehearsal
+
+The validated source candidate is `94308a6a336508a0dc30188dfdb6588761e5a3a4` on [draft PR 22](https://github.com/talkyai-source/Talky.ai-complete-/pull/22). Vercel access works. The customer preview and protected Admin staging are ready, but the production backend and public customer deployment have not been changed.
+
+- The [full backend unit/security workflow](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40301582584) passes: **15,271 passed, zero failed, 220 existing skips**, plus 18 passing subtests. All four failures from the previous full run and both new inventory regressions pass. The skip list is unchanged, including 133 previously quarantined cases; this is not complete live-feature acceptance. The exact source-bound checkpoint is `output/voice-ci-live-review-local/94308-full-ci-checkpoint-v1.json`, SHA-256 `b565dedb3416b43874e678479da86be7e873314866f48d85f497c729ea406b32`.
+- Both clean Linux frontend jobs pass: Admin **932 tests, no skips**; customer **1,287 tests, two optional database skips**. Lint, typecheck, production builds and dependency audits pass. The final clean customer installation reports zero vulnerabilities after the Storybook patch. The customer build emits 86 pages. Existing build warnings remain recorded.
+- The [complete main CI workflow](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40301582553) passes. Backend results are **643 Admin PostgreSQL cases with no skips**, followed by **15,317 unit/security cases passed, zero failed and 174 existing skips**, with **72.61% coverage**. OpenAPI export succeeds with 371 paths. This suite overlaps the separate voice workflow and must not be added to its count. CI checked out merge `db427b1dc986dff1cfc14e37f7b1057ffe0c6718`; its complete tree exactly matches candidate `94308a6a` with the recorded main `454b8efe` base. Image build, configured Trivy security gate and Compose build all pass; the scan gate checks HIGH/CRITICAL findings with `ignore-unfixed` enabled and is not a claim of zero vulnerabilities at every severity.
+- The [C++ workflow](https://github.com/talkyai-source/Talky.ai-complete-/actions/runs/40301582554) passes its production CTest checks and sanitizer/shutdown gate.
+- The final [customer preview](https://talkleeai-m9me7f1st-allestateestimation-9391s-projects.vercel.app), deployment `dpl_EXwhK87bWqYQcxd84sDjXWL4nvuH`, builds successfully from the exact candidate through the normal GitHub integration. Four page requests and all 35 directly referenced JavaScript/CSS assets return HTTP 200. This Vercel build restored the previous cache; the separate Linux job supplies clean-install evidence. Earlier desktop/mobile interaction checks remain bound to their named deployment below. The final static QA manifest is `output/playwright/customer-final-preview-qa-local/final-preview-qa-manifest-v1.json`, SHA-256 `a6f90fdad983fa6c319bac8bc4f345026f8b6386706ff65219560a6fafdb9a09`.
+
+Additional CI limits remain explicit: the ingress selection passes 25 static cases and skips the same 14 opt-in Docker checks because `TELEPHONY_RUN_DOCKER_TESTS=1` is not enabled. These are not live ingress acceptance. Trivy reports no findings within its configured HIGH/CRITICAL, fixable OS/library policy across 172 targets. It scans the first image build; the later successful no-cache Compose image is a distinct artifact and is not separately scanned. Neither result proves the running systemd backend has been upgraded or accepted.
+
+The final main CI checkpoint is `output/ci-94308a6-local/ci-review-checkpoint-v1.json`, SHA-256 `5b3edbeb95a40c350bee37d882e203591008b4031d810afbcace8b1e29d1b396`. It binds all eight successful jobs, raw logs, merge/source trees, exported schema, image identities and exact skip qualifications. Raw evidence remains local rather than being published into this public repository.
+
+At 09:49 UTC, read-only checks from the production server confirmed HTTP 200 from the existing customer site and API health endpoint, while the Admin hostname did not resolve. Local workstation DNS later had transient failures; these are not evidence of a production outage. The production checkout remains `2739eeabf7d091ffa63b7dc0695019da77f972f9` at migration 0070. The available SSH account still requires an interactive sudo password, and its noninteractive privilege-list check also fails. Admin DNS verification, backend CORS, the existing measured drain/backup/recovery procedure and post-migration checks remain activation dependencies. Application login, business mutations and provider effects against the new production backend have therefore not been tested. No deployment credentials are requested or recorded in this document.
+
+The final record update changes only this document and the execution tracker. The executable source remains the tested candidate above; a later documentation commit is not described as a separate completed CI run. The following sections retain earlier failures, corrections and source-specific evidence; later success does not turn those earlier runs into passing results.
+
+## Candidate
+
+The release workspace is on `codex/admin-release-20261026`, based on main commit `454b8efe330253d9678dfc85e93935b4fe2b3478`. It incorporates the tested Admin remediation from the isolated `codex/admin-premortem-20261021` workspace. The original workspace and unrelated changes in the main checkout are preserved.
+
+The three-way merge retains main's silent-pickup scheduling and post-notice utterance-ID rotation alongside the Admin account-authority, admission and termination changes. A fresh 259-case backend merge gate passes across ten existing modules with no failures or skips and no database/provider connections.
+
+The initial Admin frontend passes all 932 tests with no failures, cancellations or skips, full lint and the TypeScript/Vite production build. Its full dependency audit reports zero vulnerabilities after updating the transitive development-only Zod package from 4.3.6 to 4.6.7. Vite remains at main's patched 7.3.7; the existing large-chunk build warning remains. Its Linux CI job also passes at `8fe93d9256c5d63cc4a3ca3db6a2ccaca24ac42b`.
+
+Customer Next.js passes 1,287 of 1,289 tests locally and in Linux CI, with no failures and the same two optional database-dependent skips. Full lint, typecheck, OpenAPI consistency, production dependency audit and the Linux build pass. The CI build uses a localhost API URL and is a compiler check, not production bundle acceptance. The Vercel package-boundary repair in `1891626777ab679bc84072e74f0b3791dc5eb5d1` makes the existing Web Locks test fixture package-local without changing its bytes or assertions; all 81 affected tests, typecheck and scoped lint pass afterward. Actual Vercel rebuilding was required separately and subsequently passed as recorded above.
+
+The release's first 48-module local Admin PostgreSQL run collected 634 cases: 633 passed and one concurrent delete/delete authority case reached the existing five-second database lock timeout. Cleanup, protected database content, catalog and roles were unchanged. The matching Linux run passed that concurrent case but failed a case-sensitive migration-file lookup and detected missing FORCE RLS on an older false-stamped upgrade path (612 passed, two failed, 20 setup errors). The lookup is corrected in `1891626777ab679bc84072e74f0b3791dc5eb5d1`; the legacy upgrade repair and its validation remain in progress. These failed runs are retained and are not replaced with the earlier isolated candidate's 634-pass result.
+
+The forward repair `0077_legacy_tenant_rls_repair` accepts only the five known bootstrap or canonical tenant policies, preserves already-canonical policy identities, and refuses unknown ownership or semantics. Its first disposable-clone run successfully upgraded both supported bootstrap paths and repeated the upgrade without changes. Validation exposed two test-observer issues: a cross-tenant write probe reached an earlier business validation trigger, and two ACL helpers used PostgreSQL's foreign-server code `S` instead of sequence code `s`. The probes now use valid existing record shapes; the helpers use the correct code without changing database grants or weakening assertions. See [PostgreSQL 16 ACL functions](https://www.postgresql.org/docs/16/functions-info.html). The original protected database has explicit sequence ACLs, so its historical and corrected snapshot hashes both remain `4cc9d1d39b32b51a08f64af824f64cba1c64be239e5de528083fffbb8f82d2e4`.
+
+Corrected clone validation passes all 37 cases with no failures, errors or skips: nine new policy-repair controls, 20 existing canonical-auth cases, two real runtime-privilege checks, the connector migration downgrade guard, four migration-history checks and the unchanged concurrent delete/delete case. Both actual bootstrap paths upgrade to 0077; already-canonical policies and business rows remain unchanged, repeated upgrades are stable, and unknown policies are rejected. Both owned clones were removed with no remaining sessions; parent content, roles and database catalog stayed exact. All 888 bound source inputs were unchanged, with no prohibited network access. The report is `output/playwright/admin-release-merge-local/legacy-rls-final-v2.json`, SHA-256 `3eb75b1dafb0a9727378c9f38704f6c5f3538f6cef394057a8d302184a073d97`. This focused result is not a claim that the expanded 643-case Linux Admin gate has passed.
+
+At `ce1058958f873e8faa1d937b4957b1365d0a8bd4`, the expanded Linux Admin gate passes all 643 cases across 49 modules with no failures, errors or skips, including the actual legacy bootstrap repair. Admin frontend again passes 932 tests, and customer frontend again passes 1,287 with two existing optional database skips. The running main workflow was cancelled after its successful Admin step because downstream unit tests contained the separately confirmed stall; that cancellation does not certify the full backend, OpenAPI export or Docker gates.
+
+The first broader backend unit/security CI job timed out after five reported failures and a stall. Its verbose fail-fast successor identified outdated transfer-control and Realtime credential fixtures, an outcome scanner confusing a media receipt with a call outcome, and an inbox fixture that never reached its cancellation barrier. Four test files now reflect the existing application contracts while retaining or strengthening assertions. The transfer module passes 20 tests; outcome/Realtime modules pass 22; the inbox module passes 15 and its overlapping surrounding window passes 74. The inbox deadline check now proves it reached the timed wait, and cancellation reports early task failure instead of waiting indefinitely. Application code is unchanged by these fixture repairs. Fresh whole-suite Linux CI is still required. Failed, interrupted and anomalously delayed local runs remain recorded separately.
+
+CI prints individual test names and a 60-second traceback diagnostic and exits with failure after five failures, retaining all test selections and the existing job timeout. An early failure is not test acceptance. Neither the full backend nor the whole release is marked green until their fresh gates finish.
+
+At `e5877ec65c515cb7c35dc9be41618e357c3a99b2`, the full suites finish without the inbox hang. Main CI reports 15,311 passes, four failures and 174 skips; the separate unit/security workflow reports 15,265 passes, the same four failures and 220 skips. The later failures concern one remaining Realtime credential fixture, a cached-settings fixture, a missing original PBX identity in an ownership-loss fixture and the diagnostic inventory counting a temporary migration reference table as persistent application data. The repairs preserve application behavior and the exact RLS-table equality assertion. Inventory regression checks retain real public tables even when a policy or temporary object has a misleading name. Four lightweight inventory controls and the real repository's 96-table equality check pass; fresh Linux validation of the complete repairs is required. The Admin 643-case gate and both frontend jobs pass again on this commit.
+
+The customer dependency audit also identified two critical development-package entries in Storybook 8.6.18. The same-major [8.6.19 security patch](https://github.com/storybookjs/storybook/security/advisories/GHSA-f2ph-cmg5-wxc8) also addresses the [LAN-access advisory](https://github.com/storybookjs/storybook/security/advisories/GHSA-px85-f4q5-jh77). Only three development lock records change; package ranges and all 480 production dependency records are unchanged. Both full and production lockfile audits now report zero vulnerabilities. A local clean-install attempt timed out under host pressure and was stopped; it is not build acceptance. Final cloud clean installation, typecheck and build remain required. Local resource inspection found only 527 MB free of 7,778 MB, so further overlapping application-import checks were stopped rather than treated as successful bounded runs.
+
+The initial staged-source secret scan reports no leaks. Browser captures and new database/session evidence bundles are not included in this source publication. Detailed local reports remain available in the remediation and release workspaces; historical test counts are not evidence for changed release inputs.
+
+## Observed production state
+
+Read-only checks on 26 October found `/opt/talky` clean at `2739eeabf7d091ffa63b7dc0695019da77f972f9`. API, gateway and worker services were active, and the backend health probe returned HTTP 200. PostgreSQL 15.17 was at `0070_trunk_soft_delete`; the release adds migrations 0071–0076 and the narrowly scoped legacy-policy repair 0077 discovered during Linux QA.
+
+The configured database login/effective role was `talkyai`, without PostgreSQL SUPERUSER or BYPASSRLS. A further read-only production catalog check confirmed RLS and FORCE RLS are already enabled on all five tables affected by the legacy-upgrade finding: calls, campaigns, connectors, conversations and leads. That finding is not evidence that the running server lacks those flags. These observations do not prove the new tables' post-migration privileges. The latest backup service execution reported success at 02:34 UTC; that service result alone does not prove the dump's contents or restorability. The inbound synthetic timer was not installed. Interactive sudo is required in the available SSH account.
+
+## Frontend hosting
+
+The existing Vercel project `talkleeai` serves the customer Next.js site from `Talk-Leee`. The dedicated `talkleeai-admin` project is configured for Vite from `Admin/frontend`, Node 24, `npm ci`, `npm run build` and output directory `dist`.
+
+Admin uses `https://api.talkleeai.com/api/v1`; both development-auth flags are false. Its Vercel configuration provides SPA deep-link rewrites. The intended custom origin is `https://admin.talkleeai.com`. DNS is managed externally at GoDaddy and requires Vercel's recorded CNAME and ownership-verification TXT entries. Project creation, a preview, or DNS verification is not production feature acceptance.
+
+The running backend's exact CORS allowlist does not yet include the Admin origin. Add that explicit origin during the coordinated release while preserving the existing cookie/authentication contract. Do not replace the customer project or publish a new Admin UI against an incompatible backend.
+
+The first Admin-only upload explicitly requested a preview, but Vercel classified it as production and assigned the new project's default aliases. That exact deployment was removed after verifying its project/team identity. The removed deployment and its three observed URLs returned 404, and the customer project's production deployment was unchanged. No backend login or business action was attempted during this upload.
+
+Vercel classifies a project's first deployment as production even when preview is requested. The subsequent staging deployment therefore explicitly uses that classification, with Vercel Authentication enabled for **all deployments before upload** and custom-domain assignment disabled. Deployment `dpl_HN2UKGDzsvnmtxcnetk9vb9dwSCg` is ready at `https://talkleeai-admin-9ccjh9k30-allestateestimation-9391s-projects.vercel.app`. Its unique and generated alias URLs require Vercel authentication; neither `admin.talkleeai.com` nor `talkleeai-admin.vercel.app` is assigned. This protected deployment is not the public Admin launch.
+
+Authenticated static probes returned HTTP 200 for the root, login and connector deep link. Browser checks at widths 1280, 1024 and 360 found no horizontal overflow or page exceptions; the connector route redirected to login. Hosted JavaScript and CSS exactly matched the locally tested build. Automatic application-auth probes were blocked before reaching the old backend, and no application login or business action was attempted. These checks prove hosting, routing and login-page layout, not authenticated Admin functionality against production.
+
+At 06:04 UTC, the existing public customer site and API health endpoint returned HTTP 200. `admin.talkleeai.com` did not resolve, and an Admin-origin CORS preflight returned HTTP 400 without an allow-origin header. These are remaining activation dependencies. The customer project's PR deployment also exposed a package-boundary build issue: its test setup imported a helper from the separate Admin folder, which Vercel does not include in the customer build root. That preview must be corrected and revalidated before promotion.
+
+A direct customer preview upload of the corrected committed source was blocked by Vercel's commit-author permission check before building. No identity metadata was changed to bypass it. The earlier GitHub-triggered deployment resolved the author's GitHub login and reached compilation; the direct CLI upload did not have that resolved identity. The normal repository integration must be checked after the coordinated push. The blocked upload has no assigned aliases, and all five observed customer production aliases remain on deployment `dpl_7fiVqu8aHbBRV5nzBDoMt4VZvUxW`.
+
+The subsequent normal GitHub deployment of `ce1058958f873e8faa1d937b4957b1365d0a8bd4` is READY: `dpl_J34LMZNy3pzb3DfGmzpkVS81g8Kd`, `https://talkleeai-qcu34ifd6-allestateestimation-9391s-projects.vercel.app`. Authenticated static browser QA passes eight home/pricing/contact/login views at 1280 and 360 pixels, with no horizontal overflow or page exceptions. Pricing-period switching and mobile navigation opening/closing also pass. Application API requests, writes and WebSockets were blocked before dispatch; no account login, contact submission or checkout was performed. Initial screenshots taken before entrance animations completed are retained separately; accepted captures wait for visible, opaque form controls. Browser/session data and private protection-cookie files were removed afterward. The report is `output/playwright/customer-git-preview-qa-local/hosted-static-qa-manifest-v1.json`, SHA-256 `57e5a6316569a7ab9291510c1b9e87f1855ab5bcb7644ebac51944d6fa344c4f`. The later Storybook-only lock patch requires a fresh build; this browser evidence remains bound to the named deployment.
+
+Vercel configuration QA found the customer contact route's required `CONTACT_ENQUIRY_PUBLIC_ORIGIN` absent. After verifying `www.talkleeai.com` redirects to the canonical origin, `https://talkleeai.com` was added for future **production** deployments only. No deployment was triggered, the existing production artifact stayed unchanged, and preview contact configuration remains absent. No contact submission was performed. The production bearer-fallback flag is present but masked by Vercel and has not been verified; preview retains the source default. Development-auth opt-in is absent, and both targets have the expected public API base.
+
+## Activation order and remaining gates
+
+1. Freeze one reviewed commit, complete its security/build/test gates and obtain a compatible fresh backup and recovery proof.
+2. Use the existing production procedure to disable new ingress and origination, observe zero gateway/Asterisk/Redis/database activity and obtain the fresh candidate-bound drain manifest required by `deploy_to_server.sh`. Generic deployment authorization is not a substitute for those measured operating facts.
+3. Use authenticated operator sudo and the supported pinned Git/systemd deployment. Coordinate dependency parity, schema migration, managed Asterisk/nginx configuration and the matching gateway/backend. Preserve saved receipts, decisions, revisions and revoked credentials.
+4. Run `backend/scripts/verify_admin_runtime_privileges.py` under the actual configured API environment after migration and before admitting new Admin writes. This additional gate is documented but is not automatically called by the current deployment script.
+5. Require backend readiness and the expected migration head, then promote the matching frontends and verify the custom Admin origin, cookie/CORS behavior, normal login/MFA and designated-role workflows.
+
+Existing E1–E6 acceptance requirements remain in force, including real provider/PBX effects, operating recovery, unfinished supplier-cost capability/reconciliation and policy decisions. The feature freeze remains active. No production backend checkout, migration or restart, or customer-frontend promotion, has occurred. The removed first Admin deployment and the subsequent protected staging deployment are recorded above.

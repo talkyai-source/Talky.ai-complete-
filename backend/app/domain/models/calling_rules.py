@@ -4,8 +4,27 @@ Tenant-configurable rules for outbound calling
 """
 from pydantic import BaseModel, Field
 from typing import List, Optional
-from datetime import datetime, time
+from datetime import datetime, time, timedelta
 import pytz
+
+
+def _parse_clock(value, *, allow_end_of_day: bool = False) -> Optional[time]:
+    """Parse a strict 24h ``HH:MM`` into a ``time``; ``None`` when unreadable.
+
+    ``"24:00"`` is accepted only as the END of a window (``allow_end_of_day``)
+    and means the end of the day, ``time.max`` -- ``datetime.time`` itself
+    cannot represent it.
+    """
+    try:
+        hour_text, minute_text = str(value).strip().split(":")
+        hour, minute = int(hour_text), int(minute_text)
+    except (ValueError, TypeError):
+        return None
+    if allow_end_of_day and (hour, minute) == (24, 0):
+        return time.max
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return time(hour, minute)
+    return None
 
 
 class CallingRules(BaseModel):
@@ -113,6 +132,19 @@ class CallingRules(BaseModel):
                 continue
         return pytz.UTC
 
+    def _has_resolvable_tz(self, tz_override: Optional[str] = None) -> bool:
+        """False only when a zone was configured but none of them is known."""
+        configured = [c for c in (tz_override, self.timezone) if c]
+        if not configured:
+            return True
+        for candidate in configured:
+            try:
+                pytz.timezone(candidate)
+                return True
+            except pytz.exceptions.UnknownTimeZoneError:
+                continue
+        return False
+
     def is_within_time_window(
         self,
         check_time: Optional[datetime] = None,
@@ -129,8 +161,18 @@ class CallingRules(BaseModel):
 
         Returns:
             (is_allowed, reason)
+
+        An unreadable window fails CLOSED (``invalid_time_window``). So does a
+        window whose start is after its end (22:00-06:00): consumer calling
+        hours never span midnight, and treating it as "overnight" would turn a
+        12-hour-clock slip such as 09:00-05:00 into 20 hours of dialing a day.
+        ``"24:00"`` is the end of the day.
         """
         tz = self._resolve_tz(tz_override)
+        if not self._has_resolvable_tz(tz_override):
+            # A typo'd zone must not silently become UTC and open the line at
+            # the wrong local hour. Fail closed, like invalid_time_window.
+            return False, "invalid_timezone"
 
         if check_time is None:
             check_time = datetime.now(tz)
@@ -138,25 +180,21 @@ class CallingRules(BaseModel):
             check_time = tz.localize(check_time)
         else:
             check_time = check_time.astimezone(tz)
-        
+
+        # Parse time window. Fail closed: a typo must not open the line.
+        start_time = _parse_clock(self.time_window_start)
+        end_time = _parse_clock(self.time_window_end, allow_end_of_day=True)
+        if start_time is None or end_time is None or start_time > end_time:
+            return False, "invalid_time_window"
+
         # Check day of week (0=Monday)
         current_day = check_time.weekday()
         if current_day not in self.allowed_days:
             day_names = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
             return False, f"calling_not_allowed_on_{day_names[current_day]}"
-        
-        # Parse time window
-        try:
-            start_hour, start_min = map(int, self.time_window_start.split(":"))
-            end_hour, end_min = map(int, self.time_window_end.split(":"))
-        except ValueError:
-            return True, "invalid_time_format_default_allow"
-        
-        start_time = time(start_hour, start_min)
-        end_time = time(end_hour, end_min)
-        current_time = check_time.time()
-        
+
         # Check if within window
+        current_time = check_time.time()
         if start_time <= current_time <= end_time:
             return True, "within_time_window"
         else:
@@ -186,8 +224,14 @@ class CallingRules(BaseModel):
         else:
             from_time = from_time.astimezone(tz)
         
-        start_hour, start_min = map(int, self.time_window_start.split(":"))
-        
+        start = _parse_clock(self.time_window_start)
+        if start is None:
+            # No readable opening time (is_within_time_window reports it as
+            # invalid_time_window and keeps the line closed): there is no
+            # window to wait for, so re-check in an hour rather than raise.
+            return from_time + timedelta(hours=1)
+        start_hour, start_min = start.hour, start.minute
+
         # Check if we can call today
         today_start = from_time.replace(hour=start_hour, minute=start_min, second=0, microsecond=0)
         
@@ -197,14 +241,12 @@ class CallingRules(BaseModel):
         # Find next allowed day
         check_date = from_time.date()
         for _ in range(7):
-            from datetime import timedelta
             check_date = check_date + timedelta(days=1)
             if check_date.weekday() in self.allowed_days:
                 next_window = datetime.combine(check_date, time(start_hour, start_min))
                 return tz.localize(next_window)
-        
+
         # Fallback: tomorrow at start time
-        from datetime import timedelta
         return today_start + timedelta(days=1)
     
     @classmethod

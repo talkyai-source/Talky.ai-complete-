@@ -1,0 +1,17 @@
+F.                                                                       [100%]
+================================== FAILURES ===================================
+_ test_terminal_during_ringing_wait_never_restarts_or_requests_second_hangup __
+tests\unit\test_selected_warmup_lifecycle.py:269: in test_terminal_during_ringing_wait_never_restarts_or_requests_second_hangup
+    answered.adapter.hangup.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+------------------------------ Captured log call ------------------------------
+ERROR    app.domain.services.telephony.lifecycle:lifecycle.py:4462 Failed to initialize AI pipeline for call: prepared_outbound_session_unavailable
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\selected-warmup-lifecycle-20261005\backend\app\domain\services\telephony\lifecycle.py", line 4032, in _on_new_call
+    raise RuntimeError("prepared_outbound_session_unavailable")
+RuntimeError: prepared_outbound_session_unavailable
+=========================== short test summary info ===========================
+FAILED tests/unit/test_selected_warmup_lifecycle.py::test_terminal_during_ringing_wait_never_restarts_or_requests_second_hangup
+1 failed, 1 passed, 17 deselected in 2.06s

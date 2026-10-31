@@ -14,16 +14,27 @@ and exposed via the AI Options UI at /api/v1/ai-options/providers
 Day 17: Added timeout handling and deterministic mode for QA.
 """
 import os
+from contextlib import aclosing
 import asyncio
 import logging
 from typing import AsyncIterator, Dict, List, Optional
 import httpx
 from groq import AsyncGroq, APITimeoutError as GroqAPITimeoutError, RateLimitError as GroqRateLimitError
 from app.domain.interfaces.llm_provider import LLMProvider
+from app.domain.models.ai_config import GroqModel
 from app.domain.models.conversation import Message, MessageRole
 from app.infrastructure.providers.key_pool import KeyPool, parse_keys_csv
 from app.infrastructure.providers.provider_concurrency import get_provider_guard
 from app.utils.resilience import CircuitBreaker, CircuitOpenError
+from app.infrastructure.llm.request_profile import record_traditional_request
+from app.infrastructure.metrics.provider_observations import ProviderAttempt
+
+from app.infrastructure.llm.streaming import (
+    stream_with_timeout, stream_tool_turn, close_stream,
+    accumulate_tool_calls as _accumulate_tool_call_frags,
+    finalize_tool_calls as _finalize_tool_calls,
+    assistant_tool_message as _assistant_tool_call_message,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +49,8 @@ _LLM_RETRY_BASE_DELAY = 0.3  # 300ms — fast first retry for voice latency budg
 # thinking can't be fully disabled (GPT-OSS floors at reasoning_effort="low";
 # Qwen3 only when run with effort != "none") a tight cap can be eaten by
 # reasoning, leaving zero answer tokens. Mirror the Gemini fix: reserve thinking
-# headroom ON TOP of the answer budget so reasoning never starves the reply.
+# headroom ON TOP of the configured reply target. The shared ceiling does not
+# guarantee a separate visible-token allowance; truncation is still possible.
 # Models with thinking fully OFF (llama/kimi, or Qwen3 effort="none") get NO
 # reserve — their max_tokens is purely the answer. Env-tunable.
 _THINKING_RESERVE_TOKENS = int(os.getenv("GROQ_THINKING_RESERVE_TOKENS", "1024"))
@@ -231,88 +243,16 @@ def _emit_usage_log(
         logger.debug("voice_metrics_cache_record_failed err=%s", exc)
 
 
-def _accumulate_tool_call_frags(acc: Dict[int, dict], frags) -> None:
-    """Merge streamed tool-call delta fragments into ``acc`` keyed by index.
-
-    Groq (OpenAI-compatible) streams a tool call across many chunks: the id +
-    function name arrive once, the JSON ``arguments`` come as a string in
-    pieces. We accumulate per call index until the stream ends.
-    """
-    for frag in frags:
-        idx = getattr(frag, "index", 0) or 0
-        slot = acc.setdefault(idx, {"id": None, "name": None, "arguments": ""})
-        if getattr(frag, "id", None):
-            slot["id"] = frag.id
-        fn = getattr(frag, "function", None)
-        if fn is not None:
-            if getattr(fn, "name", None):
-                slot["name"] = fn.name
-            if getattr(fn, "arguments", None):
-                slot["arguments"] += fn.arguments
-
-
-def _finalize_tool_calls(acc: Dict[int, dict]) -> List[dict]:
-    """Turn accumulated fragments into clean call dicts with parsed arguments.
-
-    Each entry: {id, name, arguments_raw (str for the echo-back assistant msg),
-    arguments (parsed dict for the tool runner)}.
-    """
-    import json
-
-    out: List[dict] = []
-    for idx in sorted(acc.keys()):
-        slot = acc[idx]
-        if not slot.get("name"):
-            continue
-        raw_args = slot.get("arguments") or "{}"
-        try:
-            parsed = json.loads(raw_args)
-        except Exception:
-            parsed = {}
-        out.append({
-            "id": slot.get("id") or f"call_{idx}",
-            "name": slot["name"],
-            "arguments_raw": raw_args,
-            "arguments": parsed if isinstance(parsed, dict) else {},
-        })
-    return out
-
-
-def _assistant_tool_call_message(calls: List[dict]) -> dict:
-    """Build the assistant message that echoes the model's tool call(s) back,
-    required by the API before the matching tool-result messages."""
-    return {
-        "role": "assistant",
-        "content": None,
-        "tool_calls": [
-            {
-                "id": c["id"],
-                "type": "function",
-                "function": {"name": c["name"], "arguments": c["arguments_raw"]},
-            }
-            for c in calls
-        ],
-    }
-
-
-class LLMTimeoutError(Exception):
-    """Raised when LLM response times out"""
-    pass
+from app.infrastructure.llm.streaming import LLMTimeoutError, LLMStreamStalled
 
 
 class GroqLLMProvider(LLMProvider):
     """
     Groq LLM provider with ultra-fast inference
     
-    Production Models (available in AI Options):
-    - llama-3.3-70b-versatile: 280 t/s - Best quality/speed balance (default)
-    - llama-3.1-8b-instant: 560 t/s - Fastest, ideal for real-time
-
-    Preview Models (evaluation only):
-    - qwen/qwen3.6-27b: ~400 t/s - Multilingual, thinking off for voice
-
-    Not offered (still handled if passed): openai/gpt-oss-* — agentic reasoners
-    that misbehave on conversational voice. See _is_gpt_oss_model.
+    The account-supported default is ``openai/gpt-oss-20b``. Retired Llama
+    ids remain accepted when explicitly supplied for stored-config backwards
+    compatibility, but are never selected by a no-model fallback.
     
     Model selection is configured via AI Options UI (/ai-options page).
     See app/domain/models/ai_config.py for full model specifications.
@@ -326,25 +266,18 @@ class GroqLLMProvider(LLMProvider):
         """GPT-OSS models on Groq use the reasoning-specific request contract."""
         return model.startswith("openai/gpt-oss-")
 
-    @staticmethod
-    def _is_qwen3_model(model: str) -> bool:
-        """Qwen 3 supports explicit thinking / non-thinking modes on Groq.
-
-        Matches the whole Qwen3 family — both ``qwen/qwen3-32b`` (dash) and
-        ``qwen/qwen3.6-27b`` (dot) — so reasoning is driven off by default for
-        all of them via reasoning_effort="none"."""
-        return model.startswith("qwen/qwen3")
-
     @classmethod
     def _default_top_p_for_model(cls, model: str) -> float:
-        """
-        Use Groq-documented defaults per model family instead of forcing one
-        sampling profile across all selectable AI Options models.
+        """Groq-documented default for the GPT-OSS family; 1.0 otherwise.
+
+        The Qwen3 branch (top_p 0.8, reasoning_effort="none",
+        reasoning_format="hidden") was removed 2026-09-07: no tenant runs a
+        Qwen model any more and the product's LLM menu is the gpt-oss pair
+        (Cerebras 120B primary, Groq 20B fallback). Any other model id gets a
+        plain request with no reasoning parameters.
         """
         if cls._is_gpt_oss_model(model):
             return 0.95
-        if cls._is_qwen3_model(model):
-            return 0.8
         return 1.0
 
     @staticmethod
@@ -353,13 +286,22 @@ class GroqLLMProvider(LLMProvider):
         system_prompt: Optional[str],
         messages: List[dict],
     ) -> List[dict]:
-        """
-        Groq recommends avoiding system prompts for GPT-OSS models and placing
-        instructions in a user message instead.
+        """Place the instructions on the CURRENT user message for GPT-OSS.
 
-        If the message list is empty or starts with an assistant message (e.g. the
-        Ask AI greeting), the instructions are prepended as a standalone user
-        message so that GPT-OSS always receives a user message first.
+        Groq's reasoning guidance for the GPT-OSS family is "avoid system
+        prompts — include all instructions in the user message". Until
+        2026-09-02 this stitched the block onto the FIRST user message, i.e.
+        the oldest turn of the call: the per-turn parts of the prompt (LIVE
+        STATE, CAPTURED, "ACTION THIS TURN: read the email back") sat next to
+        "hello" while the caller's current words were at the far end, and
+        because that first message changed every turn no prefix could ever be
+        cached. The instructions now ride on the LATEST user message; every
+        earlier message is passed through byte-for-byte, so the history is a
+        stable, cacheable prefix.
+
+        GPT-OSS still wants a user message first. When the history opens with
+        the agent's greeting, a short neutral user lead-in is prepended — it
+        carries no instructions, so it never changes between turns.
         """
         if not system_prompt:
             return messages
@@ -370,36 +312,29 @@ class GroqLLMProvider(LLMProvider):
             "Apply these instructions to every reply in this conversation."
         )
 
-        # GPT-OSS requires the first message to be user role.
-        # If history starts with an assistant message (e.g. greeting), prepend a
-        # standalone user instruction message rather than trying to inject into a
-        # later user message — that would leave the assistant message at index 0.
-        if not messages or messages[0].get("role") != "user":
-            return [{"role": "user", "content": instruction_block}, *messages]
+        if not messages:
+            return [{"role": "user", "content": instruction_block}]
 
-        # Normal path: inject instructions into the first user message.
-        merged_messages: List[dict] = []
-        injected = False
-        for message in messages:
-            if not injected and message.get("role") == "user":
-                merged_messages.append({
-                    **message,
-                    "content": (
-                        f"{instruction_block}\n\n"
-                        f"Current user message:\n{message.get('content', '')}"
-                    ),
-                })
-                injected = True
-                continue
-            merged_messages.append(message)
+        last_user_idx = next(
+            (i for i in range(len(messages) - 1, -1, -1) if messages[i].get("role") == "user"),
+            None,
+        )
+        if last_user_idx is None:
+            # Only assistant turns so far (e.g. a greeting with no reply yet):
+            # the instructions become the current user message.
+            return [*messages, {"role": "user", "content": instruction_block}]
 
-        if not injected:
-            merged_messages.insert(0, {
-                "role": "user",
-                "content": instruction_block,
-            })
-
-        return merged_messages
+        merged: List[dict] = list(messages)
+        merged[last_user_idx] = {
+            **messages[last_user_idx],
+            "content": (
+                f"{instruction_block}\n\n"
+                f"Current user message:\n{messages[last_user_idx].get('content', '')}"
+            ),
+        }
+        if merged[0].get("role") != "user":
+            merged.insert(0, {"role": "user", "content": "(The call has connected.)"})
+        return merged
     
     def __init__(self):
         self._client: Optional[AsyncGroq] = None
@@ -410,7 +345,7 @@ class GroqLLMProvider(LLMProvider):
         self._guard = get_provider_guard("groq")
         self._http_timeout: Optional[httpx.Timeout] = None
         self._config: dict = {}
-        self._model: str = "llama-3.3-70b-versatile"  # Best balance for voice AI
+        self._model: str = GroqModel.GPT_OSS_20B.value
         self._temperature: float = 0.6  # Slightly lower for more consistent responses
         # 150 tokens ≈ 110 words — enough for 2-3 full sentences covering most voice
         # responses while still keeping the AI concise.  100 truncated complex answers
@@ -431,6 +366,7 @@ class GroqLLMProvider(LLMProvider):
     async def initialize(self, config: dict) -> None:
         """Initialize Groq client with configuration"""
         self._config = config
+        self._observation_context = dict(config.get("observation_context") or {})
 
         # Multi-key pool path overrides single-key when GROQ_API_KEYS is set
         # *and* no tenant-scoped api_key was supplied.
@@ -446,6 +382,8 @@ class GroqLLMProvider(LLMProvider):
         if not primary_key:
             raise ValueError("Groq API key not found in config or environment")
 
+        self._api_key = primary_key
+
         # httpx timeout shared by every per-key client.
         # read=timeout bounds TTFT — if Groq takes longer than this to produce
         # the first token, httpx raises ReadTimeout → GroqAPITimeoutError
@@ -459,7 +397,7 @@ class GroqLLMProvider(LLMProvider):
         self._client = self._client_for(primary_key)
 
         # Configuration with voice-optimized defaults
-        self._model = config.get("model", "llama-3.3-70b-versatile")
+        self._model = config.get("model") or GroqModel.GPT_OSS_20B.value
         self._temperature = config.get("temperature", 0.6)
         self._max_tokens = config.get("max_tokens", 150)
 
@@ -467,7 +405,12 @@ class GroqLLMProvider(LLMProvider):
         """Return (and cache) an AsyncGroq client bound to the given key."""
         client = self._clients_by_key.get(api_key)
         if client is None:
-            client = AsyncGroq(api_key=api_key, timeout=self._http_timeout)
+            # max_retries=0: this provider owns retries (bounded attempt loop
+            # + circuit breaker + the voice first-token deadline). With the
+            # SDK's default of 2 the two layers multiplied — a mocked HTTP 500
+            # produced 9 requests per turn (2026-09-06 audit, F04). Cerebras
+            # already ran with SDK retries off.
+            client = AsyncGroq(api_key=api_key, timeout=self._http_timeout, max_retries=0)
             self._clients_by_key[api_key] = client
         return client
 
@@ -487,14 +430,23 @@ class GroqLLMProvider(LLMProvider):
             return
         _t0 = asyncio.get_event_loop().time()
         try:
-            await self._client.chat.completions.create(
-                model=self._model,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
-                temperature=0.0,
-                stream=False,
-                timeout=1.5,
-            )
+            with ProviderAttempt("llm", self.name, getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                response = await self._client.chat.completions.create(
+                    model=self._model,
+                    messages=[{"role": "user", "content": "hi"}],
+                    max_tokens=1,
+                    temperature=0.0,
+                    stream=False,
+                    timeout=1.5,
+                )
+                observation.accepted()
+                choice = (getattr(response, "choices", None) or [None])[0]
+                message = getattr(choice, "message", None)
+                content = getattr(message, "content", None)
+                if (isinstance(content, str) and content.strip()) or getattr(message, "tool_calls", None):
+                    observation.first_output()
+                if getattr(choice, "finish_reason", None) in {"stop", "tool_calls"}:
+                    observation.complete()
             elapsed_ms = (asyncio.get_event_loop().time() - _t0) * 1000.0
             logger.info(
                 "groq_warmup_ok model=%s warmup_ms=%.0f",
@@ -523,201 +475,18 @@ class GroqLLMProvider(LLMProvider):
         else:
             logger.info("Deterministic mode disabled")
     
-    async def stream_chat_with_timeout(
-        self,
-        messages: List[Message],
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        **kwargs
-    ) -> AsyncIterator[str]:
-        """
-        Stream chat completion with a true hard deadline on every token.
-
-        Two-layer timeout defence (Groq SDK recommendation + asyncio safety net):
-
-        Layer 1 — httpx.Timeout(read=timeout_seconds) set on AsyncGroq at
-          initialization.  httpx enforces this at the HTTP level: if no bytes
-          arrive within `read` seconds (including TTFT), it raises
-          GroqAPITimeoutError *before* any token is yielded.  This is the primary
-          guard and handles the slow-first-token case the old post-hoc check missed.
-
-        Layer 2 — asyncio.wait_for() per __anext__() call.  Two budgets apply:
-          - Before first token: full `remaining` wall-clock budget (TTFT guard).
-          - After first token: min(remaining, _INTERTOKEN_TIMEOUT) per token.
-            If Groq silently stalls mid-stream (confirmed bug: stream stops
-            without finish_reason or exception), we detect it in 2s and break
-            cleanly rather than waiting up to 9s and then discarding content.
-
-        The `timeout_seconds` budget measures ONLY the time spent *awaiting the
-        next token from Groq* — it is accumulated across the token-fetch awaits
-        and explicitly EXCLUDES the time the consumer holds this generator
-        suspended at `yield` (real-time-paced TTS/playback between token pulls).
-        Counting playback time against the LLM budget was truncating healthy,
-        valid multi-sentence replies mid-sentence: the generator is suspended at
-        its `yield` while audio plays, so a plain wall-clock kept ticking on time
-        we never spent waiting on Groq. Genuine Groq slowness is still caught —
-        the per-await `_INTERTOKEN_TIMEOUT` bounds every single token wait, and
-        the accumulated Groq-wait budget bounds the total.
-
-        Args:
-            messages: Conversation history
-            timeout_seconds: Budget for total time spent WAITING ON GROQ (not
-                downstream playback) across the whole stream
-            **kwargs: Passed to stream_chat
-
-        Yields:
-            str: Token/chunk of response
-
-        Raises:
-            LLMTimeoutError: If no token arrives before TTFT deadline (first token only)
-        """
-        _INTERTOKEN_TIMEOUT = 2.0  # Groq confirmed bug: stream stalls silently mid-stream
-
-        # Time spent INSIDE the awaits that fetch the next token from Groq.
-        # The gap between yielding a token and being asked for the next one
-        # (consumer-side TTS/playback) is NOT added here, so downstream pacing
-        # can never consume the LLM budget.
-        groq_wait_accumulated = 0.0
-        tokens_received = 0
-        gen = self.stream_chat(messages, **kwargs)
-        try:
-            while True:
-                remaining = timeout_seconds - groq_wait_accumulated
-                if remaining <= 0:
-                    if tokens_received > 0:
-                        # Budget of actual Groq-wait time exhausted mid-stream —
-                        # content already yielded/TTS'd, treat as normal end.
-                        logger.warning(
-                            "LLM Groq-wait budget expired mid-stream (limit=%.1fs, tokens=%d) — "
-                            "treating as stream end", timeout_seconds, tokens_received
-                        )
-                        break
-                    logger.error(
-                        "LLM deadline exceeded before first token "
-                        "(limit=%.1fs)", timeout_seconds
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                # Use tight inter-token timeout after first token to catch Groq silent stalls
-                token_timeout = remaining if tokens_received == 0 else min(remaining, _INTERTOKEN_TIMEOUT)
-                _wait_t0 = asyncio.get_event_loop().time()
-                try:
-                    token = await asyncio.wait_for(gen.__anext__(), timeout=token_timeout)
-                except StopAsyncIteration:
-                    break
-                except asyncio.TimeoutError:
-                    # Only the Groq wait counts — a full `token_timeout` elapsed here.
-                    groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                    if tokens_received > 0:
-                        # Inter-token stall: Groq stopped sending tokens mid-stream silently.
-                        # Content already yielded and TTS'd — break cleanly, no fallback needed.
-                        logger.warning(
-                            "Groq inter-token stall (groq_wait=%.2fs, tokens=%d) — "
-                            "treating as stream end (Groq silent-stall bug)",
-                            groq_wait_accumulated, tokens_received,
-                        )
-                        break
-                    logger.error(
-                        "LLM timeout waiting for first token after %.2fs (limit=%.1fs): %s",
-                        groq_wait_accumulated, timeout_seconds, "asyncio.TimeoutError",
-                    )
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                except GroqAPITimeoutError as exc:
-                    groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                    logger.error(
-                        "LLM Groq API timeout after %.2fs (limit=%.1fs, tokens=%d): %s",
-                        groq_wait_accumulated, timeout_seconds, tokens_received, exc,
-                    )
-                    if tokens_received > 0:
-                        break
-                    raise LLMTimeoutError(
-                        f"LLM response timed out after {timeout_seconds}s"
-                    )
-                # Success: charge ONLY the just-measured Groq-wait span to the
-                # budget, then yield. Whatever downstream time the consumer spends
-                # before pulling again lands OUTSIDE this measured span.
-                groq_wait_accumulated += asyncio.get_event_loop().time() - _wait_t0
-                if tokens_received == 0:
-                    ttft_ms = groq_wait_accumulated * 1000
-                    if ttft_ms > 800:
-                        logger.warning(
-                            "High TTFT: %.0fms — likely Groq rate limiting or cold cache. "
-                            "Check Groq console for token bucket status.", ttft_ms
-                        )
-                tokens_received += 1
+    async def stream_chat_with_timeout(self, messages, timeout_seconds=DEFAULT_LLM_TIMEOUT, **kwargs):
+        """Shared provider-wait budget; playback never consumes this allowance."""
+        async with aclosing(stream_with_timeout(
+            self.stream_chat(messages, **kwargs), timeout_seconds
+        )) as stream:
+            async for token in stream:
                 yield token
-        finally:
-            await gen.aclose()
-    
-    async def stream_chat_with_tools(
-        self,
-        messages: List[Message],
-        system_prompt: Optional[str] = None,
-        tools: Optional[List[dict]] = None,
-        tool_runner=None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        timeout_seconds: float = DEFAULT_LLM_TIMEOUT,
-        **kwargs,
-    ) -> AsyncIterator[str]:
-        """Stream a turn that MAY call a function tool, yielding only spoken
-        content (same str contract as stream_chat_with_timeout, so the voice
-        pipeline's streaming loop is unchanged).
 
-        Round 0: the model decides — it either answers directly (the fast,
-        common path: zero retrieval, small prompt) or emits a tool call.
-        Round 1 (only if it called the tool): run ``tool_runner`` for the
-        requested fact(s), append the tool result, and stream the grounded
-        answer. No tools are offered in round 1, so the model cannot loop.
-
-        ``tool_runner`` is an async callable ``(name, arguments_dict) -> str``.
-        With no tools/runner this degrades to the normal timeout-guarded stream.
-        """
-        if not tools or tool_runner is None:
-            async for tok in self.stream_chat_with_timeout(
-                messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-                temperature=temperature, max_tokens=max_tokens, **kwargs,
-            ):
-                yield tok
-            return
-
-        sink: List[dict] = []
-        produced_content = False
-        # Round 0 — let the model decide. A clean tool-only response ends via
-        # StopAsyncIteration (no content), so the TTFT guard does NOT misfire.
-        async for tok in self.stream_chat_with_timeout(
-            messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-            temperature=temperature, max_tokens=max_tokens,
-            tools=tools, tool_choice="auto", tool_calls_sink=sink, **kwargs,
-        ):
-            produced_content = True
-            yield tok
-
-        # Answered directly, or nothing to look up → done.
-        if produced_content or not sink:
-            return
-
-        # Round 1 — execute the tool(s) and stream the grounded answer.
-        extra: List[dict] = [_assistant_tool_call_message(sink)]
-        for call in sink:
-            try:
-                result = await tool_runner(call["name"], call["arguments"])
-            except Exception as exc:  # never let a tool failure stall the turn
-                logger.warning("tool_runner failed name=%s: %s", call.get("name"), exc)
-                result = "No specific information found."
-            extra.append({
-                "role": "tool",
-                "tool_call_id": call["id"],
-                "content": result or "No specific information found.",
-            })
-
-        async for tok in self.stream_chat_with_timeout(
-            messages, timeout_seconds=timeout_seconds, system_prompt=system_prompt,
-            temperature=temperature, max_tokens=max_tokens, extra_messages=extra, **kwargs,
-        ):
-            yield tok
+    async def stream_chat_with_tools(self, messages, **kwargs):
+        async with aclosing(stream_tool_turn(self, messages, **kwargs)) as stream:
+            async for token in stream:
+                yield token
 
     async def stream_chat(
         self,
@@ -748,6 +517,7 @@ class GroqLLMProvider(LLMProvider):
         if not self._client:
             raise RuntimeError("Groq client not initialized. Call initialize() first.")
         
+        configured_temperature = self._temperature if temperature is None else temperature
         # Apply deterministic mode settings if enabled
         if self._deterministic_mode:
             temperature = 0.0
@@ -759,6 +529,9 @@ class GroqLLMProvider(LLMProvider):
         
         # Get model from kwargs or use configured default
         model = kwargs.get("model", self._model)
+        effort = kwargs.get("reasoning_effort")
+        if self._is_gpt_oss_model(model) and effort is not None and effort not in {"low", "medium", "high"}:
+            raise ValueError("Groq GPT-OSS reasoning_effort must be low, medium, or high")
 
         # On-demand tool-calling (opt-in, see voice_pipeline/knowledge_tool.py).
         # All default None → the normal non-tool path is byte-for-byte unchanged.
@@ -892,24 +665,6 @@ class GroqLLMProvider(LLMProvider):
                 request_kwargs["reasoning_effort"] = reasoning_effort
                 # Floored, never off → always reserve answer headroom.
                 thinking_floored = True
-            elif self._is_qwen3_model(model):
-                # Groq recommends non-thinking mode for general dialogue — Qwen3
-                # CAN be turned fully off via reasoning_effort="none".
-                if reasoning_effort is None:
-                    reasoning_effort = "none"
-                if reasoning_format is None:
-                    reasoning_format = "hidden"
-                request_kwargs["reasoning_effort"] = reasoning_effort
-                request_kwargs["reasoning_format"] = reasoning_format
-                if include_reasoning is not None:
-                    logger.warning(
-                        "Ignoring include_reasoning=%s for Qwen model %s; "
-                        "Groq documents reasoning_format/reasoning_effort for this family.",
-                        include_reasoning,
-                        model,
-                    )
-                # Only reserve headroom if reasoning is actually left on.
-                thinking_floored = reasoning_effort != "none"
             elif reasoning_format is not None:
                 request_kwargs["reasoning_format"] = reasoning_format
                 if reasoning_effort is not None:
@@ -917,9 +672,9 @@ class GroqLLMProvider(LLMProvider):
                 thinking_floored = reasoning_effort not in (None, "none")
 
             # Reasoning tokens share the max_completion_tokens ceiling with the
-            # answer. When thinking is on, add a reserve on top so the caller's
-            # max_tokens stays fully available for the visible reply (mirrors the
-            # Gemini additive-budget fix). Non-thinking models keep max_tokens as-is.
+            # answer. Add headroom when thinking is on, without promising a
+            # separate visible-token allowance. Non-thinking models keep the
+            # configured ceiling as-is.
             if thinking_floored:
                 request_kwargs["max_completion_tokens"] = (
                     max_tokens + _THINKING_RESERVE_TOKENS
@@ -951,105 +706,144 @@ class GroqLLMProvider(LLMProvider):
                         )
                         try:
                             async with self._circuit:
-                                stream = await chosen_client.chat.completions.create(
-                                    **request_kwargs
+                                record_traditional_request(
+                                    provider=self.name, request=request_kwargs, instructions=system_prompt,
+                                    configured_temperature=configured_temperature,
+                                    configured_max_tokens=max_tokens,
                                 )
+                                with ProviderAttempt("llm", self.name, _lease.key or getattr(self, "_api_key", None), getattr(self, "_observation_context", None)) as observation:
+                                    stream = await chosen_client.chat.completions.create(
+                                        **request_kwargs
+                                    )
 
-                                # Yield tokens as they arrive. Normal Groq
-                                # streaming usage arrives on the Groq-specific
-                                # chunk.x_groq.usage field (chunk.usage is only
-                                # populated when stream_options.include_usage is
-                                # set, which Groq rejects — see NOTE above);
-                                # _extract_stream_usage checks both, getattr-safe.
-                                token_count = 0
-                                final_usage = None
-                                tc_acc: Dict[int, dict] = {}
-                                # Client-side timing for telemetry only — never
-                                # gates yielding. dispatch = right before we
-                                # start consuming the stream; first_content_t =
-                                # the moment the first content token is ready.
-                                _t_dispatch = asyncio.get_event_loop().time()
-                                _first_content_t: Optional[float] = None
-                                try:
-                                    async for chunk in stream:
-                                        if chunk.choices:
-                                            delta = chunk.choices[0].delta
-                                            if delta.content:
-                                                if _first_content_t is None:
-                                                    _first_content_t = asyncio.get_event_loop().time()
-                                                token_count += 1
-                                                tokens_yielded += 1
-                                                yield delta.content
-                                            # Assemble streamed tool-call fragments
-                                            # (name + arguments arrive in pieces).
-                                            if tool_calls_sink is not None:
+                                    observation.accepted()
+
+                                    # Yield tokens as they arrive. Normal Groq
+                                    # streaming usage arrives on the Groq-specific
+                                    # chunk.x_groq.usage field (chunk.usage is only
+                                    # populated when stream_options.include_usage is
+                                    # set, which Groq rejects — see NOTE above);
+                                    # _extract_stream_usage checks both, getattr-safe.
+                                    token_count = 0
+                                    terminal_seen = False
+                                    final_usage = None
+                                    tc_acc: Dict[int, dict] = {}
+                                    # Client-side timing for telemetry only — never
+                                    # gates yielding. dispatch = right before we
+                                    # start consuming the stream; first_content_t =
+                                    # the moment the first content token is ready.
+                                    _t_dispatch = asyncio.get_event_loop().time()
+                                    _first_content_t: Optional[float] = None
+                                    try:
+                                        async for chunk in stream:
+                                            if chunk.choices:
+                                                choice = chunk.choices[0]
+                                                reason = getattr(choice, "finish_reason", None)
+                                                if reason and reason not in {"stop", "tool_calls"}:
+                                                    # A provider-declared truncation is not a
+                                                    # complete answer or a completed tool decision.
+                                                    raise LLMStreamStalled(f"Groq response incomplete: {reason}")
+                                                if reason in {"stop", "tool_calls"}:
+                                                    terminal_seen = True
+                                                delta = choice.delta
+                                                if delta.content:
+                                                    if _first_content_t is None:
+                                                        _first_content_t = asyncio.get_event_loop().time()
+                                                    token_count += 1
+                                                    tokens_yielded += 1
+                                                    if isinstance(delta.content, str) and delta.content.strip():
+                                                        observation.first_output()
+                                                    yield delta.content
+                                                # Assemble streamed tool-call fragments
+                                                # (name + arguments arrive in pieces).
                                                 frags = getattr(delta, "tool_calls", None)
                                                 if frags:
+                                                    observation.first_output()
                                                     _accumulate_tool_call_frags(tc_acc, frags)
-                                        chunk_usage = _extract_stream_usage(chunk)
-                                        if chunk_usage is not None:
-                                            final_usage = chunk_usage
-                                finally:
-                                    # Fail-soft telemetry tail. Runs on normal
-                                    # stream completion AND on early close —
-                                    # e.g. barge-in causes the consumer
-                                    # (stream_chat_with_timeout) to call
-                                    # gen.aclose(), which raises GeneratorExit at
-                                    # our current `yield` above; this `finally`
-                                    # still runs so we log what we captured
-                                    # instead of nothing. Never let a telemetry
-                                    # bug break the token stream or propagate
-                                    # past the exception that triggered us here.
-                                    try:
-                                        client_ttft_ms = (
-                                            (_first_content_t - _t_dispatch) * 1000.0
-                                            if _first_content_t is not None else None
-                                        )
-                                        client_total_ms = (
-                                            asyncio.get_event_loop().time() - _t_dispatch
-                                        ) * 1000.0
-                                        if final_usage is not None:
-                                            _emit_usage_log(
-                                                final_usage, model=model,
-                                                client_ttft_ms=client_ttft_ms,
-                                                client_total_ms=client_total_ms,
+                                            chunk_usage = _extract_stream_usage(chunk)
+                                            if chunk_usage is not None:
+                                                final_usage = chunk_usage
+                                        # The SDK permits clean SSE/HTTP EOF without a
+                                        # final choice. Only a provider completion marker
+                                        # authorizes publishing the accumulated tool calls.
+                                        # Consumer cancellation exits via finally instead.
+                                        if not terminal_seen:
+                                            raise LLMStreamStalled("Groq stream ended without a terminal reason")
+                                    finally:
+                                        await close_stream(stream)
+                                        # Fail-soft telemetry tail. Runs on normal
+                                        # stream completion AND on early close —
+                                        # e.g. barge-in causes the consumer
+                                        # (stream_chat_with_timeout) to call
+                                        # gen.aclose(), which raises GeneratorExit at
+                                        # our current `yield` above; this `finally`
+                                        # still runs so we log what we captured
+                                        # instead of nothing. Never let a telemetry
+                                        # bug break the token stream or propagate
+                                        # past the exception that triggered us here.
+                                        try:
+                                            client_ttft_ms = (
+                                                (_first_content_t - _t_dispatch) * 1000.0
+                                                if _first_content_t is not None else None
                                             )
-                                        elif token_count > 0:
-                                            # No final usage chunk arrived — most
-                                            # likely a barge-in closed the stream
-                                            # before Groq emitted one (or this
-                                            # model/SDK path never sends it).
-                                            # Content was demonstrably yielded and
-                                            # TTS'd, so log what's available
-                                            # rather than staying silent.
-                                            _emit_usage_log(
-                                                None, model=model,
-                                                client_ttft_ms=client_ttft_ms,
-                                                client_total_ms=client_total_ms,
-                                                partial=True,
+                                            client_total_ms = (
+                                                asyncio.get_event_loop().time() - _t_dispatch
+                                            ) * 1000.0
+                                            if final_usage is not None:
+                                                _emit_usage_log(
+                                                    final_usage, model=model,
+                                                    client_ttft_ms=client_ttft_ms,
+                                                    client_total_ms=client_total_ms,
+                                                )
+                                            elif token_count > 0:
+                                                # No final usage chunk arrived — most
+                                                # likely a barge-in closed the stream
+                                                # before Groq emitted one (or this
+                                                # model/SDK path never sends it).
+                                                # Content was demonstrably yielded and
+                                                # TTS'd, so log what's available
+                                                # rather than staying silent.
+                                                _emit_usage_log(
+                                                    None, model=model,
+                                                    client_ttft_ms=client_ttft_ms,
+                                                    client_total_ms=client_total_ms,
+                                                    partial=True,
+                                                )
+                                        except Exception as _telemetry_exc:  # noqa: BLE001
+                                            logger.debug(
+                                                "groq_usage_telemetry_failed err=%s",
+                                                _telemetry_exc,
                                             )
-                                    except Exception as _telemetry_exc:  # noqa: BLE001
-                                        logger.debug(
-                                            "groq_usage_telemetry_failed err=%s",
-                                            _telemetry_exc,
-                                        )
 
-                                # Surface any assembled tool calls to the caller.
-                                # Only reached on a fully-successful stream, so a
-                                # retry (tokens_yielded==0) can never double-fill.
-                                if tool_calls_sink is not None and tc_acc:
-                                    tool_calls_sink.extend(_finalize_tool_calls(tc_acc))
+                                    # Surface any assembled tool calls to the caller.
+                                    # Only reached on a fully-successful stream, so a
+                                    # retry (tokens_yielded==0) can never double-fill.
+                                    finalized_calls = _finalize_tool_calls(tc_acc)
+                                    if tool_calls_sink is not None and tc_acc:
+                                        tool_calls_sink.extend(finalized_calls)
 
-                                logger.debug(
-                                    f"Stream completed, yielded {token_count} tokens"
-                                )
-                                if token_count == 0 and not (tool_calls_sink is not None and tc_acc):
-                                    logger.warning("Zero tokens received from Groq")
+                                    logger.debug(
+                                        f"Stream completed, yielded {token_count} tokens"
+                                    )
+                                    if token_count == 0 and not (tool_calls_sink is not None and tc_acc):
+                                        logger.warning("Zero tokens received from Groq")
+                                    # A terminal frame does not validate malformed
+                                    # or nameless structured output. Keep the
+                                    # existing tool-runtime result, but do not
+                                    # certify a tool-only or mixed turn as healthy.
+                                    if len(finalized_calls) == len(tc_acc) and all(call["arguments_valid"] for call in finalized_calls):
+                                        observation.complete()
                             _lease.report_success()
                             return  # success — exit retry loop AND generator
 
                         except CircuitOpenError:
                             raise  # Don't retry when circuit is open
+
+                        except LLMStreamStalled:
+                            # An incomplete response is never replayed here,
+                            # even when reasoning produced no visible text.
+                            _lease.report_failure(retryable=False)
+                            raise
 
                         except GroqRateLimitError as e:
                             _lease.report_failure(retryable=True)
@@ -1088,6 +882,8 @@ class GroqLLMProvider(LLMProvider):
         except CircuitOpenError as co:
             logger.error(f"Groq circuit breaker open: {co}")
             raise RuntimeError(f"LLM provider unavailable: {co}")
+        except LLMStreamStalled:
+            raise
         except Exception as e:
             if not isinstance(e, RuntimeError):
                 logger.error(f"Groq LLM streaming failed: {str(e)}")
@@ -1096,17 +892,37 @@ class GroqLLMProvider(LLMProvider):
             raise
     
     async def cleanup(self) -> None:
-        """Release resources"""
-        if self._client:
-            # Groq async client doesn't require explicit cleanup
-            # but we'll set it to None for garbage collection
-            self._client = None
+        """Release resources: close every SDK client this provider opened.
+
+        Dropping the reference left the httpx pools to the garbage collector;
+        under repeated barge-in/cancel the connections outlived the call
+        (2026-09-06 audit, F05). Close each key-bound client exactly once.
+        """
+        clients = list(self._clients_by_key.values())
+        if self._client is not None and self._client not in clients:
+            clients.append(self._client)
+        self._clients_by_key.clear()
+        self._client = None
+        for client in clients:
+            close = getattr(client, "close", None)
+            if close is None:
+                continue
+            try:
+                result = close()
+                if hasattr(result, "__await__"):
+                    await result
+            except Exception as exc:  # noqa: BLE001 — teardown must not raise
+                logger.debug("groq client close failed: %s", exc)
     
     @property
     def name(self) -> str:
         """Provider name"""
         return "groq"
     
+    @property
+    def supports_tools(self) -> bool:
+        return True
+
     @property
     def supports_streaming(self) -> bool:
         """Groq supports token streaming"""

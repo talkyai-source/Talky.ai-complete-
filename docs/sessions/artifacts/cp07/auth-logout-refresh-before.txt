@@ -1,0 +1,36 @@
+✖ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (78.4044ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3111.4472
+
+✖ failing tests:
+
+test at src\lib\notifications-isolation.test.tsx:2:14729
+✖ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (78.4044ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + {
+  +   email: 'a@example.test',
+  +   id: 'user-a',
+  +   minutes_remaining: 10,
+  +   role: 'tenant_admin',
+  +   tenant_id: 'tenant-a'
+  + }
+  - null
+  
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\notifications-isolation.test.tsx:198:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:385:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { id: 'user-a', tenant_id: 'tenant-a', email: 'a@example.test', role: 'tenant_admin', minutes_remaining: 10 },
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

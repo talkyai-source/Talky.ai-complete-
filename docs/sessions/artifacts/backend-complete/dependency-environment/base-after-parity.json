@@ -1,0 +1,425 @@
+{
+  "requirements_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\production-ready-20261004\\backend\\requirements.txt",
+  "requirements_sha256": "2564e9ed1f871f5597bba5830149cfdfab706ac27c5215263b20377bad6f9915",
+  "python": "3.12.12 (main, Dec  9 2025, 19:02:55) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.26200-SP0",
+  "markers": {
+    "implementation_name": "cpython",
+    "implementation_version": "3.12.12",
+    "os_name": "nt",
+    "platform_machine": "AMD64",
+    "platform_release": "11",
+    "platform_system": "Windows",
+    "platform_version": "10.0.26200",
+    "python_full_version": "3.12.12",
+    "platform_python_implementation": "CPython",
+    "python_version": "3.12",
+    "sys_platform": "win32",
+    "extra": ""
+  },
+  "declared_count": 62,
+  "active_count": 62,
+  "failures": [
+    {
+      "requirement": "urllib3==2.8.0",
+      "active": true,
+      "installed": "2.7.0",
+      "satisfied": false
+    },
+    {
+      "requirement": "PyJWT==2.15.1",
+      "active": true,
+      "installed": "2.13.0",
+      "satisfied": false
+    }
+  ],
+  "imports": {
+    "urllib3": {
+      "metadata_version": "2.7.0",
+      "imported_version": "2.7.0",
+      "module_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\urllib3\\__init__.py",
+      "metadata_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages"
+    },
+    "PyJWT": {
+      "metadata_version": "2.13.0",
+      "imported_version": "2.13.0",
+      "module_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages\\jwt\\__init__.py",
+      "metadata_path": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Lib\\site-packages"
+    }
+  },
+  "requirements": [
+    {
+      "requirement": "fastapi==0.139.0",
+      "active": true,
+      "installed": "0.139.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "uvicorn[standard]==0.27.0",
+      "active": true,
+      "installed": "0.27.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "starlette==1.3.1",
+      "active": true,
+      "installed": "1.3.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "python-multipart==0.0.32",
+      "active": true,
+      "installed": "0.0.32",
+      "satisfied": true
+    },
+    {
+      "requirement": "slowapi>=0.1.9",
+      "active": true,
+      "installed": "0.1.10",
+      "satisfied": true
+    },
+    {
+      "requirement": "pydantic==2.12.5",
+      "active": true,
+      "installed": "2.12.5",
+      "satisfied": true
+    },
+    {
+      "requirement": "pydantic-settings==2.1.0",
+      "active": true,
+      "installed": "2.1.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "python-dotenv==1.2.2",
+      "active": true,
+      "installed": "1.2.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "PyYAML==6.0.1",
+      "active": true,
+      "installed": "6.0.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "sqlalchemy==2.0.25",
+      "active": true,
+      "installed": "2.0.25",
+      "satisfied": true
+    },
+    {
+      "requirement": "psycopg2-binary==2.9.11",
+      "active": true,
+      "installed": "2.9.11",
+      "satisfied": true
+    },
+    {
+      "requirement": "asyncpg==0.29.0",
+      "active": true,
+      "installed": "0.29.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "alembic==1.13.1",
+      "active": true,
+      "installed": "1.13.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "redis==5.0.1",
+      "active": true,
+      "installed": "5.0.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "hiredis==2.3.2",
+      "active": true,
+      "installed": "2.3.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "httpx==0.28.1",
+      "active": true,
+      "installed": "0.28.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "urllib3==2.8.0",
+      "active": true,
+      "installed": "2.7.0",
+      "satisfied": false
+    },
+    {
+      "requirement": "aiohttp==3.14.3",
+      "active": true,
+      "installed": "3.14.3",
+      "satisfied": true
+    },
+    {
+      "requirement": "aiofiles==23.2.1",
+      "active": true,
+      "installed": "23.2.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "aiosmtplib>=2.0.0",
+      "active": true,
+      "installed": "5.1.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "websockets==15.0.1",
+      "active": true,
+      "installed": "15.0.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "deepgram-sdk==5.3.0",
+      "active": true,
+      "installed": "5.3.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "groq==0.37.0",
+      "active": true,
+      "installed": "0.37.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "cerebras-cloud-sdk==1.91.0",
+      "active": true,
+      "installed": "1.91.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "google-genai==2.0.1",
+      "active": true,
+      "installed": "2.0.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "cartesia==2.0.17",
+      "active": true,
+      "installed": "2.0.17",
+      "satisfied": true
+    },
+    {
+      "requirement": "google-cloud-texttospeech>=2.16.0",
+      "active": true,
+      "installed": "2.37.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "vonage>=3.0.0",
+      "active": true,
+      "installed": "4.8.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "phonenumbers>=8.13.0",
+      "active": true,
+      "installed": "9.0.37",
+      "satisfied": true
+    },
+    {
+      "requirement": "stripe<15.0.0,>=12.0.0",
+      "active": true,
+      "installed": "14.4.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "PyJWT==2.15.1",
+      "active": true,
+      "installed": "2.13.0",
+      "satisfied": false
+    },
+    {
+      "requirement": "email-validator>=2.0.0",
+      "active": true,
+      "installed": "2.3.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "passlib[bcrypt]==1.7.4",
+      "active": true,
+      "installed": "1.7.4",
+      "satisfied": true
+    },
+    {
+      "requirement": "bcrypt==5.0.0",
+      "active": true,
+      "installed": "5.0.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "cryptography==50.0.0",
+      "active": true,
+      "installed": "50.0.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "pyOpenSSL==26.4.0",
+      "active": true,
+      "installed": "26.4.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "argon2-cffi==23.1.0",
+      "active": true,
+      "installed": "23.1.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "pyotp==2.9.0",
+      "active": true,
+      "installed": "2.9.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "qrcode==8.0",
+      "active": true,
+      "installed": "8.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "Pillow>=10.0.0",
+      "active": true,
+      "installed": "12.3.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "webauthn==2.7.1",
+      "active": true,
+      "installed": "2.7.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "langchain-core==1.3.3",
+      "active": true,
+      "installed": "1.3.3",
+      "satisfied": true
+    },
+    {
+      "requirement": "langgraph==1.1.10",
+      "active": true,
+      "installed": "1.1.10",
+      "satisfied": true
+    },
+    {
+      "requirement": "langgraph-prebuilt==1.0.13",
+      "active": true,
+      "installed": "1.0.13",
+      "satisfied": true
+    },
+    {
+      "requirement": "langchain-groq==1.1.2",
+      "active": true,
+      "installed": "1.1.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "langsmith==0.8.18",
+      "active": true,
+      "installed": "0.8.18",
+      "satisfied": true
+    },
+    {
+      "requirement": "Jinja2>=3.1.0",
+      "active": true,
+      "installed": "3.1.6",
+      "satisfied": true
+    },
+    {
+      "requirement": "numpy>=1.26.0",
+      "active": true,
+      "installed": "2.5.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "pydub==0.25.1",
+      "active": true,
+      "installed": "0.25.1",
+      "satisfied": true
+    },
+    {
+      "requirement": "soxr>=0.3.7",
+      "active": true,
+      "installed": "1.1.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "boto3>=1.34.0",
+      "active": true,
+      "installed": "1.43.81",
+      "satisfied": true
+    },
+    {
+      "requirement": "botocore>=1.34.0",
+      "active": true,
+      "installed": "1.43.81",
+      "satisfied": true
+    },
+    {
+      "requirement": "opentelemetry-api>=1.24.0",
+      "active": true,
+      "installed": "1.44.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "opentelemetry-sdk>=1.24.0",
+      "active": true,
+      "installed": "1.44.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "opentelemetry-instrumentation-fastapi>=0.45b0",
+      "active": true,
+      "installed": "0.65b0",
+      "satisfied": true
+    },
+    {
+      "requirement": "opentelemetry-instrumentation-asyncpg>=0.45b0",
+      "active": true,
+      "installed": "0.65b0",
+      "satisfied": true
+    },
+    {
+      "requirement": "opentelemetry-instrumentation-redis>=0.45b0",
+      "active": true,
+      "installed": "0.65b0",
+      "satisfied": true
+    },
+    {
+      "requirement": "opentelemetry-exporter-otlp-proto-grpc>=1.24.0",
+      "active": true,
+      "installed": "1.44.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "prometheus-client==0.19.0",
+      "active": true,
+      "installed": "0.19.0",
+      "satisfied": true
+    },
+    {
+      "requirement": "psutil>=5.9.0",
+      "active": true,
+      "installed": "7.2.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "pytz==2025.2",
+      "active": true,
+      "installed": "2025.2",
+      "satisfied": true
+    },
+    {
+      "requirement": "tzdata>=2025.2",
+      "active": true,
+      "installed": "2026.3",
+      "satisfied": true
+    }
+  ],
+  "scope": "All declared active production requirement version specifiers; not a fresh resolver/transitive-environment or provider qualification claim."
+}

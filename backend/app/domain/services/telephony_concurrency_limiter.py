@@ -19,6 +19,13 @@ import asyncpg
 
 logger = logging.getLogger(__name__)
 
+MIN_SAFE_HEARTBEAT_WINDOW_SECONDS = 90
+
+# TTL refreshed on the Redis mirror of the active-lease count while it is
+# non-zero, and the shorter TTL used once it has drained to zero.
+REDIS_ACTIVE_TTL_SECONDS = 300
+REDIS_ZERO_TTL_SECONDS = 60
+
 
 class LeaseKind(str, Enum):
     CALL = "call"
@@ -112,7 +119,7 @@ class TelephonyConcurrencyLimiter:
         )
         if not row:
             return self._default_policy()
-        return ConcurrencyPolicy(
+        policy = ConcurrencyPolicy(
             policy_id=row["id"],
             policy_name=row["policy_name"],
             max_active_calls=int(row["max_active_calls"]),
@@ -121,23 +128,47 @@ class TelephonyConcurrencyLimiter:
             heartbeat_grace_seconds=int(row["heartbeat_grace_seconds"]),
             metadata=row["metadata"] or {},
         )
+        if (
+            policy.lease_ttl_seconds + policy.heartbeat_grace_seconds
+            < MIN_SAFE_HEARTBEAT_WINDOW_SECONDS
+        ):
+            raise RuntimeError(
+                "unsafe telephony concurrency policy: lease TTL plus heartbeat "
+                f"grace must be at least {MIN_SAFE_HEARTBEAT_WINDOW_SECONDS} seconds"
+            )
+        return policy
 
     async def _active_counts(self, conn: asyncpg.Connection, *, tenant_id: str) -> tuple[int, int]:
         row = await conn.fetchrow(
             """
             SELECT
                 COUNT(*) FILTER (
-                    WHERE state IN ('active', 'releasing')
-                      AND released_at IS NULL
-                      AND lease_kind = 'call'
+                    WHERE lease_kind = 'call'
+                      AND (
+                            (
+                                state IN ('active', 'releasing')
+                                AND released_at IS NULL
+                            )
+                            OR (
+                                state IN ('expired', 'releasing')
+                                AND EXISTS (
+                                    SELECT 1
+                                    FROM calls c
+                                    WHERE c.id = lease.call_id
+                                      AND c.tenant_id = lease.tenant_id
+                                      AND c.direction = 'inbound'
+                                      AND c.billing_status IN ('reserved', 'held')
+                                )
+                            )
+                      )
                 ) AS active_calls,
                 COUNT(*) FILTER (
                     WHERE state IN ('active', 'releasing')
                       AND released_at IS NULL
                       AND lease_kind = 'transfer'
                 ) AS active_transfers
-            FROM tenant_telephony_concurrency_leases
-            WHERE tenant_id = $1
+            FROM tenant_telephony_concurrency_leases lease
+            WHERE lease.tenant_id = $1
             """,
             tenant_id,
         )
@@ -188,27 +219,41 @@ class TelephonyConcurrencyLimiter:
             created_by,
         )
 
+    @staticmethod
+    def _redis_key(tenant_id: str, lease_kind: LeaseKind) -> str:
+        return f"telephony:concurrency:active:{tenant_id}:{lease_kind.value}"
+
     async def _redis_increment(self, tenant_id: str, lease_kind: LeaseKind) -> None:
         if not self._redis:
             return
-        key = f"telephony:concurrency:active:{tenant_id}:{lease_kind.value}"
+        key = self._redis_key(tenant_id, lease_kind)
         try:
             await self._redis.incr(key)
-            await self._redis.expire(key, 300)
+            await self._redis.expire(key, REDIS_ACTIVE_TTL_SECONDS)
         except Exception:
             logger.warning("Failed to increment redis concurrency key", exc_info=True)
 
     async def _redis_decrement(self, tenant_id: str, lease_kind: LeaseKind) -> None:
         if not self._redis:
             return
-        key = f"telephony:concurrency:active:{tenant_id}:{lease_kind.value}"
+        key = self._redis_key(tenant_id, lease_kind)
         try:
-            value = await self._redis.get(key)
-            current = int(value or "0")
-            if current <= 1:
-                await self._redis.setex(key, 60, "0")
+            # OVER-COUNT FIX (2) — this was a GET / SETEX read-modify-write.
+            # Redis executes each command atomically but the client yields
+            # between them, so two releases for the same tenant (or a release
+            # racing the stale-lease reaper, which decrements once per reaped
+            # row) both read N and both wrote N-1: one decrement was lost and
+            # the counter stayed permanently above the real active count.
+            # DECR does the read and the write in one atomic command, so every
+            # decrement lands.
+            remaining = int(await self._redis.decr(key) or 0)
+            if remaining <= 0:
+                # DECR on a missing/expired key creates it at -1. Never leave
+                # the counter below zero: subsequent increments would be
+                # swallowed climbing back to 0 and under-count instead.
+                await self._redis.setex(key, REDIS_ZERO_TTL_SECONDS, "0")
             else:
-                await self._redis.setex(key, 300, str(current - 1))
+                await self._redis.expire(key, REDIS_ACTIVE_TTL_SECONDS)
         except Exception:
             logger.warning("Failed to decrement redis concurrency key", exc_info=True)
 
@@ -232,19 +277,16 @@ class TelephonyConcurrencyLimiter:
 
         await conn.execute("SELECT pg_advisory_xact_lock($1::bigint)", self._lock_key(tenant_id))
 
-        # FIX #12 — self-heal stale leases before counting. Without this,
-        # a crashed lease holder (never calls release_lease, stops
-        # heartbeating) sits in _active_counts forever with state IN
-        # ('active', 'releasing') AND released_at IS NULL — permanently
-        # shrinking this tenant's concurrency capacity. expire_stale_leases
-        # already implements the exact TTL+grace reap this needs; it was
-        # previously only reachable via a manual admin endpoint. Running it
-        # here, inside the advisory lock we already hold for this tenant,
-        # makes acquisition self-healing without any schema change: it uses
-        # the existing last_heartbeat_at / lease_ttl_seconds /
-        # heartbeat_grace_seconds columns the policy already carries.
+        # Self-heal leases whose holders disappeared before counting. A stale
+        # heartbeat alone is not permission to reuse an inbound call slot,
+        # though: expire_stale_leases deliberately retains call leases whose
+        # durable call row still has reserved/held usage. Those remain counted
+        # until the proof-aware finalizer explicitly releases the lease.
         await self.expire_stale_leases(
-            conn, tenant_id=tenant_id, request_id=request_id, created_by=created_by,
+            conn,
+            tenant_id=tenant_id,
+            request_id=request_id,
+            created_by=created_by,
         )
 
         active_calls, active_transfers = await self._active_counts(conn, tenant_id=tenant_id)
@@ -331,7 +373,9 @@ class TelephonyConcurrencyLimiter:
             created_by,
         )
         lease_id: UUID = lease_row["id"]
-        active_calls_post, active_transfers_post = await self._active_counts(conn, tenant_id=tenant_id)
+        active_calls_post, active_transfers_post = await self._active_counts(
+            conn, tenant_id=tenant_id
+        )
 
         decision = LeaseDecision(
             accepted=True,
@@ -355,7 +399,25 @@ class TelephonyConcurrencyLimiter:
             created_by=created_by,
             details=decision.to_dict(),
         )
-        await self._redis_increment(tenant_id, kind)
+        # OVER-COUNT FIX (1) — only count a lease that was actually created.
+        # The INSERT above is ON CONFLICT ... DO UPDATE: when this call already
+        # holds an unreleased lease (retry, duplicate webhook, reconnect —
+        # exactly what that clause exists for) it refreshes the heartbeat and
+        # returns the EXISTING lease id. No new lease exists and the DB active
+        # count is unchanged, but the old code incremented Redis anyway. Since
+        # only release_lease / expire_stale_leases decrement, and each does so
+        # once per lease row, that surplus was never given back: every re-acquire
+        # ratcheted the mirror one higher, forever.
+        #
+        # Both counts are read inside the same advisory-locked transaction,
+        # after the stale-lease reap and with no other writer for this tenant,
+        # so a rise is an exact "a row was inserted" signal.
+        if kind == LeaseKind.CALL:
+            lease_created = active_calls_post > active_calls
+        else:
+            lease_created = active_transfers_post > active_transfers
+        if lease_created:
+            await self._redis_increment(tenant_id, kind)
         return decision
 
     async def release_lease(
@@ -471,6 +533,17 @@ class TelephonyConcurrencyLimiter:
               AND released_at IS NULL
               AND state IN ('active', 'releasing')
               AND last_heartbeat_at < NOW() - ($2::int * INTERVAL '1 second')
+              AND NOT (
+                    lease_kind = 'call'
+                    AND EXISTS (
+                        SELECT 1
+                        FROM calls c
+                        WHERE c.id = tenant_telephony_concurrency_leases.call_id
+                          AND c.tenant_id = tenant_telephony_concurrency_leases.tenant_id
+                          AND c.direction = 'inbound'
+                          AND c.billing_status IN ('reserved', 'held')
+                    )
+              )
             RETURNING id, policy_id, call_id, talklee_call_id, lease_kind
             """,
             tenant_id,
@@ -498,18 +571,17 @@ class TelephonyConcurrencyLimiter:
 
     async def get_status(self, conn: asyncpg.Connection, *, tenant_id: str) -> Dict[str, Any]:
         policy = await self._load_policy(conn, tenant_id=tenant_id)
-        # FIX #12 — same self-heal as acquire_lease (see comment there) so a
-        # tenant's reported active_calls/active_transfers doesn't stay
-        # permanently inflated by a crashed holder's never-released lease
-        # just because nobody happened to call acquire_lease again. Best
-        # effort: get_status is a plain read path with no advisory lock
-        # held, so a reap failure here must not break status reporting.
+        # Same proof-aware reap as acquire_lease: true orphan leases can drain,
+        # while a stale lease backed by unresolved reserved/held inbound usage
+        # remains visible and counted. Best effort: get_status is a plain read
+        # path with no advisory lock, so a reap failure must not break status.
         try:
             await self.expire_stale_leases(conn, tenant_id=tenant_id)
         except Exception:
             logger.warning(
                 "get_status: stale-lease reap failed for tenant=%s (non-fatal)",
-                tenant_id, exc_info=True,
+                tenant_id,
+                exc_info=True,
             )
         active_calls, active_transfers = await self._active_counts(conn, tenant_id=tenant_id)
         return {

@@ -1,0 +1,17 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_______ test_cleanup_closes_both_transports_once_and_releases_reference _______
+tests\unit\test_gemini_client_cleanup.py:16: in test_cleanup_closes_both_transports_once_and_releases_reference
+    client.aio.aclose.assert_awaited_once_with()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2362: in assert_awaited_once_with
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to have been awaited once. Awaited 0 times.
+_________ test_sync_transport_still_closes_after_async_close_failure __________
+tests\unit\test_gemini_client_cleanup.py:25: in test_sync_transport_still_closes_after_async_close_failure
+    with pytest.raises(RuntimeError, match="close failed"):
+E   Failed: DID NOT RAISE <class 'RuntimeError'>
+=========================== short test summary info ===========================
+FAILED tests/unit/test_gemini_client_cleanup.py::test_cleanup_closes_both_transports_once_and_releases_reference
+FAILED tests/unit/test_gemini_client_cleanup.py::test_sync_transport_still_closes_after_async_close_failure
+2 failed in 3.31s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 5, 'prohibited': 0}

@@ -1,0 +1,160 @@
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000001355622E7A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+_ test_lost_remote_success_remains_held_despite_matching_reference[salesforce] _
+tests\unit\test_crm_sync_service.py:541: in test_lost_remote_success_remains_held_despite_matching_reference
+    assert not _run(harness['service'].sync_call(TENANT, CALL)).success
+tests\unit\test_crm_sync_service.py:35: in _run
+    return asyncio.run(coro)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:194: in run
+    with Runner(debug=debug, loop_factory=loop_factory) as runner:
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:58: in __enter__
+    self._lazy_init()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:137: in _lazy_init
+    self._loop = events.new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:823: in new_event_loop
+    return get_event_loop_policy().new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:720: in new_event_loop
+    return self._loop_factory()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\windows_events.py:316: in __init__
+    super().__init__(proactor)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:640: in __init__
+    self._make_self_pipe()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:787: in _make_self_pipe
+    self._ssock, self._csock = socket.socketpair()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\socket.py:623: in _fallback_socketpair
+    csock.connect((addr, port))
+..\tmp\crm-unknown-verification.py:18: in deny_network
+    raise AssertionError('External/network socket connections are prohibited in this scoped test')
+E   AssertionError: External/network socket connections are prohibited in this scoped test
+__ test_lost_remote_success_remains_held_despite_matching_reference[hubspot] __
+tests\unit\test_crm_sync_service.py:541: in test_lost_remote_success_remains_held_despite_matching_reference
+    assert not _run(harness['service'].sync_call(TENANT, CALL)).success
+tests\unit\test_crm_sync_service.py:35: in _run
+    return asyncio.run(coro)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:194: in run
+    with Runner(debug=debug, loop_factory=loop_factory) as runner:
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:58: in __enter__
+    self._lazy_init()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:137: in _lazy_init
+    self._loop = events.new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:823: in new_event_loop
+    return get_event_loop_policy().new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:720: in new_event_loop
+    return self._loop_factory()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\windows_events.py:316: in __init__
+    super().__init__(proactor)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:640: in __init__
+    self._make_self_pipe()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:787: in _make_self_pipe
+    self._ssock, self._csock = socket.socketpair()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\socket.py:623: in _fallback_socketpair
+    csock.connect((addr, port))
+..\tmp\crm-unknown-verification.py:18: in deny_network
+    raise AssertionError('External/network socket connections are prohibited in this scoped test')
+E   AssertionError: External/network socket connections are prohibited in this scoped test
+_ test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[salesforce] _
+tests\unit\test_crm_sync_service.py:573: in test_expired_creating_call_recovery_never_adopts_or_updates_an_activity
+    _run(harness['service']._deliver(receipt, harness['call'], harness['lead'], 'body', None))
+tests\unit\test_crm_sync_service.py:35: in _run
+    return asyncio.run(coro)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:194: in run
+    with Runner(debug=debug, loop_factory=loop_factory) as runner:
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:58: in __enter__
+    self._lazy_init()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:137: in _lazy_init
+    self._loop = events.new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:823: in new_event_loop
+    return get_event_loop_policy().new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:720: in new_event_loop
+    return self._loop_factory()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\windows_events.py:316: in __init__
+    super().__init__(proactor)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:640: in __init__
+    self._make_self_pipe()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:787: in _make_self_pipe
+    self._ssock, self._csock = socket.socketpair()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\socket.py:623: in _fallback_socketpair
+    csock.connect((addr, port))
+..\tmp\crm-unknown-verification.py:18: in deny_network
+    raise AssertionError('External/network socket connections are prohibited in this scoped test')
+E   AssertionError: External/network socket connections are prohibited in this scoped test
+_ test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[hubspot] _
+tests\unit\test_crm_sync_service.py:573: in test_expired_creating_call_recovery_never_adopts_or_updates_an_activity
+    _run(harness['service']._deliver(receipt, harness['call'], harness['lead'], 'body', None))
+tests\unit\test_crm_sync_service.py:35: in _run
+    return asyncio.run(coro)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:194: in run
+    with Runner(debug=debug, loop_factory=loop_factory) as runner:
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:58: in __enter__
+    self._lazy_init()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\runners.py:137: in _lazy_init
+    self._loop = events.new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:823: in new_event_loop
+    return get_event_loop_policy().new_event_loop()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\events.py:720: in new_event_loop
+    return self._loop_factory()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\windows_events.py:316: in __init__
+    super().__init__(proactor)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:640: in __init__
+    self._make_self_pipe()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py:787: in _make_self_pipe
+    self._ssock, self._csock = socket.socketpair()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\socket.py:623: in _fallback_socketpair
+    csock.connect((addr, port))
+..\tmp\crm-unknown-verification.py:18: in deny_network
+Traceback (most recent call last):
+    raise AssertionError('External/network socket connections are prohibited in this scoped test')
+E   AssertionError: External/network socket connections are prohibited in this scoped test
+=========================== short test summary info ===========================
+FAILED tests/unit/test_crm_sync_service.py::test_lost_remote_success_remains_held_despite_matching_reference[salesforce]
+FAILED tests/unit/test_crm_sync_service.py::test_lost_remote_success_remains_held_despite_matching_reference[hubspot]
+FAILED tests/unit/test_crm_sync_service.py::test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[salesforce]
+FAILED tests/unit/test_crm_sync_service.py::test_expired_creating_call_recovery_never_adopts_or_updates_an_activity[hubspot]
+4 failed, 31 deselected in 4.61s
+  File "C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\tmp\crm-unknown-verification.py", line 52, in <module>
+    raise AssertionError('Source changed or network attempted during verification')
+AssertionError: Source changed or network attempted during verification
+sys:1: RuntimeWarning: coroutine 'CRMSyncService.sync_call' was never awaited
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000001355622E7A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+sys:1: RuntimeWarning: coroutine 'CRMSyncService._deliver' was never awaited
+RuntimeWarning: Enable tracemalloc to get the object allocation traceback
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000001355622E7A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'
+Exception ignored in: <function BaseEventLoop.__del__ at 0x000001355622E7A0>
+Traceback (most recent call last):
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\base_events.py", line 732, in __del__
+    self.close()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 697, in close
+    self._close_self_pipe()
+  File "C:\Users\AL AZIZ TECH\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\asyncio\proactor_events.py", line 779, in _close_self_pipe
+    self._ssock.close()
+    ^^^^^^^^^^^
+AttributeError: 'ProactorEventLoop' object has no attribute '_ssock'

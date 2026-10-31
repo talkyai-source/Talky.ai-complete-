@@ -1,0 +1,33 @@
+........................................................................ [ 57%]
+....................................................FF                   [100%]
+================================== FAILURES ===================================
+_____ test_modal_failure_cannot_swallow_a_later_delivery_claim[results0] ______
+
+results = {}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": receipt(status="failed")}])
+    def test_modal_failure_cannot_swallow_a_later_delivery_claim(results):
+        valid, reason = LLMGuardrails().validate_response(
+            "The email could not be sent but delivered.", action_results=results,
+        )
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:202: AssertionError
+_____ test_modal_failure_cannot_swallow_a_later_delivery_claim[results1] ______
+
+results = {'send_email': {'action': 'send_email', 'confirmation_allowed': False, 'message': 'The outcome is not confirmed. Review before repeating.', 'message_id': None, ...}}
+
+    @pytest.mark.parametrize("results", [{}, {"send_email": receipt(status="failed")}])
+    def test_modal_failure_cannot_swallow_a_later_delivery_claim(results):
+        valid, reason = LLMGuardrails().validate_response(
+            "The email could not be sent but delivered.", action_results=results,
+        )
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:202: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_unresolved_action_speech.py::test_modal_failure_cannot_swallow_a_later_delivery_claim[results0]
+FAILED tests/unit/test_unresolved_action_speech.py::test_modal_failure_cannot_swallow_a_later_delivery_claim[results1]
+2 failed, 124 passed in 1.24s

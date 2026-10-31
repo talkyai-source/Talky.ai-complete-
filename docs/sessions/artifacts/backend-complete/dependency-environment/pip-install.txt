@@ -1,0 +1,9 @@
+Collecting urllib3==2.8.0
+  Using cached urllib3-2.8.0-py3-none-any.whl.metadata (7.4 kB)
+Collecting PyJWT==2.15.1
+  Using cached pyjwt-2.15.1-py3-none-any.whl.metadata (3.5 kB)
+Downloading urllib3-2.8.0-py3-none-any.whl (135 kB)
+Downloading pyjwt-2.15.1-py3-none-any.whl (33 kB)
+Installing collected packages: urllib3, PyJWT
+
+Successfully installed PyJWT-2.15.1 urllib3-2.8.0

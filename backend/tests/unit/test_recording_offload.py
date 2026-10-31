@@ -28,7 +28,9 @@ from __future__ import annotations
 
 import asyncio
 import time
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
+from uuid import UUID
 
 import pytest
 
@@ -39,6 +41,8 @@ from app.domain.services.recording_service import (
     mix_stereo_recording,
 )
 from app.domain.services.telephony.recording import _save_call_recording
+
+_RECORDING_ID = UUID("40000000-0000-4000-8000-000000000001")
 
 
 # ---------------------------------------------------------------------------
@@ -87,6 +91,29 @@ def _uninitialized_container():
     container = AsyncMock()
     container.is_initialized = False
     return container
+
+
+@pytest.mark.asyncio
+async def test_inbound_emergency_switch_is_rechecked_before_any_mix_or_write():
+    gateway = FakeGateway([b"\x01\x00" * 20_000], [(0, b"\x02\x00" * 20_000)])
+    vs = FakeVoiceSession(gateway)
+    vs._inbound_admission = {"call_id": "11111111-1111-1111-1111-111111111111"}
+    vs._recording_allowed = True
+    container = SimpleNamespace(is_initialized=True, db_pool=object())
+
+    with patch(
+        "app.core.container.get_container", return_value=container
+    ), patch(
+        "app.domain.services.telephony.modes.caller_first._live_inbound_recording_enabled",
+        new=AsyncMock(return_value=False),
+    ), patch(
+        "app.domain.services.recording_service.mix_stereo_recording"
+    ) as mix:
+        await _save_call_recording(vs, "pbx-call-id")
+
+    assert gateway.cleared is True
+    assert vs._recording_allowed is False
+    mix.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -239,6 +266,10 @@ async def test_buffer_snapshot_immune_to_concurrent_clear():
 @pytest.mark.asyncio
 async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
     monkeypatch.setenv("LOCAL_RECORDINGS_DIR", str(tmp_path))
+    # Storage encoding (MP3 by default) is covered in test_recording_encoding;
+    # this test is about the offloaded write being byte-identical to the WAV.
+    import app.domain.services.recording_service as _rs
+    monkeypatch.setattr(_rs, "RECORDING_AUDIO_CODEC", "wav")
 
     buf = RecordingBuffer(call_id="call-1", sample_rate=16000, channels=2, bit_depth=16)
     buf.add_chunk(b"\x01\x02" * 500)
@@ -252,12 +283,14 @@ async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
         return await real_to_thread(func, *args, **kwargs)
 
     svc = RecordingService(db_pool=AsyncMock())
+    # Encoding/offload unit scope; actual admission is exercised in OP07 controls.
+    monkeypatch.setattr(svc, "_retention_allowed", AsyncMock(return_value=True))
     with patch(
         "app.domain.services.recording_service.asyncio.to_thread",
         side_effect=spy_to_thread,
     ), patch.object(
-        svc, "_insert_recording_record", AsyncMock(return_value=None)
-    ):
+        svc, "_insert_recording_record", AsyncMock(return_value=_RECORDING_ID)
+    ), patch.object(svc, "_update_call_recording_url", AsyncMock()):
         result = await svc._save_local(
             call_id="call-1", buffer=buf, tenant_id="t1", campaign_id="c1",
         )
@@ -265,10 +298,13 @@ async def test_local_save_offloaded_and_byte_identical(tmp_path, monkeypatch):
     assert "_write_wav_file" in calls, (
         "the makedirs+open+write sequence must run via asyncio.to_thread"
     )
-    written = (tmp_path / "call-1.wav").read_bytes()
+    written = (tmp_path / "t1" / "c1" / "call-1.wav").read_bytes()
     assert written == expected_wav, "recording output must be byte-identical"
-    # DB insert failed (mocked None) -> falls back to returning the filepath.
-    assert result is not None
+    assert not (tmp_path / "call-1.wav").exists(), (
+        "local recordings must not share a flat cross-tenant namespace"
+    )
+    # The row insert succeeded -> the caller gets the recording id, not a path.
+    assert result == str(_RECORDING_ID)
 
 
 # ---------------------------------------------------------------------------

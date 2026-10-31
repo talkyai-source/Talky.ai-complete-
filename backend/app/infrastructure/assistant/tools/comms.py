@@ -1,13 +1,14 @@
 """
 Email and SMS communication tools for the assistant agent.
 """
-import json
+import re
 import logging
 import os
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.services.connector_resolver import reviewed_authorization_label
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ def _support_report_email() -> Optional[str]:
 
 class ReportIssueInput(BaseModel):
     """Input for the report_issue tool — files a technical-issue report to support."""
+    confirm: bool = Field(False, description="False previews the report; the user applies it to send.")
     description: str = Field(
         ...,
         description="Clear description of the technical problem the user is facing, in their words plus any specifics (what they were doing, what failed, error text).",
@@ -62,90 +64,84 @@ async def _resolve_reporter_email(tenant_id: str, db_client: Client) -> Optional
 
 
 async def report_issue(
-    tenant_id: str,
-    db_client: Client,
-    description: str,
-    category: Optional[str] = None,
-    severity: str = "normal",
-    contact_email: Optional[str] = None,
-    conversation_id: Optional[str] = None,
+    tenant_id: str, db_client: Client, description: str,
+    category: Optional[str] = None, severity: str = "normal",
+    contact_email: Optional[str] = None, conversation_id: Optional[str] = None,
+    confirm: bool = False, _prepared_report: Optional[dict] = None,
 ) -> Dict[str, Any]:
-    """File a technical-issue report to the support inbox.
-
-    Sends IMMEDIATELY (this is a support ticket the user is asking us to log,
-    not a mutation of their data). Auto-includes the tenant id, the reporter's
-    email (explicit or resolved from the account), category, severity, a
-    timestamp, and the description. Goes to ``SUPPORT_REPORT_EMAIL``.
-    """
+    """Preview a support report, then submit the exact approved content."""
     if not (description or "").strip():
-        return {"success": False, "error": "Need a description of the issue before I can report it."}
-
+        return {"success": False, "status": "failed", "error": "Need a description of the issue."}
     support_to = _support_report_email()
     if not support_to:
-        logger.warning("report_issue called but SUPPORT_REPORT_EMAIL is not configured")
-        return {
-            "success": False,
-            "error": "Support reporting isn't configured on the server, so I couldn't file the report. Please contact support directly.",
-        }
-
-    reporter = (contact_email or "").strip() or await _resolve_reporter_email(tenant_id, db_client)
-    sev = (severity or "normal").strip().lower()
-    cat = (category or "other").strip().lower()
-    ts = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-
-    subject = f"[Talky issue] {sev.upper()} · {cat} · tenant {str(tenant_id)[:8]}"
-    body = (
-        "A technical issue was reported via the in-app assistant.\n\n"
-        f"Severity:    {sev}\n"
-        f"Category:    {cat}\n"
-        f"Tenant ID:   {tenant_id}\n"
-        f"Reporter:    {reporter or 'unknown (no email on file)'}\n"
-        f"Conversation:{conversation_id or '-'}\n"
-        f"Reported at: {ts}\n\n"
-        "Description:\n"
-        f"{description.strip()}\n"
-    )
-
-    try:
-        from app.services.email_service import get_email_service, EmailNotConnectedError
-        from app.infrastructure.connectors.email.smtp import SMTPConnector
-
-        service = get_email_service(db_client)
+        return {"success": False, "status": "failed", "error": "Support reporting is not configured."}
+    reporter = (contact_email or "").strip()
+    if not reporter and not (confirm and _prepared_report is not None):
+        reporter = await _resolve_reporter_email(tenant_id, db_client)
+    sev, cat = (severity or "normal").strip().lower(), (category or "other").strip().lower()
+    subject = f"[Talky issue] {sev.upper()} / {cat} / tenant {str(tenant_id)[:8]}"
+    body = ("A technical issue was reported via the in-app assistant.\n\n"
+        f"Severity: {sev}\nCategory: {cat}\nTenant ID: {tenant_id}\nReporter: {reporter or 'unknown'}\n"
+        f"Conversation: {conversation_id or '-'}\nReported at: {datetime.now(timezone.utc).isoformat()}\n\n"
+        f"Description:\n{description.strip()}\n")
+    if confirm and _prepared_report is not None:
+        if _prepared_report.get("to") != support_to:
+            return {"success": False, "status": "failed", "error": "Support destination changed; preview again."}
+        subject, body = _prepared_report["subject"], _prepared_report["body"]
+    from app.services.email_service import get_email_service, EmailNotConnectedError
+    from app.infrastructure.connectors.email.smtp import SMTPConnector
+    if not confirm:
         try:
-            await service.send_email(
-                tenant_id=tenant_id,
-                to=[support_to],
-                subject=subject,
-                body=body,
-                triggered_by="assistant_report_issue",
-                conversation_id=conversation_id,
-            )
+            reviewed = await get_email_service(db_client).review_connector(tenant_id)
+            sender = {"kind": "tenant", "connector": {key: value for key, value in reviewed.items() if key != "display_label"}}
+            sender_label = reviewed_authorization_label(reviewed)
         except EmailNotConnectedError:
             if not SMTPConnector.is_configured():
-                return {
-                    "success": False,
-                    "error": "Support email isn't configured on the server, so I couldn't file the report. Please contact support directly.",
-                }
+                return {"success": False, "status": "failed", "error": "Support email is not configured."}
             smtp = SMTPConnector()
-            await smtp.send_email(to=[support_to], subject=subject, body=body)
-
-        logger.info(
-            "assistant report_issue filed tenant=%s sev=%s cat=%s -> %s",
-            tenant_id, sev, cat, support_to,
-        )
-        return {
-            "success": True,
-            "message": (
-                "Thanks — I've sent your issue to our support team. "
-                "They'll follow up"
-                + (f" at {reporter}." if reporter else ".")
-            ),
-            "severity": sev,
-            "category": cat,
-        }
-    except Exception as e:  # noqa: BLE001
-        logger.error("report_issue failed: %s", e)
-        return {"success": False, "error": "I couldn't file the report just now. Please try again, or contact support directly."}
+            sender = {"kind": "smtp", "host": smtp.host, "port": smtp.port, "from_email": smtp.from_email}
+            sender_label = smtp.from_email
+        except Exception:
+            return {"success": False, "status": "failed", "error": "The support sending account could not be verified."}
+        return {"preview": True, "changes": [
+            {"field": "Sending account", "before": None, "after": sender_label},
+            {"field": "To", "before": None, "after": support_to},
+            {"field": "Subject", "before": None, "after": subject},
+            {"field": "Body", "before": None, "after": body}], "note": "Not sent yet.",
+            "_apply_args": {"description": description, "category": cat, "severity": sev,
+                "contact_email": reporter, "_prepared_report": {"to": support_to, "subject": subject, "body": body, "sender": sender}}}
+    if not isinstance(_prepared_report, dict) or not isinstance(_prepared_report.get("sender"), dict):
+        return {"success": False, "status": "failed", "error": "Review the support destination and sending account before applying."}
+    try:
+        sender = _prepared_report["sender"]
+        if sender.get("kind") == "tenant":
+            result = await get_email_service(db_client).send_email(tenant_id=tenant_id, to=[support_to], subject=subject,
+                body=body, triggered_by="assistant_report_issue", conversation_id=conversation_id,
+                reviewed_connector=sender.get("connector"))
+        elif sender.get("kind") == "smtp":
+            smtp = SMTPConnector()
+            current = {"kind": "smtp", "host": smtp.host, "port": smtp.port, "from_email": smtp.from_email}
+            if not SMTPConnector.is_configured() or current != sender:
+                return {"success": False, "status": "failed", "error": "The support sending account changed. Review a new proposal."}
+            sent = await smtp.send_email(to=[support_to], subject=subject, body=body)
+            if not getattr(sent, "id", None):
+                return {"success": False, "status": "unknown", "error": "Support send returned no receipt."}
+            result = {"success": True, "status": "accepted", "message_id": sent.id, "provider": "smtp"}
+        else:
+            return {"success": False, "status": "failed", "error": "The reviewed support sending account is unavailable."}
+        if not isinstance(result, dict):
+            return {"success": False, "status": "unknown", "confirmation_allowed": False}
+        if result.get("success") is not True:
+            return result
+        if not result.get("message_id"):
+            return {**result, "success": False, "status": "unknown", "confirmation_allowed": False,
+                    "error": "Support send returned no receipt."}
+        return {**result, "confirmation_allowed": True,
+            "message": "The email provider accepted your support report.", "severity": sev, "category": cat}
+    except Exception as exc:
+        logger.error("report_issue failed: %s", type(exc).__name__)
+        return {"success": False, "status": "unknown", "confirmation_allowed": False,
+            "error": "The report outcome is unconfirmed. Do not resend automatically."}
 
 
 class SendEmailInput(BaseModel):
@@ -208,6 +204,7 @@ class SendSMSInput(BaseModel):
     """Input for send_sms tool"""
     to: List[str] = Field(..., description="List of phone numbers")
     message: str
+    confirm: bool = Field(False, description="False previews only; the user applies it to send.")
 
 
 async def send_email(
@@ -224,10 +221,11 @@ async def send_email(
     phone_number: Optional[str] = None,
     confirm: bool = False,
     connector_id: Optional[str] = None,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    _reviewed_connector: Optional[Dict[str, str]] = None,
 ) -> Dict[str, Any]:
     """
-    Send email via connected provider (Gmail) or SMTP fallback.
+    Send email through the tenant connected provider.
 
     Two-phase like the other edit tools:
     - confirm=False → resolve the recipient (incl. a lead's stored email) and
@@ -278,107 +276,109 @@ async def send_email(
 
         # PREVIEW — confirm=False returns a proposal-style diff and sends nothing.
         if not confirm:
-            preview_body = eff_body if len(eff_body) <= 600 else eff_body[:600] + "…"
+            from app.services.email_service import get_email_service
+            reviewed = await get_email_service(db_client).review_connector(tenant_id, connector_id)
+            preview_body = eff_body
             return {
                 "preview": True,
                 "changes": [
+                    {"field": "Sending account", "before": None, "after": reviewed_authorization_label(reviewed)},
                     {"field": "To", "before": None, "after": ", ".join(recipients)},
                     {"field": "Subject", "before": None, "after": eff_subject},
                     {"field": "Body", "before": None, "after": preview_body},
                 ],
                 "note": "Not sent yet.",
+                "_apply_args": {"to": recipients, "subject": eff_subject, "body": eff_body,
+                    "body_html": eff_html, "lead_ids": lead_ids, "connector_id": reviewed["connector_id"],
+                    "_reviewed_connector": {key: value for key, value in reviewed.items() if key != "display_label"}},
             }
 
-        # APPLY — actually send via Gmail (if connected) or SMTP fallback.
         from app.services.email_service import get_email_service, EmailNotConnectedError
-        from app.infrastructure.connectors.email.smtp import SMTPConnector
-
-        service = get_email_service(db_client)
         try:
-            result = await service.send_email(
-                tenant_id=tenant_id,
-                to=recipients,
-                subject=eff_subject,
-                body=eff_body,
-                body_html=eff_html,
-                template_name=None,
-                template_context=None,
-                lead_ids=lead_ids,
-                conversation_id=conversation_id,
-                triggered_by="assistant",
-            )
-            return result if isinstance(result, dict) else {"success": True, "recipients": recipients}
-
+            if not _reviewed_connector:
+                return {"success": False, "status": "failed", "error": "Review the sending account in a new proposal before sending."}
+            result = await get_email_service(db_client).send_email(
+                tenant_id=tenant_id, to=recipients, subject=eff_subject, body=eff_body,
+                body_html=eff_html, template_name=None, template_context=None,
+                lead_ids=lead_ids, conversation_id=conversation_id, triggered_by="assistant",
+                connector_id=connector_id, reviewed_connector=_reviewed_connector)
+            return result if isinstance(result, dict) else {"success": False, "status": "unknown"}
         except EmailNotConnectedError:
-            if SMTPConnector.is_configured():
-                logger.info("Using SMTP fallback for email sending")
-                smtp = SMTPConnector()
-                sent = await smtp.send_email(
-                    to=recipients, subject=eff_subject, body=eff_body, body_html=eff_html
-                )
-                return {
-                    "success": True,
-                    "message_id": sent.id,
-                    "provider": "smtp",
-                    "recipients": recipients,
-                    "message": f"Email sent to {len(recipients)} recipient(s)",
-                }
-            return {
-                "success": False,
-                "error": "No email provider connected. Please connect Gmail from Settings > Integrations.",
-                "email_required": True,
-            }
+            return {"success": False, "status": "failed", "email_required": True,
+                "error": "No tenant email provider connected. Connect Gmail from Settings > Integrations."}
 
     except Exception as e:
         logger.error(f"Error sending email: {e}")
-        return {"success": False, "error": str(e)}
+        return {"success": False, "status": "unknown" if confirm else "failed",
+                "confirmation_allowed": False, "error": str(e)}
+
+
+async def _sms_suppression(db_client: Any, tenant_id: str, number: str) -> str:
+    """'opted_out', 'ok' or 'unknown' (lookup failed: do not send).
+
+    Same rule as the reminder worker: a lead flagged do_not_call / status 'dnc'
+    or a number on the tenant/global DNC list (the call guard's normaliser) is
+    never texted. Fails closed.
+    """
+    try:
+        from app.core.db_utils import acquire_with_tenant
+        from app.domain.services.dnc_service import DNCService
+
+        pool = getattr(db_client, "pool", None)
+        if pool is None:
+            return "unknown"
+        if await DNCService(pool).is_on_dnc(tenant_id=tenant_id, e164=number):
+            return "opted_out"
+        async with acquire_with_tenant(pool, tenant_id) as conn:
+            flagged = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM leads WHERE tenant_id=$1::uuid "
+                "AND phone_number=$2 AND (do_not_call OR status='dnc'))",
+                tenant_id, number,
+            )
+        return "opted_out" if flagged else "ok"
+    except Exception as exc:
+        logger.error("send_sms: suppression lookup failed: %s", type(exc).__name__)
+        return "unknown"
 
 
 async def send_sms(
-    tenant_id: str,
-    db_client: Client,
-    to: List[str],
-    message: str,
-    lead_ids: Optional[List[str]] = None,
-    connector_id: Optional[str] = None,
-    conversation_id: Optional[str] = None
+    tenant_id: str, db_client: Client, to: List[str], message: str,
+    lead_ids: Optional[List[str]] = None, connector_id: Optional[str] = None,
+    conversation_id: Optional[str] = None, confirm: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Send SMS via connected SMS provider.
-    """
+    """Preview then submit SMS through SMSService and return real receipts."""
+    recipients = list(dict.fromkeys(number.strip() for number in to))
+    if not recipients or not message.strip() or any(not re.fullmatch(r"\+[1-9]\d{7,14}", n) for n in recipients):
+        return {"success": False, "status": "failed", "error": "Provide the message and complete international phone numbers."}
+    if not confirm:
+        return {"preview": True, "changes": [
+            {"field": "To", "before": None, "after": ", ".join(recipients)},
+            {"field": "Message", "before": None, "after": message}], "note": "Not sent yet.",
+            "_apply_args": {"to": recipients, "message": message, "lead_ids": lead_ids}}
+    from app.services.sms_service import get_sms_service
+    receipts = []
+    for number in recipients:
+        verdict = await _sms_suppression(db_client, tenant_id, number)
+        if verdict != "ok":
+            # Nothing is sent to ANY recipient: the proposal was reviewed as a
+            # whole and a partial send would be a different action.
+            return {"success": False, "status": "failed", "confirmation_allowed": False,
+                "error": ("A recipient has opted out of contact; the SMS was not sent."
+                          if verdict == "opted_out" else
+                          "The do-not-contact list could not be checked; the SMS was not sent."),
+                "opted_out": verdict == "opted_out"}
     try:
-        action_data = {
-            "tenant_id": tenant_id,
-            "type": "send_sms",
-            "status": "pending",
-            "triggered_by": "chat",
-            "conversation_id": conversation_id,
-            "connector_id": connector_id,
-            "input_data": json.dumps({
-                "to": to,
-                "message": message,
-                "lead_ids": lead_ids
-            })
-        }
-
-        action_response = db_client.table("assistant_actions").insert(action_data).execute()
-        action_id = action_response.data[0]["id"] if action_response.data else None
-
-        # TODO: Actually send SMS via connector
-
-        if action_id:
-            db_client.table("assistant_actions").update({
-                "status": "completed",
-                "completed_at": datetime.utcnow().isoformat(),
-                "output_data": json.dumps({"message": "SMS queued for delivery"})
-            }).eq("id", action_id).execute()
-
-        return {
-            "success": True,
-            "action_id": action_id,
-            "message": f"SMS to {len(to)} recipient(s) queued",
-            "recipients": to
-        }
-    except Exception as e:
-        logger.error(f"Error sending SMS: {e}")
-        return {"success": False, "error": str(e)}
+        service = get_sms_service(db_client)
+        for number in recipients:
+            result = await service.send_sms(tenant_id=tenant_id, to_number=number, message=message,
+                triggered_by="assistant")
+            receipts.append({**result, "to_number": number})
+        success = all(r.get("success") is True and r.get("message_id") for r in receipts)
+        state = "accepted" if success else "unknown" if any(r.get("status") == "unknown" for r in receipts) else "failed"
+        return {"success": bool(success), "status": state, "confirmation_allowed": bool(success),
+            "receipts": receipts, "recipients": recipients,
+            "message": "SMS accepted by the provider." if success else "Some SMS requests were not confirmed; review individual receipts."}
+    except Exception as exc:
+        logger.error("send_sms failed: %s", type(exc).__name__)
+        return {"success": False, "status": "unknown" if receipts else "failed", "confirmation_allowed": False,
+            "receipts": receipts, "error": "SMS request could not be completed."}

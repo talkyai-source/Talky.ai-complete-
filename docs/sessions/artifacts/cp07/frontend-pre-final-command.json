@@ -1,0 +1,31 @@
+{
+  "cwd": "Talk-Leee",
+  "command": [
+    "node",
+    "--test",
+    "--test-concurrency=1",
+    "--import",
+    "tsx",
+    "--import",
+    "./src/test-utils/setup.ts",
+    "src/lib/notifications.test.ts",
+    "src/lib/notifications-isolation.test.tsx",
+    "src/lib/notification-mutations.test.ts",
+    "src/components/notifications/qualified-lead-alerts.test.ts",
+    "src/components/campaigns/contact-lists.test.tsx",
+    "src/components/settings/sip-trunks-list.test.tsx",
+    "src/components/settings/recording-policy-section.test.ts",
+    "src/lib/queries/inbound-queries.test.ts",
+    "src/lib/structural-auth-isolation.test.ts",
+    "src/lib/http-client.test.ts",
+    "src/lib/http-client.session-expired.test.ts",
+    "src/lib/post-auth-navigation.test.ts",
+    "src/components/calls/conversation-review-panel.test.tsx",
+    "src/components/campaigns/live-calls-panel.test.tsx",
+    "src/lib/billing-read.test.ts",
+    "src/components/billing/billing-overview.test.tsx",
+    "src/components/billing/topup-card.test.tsx"
+  ],
+  "exit_code": 1,
+  "artifact": "frontend-pre-final-auth-tests.txt"
+}

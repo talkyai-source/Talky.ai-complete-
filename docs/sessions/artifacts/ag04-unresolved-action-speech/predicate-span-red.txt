@@ -1,0 +1,245 @@
+........................................................................ [ 58%]
+........................FFFFFFFFFFFF................                     [100%]
+================================== FAILURES ===================================
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[schedule_callback-The callback, as requested, was scheduled.-None] _
+
+status = None, action = 'schedule_callback'
+text = 'The callback, as requested, was scheduled.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[schedule_callback-The callback, as requested, was scheduled.-unknown] _
+
+status = 'unknown', action = 'schedule_callback'
+text = 'The callback, as requested, was scheduled.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[schedule_callback-The callback, as requested, was scheduled.-failed] _
+
+status = 'failed', action = 'schedule_callback'
+text = 'The callback, as requested, was scheduled.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-The email, as requested, was sent.-None] _
+
+status = None, action = 'send_email'
+text = 'The email, as requested, was sent.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-The email, as requested, was sent.-unknown] _
+
+status = 'unknown', action = 'send_email'
+text = 'The email, as requested, was sent.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-The email, as requested, was sent.-failed] _
+
+status = 'failed', action = 'send_email'
+text = 'The email, as requested, was sent.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[submit_form-The form, as requested, was submitted.-None] _
+
+status = None, action = 'submit_form'
+text = 'The form, as requested, was submitted.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[submit_form-The form, as requested, was submitted.-unknown] _
+
+status = 'unknown', action = 'submit_form'
+text = 'The form, as requested, was submitted.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[submit_form-The form, as requested, was submitted.-failed] _
+
+status = 'failed', action = 'submit_form'
+text = 'The form, as requested, was submitted.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-I have sent the price and payment information.-None] _
+
+status = None, action = 'send_email'
+text = 'I have sent the price and payment information.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-I have sent the price and payment information.-unknown] _
+
+status = 'unknown', action = 'send_email'
+text = 'I have sent the price and payment information.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+_ test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-I have sent the price and payment information.-failed] _
+
+status = 'failed', action = 'send_email'
+text = 'I have sent the price and payment information.'
+
+    @pytest.mark.parametrize("status", [None, "unknown", "failed"])
+    @pytest.mark.parametrize("action,text", [
+        ("schedule_callback", "The callback, as requested, was scheduled."),
+        ("send_email", "The email, as requested, was sent."),
+        ("submit_form", "The form, as requested, was submitted."),
+        ("send_email", "I have sent the price and payment information."),
+    ])
+    def test_complete_positive_predicates_survive_embedded_clause_punctuation(status, action, text):
+        results = {} if status is None else {action: receipt(action, status)}
+        valid, reason = LLMGuardrails().validate_response(text, action_results=results)
+>       assert valid is False
+E       assert True is False
+
+tests\unit\test_unresolved_action_speech.py:165: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[schedule_callback-The callback, as requested, was scheduled.-None]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[schedule_callback-The callback, as requested, was scheduled.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[schedule_callback-The callback, as requested, was scheduled.-failed]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-The email, as requested, was sent.-None]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-The email, as requested, was sent.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-The email, as requested, was sent.-failed]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[submit_form-The form, as requested, was submitted.-None]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[submit_form-The form, as requested, was submitted.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[submit_form-The form, as requested, was submitted.-failed]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-I have sent the price and payment information.-None]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-I have sent the price and payment information.-unknown]
+FAILED tests/unit/test_unresolved_action_speech.py::test_complete_positive_predicates_survive_embedded_clause_punctuation[send_email-I have sent the price and payment information.-failed]
+12 failed, 112 passed in 0.90s

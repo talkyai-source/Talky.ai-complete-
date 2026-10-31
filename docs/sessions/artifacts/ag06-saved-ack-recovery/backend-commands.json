@@ -1,0 +1,106 @@
+{
+  "backend_source_commit": "9eeeb428c9fe1cfe6f82bef57541d416b3f59012",
+  "tested_base": "fe1ad226f8e68ba1042d5b3df880db7c08d434fa",
+  "binding": "The recorded runs used this base plus the five reviewed backend changes. The LF source hashes bind those exact files to the subsequent source commit; no test rerun is implied by committing.",
+  "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "explicit_environment": {
+    "PYTHONUTF8": "1"
+  },
+  "commands": [
+    {
+      "cwd": "backend",
+      "argv": [
+        "-m",
+        "pytest",
+        "tests/unit/test_saved_acknowledgement.py",
+        "-q",
+        "--disable-warnings",
+        "--tb=short"
+      ],
+      "log": "unit-focus.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 48,
+        "warnings": 1,
+        "seconds": 10.74
+      }
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/pg_probe.py",
+        "--output",
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-first-result.json"
+      ],
+      "script_snapshot": "pg-first-probe.py",
+      "log": "pg-first.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 8,
+        "warnings": 1,
+        "seconds": 20.05
+      },
+      "limitation": "Original socket-only guard did not intercept Windows Proactor transports; its zero socket counter does not mean zero transports. Public/source parity and cleanup passed."
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/pg_probe.py",
+        "--output",
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-final-result.json"
+      ],
+      "script_snapshot": "pg_probe.py",
+      "log": "pg-final.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 8,
+        "warnings": 1,
+        "seconds": 15.74
+      },
+      "limitation": "Actual namespace-rewritten0062 applied only to hand-built private relevant-shape tables; not full migrated product or provider acceptance."
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/unit_probe.py"
+      ],
+      "log": "unit-final.txt",
+      "exit_code": 0,
+      "result": {
+        "passed": 441,
+        "warnings": 1,
+        "seconds": 15.52
+      },
+      "overlap": "48 focused controls included in441;12affected modules; no database or provider IO."
+    },
+    {
+      "cwd": ".",
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "backend/app/services/saved_acknowledgement.py",
+        "backend/app/api/v1/endpoints/admin/actions.py",
+        "backend/Alembic/versions/0062_saved_acknowledgement.py",
+        "backend/tests/unit/test_saved_acknowledgement.py",
+        "backend/tests/integration/test_saved_acknowledgement.py",
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/pg_probe.py",
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/pg-first-probe.py",
+        "docs/sessions/artifacts/ag06-saved-ack-recovery/unit_probe.py"
+      ],
+      "log": "backend-lint.txt",
+      "exit_code": 0
+    }
+  ],
+  "earlier_development_checks": "40 focused controls, then42 after post-lock controls, passed before the final48. An initial synchronous fixture blocked Windows loop socket setup; converting its network-guard lifetime to async fixture fixed the test harness. A later213-pass four-module check predates the final marker controls and is not added to final totals.",
+  "not_executed": [
+    "Live Gmail/provider calls",
+    "Customer databases",
+    "Public schema/data migration",
+    "Full migrated product acceptance",
+    "Browser/end-user acceptance",
+    "Push or deployment"
+  ]
+}

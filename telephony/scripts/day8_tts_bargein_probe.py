@@ -265,7 +265,9 @@ def _parse_sdp_target(default_host: str, sdp_body: str) -> Tuple[str, int]:
 
 
 def _build_rtp_packet(*, seq: int, ts: int, ssrc: int, payload: bytes) -> bytes:
-    header = struct.pack("!BBHII", 0x80, 0x00, seq & 0xFFFF, ts & 0xFFFFFFFF, ssrc & 0xFFFFFFFF)
+    header = struct.pack(
+        "!BBHII", 0x80, 0x00, seq & 0xFFFF, ts & 0xFFFFFFFF, ssrc & 0xFFFFFFFF
+    )
     return header + payload
 
 
@@ -280,18 +282,39 @@ def _extract_ulaw_payload(packet: bytes) -> Optional[bytes]:
 
 
 def _gateway_get(base_url: str, path: str) -> Dict[str, Any]:
-    resp = requests.get(base_url.rstrip("/") + path, timeout=5)
+    token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
+    if not token:
+        raise ProbeError(
+            "VOICE_GATEWAY_AUTH_TOKEN is required for gateway control requests"
+        )
+    resp = requests.get(
+        base_url.rstrip("/") + path,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=5,
+    )
     resp.raise_for_status()
     return resp.json() if resp.text else {}
 
 
 def _gateway_post(base_url: str, path: str, payload: Dict[str, Any]) -> Dict[str, Any]:
-    resp = requests.post(base_url.rstrip("/") + path, json=payload, timeout=5)
+    token = os.getenv("VOICE_GATEWAY_AUTH_TOKEN", "").strip()
+    if not token:
+        raise ProbeError(
+            "VOICE_GATEWAY_AUTH_TOKEN is required for gateway control requests"
+        )
+    resp = requests.post(
+        base_url.rstrip("/") + path,
+        json=payload,
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=5,
+    )
     resp.raise_for_status()
     return resp.json() if resp.text else {}
 
 
-def _wait_for_active_session(base_url: str, timeout_s: float, *, exclude_session_ids: Optional[Set[str]] = None) -> str:
+def _wait_for_active_session(
+    base_url: str, timeout_s: float, *, exclude_session_ids: Optional[Set[str]] = None
+) -> str:
     excluded = exclude_session_ids or set()
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
@@ -309,7 +332,9 @@ def _wait_for_active_session(base_url: str, timeout_s: float, *, exclude_session
     raise ProbeError("active gateway session not found")
 
 
-def _gateway_play_tts(base_url: str, session_id: str, ulaw_audio: bytes, clear_existing: bool = True) -> Dict[str, Any]:
+def _gateway_play_tts(
+    base_url: str, session_id: str, ulaw_audio: bytes, clear_existing: bool = True
+) -> Dict[str, Any]:
     b64 = base64.b64encode(ulaw_audio).decode("ascii")
     return _gateway_post(
         base_url,
@@ -322,7 +347,9 @@ def _gateway_play_tts(base_url: str, session_id: str, ulaw_audio: bytes, clear_e
     )
 
 
-def _gateway_interrupt_tts(base_url: str, session_id: str, reason: str) -> Dict[str, Any]:
+def _gateway_interrupt_tts(
+    base_url: str, session_id: str, reason: str
+) -> Dict[str, Any]:
     return _gateway_post(
         base_url,
         "/v1/sessions/tts/interrupt",
@@ -348,8 +375,12 @@ def _percentile(values: List[float], p: int) -> Optional[float]:
 async def _synthesize_tts_ulaw(api_key: str, voice: str, text: str) -> bytes:
     provider = DeepgramTTSProvider()
     try:
-        await provider.initialize({"api_key": api_key, "voice_id": voice, "sample_rate": 8000})
-        pcm16 = await provider.synthesize_raw(text=text, voice_id=voice, sample_rate=8000)
+        await provider.initialize(
+            {"api_key": api_key, "voice_id": voice, "sample_rate": 8000}
+        )
+        pcm16 = await provider.synthesize_raw(
+            text=text, voice_id=voice, sample_rate=8000
+        )
         return pcm_to_ulaw(pcm16)
     finally:
         await provider.cleanup()
@@ -384,9 +415,12 @@ async def _detect_start_of_turn(api_key: str, ulaw_audio: bytes) -> bool:
 
     detected = False
     try:
+
         async def _collect():
             nonlocal detected
-            async for item in provider.stream_transcribe(audio_stream(), call_id=f"day8-{uuid.uuid4().hex[:8]}"):
+            async for item in provider.stream_transcribe(
+                audio_stream(), call_id=f"day8-{uuid.uuid4().hex[:8]}"
+            ):
                 if isinstance(item, BargeInSignal):
                     detected = True
                     break
@@ -465,10 +499,15 @@ def _run_single_call(
             sip_sock.sendto(invite, (host, port))
 
             invite_codes, final_headers, final_body = _recv_until_final(
-                sip_sock, timeout_s=timeout_s, expected_method="INVITE", call_id=sip_call_id
+                sip_sock,
+                timeout_s=timeout_s,
+                expected_method="INVITE",
+                call_id=sip_call_id,
             )
             if not final_headers or invite_codes[-1] != 200:
-                raise ProbeError(f"call {call_index}: invite failed codes={invite_codes}")
+                raise ProbeError(
+                    f"call {call_index}: invite failed codes={invite_codes}"
+                )
 
             to_tag = _extract_to_tag(final_headers.get("to", to_header))
             if not to_tag:
@@ -499,7 +538,9 @@ def _run_single_call(
                 timeout_s=6.0,
                 exclude_session_ids=known_session_ids,
             )
-            _gateway_play_tts(gateway_base_url, session_id, tts_ulaw, clear_existing=True)
+            _gateway_play_tts(
+                gateway_base_url, session_id, tts_ulaw, clear_existing=True
+            )
 
             trace_sink.append(
                 {
@@ -528,14 +569,21 @@ def _run_single_call(
                     since_first_ms = (now - first_rx_ts) * 1000.0
                     if since_first_ms >= float(barge_after_ms):
                         for payload in user_payloads[:20]:
-                            pkt = _build_rtp_packet(seq=user_seq, ts=user_ts, ssrc=user_ssrc, payload=payload)
+                            pkt = _build_rtp_packet(
+                                seq=user_seq,
+                                ts=user_ts,
+                                ssrc=user_ssrc,
+                                payload=payload,
+                            )
                             rtp_sock.sendto(pkt, (remote_media_ip, remote_media_port))
                             user_seq = (user_seq + 1) & 0xFFFF
                             user_ts = (user_ts + 160) & 0xFFFFFFFF
                             time.sleep(0.02)
                         trigger_ts = time.monotonic()
                         interrupt_reason = "barge_in_start_of_turn"
-                        _gateway_interrupt_tts(gateway_base_url, session_id, interrupt_reason)
+                        _gateway_interrupt_tts(
+                            gateway_base_url, session_id, interrupt_reason
+                        )
                         barge_sent = True
                         trace_sink.append(
                             {
@@ -553,9 +601,15 @@ def _run_single_call(
                 except TimeoutError:
                     if first_rx_ts and last_rx_ts:
                         idle_ms = (time.monotonic() - last_rx_ts) * 1000.0
-                        if scenario == "baseline" and idle_ms >= float(playback_idle_ms):
+                        if scenario == "baseline" and idle_ms >= float(
+                            playback_idle_ms
+                        ):
                             break
-                        if scenario == "barge_in" and barge_sent and idle_ms >= float(post_barge_idle_ms):
+                        if (
+                            scenario == "barge_in"
+                            and barge_sent
+                            and idle_ms >= float(post_barge_idle_ms)
+                        ):
                             break
                     continue
 
@@ -596,8 +650,12 @@ def _run_single_call(
 
             if session_id:
                 try:
-                    stats = _gateway_get(gateway_base_url, f"/v1/sessions/{session_id}/stats")
-                    gateway_tts_stop_reason = str(stats.get("tts_last_stop_reason") or "")
+                    stats = _gateway_get(
+                        gateway_base_url, f"/v1/sessions/{session_id}/stats"
+                    )
+                    gateway_tts_stop_reason = str(
+                        stats.get("tts_last_stop_reason") or ""
+                    )
                 except Exception:
                     gateway_tts_stop_reason = ""
 
@@ -618,9 +676,18 @@ def _run_single_call(
                 body="",
             )
             sip_sock.sendto(bye, (host, port))
-            _recv_until_final(sip_sock, timeout_s=timeout_s, expected_method="BYE", call_id=sip_call_id)
+            _recv_until_final(
+                sip_sock,
+                timeout_s=timeout_s,
+                expected_method="BYE",
+                call_id=sip_call_id,
+            )
 
-    if scenario == "barge_in" and gateway_tts_stop_reason and gateway_tts_stop_reason != "barge_in_start_of_turn":
+    if (
+        scenario == "barge_in"
+        and gateway_tts_stop_reason
+        and gateway_tts_stop_reason != "barge_in_start_of_turn"
+    ):
         if reason == "ok":
             reason = f"unexpected_tts_stop_reason:{gateway_tts_stop_reason}"
         barge_in_success = False
@@ -653,8 +720,12 @@ def run_probe(args: argparse.Namespace) -> int:
 
     user_payloads = _prepare_ulaw_payloads(Path(args.audio_file))
     user_ulaw_audio = b"".join(user_payloads)
-    start_of_turn_detected = asyncio.run(_detect_start_of_turn(args.deepgram_api_key, user_ulaw_audio))
-    tts_ulaw = asyncio.run(_synthesize_tts_ulaw(args.deepgram_api_key, args.tts_voice, args.tts_text))
+    start_of_turn_detected = asyncio.run(
+        _detect_start_of_turn(args.deepgram_api_key, user_ulaw_audio)
+    )
+    tts_ulaw = asyncio.run(
+        _synthesize_tts_ulaw(args.deepgram_api_key, args.tts_voice, args.tts_text)
+    )
 
     results: List[Day8CallResult] = []
     trace_events: List[Dict[str, Any]] = []
@@ -693,14 +764,18 @@ def run_probe(args: argparse.Namespace) -> int:
             if result.session_id:
                 known_session_ids.add(result.session_id)
             if result.gateway_tts_stop_reason:
-                stop_reasons[result.gateway_tts_stop_reason] = stop_reasons.get(result.gateway_tts_stop_reason, 0) + 1
+                stop_reasons[result.gateway_tts_stop_reason] = (
+                    stop_reasons.get(result.gateway_tts_stop_reason, 0) + 1
+                )
             if result.barge_in_reaction_ms is not None:
                 reaction_values.append(float(result.barge_in_reaction_ms))
 
     passed = sum(
         1
         for r in results
-        if r.sip_success and r.tts_playback_success and (r.scenario != "barge_in" or r.barge_in_success)
+        if r.sip_success
+        and r.tts_playback_success
+        and (r.scenario != "barge_in" or r.barge_in_success)
     )
     failed = total_calls - passed
 
@@ -722,7 +797,11 @@ def run_probe(args: argparse.Namespace) -> int:
             "values": reaction_values,
         },
         "max_allowed_p95_ms": args.max_barge_reaction_ms,
-        "pass": (_percentile(reaction_values, 95) or 0.0) <= args.max_barge_reaction_ms if reaction_values else False,
+        "pass": (
+            (_percentile(reaction_values, 95) or 0.0) <= args.max_barge_reaction_ms
+            if reaction_values
+            else False
+        ),
     }
 
     stop_reason_output = {
@@ -730,9 +809,15 @@ def run_probe(args: argparse.Namespace) -> int:
         "stop_reasons": stop_reasons,
     }
 
-    Path(args.output_results).write_text(json.dumps(batch_output, indent=2), encoding="utf-8")
-    Path(args.output_reaction).write_text(json.dumps(reaction_output, indent=2), encoding="utf-8")
-    Path(args.output_stop_reasons).write_text(json.dumps(stop_reason_output, indent=2), encoding="utf-8")
+    Path(args.output_results).write_text(
+        json.dumps(batch_output, indent=2), encoding="utf-8"
+    )
+    Path(args.output_reaction).write_text(
+        json.dumps(reaction_output, indent=2), encoding="utf-8"
+    )
+    Path(args.output_stop_reasons).write_text(
+        json.dumps(stop_reason_output, indent=2), encoding="utf-8"
+    )
     with Path(args.output_trace).open("w", encoding="utf-8") as fh:
         for event in trace_events:
             fh.write(json.dumps(event, ensure_ascii=True) + "\n")
@@ -753,11 +838,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--extension", default="750")
     parser.add_argument("--bind-ip", default="127.0.0.1")
     parser.add_argument("--timeout", type=float, default=6.0)
-    parser.add_argument("--audio-file", default=str(REPO_ROOT / "backend" / "tests" / "fixtures" / "test_greeting.wav"))
+    parser.add_argument(
+        "--audio-file",
+        default=str(REPO_ROOT / "backend" / "tests" / "fixtures" / "test_greeting.wav"),
+    )
     parser.add_argument("--gateway-base-url", required=True)
     parser.add_argument("--batches", type=int, default=3)
     parser.add_argument("--calls-per-batch", type=int, default=2)
-    parser.add_argument("--tts-text", default="Hello, this is Talky AI speaking. You can interrupt me at any time.")
+    parser.add_argument(
+        "--tts-text",
+        default="Hello, this is Talky AI speaking. You can interrupt me at any time.",
+    )
     parser.add_argument("--tts-voice", default="aura-2-andromeda-en")
     parser.add_argument("--barge-after-ms", type=int, default=350)
     parser.add_argument("--playback-idle-ms", type=int, default=400)

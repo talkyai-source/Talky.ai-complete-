@@ -1,0 +1,71 @@
+FFFF.................FF.........................                         [100%]
+================================== FAILURES ===================================
+_____ test_disabled_manual_start_refuses_before_storage_or_adapter[false] _____
+tests\unit\test_api_process_role_admission.py:24: in test_disabled_manual_start_refuses_before_storage_or_adapter
+    await bridge.start_telephony(adapter_type="auto", _authorized=None)
+app\api\v1\endpoints\telephony_bridge.py:378: in start_telephony
+    getattr(get_container(), "db_pool", None), environment=environment
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: storage must not be touched
+_______ test_disabled_manual_start_refuses_before_storage_or_adapter[0] _______
+tests\unit\test_api_process_role_admission.py:24: in test_disabled_manual_start_refuses_before_storage_or_adapter
+    await bridge.start_telephony(adapter_type="auto", _authorized=None)
+app\api\v1\endpoints\telephony_bridge.py:378: in start_telephony
+    getattr(get_container(), "db_pool", None), environment=environment
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: storage must not be touched
+__ test_disabled_origination_refuses_before_tenant_intent_or_adapter[false] ___
+tests\unit\test_api_process_role_admission.py:42: in test_disabled_origination_refuses_before_tenant_intent_or_adapter
+    await bridge.make_call(request, bridge.MakeCallRequest(destination="+15555550123"))
+app\api\v1\endpoints\telephony_bridge.py:1668: in make_call
+    effective_tenant_id = resolve_call_tenant(request, body.tenant_id, ctx=caller_ctx)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: tenant/intent work must not start
+____ test_disabled_origination_refuses_before_tenant_intent_or_adapter[0] _____
+tests\unit\test_api_process_role_admission.py:42: in test_disabled_origination_refuses_before_tenant_intent_or_adapter
+    await bridge.make_call(request, bridge.MakeCallRequest(destination="+15555550123"))
+app\api\v1\endpoints\telephony_bridge.py:1668: in make_call
+    effective_tenant_id = resolve_call_tenant(request, body.tenant_id, ctx=caller_ctx)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   AssertionError: tenant/intent work must not start
+___ test_live_call_routes_reach_the_call_process[GET-/api/v1/healthz/ready] ___
+tests\unit\test_api_process_split.py:133: in test_live_call_routes_reach_the_call_process
+    assert _route(method, uri) == "talky_call"
+E   AssertionError: assert 'talky_web' == 'talky_call'
+E     - talky_call
+E     + talky_web
+___ test_live_call_routes_reach_the_call_process[GET-/api/v1/healthz/deep] ____
+tests\unit\test_api_process_split.py:133: in test_live_call_routes_reach_the_call_process
+    assert _route(method, uri) == "talky_call"
+E   AssertionError: assert 'talky_web' == 'talky_call'
+E     - talky_call
+E     + talky_web
+=========================== short test summary info ===========================
+FAILED tests/unit/test_api_process_role_admission.py::test_disabled_manual_start_refuses_before_storage_or_adapter[false]
+FAILED tests/unit/test_api_process_role_admission.py::test_disabled_manual_start_refuses_before_storage_or_adapter[0]
+FAILED tests/unit/test_api_process_role_admission.py::test_disabled_origination_refuses_before_tenant_intent_or_adapter[false]
+FAILED tests/unit/test_api_process_role_admission.py::test_disabled_origination_refuses_before_tenant_intent_or_adapter[0]
+FAILED tests/unit/test_api_process_split.py::test_live_call_routes_reach_the_call_process[GET-/api/v1/healthz/ready]
+FAILED tests/unit/test_api_process_split.py::test_live_call_routes_reach_the_call_process[GET-/api/v1/healthz/deep]
+6 failed, 42 passed in 4.71s
+blocked_network_attempts=0

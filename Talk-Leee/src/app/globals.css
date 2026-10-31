@@ -44,6 +44,16 @@
 }
 
 :root {
+  /* `font-mono` (and the preflight code/kbd/samp/pre rule) resolve through
+     `--font-geist-mono` via @theme inline above. No Geist font is loaded, so
+     without this definition the utility is invalid at computed-value time and
+     `font-mono` text silently inherited the sans stack. The value is Tailwind's
+     own default mono stack - the same list bare <code> elements already fall
+     back to - so nothing new is loaded. `--font-geist-sans` is deliberately
+     left undefined: `font-sans` sits on <body> and on the homepage hero, and
+     the hero relies on it staying invalid so it inherits Satoshi from
+     <main id="home">. */
+  --font-geist-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   --radius: 0.625rem;
   --sidebar-expanded-width: 232px;
   --sidebar-collapsed-width: 72px;
@@ -120,7 +130,9 @@
   --ring: rgba(0, 255, 255, 0.25);
   background-color: #001022;
   background-image: linear-gradient(180deg, #001022 0%, #004d5e 100%);
-  background-size: 100% 100vh;
+  /* 100% height, not 100vh: the hero can now grow taller than one screen,
+     and a gradient pinned to one viewport height left a flat band below. */
+  background-size: 100% 100%;
   background-repeat: no-repeat;
   color: var(--foreground);
   position: relative;
@@ -216,11 +228,33 @@
   body {
     @apply bg-background text-foreground;
     overflow-x: hidden;
+    transition: background-color 300ms ease-in-out, color 300ms ease-in-out;
   }
 }
 
+/* Site-wide page canvas: cyan-50 in light, pure black in dark. Surfaces that paint
+   their own background (dashboard shell, cards, footer) are unaffected. */
 .light body {
   background: #ecfeff;
+}
+
+.dark body {
+  background: #000000;
+}
+
+/* The homepage <main> carries .homepage-bg, which locally re-points --background,
+   --foreground, --muted-foreground, --border and --ring at its own navy hero palette.
+   That leaked into the Contact section, so its inputs rendered #001022 navy while the
+   dedicated /contact page rendered #121212. Restore the standard dark tokens for that
+   subtree only, so both Contact sections are pixel-identical in dark mode.
+   Dark-mode only: light mode never matches this selector. */
+.dark .homepage-bg #contact {
+  --background: #121212;
+  --foreground: #EDEDED;
+  --muted-foreground: #A3A3A3;
+  --border: #262626;
+  --ring: #D4D4D4;
+  color: var(--foreground);
 }
 
 /* Sidebar Styles */
@@ -245,7 +279,9 @@
 
 .home-navbar-fixed {
   position: absolute;
-  top: 8px;
+  /* Viewport width only: 16px (the px-4 page gutter) on phones, rising
+     2.5vw to 20px (the navbar's own md:px-5 inner padding) from 800px. */
+  top: clamp(1rem, 2.5vw, 1.25rem);
   left: 0;
   right: 0;
   margin: 0 auto;
@@ -268,15 +304,22 @@
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  backdrop-filter: blur(20px) saturate(1.5);
+  /* Prefixed form FIRST. The production CSS pass (Lightning CSS, run by
+     @tailwindcss/postcss) drops the unprefixed declaration when the
+     -webkit- one follows it, shipping only -webkit-backdrop-filter — which
+     Chromium does not implement, so the blur never rendered in Chrome/Edge.
+     In this order both declarations survive. */
   -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
   z-index: -1;
   pointer-events: none;
 }
 
-@media (min-width: 768px) {
+/* The horizontal navbar exists only from 1024px up (navbar.tsx: lg: prefixes
+   on .navbarMobileMenu / .navbarDesktopNav / .navbarDesktopAction). Below
+   that the drawer renders and the pill stays full width like a phone. */
+@media (min-width: 1024px) {
   .home-navbar-fixed {
-    top: 10px;
     width: max-content;
     max-width: calc(100% - 1.5rem);
   }
@@ -296,7 +339,10 @@
   filter: drop-shadow(0 1px 2px rgba(0, 0, 0, 0.45));
 }
 
-.home-navbar-scrolled {
+/* The opaque navy "scrolled" panel is a LIGHT-mode treatment only. In dark mode the
+   navbar deliberately falls through to the shared translucent .home-navbar-fixed
+   glass, so every page matches the /contact navbar. */
+.light .home-navbar-scrolled {
   color: #7dd3fc;
   text-shadow: none;
   background: rgba(0, 16, 34, 0.78);
@@ -304,24 +350,24 @@
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.2), 0 1px 2px rgba(0, 0, 0, 0.12);
 }
 
-.home-navbar-scrolled a,
-.home-navbar-scrolled button,
-.home-navbar-scrolled summary {
+.light .home-navbar-scrolled a,
+.light .home-navbar-scrolled button,
+.light .home-navbar-scrolled summary {
   color: #7dd3fc !important;
 }
 
-.home-navbar-scrolled .navbarDesktopAction a[href="/dashboard"].bg-indigo-600,
-.home-navbar-scrolled a.bg-indigo-600 {
+.light .home-navbar-scrolled .navbarDesktopAction a[href="/dashboard"].bg-indigo-600,
+.light .home-navbar-scrolled a.bg-indigo-600 {
   color: #ffffff !important;
   background-color: #4f46e5 !important;
 }
 
-.home-navbar-scrolled .navbarDesktopAction a[href="/dashboard"].bg-indigo-600:hover,
-.home-navbar-scrolled a.bg-indigo-600:hover {
+.light .home-navbar-scrolled .navbarDesktopAction a[href="/dashboard"].bg-indigo-600:hover,
+.light .home-navbar-scrolled a.bg-indigo-600:hover {
   background-color: #4338ca !important;
 }
 
-.home-navbar-scrolled svg {
+.light .home-navbar-scrolled svg {
   filter: drop-shadow(0 0 10px rgba(125, 211, 252, 0.25));
 }
 
@@ -402,7 +448,9 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-.home-navbar-scrolled .home-nav-link:hover {
+/* Standalone pages (.home-navbar-page) keep their own navy hover tint, defined above;
+   this sky tint is for the light-mode homepage once it scrolls past the hero. */
+.light .home-navbar-scrolled:not(.home-navbar-page) .home-nav-link:hover {
   background-color: rgba(125, 211, 252, 0.08);
   border-color: rgba(125, 211, 252, 0.15);
   box-shadow: 0 2px 8px rgba(125, 211, 252, 0.1);
@@ -654,6 +702,16 @@ details > summary.home-menu-toggle {
   z-index: 71;
 }
 
+/* While the drawer is open the summary is an empty, invisible 40px box that
+   still paints above the panel (z-index 71 over 70). From 768px the navbar's
+   md:px-5 inner padding carries it over the centre of the drawer's own
+   Talk-Lee link, so taps there hit the toggle instead of the link. Let
+   pointer hits pass through; the toggle stays focusable and Enter/Space on
+   it still close the drawer. */
+details[open] > summary.home-menu-toggle {
+  pointer-events: none;
+}
+
 .home-navbar-menu-open[data-theme="light"] {
   background: rgba(0, 0, 0, 0.95);
   color: #fff;
@@ -679,37 +737,54 @@ details > summary.home-menu-toggle {
 }
 
 .home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel {
-  background: #000;
-  color: #fff;
+  /* Light --home-card-gradient copied verbatim from :root. The navbar always carries
+     `.dark`, so var(--home-card-gradient) would resolve to the dark gradient here.
+     Guarded by src/lib/theme-implementation.test.ts. */
+  background-image: linear-gradient(120deg, #fff3a3 0%, #b7f6d1 40%, #6ee7ff 100%);
+  background-size: cover;
+  background-repeat: no-repeat;
+  color: #171717;
   border-right: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3), 1px 0 3px rgba(0, 0, 0, 0.15);
 }
 
 .home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel a,
-.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel button {
+.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel button,
+.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel summary {
   color: inherit !important;
 }
 
+.home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel .border-t {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
 .home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel {
-  background: #fff;
-  color: #000;
+  background-image: var(--home-card-gradient);
+  background-size: cover;
+  background-repeat: no-repeat;
+  color: #ededed;
   border-right: 1px solid rgba(0, 0, 0, 0.08);
   box-shadow: 4px 0 24px rgba(0, 0, 0, 0.1), 1px 0 3px rgba(0, 0, 0, 0.04);
 }
 
+.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel .border-t {
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
 .home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel a,
-.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel button {
+.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel button,
+.home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel summary {
   color: inherit !important;
 }
 
 .home-navbar-menu-open[data-theme="light"] details[open] > .home-mobile-panel .home-mobile-link:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-  border-color: rgba(255, 255, 255, 0.08);
+  background-color: rgba(0, 0, 0, 0.06);
+  border-color: rgba(0, 0, 0, 0.06);
 }
 
 .home-navbar-menu-open[data-theme="dark"] details[open] > .home-mobile-panel .home-mobile-link:hover {
-  background-color: rgba(0, 0, 0, 0.06);
-  border-color: rgba(0, 0, 0, 0.06);
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.08);
 }
 
 .home-mobile-link {
@@ -858,6 +933,67 @@ details > summary.home-menu-toggle {
   box-shadow: 0 10px 30px rgba(0, 0, 0, 0.22);
 }
 
+/* Event Stream / Error & Alert Timeline cards (Campaign window): the shared
+   .content-card hover grows the box via scale/translateY and casts a wide
+   30px-blur shadow, which spills onto the campaign table row and neighboring
+   card above/below when these cards are stacked with a small gap. Scope a
+   contained hover here instead of touching .content-card (used in 32 files). */
+.event-stream-card:hover,
+.alert-timeline-card:hover {
+  transform: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+}
+
+.dark .event-stream-card:hover,
+.dark .alert-timeline-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+}
+
+/* Server Readiness card (Inbound campaign detail): same shared .content-card
+   hover overlap as above, now that this card also scrolls internally. Scoped
+   the same way instead of touching .content-card. */
+.server-readiness-card:hover {
+  transform: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+}
+
+.dark .server-readiness-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+}
+
+/* Call History campaign cards (calls page): same shared .content-card hover
+   overlap as above, now that each card also scrolls internally. Scoped the
+   same way instead of touching .content-card. */
+.call-history-card:hover {
+  transform: none;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.10);
+}
+
+.dark .call-history-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.20);
+}
+
+/* Call Details window (/calls/[id]): the shared .content-card hover grows the
+   cards and casts a wide shadow, and the cards sit close together. Keep only
+   the colour change here, scoped to this window instead of touching
+   .content-card. */
+.call-detail-page .content-card:hover {
+  transform: none;
+  box-shadow: none;
+}
+
+.dark .call-detail-page .content-card:hover {
+  box-shadow: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .content-card,
+  .content-card:hover {
+    transform: none;
+    transition: none;
+  }
+}
+
 /* Subtle Float Animation */
 @keyframes subtle-float {
 
@@ -919,7 +1055,7 @@ details > summary.home-menu-toggle {
        (width: 820px) and (height: 1180px) and (orientation: portrait),
        (width: 1024px) and (height: 1366px) and (orientation: portrait),
        (width: 912px) and (height: 1368px) and (orientation: portrait),
-       (width: 853px) and (height: 1280px) and (orientation: portrait),
+       (min-width: 1064px) and (max-width: 1069px) and (min-height: 1598px) and (max-height: 1602px) and (orientation: portrait),
        (width: 1024px) and (height: 600px) and (orientation: landscape) {
   .home-navbar-fixed {
     width: calc(100% - 1.5rem) !important;
@@ -994,45 +1130,39 @@ details > summary.home-menu-toggle {
   }
 }
 
+/* ── Homepage hero — industry chip row (one fluid rule) ───────────────────
+   Replaces the three fixed breakpoint size regimes. One fluid font-size
+   drives the row: chip height is in em of it, and padding and gap ramp on
+   the same viewport range, pinned to today's exact values at 768px
+   (12px text, 36px height, 20px inline padding, 8px gap) so ≥768px renders
+   exactly as before. All three reach their floor together at 304px of
+   viewport width; the 9px font floor is the legibility limit on a real
+   phone. Scoped to the hero's static chip row only (these classes are set
+   by the isHeroStatic branch of TrustedByMarquee); the animated marquee
+   keeps its own utility classes. */
+.heroChipsGroup {
+  font-size: clamp(9px, calc(12px - (768px - 100vw) * 0.0064655), 12px);
+  gap: clamp(3px, calc(8px - (768px - 100vw) * 0.0107759), 8px);
+}
+
+.heroChip {
+  height: 3em; /* 36px at the 12px cap = today's h-9 */
+  padding-inline: clamp(4px, calc(20px - (768px - 100vw) * 0.0344828), 20px);
+}
+
+/* Below the narrowest width where one legible 9px row still fits inside
+   the hero's 16px side padding (proven: fits at 247px, not at 246px), fall
+   back to a centred 2x2 grid (width rule, not a device list). */
+@media (max-width: 246px) {
+  .heroChipsGroup {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, max-content));
+    justify-content: center;
+    justify-items: center;
+  }
+}
+
 /* ── SecondaryHero styles (moved from style jsx) ── */
-.secondaryHeroPlayer {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  max-width: 600px;
-  margin-left: auto;
-  margin-right: auto;
-  overflow: hidden;
-  border-radius: 14px;
-}
-
-.secondaryHeroPoster {
-  object-fit: cover;
-  border-radius: 14px;
-}
-
-.secondaryHeroVideoLayer {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  transition: opacity 320ms ease-in-out;
-}
-
-.secondaryHeroVideoLayer.active {
-  opacity: 1;
-}
-
-.secondaryHeroVideo {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  border-radius: 14px;
-  background: transparent;
-}
-
 .secondaryHeroSection {
   box-sizing: border-box;
 }
@@ -1044,139 +1174,21 @@ details > summary.home-menu-toggle {
   }
 }
 
+/* .secondaryHeroCtas has no current markup hook (no CTA buttons render in this
+   section today); its rules are kept, untouched, per task instructions. */
 @media (width: 768px) and (height: 1024px) and (orientation: portrait),
        (width: 820px) and (height: 1180px) and (orientation: portrait),
        (width: 834px) and (height: 1194px) and (orientation: portrait),
        (width: 1024px) and (height: 1366px) and (orientation: portrait),
        (width: 912px) and (height: 1368px) and (orientation: portrait),
-       (width: 853px) and (height: 1280px) and (orientation: portrait),
-       (width: 1024px) and (height: 600px) and (orientation: landscape) {
-  .secondaryHeroGrid {
-    grid-template-columns: 1fr !important;
-  }
-  .secondaryHeroPlayer {
-    max-width: 100% !important;
-  }
-  .secondaryHeroImageWrap {
-    max-width: 100% !important;
-    border-right: 0 !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12);
-    background-color: #ffffff !important;
-  }
-  .dark .secondaryHeroImageWrap {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12);
-  }
-  .secondaryHeroContent {
-    text-align: center !important;
-  }
-  .secondaryHeroFeatures {
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
+       (min-width: 1064px) and (max-width: 1069px) and (min-height: 1598px) and (max-height: 1602px) and (orientation: portrait) {
   .secondaryHeroCtas {
     justify-content: center !important;
     align-items: center !important;
   }
 }
 
-@media (width: 768px) and (height: 1024px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 380px !important; }
-  .secondaryHeroContent { padding-left: 20px !important; padding-right: 20px !important; }
-  .secondaryHeroFeatures { max-width: 42rem !important; }
-}
-
-@media (width: 820px) and (height: 1180px) and (orientation: portrait),
-       (width: 834px) and (height: 1194px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 420px !important; }
-  .secondaryHeroContent { padding-left: 24px !important; padding-right: 24px !important; }
-  .secondaryHeroFeatures { max-width: 46rem !important; }
-}
-
-@media (width: 1024px) and (height: 1366px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 520px !important; }
-  .secondaryHeroContent { padding-left: 28px !important; padding-right: 28px !important; }
-  .secondaryHeroFeatures { max-width: 50rem !important; }
-}
-
-@media (width: 912px) and (height: 1368px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 500px !important; }
-  .secondaryHeroContent { padding-left: 26px !important; padding-right: 26px !important; }
-  .secondaryHeroFeatures { max-width: 48rem !important; }
-}
-
-@media (width: 853px) and (height: 1280px) and (orientation: portrait) {
-  .secondaryHeroImageWrap { min-height: 520px !important; }
-  .secondaryHeroContent { padding-left: 28px !important; padding-right: 28px !important; }
-  .secondaryHeroFeatures { max-width: 50rem !important; }
-}
-
-@media (width: 1024px) and (height: 600px) and (orientation: landscape) {
-  .secondaryHeroImageWrap { min-height: 300px !important; }
-  .secondaryHeroContent { padding-left: 24px !important; padding-right: 24px !important; }
-  .secondaryHeroFeatures { max-width: 46rem !important; }
-}
-
-/* Laptop 1024px – keep side-by-side layout, tighten cards & spacing */
 @media (min-width: 1020px) and (max-width: 1028px) and (min-height: 700px) and (max-height: 900px) {
-  .secondaryHeroSection {
-    padding-top: 6px !important;
-    padding-bottom: 6px !important;
-  }
-  .secondaryHeroGrid {
-    grid-template-columns: minmax(0, 420px) minmax(0, 1fr) !important;
-    align-items: stretch !important;
-  }
-  .secondaryHeroImageWrap {
-    min-height: 380px !important;
-    max-width: none !important;
-    border-right: 1px solid rgba(0, 0, 0, 0.12) !important;
-    border-bottom: 0 !important;
-  }
-  .dark .secondaryHeroImageWrap {
-    border-right: 1px solid rgba(255, 255, 255, 0.12) !important;
-    border-bottom: 0 !important;
-  }
-  .secondaryHeroContent {
-    padding: 1rem 1.25rem !important;
-    text-align: left !important;
-    justify-content: center !important;
-  }
-  .secondaryHeroContent h2 {
-    font-size: 1.5rem !important;
-    line-height: 1.1 !important;
-  }
-  .secondaryHeroContent p {
-    margin-top: 0.4rem !important;
-    font-size: 0.85rem !important;
-    line-height: 1.45 !important;
-  }
-  .secondaryHeroFeatures {
-    margin-top: 0.6rem !important;
-    gap: 0.4rem !important;
-    grid-template-columns: repeat(2, 1fr) !important;
-    max-width: none !important;
-    margin-left: 0 !important;
-    margin-right: 0 !important;
-  }
-  .secondaryHeroFeatures > div {
-    padding: 0.5rem 0.6rem !important;
-  }
-  .secondaryHeroFeatures .flex.items-start {
-    gap: 0.5rem !important;
-  }
-  .secondaryHeroFeatures .flex h-9 {
-    height: 1.75rem !important;
-    width: 1.75rem !important;
-  }
-  .secondaryHeroFeatures .text-sm.font-semibold {
-    font-size: 0.8rem !important;
-    line-height: 1.2 !important;
-  }
-  .secondaryHeroFeatures .mt-1.text-sm {
-    font-size: 0.75rem !important;
-    line-height: 1.35 !important;
-    margin-top: 2px !important;
-  }
   .secondaryHeroCtas {
     margin-top: 0.5rem !important;
     justify-content: flex-start !important;
@@ -1203,19 +1215,7 @@ details > summary.home-menu-toggle {
   }
 }
 
-.secondaryHeroImageWrap {
-  z-index: 0;
-  transform-style: preserve-3d;
-  transition: box-shadow 300ms ease-in-out, transform 300ms ease-in-out;
-  transform-origin: center;
-}
-
-@media (min-width: 768px) {
-  .secondaryHeroImageWrap {
-    transform-origin: right center;
-  }
-}
-
+/* .secondaryHeroImage has no current markup hook; kept, untouched, per task instructions. */
 .secondaryHeroImage {
   z-index: 0;
   backface-visibility: hidden;
@@ -1225,43 +1225,14 @@ details > summary.home-menu-toggle {
   filter: saturate(1.06) contrast(1.03);
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .secondaryHeroImageWrap:hover {
-    z-index: 2;
-    box-shadow: 0 18px 56px rgba(0, 0, 0, 0.14);
-    transform: scale(1.06);
-  }
-  .secondaryHeroImageWrap:hover .secondaryHeroImage {
-    transform: perspective(1000px) rotateY(0deg) scale(1.06);
-    filter: saturate(1.12) contrast(1.06);
-  }
-}
-
-.secondaryHeroImageWrap:focus-visible .secondaryHeroImage {
-  transform: perspective(1000px) rotateY(0deg) scale(1.06);
-  filter: saturate(1.12) contrast(1.06);
-}
-
 .secondaryHeroContent {
   transition: transform 300ms ease-in-out;
   transform-origin: center;
 }
 
-@media (min-width: 768px) {
-  .secondaryHeroContent {
-    transform-origin: left center;
-  }
-}
-
 @media (hover: hover) and (pointer: fine) {
   .secondaryHeroContent:hover {
     transform: none;
-  }
-}
-
-@media (hover: none) and (pointer: coarse) {
-  .secondaryHeroImageWrap:active .secondaryHeroImage {
-    transform: perspective(1000px) rotateY(0deg) scale(1.03);
   }
 }
 
@@ -1277,252 +1248,209 @@ details > summary.home-menu-toggle {
   75%, 100% { transform: scale(1.15); opacity: 0; }
 }
 
-@media (width: 768px) and (height: 1024px) and (orientation: portrait),
-       (width: 820px) and (height: 1180px) and (orientation: portrait),
-       (width: 834px) and (height: 1194px) and (orientation: portrait),
-       (width: 1024px) and (height: 1366px) and (orientation: portrait),
-       (width: 912px) and (height: 1368px) and (orientation: portrait),
-       (width: 853px) and (height: 1280px) and (orientation: portrait),
-       (width: 1280px) and (height: 800px) and (orientation: landscape) {
-  .heroTrustedBadgeTop {
-    display: none !important;
-  }
-  .heroTrustedBadgeInlineWrap {
-    display: block !important;
-    margin-bottom: 10px !important;
-  }
-  .heroTrustedBadgeInline {
-    display: inline-flex !important;
-    flex-wrap: wrap !important;
-    max-width: calc(100vw - 2rem) !important;
-    padding: 6px 16px !important;
-    gap: 8px !important;
-    font-size: 14px !important;
-    line-height: 1.1 !important;
-    text-align: center !important;
-    white-space: normal !important;
-  }
-  .heroHeadlineContainer {
-    gap: 8px !important;
-  }
-  .heroDesktopTitle {
-    margin-top: 0 !important;
-  }
-}
-
-/* Nest Hub – tick line just above the title, not near navbar */
-@media (width: 1024px) and (height: 600px) and (orientation: landscape) {
-  .heroContentWrap {
-    padding-top: 0 !important;
-    align-items: center !important;
-  }
-  .heroTrustedBadgeInlineWrap {
-    margin-bottom: 0 !important;
-  }
-  .heroHeadlineContainer {
-    gap: 0 !important;
-    margin-bottom: 0.5rem !important;
-  }
-  .heroDesktopTitle {
-    margin-top: 0 !important;
-  }
-  .heroDescWrap {
-    margin-bottom: 0.5rem !important;
-  }
-  .heroMarqueeWrap {
-    margin-top: 0.5rem !important;
-  }
-}
-
-/* ASUS Zenbook Fold – tick line just above the title */
-@media (width: 1280px) and (height: 800px) and (orientation: landscape) {
-  .heroContentWrap {
-    padding-top: 0 !important;
-    align-items: center !important;
-  }
-  .heroTrustedBadgeInlineWrap {
-    margin-bottom: 0 !important;
-  }
-  .heroHeadlineContainer {
-    gap: 0 !important;
-    margin-bottom: 0.5rem !important;
-  }
-  .heroDesktopTitle {
-    margin-top: 0 !important;
-  }
-  .heroDescWrap {
-    margin-bottom: 0.5rem !important;
-  }
-  .heroMarqueeWrap {
-    margin-top: 0.5rem !important;
-  }
-}
-
-/* ASUS Zenbook Fold portrait – tick line just above the title */
-@media (width: 853px) and (height: 1280px) and (orientation: portrait) {
-  .heroTrustedBadgeInlineWrap {
-    margin-bottom: 0 !important;
-  }
-  .heroHeadlineContainer {
-    gap: 0 !important;
-    margin-bottom: 0.5rem !important;
-  }
-  .heroDesktopTitle {
-    margin-top: 0 !important;
-  }
-}
-
-/* Laptop 1024px – tick line just above the title */
-@media (min-width: 1020px) and (max-width: 1028px) and (min-height: 700px) and (max-height: 900px) {
-  .heroTrustedBadgeInlineWrap {
-    margin-bottom: 0 !important;
-  }
-  .heroHeadlineContainer {
-    gap: 0 !important;
-    margin-bottom: 0.5rem !important;
-  }
-  .heroDesktopTitle {
-    margin-top: 0 !important;
-  }
-  .heroDescWrap {
-    margin-bottom: 0.5rem !important;
-  }
-  .heroMarqueeWrap {
-    margin-top: 0.5rem !important;
-  }
-}
-
-/* Laptop L 1440×900 – tick line just above the title */
-@media (min-width: 1436px) and (max-width: 1444px) and (min-height: 850px) and (max-height: 950px) {
-  .heroTrustedBadgeTop {
-    margin-bottom: 0 !important;
-  }
-  .heroHeadlineContainer {
-    gap: 0 !important;
-  }
-  .heroDesktopTitle {
-    margin-top: 0.25rem !important;
-  }
-}
-
-
-@media (min-width: 767px) and (max-width: 769px) {
-  /* Content — clear navbar, fit everything in one screen */
-  .heroContentWrap {
-    padding-top: calc(var(--home-navbar-height) + 1rem) !important;
-    padding-bottom: 1rem !important;
-  }
-
-  /* 1. Tick line */
-  .heroTrustedBadgeTop {
-    display: none !important;
-  }
-  .heroTrustedBadgeInlineWrap {
-    display: block !important;
-    margin-top: 0 !important;
-    margin-bottom: 0.75rem !important;
-  }
-  .heroTrustedBadgeInline {
-    display: inline-flex !important;
-    white-space: normal !important;
-    flex-wrap: wrap !important;
-    max-width: calc(100vw - 2rem) !important;
-    font-size: 13px !important;
-    padding: 5px 14px !important;
-    gap: 6px !important;
-    line-height: 1.1 !important;
-    text-align: center !important;
-  }
-
-  /* 2. Title */
-  .heroHeadlineContainer {
-    gap: 6px !important;
-    margin-bottom: 0.75rem !important;
-  }
-  .heroDesktopTitle {
-    margin-top: 0 !important;
-  }
-
-  /* 3. Description */
-  .heroDescWrap {
-    margin-bottom: 0.75rem !important;
-  }
-  .heroDescText {
-    font-size: 1rem !important;
-    line-height: 1.5rem !important;
-  }
-
-  /* 4. Three stat boxes */
-  .heroStatsGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    gap: 0.75rem !important;
-    max-width: 580px !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
-  .heroStatBox.stats-card {
-    padding: 0.65rem 0.5rem !important;
-  }
-  .heroStatBox .text-3xl {
-    font-size: 1.5rem !important;
-    line-height: 1.75rem !important;
-  }
-  .heroStatBox .text-sm {
-    font-size: 0.7rem !important;
-    margin-top: 2px !important;
-  }
-
-  /* 5. Industry names */
-  .heroMarqueeWrap {
-    margin-top: 0.75rem !important;
-  }
-  .heroMarqueeWrap > div {
-    height: 2rem !important;
-    padding-left: 0.25rem !important;
-    padding-right: 0.25rem !important;
-  }
-  .heroMarqueeWrap > div > div > div > div {
-    height: 1.6rem !important;
-    padding-left: 0.5rem !important;
-    padding-right: 0.5rem !important;
-    font-size: 9.5px !important;
-  }
-
-  /* Secondary hero — match Nest Hub layout */
-  .secondaryHeroGrid {
-    grid-template-columns: 1fr !important;
-  }
-  .secondaryHeroPlayer {
-    max-width: 100% !important;
-  }
-  .secondaryHeroImageWrap {
-    max-width: 100% !important;
-    min-height: 380px !important;
-    border-right: 0 !important;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.12) !important;
-    background-color: #ffffff !important;
-  }
-  .dark .secondaryHeroImageWrap {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.12) !important;
-  }
-  .secondaryHeroContent {
-    text-align: center !important;
-    padding-left: 24px !important;
-    padding-right: 24px !important;
-  }
-  .secondaryHeroFeatures {
-    margin-left: auto !important;
-    margin-right: auto !important;
-    max-width: 42rem !important;
-  }
-  .secondaryHeroCtas {
-    justify-content: center !important;
-    align-items: center !important;
-  }
-}
-
 .heroAskAiPing {
   animation: ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* ── Ask AI active-call bar (voice-agent-popup.tsx) ──────────────────────
+   Shown while a call is live and the user has scrolled past the hero.
+   Horizontal centring is solved here by the browser: left:0 / right:0 /
+   margin-inline:auto is the same over-constrained auto-margin rule the
+   navbar uses (.home-navbar-fixed), so the two side gaps are always equal
+   by construction. The top offset is measured from the navbar element at
+   runtime (ResizeObserver in voice-agent-popup.tsx) and set inline at
+   every size; the clamp(1rem, 2.5vw, 1.25rem) below is the navbar's own
+   top rule (.home-navbar-fixed), so the bar sits where the navbar is from
+   first paint and does not move when the measurement lands.
+
+   Two forms, split at the same sm breakpoint the rest of the site uses
+   (viewport width only, no device targeting):
+
+   Below 640px — the phone form. A solid dark rounded rectangle and nothing
+   else: 88% of the viewport (a fixed element's percentage width resolves
+   against the viewport, so one rule covers every phone width), 14px
+   radius, opaque background, no border, no shadow, no backdrop blur. Two
+   rows with an explicit 11px gap between them; the 103px height is exactly
+   12 + 24 (row) + 11 (gap) + 44 (End Call) + 12, so no leftover space is
+   ever distributed. Width and radius are NOT set inline here — the
+   component only emits them for the one-row form.
+
+   At 640px and above — the one-row form, unchanged: the navbar's own
+   translucent glass (border, shadow, backdrop blur), its pill radius, and
+   its width and radius measured from the navbar and set inline, with
+   calc(100% - 1.5rem) / 9999px as the pre-measurement fallbacks.
+
+   Keep the two heights in sync with BAR_HEIGHT_TWO_ROW / BAR_HEIGHT_ONE_ROW
+   in voice-agent-popup.tsx: the orb↔bar swap thresholds are computed from
+   them. The padding gives the red End Call button a visible band of bar on
+   all four sides. */
+.askAiCallBar {
+  position: fixed;
+  z-index: 600;
+  top: clamp(1rem, 2.5vw, 1.25rem);
+  left: 0;
+  right: 0;
+  margin-inline: auto;
+  width: 88%;
+  border-radius: 14px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  gap: 11px;
+  height: 103px;
+  padding: 12px 16px;
+  color: #fff;
+  background: rgb(2, 14, 28);
+  font-family: var(--font-manrope, inherit);
+  /* Fluid, breakpoint-free: 11px on a 280px viewport up to 13px from
+     ~430px, so "Talk-Lee is listening" never truncates at 280-294px. */
+  font-size: clamp(11px, calc(7px + 1.4vw), 13px);
+  line-height: 1.3;
+  font-weight: 500;
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+  transition: opacity 200ms ease, transform 200ms ease;
+}
+
+/* One-row form. Everything here is exactly what the bar had at these
+   widths before the phone form diverged: the width/radius fallbacks, the
+   navbar's glass layers, and space-between (a no-op here, the row is
+   flex: 1, kept so the computed value is unchanged). */
+@media (min-width: 640px) {
+  .askAiCallBar {
+    width: calc(100% - 1.5rem);
+    border-radius: 9999px;
+    height: 64px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 0 16px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(2, 14, 28, 0.92);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25), 0 1px 2px rgba(0, 0, 0, 0.12);
+    /* -webkit- first, unprefixed second: see .home-navbar-fixed::before. */
+    -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    backdrop-filter: blur(20px) saturate(1.5);
+  }
+}
+
+.askAiCallBarVisible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+.askAiCallBarRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+@media (min-width: 640px) {
+  .askAiCallBarRow {
+    flex: 1;
+    gap: 10px;
+  }
+}
+
+.askAiCallBarState {
+  font-weight: 700;
+  flex: none;
+}
+
+.askAiCallBarLine {
+  flex: 0 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.75;
+}
+
+.askAiCallBarErrorText {
+  color: #fecaca;
+  opacity: 1;
+}
+
+.askAiCallBarTimer {
+  margin-left: auto;
+  flex: none;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.9;
+}
+
+.askAiCallBarEnd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  width: 100%;
+  border: 0;
+  border-radius: 9999px;
+  background: #dc2626;
+  color: #fff;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  flex: none;
+}
+
+.askAiCallBarEnd:hover {
+  background: #b91c1c;
+}
+
+@media (min-width: 640px) {
+  .askAiCallBarEnd {
+    width: auto;
+    padding: 0 16px;
+  }
+}
+
+/* ── Ask AI call-ended notice (call-ended-notice.tsx, root layout) ── */
+.askAiCallEndedNotice {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 700;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  max-width: calc(100vw - 24px);
+  padding: 8px 6px 8px 14px;
+  border-radius: 9999px;
+  background: rgba(2, 14, 28, 0.92);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+  /* -webkit- first, unprefixed second: see .home-navbar-fixed::before. */
+  -webkit-backdrop-filter: blur(20px) saturate(1.5);
+  backdrop-filter: blur(20px) saturate(1.5);
+  /* Mounted in the root layout, outside the homepage <main>, so it never
+     inherited Manrope; ask for it the same way .askAiCallBar does. */
+  font-family: var(--font-manrope, inherit);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+/* 44x44 effective tap target without inflating the pill's height. */
+.askAiCallEndedDismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  margin: -12px 0;
+  opacity: 0.75;
+}
+
+.askAiCallEndedDismiss:hover {
+  opacity: 1;
 }
 
 .heroTitleGlow,
@@ -1533,330 +1461,52 @@ details > summary.home-menu-toggle {
     0 12px 48px rgba(0, 0, 0, 0.55);
 }
 
-@media (min-width: 374px) and (max-width: 376px) {
-  /* 1. Tick line — space after navbar + centered */
-  .heroTrustedBadgeInlineWrap {
-    margin-top: 10px !important;
-    margin-bottom: 10px !important;
-  }
-  .heroTrustedBadgeInline {
-    white-space: normal !important;
-    flex-wrap: wrap !important;
-    max-width: calc(100vw - 2rem) !important;
-    font-size: 10px !important;
-    padding: 5px 12px !important;
-    gap: 4px !important;
-    line-height: 1.2 !important;
+/* ── Homepage hero — fluid vertical rhythm (browser-zoom stability) ──────
+   The hero is a fixed `100vh - navbar` box, but every gap inside it is a
+   fixed rem value. Zooming the browser out grows the box in CSS pixels
+   while the content keeps its size, so the surplus height collects as
+   empty bands above and below the block — which is what makes the
+   navbar → heading → description → stat cards → industry buttons spacing
+   look different at 90%, 80% and lower.
+
+   These tokens let the three vertical gaps grow with the viewport so the
+   block keeps filling the hero as the window (or zoom level) gets taller.
+
+   Scoped so nothing else can be affected:
+     .heroFluidSpacing     only the homepage hero (adjustForNavbar)
+     min-width: 768px      phones untouched
+     orientation           portrait tablets untouched
+     hover + pointer       touch devices untouched, incl. tablets held in
+                           landscape (a mouse-driven desktop always matches,
+                           at any zoom level)
+     min-height: 940px     every normal desktop/laptop viewport — a 1080p
+                           Chrome window is ~937 CSS px tall — renders
+                           byte-for-byte as before. Only taller-than-normal
+                           viewports (zoomed-out windows, large monitors)
+                           pick up the fluid rhythm.
+
+   Each track is calc(10vh - C), anchored so it equals today's value at
+   937 CSS px of viewport height, then clamped so it can never drop below
+   today's spacing nor run away past ~2x. The device-specific rules
+   elsewhere in this file still win — they carry !important. */
+@media (min-width: 768px) and (orientation: landscape) and (min-height: 940px)
+  and (hover: hover) and (pointer: fine) {
+  .heroFluidSpacing {
+    --hero-gap-title: clamp(1.5rem, calc(10vh - 69.7px), 3.25rem);   /* 24px -> 52px */
+    --hero-gap-desc: clamp(2rem, calc(10vh - 61.7px), 3.75rem);      /* 32px -> 60px */
+    --hero-gap-marquee: clamp(1.75rem, calc(10vh - 65.7px), 3.5rem); /* 28px -> 56px */
   }
 
-  /* 2. Title — centered, clearly visible */
-  .heroHeadlineContainer {
-    gap: 5px !important;
-    margin-bottom: 1rem !important;
-  }
-  h1.heroMobileTitle {
-    font-size: 18px !important;
-    line-height: 1.15 !important;
-    text-align: center !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow {
-    white-space: nowrap !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow + .heroTitleGlow {
-    margin-top: 0.4rem !important;
+  .heroFluidSpacing .heroHeadlineContainer {
+    margin-bottom: var(--hero-gap-title);
   }
 
-  /* 3. Description paragraph */
-  .heroDescWrap {
-    margin-bottom: 1rem !important;
-  }
-  .heroDescText {
-    font-size: 0.85rem !important;
-    line-height: 1.4rem !important;
+  .heroFluidSpacing .heroDescWrap {
+    margin-bottom: var(--hero-gap-desc);
   }
 
-  /* 4. Three stat boxes — 2-col grid, centered */
-  .heroStatsGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 0.5rem !important;
-    max-width: 100% !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
-  .heroStatBox.stats-card {
-    padding: 0.65rem 0.5rem !important;
-    border-radius: 0.875rem !important;
-  }
-  .heroStatBox .text-3xl,
-  .heroStatBox .text-2xl {
-    font-size: 1.25rem !important;
-    line-height: 1.5rem !important;
-  }
-  .heroStatBox .text-sm,
-  .heroStatBox .text-\[11px\] {
-    font-size: 8px !important;
-    line-height: 1.15 !important;
-    margin-top: 2px !important;
-  }
-
-  /* 5. Industry names — fully visible, centered */
-  .heroMarqueeWrap {
-    margin-top: 0.75rem !important;
-  }
-  .heroMarqueeWrap > div {
-    height: 1.85rem !important;
-    padding-left: 0.2rem !important;
-    padding-right: 0.2rem !important;
-  }
-  .heroMarqueeWrap > div > div > div > div {
-    height: 1.5rem !important;
-    padding-left: 0.35rem !important;
-    padding-right: 0.35rem !important;
-    font-size: 7.5px !important;
-  }
-}
-
-@media (min-width: 424px) and (max-width: 426px) {
-  /* 1. Tick line — space after navbar + centered */
-  .heroTrustedBadgeInlineWrap {
-    margin-top: 10px !important;
-    margin-bottom: 10px !important;
-  }
-  .heroTrustedBadgeInline {
-    white-space: normal !important;
-    flex-wrap: wrap !important;
-    max-width: calc(100vw - 2rem) !important;
-    font-size: 10.5px !important;
-    padding: 5px 12px !important;
-    gap: 5px !important;
-    line-height: 1.2 !important;
-  }
-
-  /* 2. Title — centered, clearly visible */
-  .heroHeadlineContainer {
-    gap: 6px !important;
-    margin-bottom: 1rem !important;
-  }
-  h1.heroMobileTitle {
-    font-size: 21px !important;
-    line-height: 1.15 !important;
-    text-align: center !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow {
-    white-space: nowrap !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow + .heroTitleGlow {
-    margin-top: 0.4rem !important;
-  }
-
-  /* 3. Description paragraph */
-  .heroDescWrap {
-    margin-bottom: 1rem !important;
-  }
-  .heroDescText {
-    font-size: 0.875rem !important;
-    line-height: 1.45rem !important;
-  }
-
-  /* 4. Three stat boxes — 3-col grid, centered */
-  .heroStatsGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    gap: 0.5rem !important;
-    max-width: 100% !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
-  .heroStatBox.stats-card {
-    padding: 0.75rem 0.5rem !important;
-    border-radius: 0.875rem !important;
-  }
-  .heroStatBox .text-3xl {
-    font-size: 1.35rem !important;
-    line-height: 1.6rem !important;
-  }
-  .heroStatBox .text-sm {
-    font-size: 9px !important;
-    line-height: 1.15 !important;
-    margin-top: 2px !important;
-  }
-
-  /* 5. Industry names — fully visible, centered */
-  .heroMarqueeWrap {
-    margin-top: 0.85rem !important;
-  }
-  .heroMarqueeWrap > div {
-    height: 1.9rem !important;
-    padding-left: 0.2rem !important;
-    padding-right: 0.2rem !important;
-  }
-  .heroMarqueeWrap > div > div > div > div {
-    height: 1.5rem !important;
-    padding-left: 0.4rem !important;
-    padding-right: 0.4rem !important;
-    font-size: 8px !important;
-  }
-}
-
-@media (width: 360px) and (height: 740px) {
-  .heroMobileTitle {
-    font-size: 18px !important;
-    line-height: 1.08 !important;
-    padding-left: 6px;
-    padding-right: 6px;
-  }
-  .heroMobileTitle .heroTitleGlow {
-    white-space: normal !important;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-  }
-  .heroMobileTitle .heroTitleGlow + .heroTitleGlow {
-    margin-top: 0.4rem !important;
-  }
-}
-
-@media (width: 344px) and (height: 882px) {
-  .heroMobileTitle {
-    font-size: 16px !important;
-    line-height: 1.08 !important;
-    padding-left: 10px;
-    padding-right: 10px;
-  }
-  .heroMobileTitle .heroTitleGlow {
-    white-space: nowrap !important;
-  }
-  .heroMobileTitle .heroTitleGlow + .heroTitleGlow {
-    margin-top: 0.45rem !important;
-  }
-}
-
-@media (min-width: 539px) and (max-width: 541px) {
-  .heroTrustedBadgeInlineWrap {
-    margin-bottom: 10px !important;
-  }
-  .heroTrustedBadgeInline {
-    font-size: 13px !important;
-    white-space: normal !important;
-  }
-  .heroHeadlineContainer {
-    gap: 8px !important;
-  }
-  h1.heroMobileTitle {
-    font-size: 26px !important;
-    line-height: 1.15 !important;
-    text-align: center !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow {
-    white-space: nowrap !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow + .heroTitleGlow {
-    margin-top: 0.5rem !important;
-  }
-  .heroContentWrap {
-    padding-left: 1.5rem !important;
-    padding-right: 1.5rem !important;
-  }
-  .heroDescText {
-    font-size: 1.05rem !important;
-    line-height: 1.65rem !important;
-  }
-  .heroStatsGrid {
-    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-    gap: 1rem !important;
-  }
-}
-
-@media (min-width: 319px) and (max-width: 321px) {
-  /* Content wrapper — reduce side padding for more room */
-  .heroContentWrap {
-    padding-left: 0.625rem !important;
-    padding-right: 0.625rem !important;
-  }
-
-  /* 1. Tick line (trusted badge) */
-  .heroTrustedBadgeInlineWrap {
-    margin-bottom: 5px !important;
-  }
-  .heroTrustedBadgeInline {
-    white-space: normal !important;
-    flex-wrap: wrap !important;
-    max-width: calc(100vw - 1.5rem) !important;
-    font-size: 9px !important;
-    padding: 4px 8px !important;
-    gap: 3px !important;
-    line-height: 1.2 !important;
-  }
-  .heroTrustedBadgeInline svg {
-    width: 12px !important;
-    height: 12px !important;
-  }
-
-  /* 2. Title — two balanced centered lines */
-  .heroHeadlineContainer {
-    gap: 3px !important;
-    margin-bottom: 0.75rem !important;
-  }
-  h1.heroMobileTitle {
-    font-size: 15px !important;
-    line-height: 1.18 !important;
-    text-align: center !important;
-    padding-left: 2px !important;
-    padding-right: 2px !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow {
-    white-space: nowrap !important;
-  }
-  h1.heroMobileTitle .heroTitleGlow + .heroTitleGlow {
-    margin-top: 0.3rem !important;
-  }
-
-  /* 3. Description paragraph */
-  .heroDescWrap {
-    margin-bottom: 0.75rem !important;
-  }
-  .heroDescText {
-    font-size: 0.8rem !important;
-    line-height: 1.35rem !important;
-  }
-
-  /* 4. Three stat boxes */
-  .heroStatsGrid {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 0.4rem !important;
-    max-width: 100% !important;
-    margin-left: auto !important;
-    margin-right: auto !important;
-  }
-  .heroStatBox.stats-card {
-    padding: 0.5rem 0.35rem !important;
-    border-radius: 0.75rem !important;
-  }
-  .heroStatBox .text-3xl,
-  .heroStatBox .text-2xl {
-    font-size: 1.1rem !important;
-    line-height: 1.3rem !important;
-  }
-  .heroStatBox .text-sm,
-  .heroStatBox .text-\[11px\] {
-    font-size: 7px !important;
-    line-height: 1.1 !important;
-    letter-spacing: 0.02em !important;
-    margin-top: 2px !important;
-  }
-
-  /* 5. Industry names (marquee) */
-  .heroMarqueeWrap {
-    margin-top: 0.6rem !important;
-  }
-  .heroMarqueeWrap > div {
-    height: 1.75rem !important;
-    padding-left: 0.25rem !important;
-    padding-right: 0.25rem !important;
-  }
-  .heroMarqueeWrap > div > div > div > div {
-    height: 1.4rem !important;
-    padding-left: 0.3rem !important;
-    padding-right: 0.3rem !important;
-    font-size: 7px !important;
+  .heroFluidSpacing .heroMarqueeWrap {
+    margin-top: var(--hero-gap-marquee);
   }
 }
 

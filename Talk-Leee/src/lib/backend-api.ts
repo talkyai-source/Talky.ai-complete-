@@ -1,12 +1,14 @@
 import { backendEndpoints } from "@/lib/backend-endpoints";
 import {
-    AssistantActionSchema,
-    AssistantPlanSchema,
-    AssistantRunSchema,
+    AssistantActionsResponseSchema,
     AuditLogEventSchema,
+    EventBoundarySchema,
     ConnectorResponseSchema,
     ConnectorAccountSchema,
     ConnectorProviderStatusSchema,
+    SalesforceImportResultSchema,
+    SalesforceProbeSchema,
+    SalesforceSettingsResponseSchema,
     EmailSendResponseSchema,
     EmailTemplateResponseSchema,
     ListResponseSchema,
@@ -17,12 +19,15 @@ import {
     SecurityEventSchema,
     PartnerSummarySchema,
     TenantSummarySchema,
+    TenantMutationReceiptSchema,
     VoiceCallGuardResponseSchema,
     VoiceCallStartResponseSchema,
-    type AssistantAction,
-    type AssistantPlan,
     type AssistantRun,
+    type AssistantRunStatus,
     type AuditLogEvent,
+    type EventBoundary,
+    type AuditSeverity,
+    type SecurityEventStatus,
     type CalendarEvent,
     type Connector,
     type ConnectorAccount,
@@ -37,10 +42,29 @@ import {
     type ReminderStatus,
     type SecurityEvent,
     type TenantSummary,
+    type TenantMutationReceipt,
     type VoiceCallGuardResponse,
     type VoiceCallStartResponse,
     type VoiceFeature,
 } from "@/lib/models";
+import type { SalesforceImportResult, SalesforceProbe, SalesforceSettingsResponse } from "@/lib/models";
+
+export type SalesforceSettingsUpdateInput = {
+    callback_campaign_id?: string | null;
+    clear_callback_campaign?: boolean;
+    log_calls?: boolean;
+    create_leads?: boolean;
+    sync_inbound?: boolean;
+    callback_priority?: number;
+};
+
+export type SalesforceImportInput = {
+    campaign_id: string;
+    object_type: "Lead" | "Contact";
+    where?: string;
+    limit?: number;
+    list_name?: string;
+};
 import { extractAuthorizationUrl } from "@/lib/connectors-utils";
 import { sharedHttpClient } from "@/lib/api";
 
@@ -76,9 +100,10 @@ function parseOrThrow<T>(schema: { parse: (v: unknown) => T }, data: unknown) {
 }
 
 export type AuditLogsListInput = {
-    page?: number;
     pageSize?: number;
+    before?: EventBoundary;
     eventType?: string;
+    eventGroup?: string;
     from?: string;
     to?: string;
     userQuery?: string;
@@ -86,17 +111,27 @@ export type AuditLogsListInput = {
     partnerId?: string;
 };
 
-export type SecurityEventsListInput = {
-    page?: number;
-    pageSize?: number;
-    eventType?: string;
-    severity?: "low" | "medium" | "high";
-    from?: string;
-    to?: string;
-    userQuery?: string;
-    tenantId?: string;
-    partnerId?: string;
+export type SecurityEventsListInput = AuditLogsListInput & {
+    severity?: AuditSeverity;
+    status?: SecurityEventStatus;
 };
+
+export type EventReadPage<T> = { items: T[]; hasNext: boolean; nextBoundary?: EventBoundary };
+function eventReadQuery(input: AuditLogsListInput, maximum: number) {
+    const size = input.pageSize ?? 20;
+    if (!Number.isSafeInteger(size) || size < 1 || size >= maximum) throw new Error("Invalid event page size.");
+    const before = input.before === undefined ? undefined : EventBoundarySchema.parse(input.before);
+    return { size, query: {
+        limit: size + 1, before_time: before?.time, before_id: before?.id,
+        event_type: input.eventType, event_group: input.eventGroup,
+        start_date: input.from, end_date: input.to, user_query: input.userQuery,
+        tenant_id: input.tenantId, partner_id: input.partnerId,
+    } };
+}
+function eventReadPage<T extends { id: string; timestamp: string }>(rows: T[], size: number): EventReadPage<T> {
+    const items = rows.slice(0, size), hasNext = rows.length > size, last = items.at(-1);
+    return { items, hasNext, ...(hasNext && last ? { nextBoundary: { time: last.timestamp, id: last.id } } : {}) };
+}
 
 export type AdminResourceListInput = {
     page?: number;
@@ -105,6 +140,27 @@ export type AdminResourceListInput = {
     status?: "active" | "suspended";
     partnerId?: string;
 };
+
+export type AdminPartnerListInput = Omit<AdminResourceListInput, "status"> & {
+    status?: PartnerSummary["status"];
+};
+
+type TenantMutationInput = { tenantId: string; expectedUpdatedAt: string | null; reason?: string };
+
+async function changeTenantSubscription(input: TenantMutationInput, target: "active" | "suspended"): Promise<TenantMutationReceipt> {
+    if (input.expectedUpdatedAt === undefined) throw new Error("Refresh and review the tenant before changing its subscription.");
+    const endpoint = target === "active" ? backendEndpoints.tenantReactivate : backendEndpoints.tenantSuspend;
+    const data = await httpClient().request({
+        path: endpoint.path.replace("{id}", encodeURIComponent(input.tenantId)), method: endpoint.method,
+        body: { expected_updated_at: input.expectedUpdatedAt, ...(input.reason ? { reason: input.reason } : {}) },
+        timeoutMs: 12_000,
+    });
+    const receipt = TenantMutationReceiptSchema.parse(data);
+    if (receipt.id !== input.tenantId || receipt.status !== target) {
+        throw new Error("Tenant change could not be confirmed. Refresh its record before retrying.");
+    }
+    return receipt;
+}
 
 export const backendApi = {
     health: async (signal?: AbortSignal) => {
@@ -116,6 +172,8 @@ export const backendApi = {
             input: { categories?: string[]; severities?: string[]; since?: string; cursor?: string; limit?: number },
             signal?: AbortSignal,
         ): Promise<{
+            tenant_id: string;
+            user_id: string;
             items: Array<{
                 id: string;
                 category: string;
@@ -218,6 +276,54 @@ export const backendApi = {
                 method: backendEndpoints.connectorsDisconnect.method,
                 timeoutMs: 12_000,
             });
+        },
+    },
+    salesforce: {
+        settings: async (signal?: AbortSignal): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({ path: backendEndpoints.salesforceSettings.path, timeoutMs: 12_000, signal });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        updateSettings: async (input: SalesforceSettingsUpdateInput): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceSettingsUpdate.path,
+                method: backendEndpoints.salesforceSettingsUpdate.method,
+                body: input,
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        revealWebhookToken: async (): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceWebhookTokenReveal.path,
+                method: backendEndpoints.salesforceWebhookTokenReveal.method,
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        rotateWebhookToken: async (): Promise<SalesforceSettingsResponse> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceWebhookTokenRotate.path,
+                method: backendEndpoints.salesforceWebhookTokenRotate.method,
+                timeoutMs: 12_000,
+            });
+            return parseOrThrow(SalesforceSettingsResponseSchema, data);
+        },
+        test: async (): Promise<SalesforceProbe> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceTest.path,
+                method: backendEndpoints.salesforceTest.method,
+                timeoutMs: 30_000,
+            });
+            return parseOrThrow(SalesforceProbeSchema, data);
+        },
+        importPeople: async (input: SalesforceImportInput): Promise<SalesforceImportResult> => {
+            const data = await httpClient().request({
+                path: backendEndpoints.salesforceImport.path,
+                method: backendEndpoints.salesforceImport.method,
+                body: input,
+                timeoutMs: 60_000,
+            });
+            return parseOrThrow(SalesforceImportResultSchema, data);
         },
     },
     connectorAccounts: {
@@ -453,131 +559,65 @@ export const backendApi = {
             return parseOrThrow(VoiceCallStartResponseSchema, data);
         },
     },
-    assistantActions: {
-        list: async (signal?: AbortSignal): Promise<ListResponse<AssistantAction>> => {
-            const data = await httpClient().request({ path: backendEndpoints.assistantActionsList.path, timeoutMs: 12_000, signal });
-            return parseOrThrow(ListResponseSchema(AssistantActionSchema), data);
-        },
-    },
     assistantRuns: {
         list: async (
             input: {
                 page?: number;
                 pageSize?: number;
-                statuses?: Array<"pending" | "in_progress" | "completed" | "failed">;
+                statuses?: AssistantRunStatus[];
                 actionType?: string;
                 leadId?: string;
                 from?: string;
                 to?: string;
-                sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType" | "source" | "leadId";
+                sortKey?: "createdAt" | "startedAt" | "completedAt" | "status" | "actionType";
                 sortDir?: "asc" | "desc";
             },
             signal?: AbortSignal
         ): Promise<{ items: AssistantRun[]; total?: number; page?: number; page_size?: number }> => {
             const data = await httpClient().request({
-                path: backendEndpoints.assistantRunsList.path,
-                method: backendEndpoints.assistantRunsList.method,
+                path: backendEndpoints.assistantActionsList.path,
+                method: backendEndpoints.assistantActionsList.method,
                 query: {
                     page: input.page,
                     page_size: input.pageSize,
                     status: input.statuses?.length ? input.statuses.join(",") : undefined,
-                    action_type: input.actionType,
+                    type: input.actionType,
                     lead_id: input.leadId,
-                    from: input.from,
-                    to: input.to,
-                    sort_key: input.sortKey,
+                    from_date: input.from,
+                    to_date: input.to,
+                    sort_by: input.sortKey ? ({ createdAt: "created_at", startedAt: "started_at", completedAt: "completed_at", status: "status", actionType: "type" } as const)[input.sortKey] : undefined,
                     sort_dir: input.sortDir,
                 },
                 timeoutMs: 12_000,
                 signal,
             });
-            return parseOrThrow(PaginatedResponseSchema(AssistantRunSchema), data);
-        },
-        retry: async (id: string): Promise<AssistantRun> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.assistantRunsRetry.path.replace("{id}", encodeURIComponent(id)),
-                method: backendEndpoints.assistantRunsRetry.method,
-                timeoutMs: 12_000,
-            });
-            return parseOrThrow(AssistantRunSchema, data);
-        },
-    },
-    assistant: {
-        plan: async (input: { actionType: string; source?: string; leadId?: string; context?: Record<string, unknown> }): Promise<AssistantPlan> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.assistantPlan.path,
-                method: backendEndpoints.assistantPlan.method,
-                body: {
-                    action_type: input.actionType,
-                    source: input.source ?? "dashboard",
-                    lead_id: input.leadId,
-                    context: input.context ?? {},
-                },
-                timeoutMs: 12_000,
-            });
-            return parseOrThrow(AssistantPlanSchema, data);
-        },
-        execute: async (input: { actionType: string; source?: string; leadId?: string; context?: Record<string, unknown> }): Promise<AssistantRun> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.assistantExecute.path,
-                method: backendEndpoints.assistantExecute.method,
-                body: {
-                    action_type: input.actionType,
-                    source: input.source ?? "dashboard",
-                    lead_id: input.leadId,
-                    context: input.context ?? {},
-                },
-                timeoutMs: 12_000,
-            });
-            return parseOrThrow(AssistantRunSchema, data);
+            const response = parseOrThrow(AssistantActionsResponseSchema, data);
+            return { items: response.actions, total: response.total, page: response.page, page_size: response.page_size };
         },
     },
     admin: {
         auditLogs: {
-            list: async (input: AuditLogsListInput, signal?: AbortSignal): Promise<{ items: AuditLogEvent[]; total?: number; page?: number; page_size?: number }> => {
+            list: async (input: AuditLogsListInput, signal?: AbortSignal): Promise<EventReadPage<AuditLogEvent>> => {
+                const { size, query } = eventReadQuery(input, 1000);
                 const data = await httpClient().request({
-                    path: backendEndpoints.auditLogsList.path,
-                    method: backendEndpoints.auditLogsList.method,
-                    query: {
-                        page: input.page,
-                        page_size: input.pageSize,
-                        event_type: input.eventType,
-                        from: input.from,
-                        to: input.to,
-                        user: input.userQuery,
-                        tenant_id: input.tenantId,
-                        partner_id: input.partnerId,
-                    },
-                    timeoutMs: 12_000,
-                    signal,
+                    path: backendEndpoints.auditLogsList.path, method: backendEndpoints.auditLogsList.method,
+                    query, timeoutMs: 12_000, signal,
                 });
-                return parseOrThrow(PaginatedResponseSchema(AuditLogEventSchema), data);
+                return eventReadPage(AuditLogEventSchema.array().max(size + 1).parse(data), size);
             },
         },
         securityEvents: {
-            list: async (input: SecurityEventsListInput, signal?: AbortSignal): Promise<{ items: SecurityEvent[]; total?: number; page?: number; page_size?: number }> => {
+            list: async (input: SecurityEventsListInput, signal?: AbortSignal): Promise<EventReadPage<SecurityEvent>> => {
+                const { size, query } = eventReadQuery(input, 500);
                 const data = await httpClient().request({
-                    path: backendEndpoints.securityEventsList.path,
-                    method: backendEndpoints.securityEventsList.method,
-                    query: {
-                        page: input.page,
-                        page_size: input.pageSize,
-                        event_type: input.eventType,
-                        severity: input.severity,
-                        from: input.from,
-                        to: input.to,
-                        user: input.userQuery,
-                        tenant_id: input.tenantId,
-                        partner_id: input.partnerId,
-                    },
-                    timeoutMs: 12_000,
-                    signal,
+                    path: backendEndpoints.securityEventsList.path, method: backendEndpoints.securityEventsList.method,
+                    query: { ...query, severity: input.severity, status: input.status }, timeoutMs: 12_000, signal,
                 });
-                return parseOrThrow(PaginatedResponseSchema(SecurityEventSchema), data);
+                return eventReadPage(SecurityEventSchema.array().max(size + 1).parse(data), size);
             },
         },
         partners: {
-            list: async (input: AdminResourceListInput, signal?: AbortSignal): Promise<{ items: PartnerSummary[]; total?: number; page?: number; page_size?: number }> => {
+            list: async (input: AdminPartnerListInput, signal?: AbortSignal): Promise<{ items: PartnerSummary[]; total?: number; page?: number; page_size?: number }> => {
                 const data = await httpClient().request({
                     path: backendEndpoints.partnersList.path,
                     method: backendEndpoints.partnersList.method,
@@ -592,60 +632,37 @@ export const backendApi = {
                 });
                 return parseOrThrow(PaginatedResponseSchema(PartnerSummarySchema), data);
             },
-            suspend: async (input: { partnerId: string; reason?: string }): Promise<PartnerSummary> => {
-                const data = await httpClient().request({
-                    path: backendEndpoints.partnerSuspend.path.replace("{id}", encodeURIComponent(input.partnerId)),
-                    method: backendEndpoints.partnerSuspend.method,
-                    body: input.reason ? { reason: input.reason } : {},
-                    timeoutMs: 12_000,
-                });
-                return parseOrThrow(PartnerSummarySchema, data);
-            },
-            reactivate: async (input: { partnerId: string; reason?: string }): Promise<PartnerSummary> => {
-                const data = await httpClient().request({
-                    path: backendEndpoints.partnerReactivate.path.replace("{id}", encodeURIComponent(input.partnerId)),
-                    method: backendEndpoints.partnerReactivate.method,
-                    body: input.reason ? { reason: input.reason } : {},
-                    timeoutMs: 12_000,
-                });
-                return parseOrThrow(PartnerSummarySchema, data);
-            },
         },
         tenants: {
             list: async (input: AdminResourceListInput, signal?: AbortSignal): Promise<{ items: TenantSummary[]; total?: number; page?: number; page_size?: number }> => {
+                if (input.partnerId) throw new Error("Partner filtering is unavailable for platform tenant administration.");
+                const page = input.page ?? 1;
+                const pageSize = input.pageSize ?? 20;
+                if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 1000) {
+                    throw new Error("Invalid tenant page.");
+                }
                 const data = await httpClient().request({
                     path: backendEndpoints.tenantsList.path,
                     method: backendEndpoints.tenantsList.method,
                     query: {
-                        page: input.page,
-                        page_size: input.pageSize,
-                        q: input.query,
+                        offset: (page - 1) * pageSize,
+                        limit: Math.min(pageSize + 1, 1000),
+                        search: input.query,
                         status: input.status,
-                        partner_id: input.partnerId,
+                        include_archived: true,
                     },
                     timeoutMs: 12_000,
                     signal,
                 });
-                return parseOrThrow(PaginatedResponseSchema(TenantSummarySchema), data);
+                const items = TenantSummarySchema.array().parse(data);
+                // The shared HTTP client exposes only the body. One lookahead
+                // row prevents an extra empty page without inventing a total.
+                const atEnd = items.length < pageSize || (pageSize < 1000 && items.length === pageSize);
+                return { items: items.slice(0, pageSize), page, page_size: pageSize,
+                    ...(atEnd ? { total: (page - 1) * pageSize + items.length } : {}) };
             },
-            suspend: async (input: { tenantId: string; reason?: string }): Promise<TenantSummary> => {
-                const data = await httpClient().request({
-                    path: backendEndpoints.tenantSuspend.path.replace("{id}", encodeURIComponent(input.tenantId)),
-                    method: backendEndpoints.tenantSuspend.method,
-                    body: input.reason ? { reason: input.reason } : {},
-                    timeoutMs: 12_000,
-                });
-                return parseOrThrow(TenantSummarySchema, data);
-            },
-            reactivate: async (input: { tenantId: string; reason?: string }): Promise<TenantSummary> => {
-                const data = await httpClient().request({
-                    path: backendEndpoints.tenantReactivate.path.replace("{id}", encodeURIComponent(input.tenantId)),
-                    method: backendEndpoints.tenantReactivate.method,
-                    body: input.reason ? { reason: input.reason } : {},
-                    timeoutMs: 12_000,
-                });
-                return parseOrThrow(TenantSummarySchema, data);
-            },
+            suspend: (input: TenantMutationInput) => changeTenantSubscription(input, "suspended"),
+            reactivate: (input: TenantMutationInput) => changeTenantSubscription(input, "active"),
         },
     },
 };

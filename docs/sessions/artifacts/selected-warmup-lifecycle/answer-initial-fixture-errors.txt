@@ -1,0 +1,44 @@
+.........EEEEEEEE                                                        [100%]
+=================================== ERRORS ====================================
+_ ERROR at setup of test_delayed_answer_after_long_live_ring_uses_original_selected_session _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+_ ERROR at setup of test_lost_owned_selection_refuses_default_factory[first_speaker] _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+_ ERROR at setup of test_lost_owned_selection_refuses_default_factory[outbound_answer_clock] _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+_ ERROR at setup of test_genuinely_unowned_legacy_callback_keeps_existing_default_compatibility _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+_ ERROR at setup of test_duplicate_registered_callback_at_pod_capacity_does_not_end_current_session _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+_ ERROR at setup of test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[before_callback] _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+_ ERROR at setup of test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_status] _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+_ ERROR at setup of test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_lease] _
+tests\unit\test_selected_warmup_lifecycle.py:142: in answered
+    adapter = AsteriskAdapter(password="synthetic-not-a-real-password")
+E   TypeError: AsteriskAdapter.__init__() got an unexpected keyword argument 'password'
+=========================== short test summary info ===========================
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_delayed_answer_after_long_live_ring_uses_original_selected_session
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_lost_owned_selection_refuses_default_factory[first_speaker]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_lost_owned_selection_refuses_default_factory[outbound_answer_clock]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_genuinely_unowned_legacy_callback_keeps_existing_default_compatibility
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_duplicate_registered_callback_at_pod_capacity_does_not_end_current_session
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[before_callback]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_status]
+ERROR tests/unit/test_selected_warmup_lifecycle.py::test_terminal_dispatch_cannot_restart_default_session_or_reacquire_lease[held_lease]
+9 passed, 8 errors in 2.46s

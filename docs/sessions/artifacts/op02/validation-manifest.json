@@ -1,0 +1,62 @@
+{
+  "source_commit": "159a1703b704b98aa35796e3d44213763d2546e7",
+  "source_baseline": "79d6362dfdfcf02f7c95939d597a171b0142ebfa",
+  "branch": "codex/production-ready-op02-20261005",
+  "cwd": "backend",
+  "module_count": 22,
+  "command_argv": [
+    "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "-m",
+    "pytest",
+    "tests/unit/test_op02_provider_boundary_inventory.py",
+    "tests/unit/test_op02_lifecycle_ownership.py",
+    "tests/unit/test_op02_lease_api_boundary.py",
+    "tests/unit/test_provider_concurrency.py",
+    "tests/unit/test_global_concurrency.py",
+    "tests/unit/test_global_concurrency_listener.py",
+    "tests/unit/test_dialer_redis_reliability.py",
+    "tests/unit/test_audio_provider_failure_boundaries.py",
+    "tests/unit/test_stt_fault_injection.py",
+    "tests/unit/test_stt_watchdog_liveness.py",
+    "tests/unit/test_flux_confidence_not_turn_boundary.py",
+    "tests/unit/test_container_dependency_security.py",
+    "tests/unit/test_opening_mode_not_direction.py",
+    "tests/unit/test_inbound_lifecycle_fail_closed.py",
+    "tests/unit/test_asterisk_preanswer_admission.py",
+    "tests/unit/test_confirmation_aware_hangup.py",
+    "tests/unit/test_lifecycle_teardown_reliability.py",
+    "tests/unit/test_outbound_answered_duration.py",
+    "tests/unit/test_telephony_orphan_recovery_confirmation.py",
+    "tests/unit/test_telephony_concurrency_limiter.py",
+    "tests/unit/test_telephony_concurrency_api.py",
+    "tests/integration/test_op02_redis_admission.py",
+    "-q",
+    "--tb=short"
+  ],
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONPATH": "../tmp/op02-testdeps (isolated lupa 2.6)",
+    "TEST_REDIS_URL": "explicitly unset for this local run"
+  },
+  "result_exit_code": 0,
+  "result_summary": "305 passed, 8 skipped, 29 warnings in 23.60s",
+  "standalone_redis": {
+    "status": "not_run",
+    "skipped_cases": 8,
+    "reason": "No local Redis server executable, Docker executable, or registered WSL distro available. Dedicated CI service acceptance added; no CI run performed from this branch."
+  },
+  "provider_calls": 0,
+  "customer_calls": 0,
+  "production_changes": 0,
+  "scope_limits": [
+    "synthetic transports and auth/SQL seams",
+    "fakeredis executes actual Lua via lupa; not a Redis server",
+    "no approved account topology or provider allowance supplied",
+    "outbound global admission remains after Answer before voice setup",
+    "local refresh/release ordering does not fence cross-process or ambiguous delayed commands",
+    "current global key scheme is not Redis Cluster compatible"
+  ],
+  "log": "affected-regression-final.txt",
+  "test_install_followup_commit": "4b492f81629eed4c83c016227af8c03ab7388994",
+  "followup_scope": "Only backend-voice-tests.yml and requirements-dev.in/txt Lua test installation declarations; application and test files unchanged after the recorded run."
+}

@@ -1,0 +1,26 @@
+✔ saved CRM evidence does not inspect until explicit click and never changes saved status (777.135ms)
+✔ no_match/absence_is_inconclusive is truthful and leaves status unresolved (10.1159ms)
+✔ ambiguous/multiple_references is truthful and leaves status unresolved (9.1771ms)
+✔ unavailable/original_receipt_unavailable is truthful and leaves status unresolved (7.6206ms)
+✔ unavailable/original_authorization_unavailable is truthful and leaves status unresolved (8.6602ms)
+✔ unavailable/provider_read_unavailable is truthful and leaves status unresolved (6.3168ms)
+✔ double click sends one read, with no implicit retry (11.7829ms)
+✔ late A observation cannot replace B and cannot clear its pending read (16.3865ms)
+✔ foreign_call response never populates current evidence (9.0515ms)
+✔ foreign_provider response never populates current evidence (7.4792ms)
+✔ bad_outcome response never populates current evidence (6.52ms)
+✔ bad_reason response never populates current evidence (8.5246ms)
+✔ inherited_outcome response never populates current evidence (7.6911ms)
+✔ inherited_reason response never populates current evidence (7.9943ms)
+✔ throw response never populates current evidence (8.2836ms)
+✔ missing proof offers no inspect button or current-account substitution (5.6949ms)
+✔ actual API request is one GET with only call and provider in its URL (142.5384ms)
+✔ late detail A cannot supply CRM receipt props to selected B (21.8056ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2749.2509

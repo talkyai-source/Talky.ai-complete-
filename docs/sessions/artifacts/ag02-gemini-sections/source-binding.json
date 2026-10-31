@@ -1,0 +1,10 @@
+{
+  "source_commit": "0754382629dd8760dc8a5317efab665b9a68779b",
+  "tested_base": "f44af7d6fb6e6b10133fb631b21f10f1693e63d3",
+  "tracked_exact_lf_matches": 14,
+  "comment_only_test_file": "backend/tests/unit/test_gemini_tools.py",
+  "tested_snapshot": "baseline-test.py",
+  "tested_snapshot_matches_final_input_hash": true,
+  "ast_equal_excluding_docstrings": true,
+  "reason": "Reviewer requested restoration of original UTF-8 comments/docstring after final owner run. No behavior/test logic changed; no owner rerun claimed."
+}

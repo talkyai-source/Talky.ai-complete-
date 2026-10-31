@@ -1,0 +1,36 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\reviewed-account-identity-20261006",
+  "python": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+  "environment": {
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test",
+    "PYTHONPATH": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages;C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+  },
+  "frozen_email_raw_sha256": "bf72801178da5386f07e4bcaaafd7e3e6d5d2eaa68a5eb1f81378590980b545d",
+  "argv": [
+    "docs/sessions/artifacts/email-bind-actual-pg/probe.py",
+    "--confirm-source-frozen",
+    "--output",
+    "docs/sessions/artifacts/email-bind-actual-pg/final-result.json"
+  ],
+  "powershell_redirection": "*> docs/sessions/artifacts/email-bind-actual-pg/final.txt",
+  "exit_code": 0,
+  "initial_argv": [
+    "docs/sessions/artifacts/email-bind-actual-pg/probe.py",
+    "--confirm-source-frozen",
+    "--output",
+    "docs/sessions/artifacts/email-bind-actual-pg/initial-result.json"
+  ],
+  "initial_exit_code": 1,
+  "initial_failure": "Evidence JSON serialization of metadata bytes; exact initial script preserved as initial-probe.py; no initial result JSON produced.",
+  "lint_argv": [
+    "-m",
+    "ruff",
+    "check",
+    "--select",
+    "F",
+    "docs/sessions/artifacts/email-bind-actual-pg/probe.py",
+    "docs/sessions/artifacts/email-bind-actual-pg/initial-probe.py"
+  ],
+  "lint_exit_code": 0
+}

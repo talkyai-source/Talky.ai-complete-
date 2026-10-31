@@ -1,0 +1,13 @@
+...                                                                      [100%]
+============================== warnings summary ===============================
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[openai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai]
+tests/unit/test_ag04_native_qualification.py::test_interrupted_opening_reaches_actual_provider_instruction_serializer[xai]
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:231: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+3 passed, 2 deselected, 6 warnings in 3.16s

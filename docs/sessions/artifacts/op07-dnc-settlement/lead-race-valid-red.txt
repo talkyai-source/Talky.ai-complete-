@@ -1,0 +1,52 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__ test_opt_out_committed_while_settlement_waits_for_lead_is_not_overwritten __
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x00000141B6518D70>, pool=<asyncpg.pool.Pool obj...d7c-2a1d-49aa-82ea-b230f2e4a4e4'), service=<app.domain.services.call_service.CallService object at 0x00000141C61C83E0>)
+
+    async def test_opt_out_committed_while_settlement_waits_for_lead_is_not_overwritten(settlement):
+        f, db = settlement, settlement.db
+        lead_read = asyncio.Event()
+
+        class LeadBarrier:
+            def __init__(self, conn):
+                self.conn = conn
+
+            def __getattr__(self, name):
+                return getattr(self.conn, name)
+
+            async def fetchval(self, sql, *args):
+                if "FROM leads" in sql:
+                    lead_read.set()
+                return await self.conn.fetchval(sql, *args)
+
+        class WrappedPool:
+            @asynccontextmanager
+            async def acquire(self, **kwargs):
+                async with db.pool.acquire(**kwargs) as conn:
+                    yield LeadBarrier(conn)
+
+        f.service._db_pool = WrappedPool()
+        task = wait_read = None
+        try:
+            async with db.admin.transaction():
+                await db.admin.fetchval("SELECT id FROM leads WHERE id=$1 FOR UPDATE", db.leads[0])
+                task = asyncio.create_task(settle(f))
+                wait_read = asyncio.create_task(lead_read.wait())
+                done, _ = await asyncio.wait({task, wait_read}, timeout=3,
+                                             return_when=asyncio.FIRST_COMPLETED)
+                if task in done:
+                    await task  # Surface a fixture/query error instead of a false race timeout.
+                assert wait_read in done, "Settlement did not reach the lead lock"
+                await db.admin.execute("""INSERT INTO dnc_entries(tenant_id,phone_number,normalized_number,source)
+                                         VALUES($1,$2,$2,'caller_opt_out')""", db.tenants[0], PHONE)
+                await db.admin.execute("UPDATE leads SET status='dnc',last_call_result='caller_opt_out' WHERE id=$1", db.leads[0])
+            execution = await asyncio.wait_for(task, 2)
+>           assert execution.retry_args is None
+E           AssertionError: assert ('8ba51df5-560e-4f63-9e97-63b30786d580', {'attempt_number': 1, 'call_id': None, 'campaign_id': UUID('1bbe3380-1606-4d2...3380-1606-4d20-a2f9-6a8efc8f295b', '5f8406a6-cbfa-4a43-9a2a-5da9b2ce0c7b', 'f1790971-8071-452c-a85f-33bcc6105e8e', ...) is None
+E            +  where ('8ba51df5-560e-4f63-9e97-63b30786d580', {'attempt_number': 1, 'call_id': None, 'campaign_id': UUID('1bbe3380-1606-4d2...3380-1606-4d20-a2f9-6a8efc8f295b', '5f8406a6-cbfa-4a43-9a2a-5da9b2ce0c7b', 'f1790971-8071-452c-a85f-33bcc6105e8e', ...) = _CallStatusExecution(result=CallStatusResult(call_id='38702d7c-2a1d-49aa-82ea-b230f2e4a4e4', found=True, applied=True,...lement_unverified'), job_id='8ba51df5-560e-4f63-9e97-63b30786d580', campaign_id='1bbe3380-1606-4d20-a2f9-6a8efc8f295b').retry_args
+
+tests\integration\test_dnc_settlement_truth.py:207: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_dnc_settlement_truth.py::test_opt_out_committed_while_settlement_waits_for_lead_is_not_overwritten
+1 failed, 17 deselected in 6.59s

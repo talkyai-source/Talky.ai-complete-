@@ -9,7 +9,7 @@ until the previous one has drained to within TARGET_AHEAD_S.
 
 Cartesia's generation latency is ~250ms. With a 200ms lead, ~50ms was left
 uncovered at every sentence boundary: the agent stops dead, pauses, resumes.
-With `response_max_sentences = 3` that is up to two gaps per turn.
+Every additional sentence can expose another gap.
 
 THE ALTERNATIVE WAS UNSAFE. Prefetching sentence N+1 while N plays looks like
 the obvious fix, but the generator being suspended for the whole audible

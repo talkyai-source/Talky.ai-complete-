@@ -1,6 +1,6 @@
+import { normalizeMinutesAllowance } from "@/lib/minutes-allowance";
 import { z } from "zod";
-import { setBrowserAuthToken } from "@/lib/auth-token";
-import { createHttpClient, ApiClientError, resetSessionExpiredLatch } from "@/lib/http-client";
+import { createHttpClient, ApiClientError, resetSessionExpiredLatch, type RequestIdentity } from "@/lib/http-client";
 import { apiBaseUrl } from "@/lib/env";
 
 /* ------------------------------------------------------------------ */
@@ -12,10 +12,12 @@ export const LoginResponseSchema = z
         access_token: z.string(),
         token_type: z.string().optional(),
         user_id: z.string(),
+        tenant_id: z.string().nullish(),
         email: z.string().email(),
         role: z.string(),
         business_name: z.string().optional().nullable(),
-        minutes_remaining: z.number().optional(),
+        minutes_remaining: z.number().int().nonnegative().nullable().optional(),
+        minutes_state: z.enum(["known", "unlimited", "unavailable"]).optional(),
         message: z.string().optional(),
         mfa_required: z.boolean().optional(),
         mfa_challenge_token: z.string().optional().nullable(),
@@ -25,51 +27,17 @@ export const LoginResponseSchema = z
         access_token: v.access_token,
         token_type: v.token_type ?? "bearer",
         user_id: v.user_id,
+        ...(v.tenant_id ? { tenant_id: v.tenant_id } : {}),
         email: v.email,
         role: v.role,
         business_name: v.business_name ?? undefined,
-        minutes_remaining: v.minutes_remaining ?? 0,
+        ...normalizeMinutesAllowance(v),
         message: v.message ?? "",
         mfa_required: v.mfa_required ?? false,
         mfa_challenge_token: v.mfa_challenge_token ?? undefined,
     }));
 
 export type LoginResponse = z.infer<typeof LoginResponseSchema>;
-
-// POST /auth/register no longer issues a session — the response shape
-// changed to {user_id, email, verification_required, verification_email_sent, message}.
-// Users must verify their email and then sign in via /auth/login.
-//
-// Kept the LoginResponse-shaped fallback so a future re-enable of
-// session-on-register doesn't immediately crash the parser.
-export const RegisterResponseSchema = z
-    .object({
-        user_id: z.string(),
-        email: z.string().email(),
-        business_name: z.string().optional().nullable(),
-        verification_required: z.boolean().optional(),
-        verification_email_sent: z.boolean().optional(),
-        message: z.string().optional(),
-        // Legacy fields — null in the new response, present if a future
-        // backend reverts to session-on-register.
-        access_token: z.string().optional().nullable(),
-        token_type: z.string().optional(),
-        role: z.string().optional(),
-        minutes_remaining: z.number().optional(),
-    })
-    .passthrough()
-    .transform((v) => ({
-        user_id: v.user_id,
-        email: v.email,
-        business_name: v.business_name ?? undefined,
-        verification_required: v.verification_required ?? true,
-        verification_email_sent: v.verification_email_sent ?? false,
-        message: v.message ?? "",
-        access_token: v.access_token ?? null,
-        role: v.role ?? null,
-        minutes_remaining: v.minutes_remaining ?? 0,
-    }));
-export type RegisterResponse = z.infer<typeof RegisterResponseSchema>;
 
 export const SignupStartResponseSchema = z
     .object({
@@ -109,7 +77,8 @@ export const MeResponseSchema = z
         name: z.string().optional().nullable(),
         business_name: z.string().optional().nullable(),
         role: z.string(),
-        minutes_remaining: z.number(),
+        minutes_remaining: z.number().int().nonnegative().nullable().optional(),
+        minutes_state: z.enum(["known", "unlimited", "unavailable"]).optional(),
         // Admin / suspension fields populated when the user has elevated
         // permissions or the tenant/partner is in a non-active state.
         // All optional — missing fields just mean "not suspended" /
@@ -125,6 +94,7 @@ export const MeResponseSchema = z
     .passthrough()
     .transform((v) => ({
         ...v,
+        ...normalizeMinutesAllowance(v),
         name: v.name ?? undefined,
         business_name: v.business_name ?? undefined,
         partner_id: v.partner_id ?? undefined,
@@ -145,6 +115,47 @@ export const ChangePasswordResponseSchema = z
     .passthrough();
 
 export type ChangePasswordResponse = z.infer<typeof ChangePasswordResponseSchema>;
+
+export type CallTerminationStatus = "none" | "requested" | "confirmed" | "failed";
+
+export interface LiveCallItem {
+    id: string;
+    talklee_call_id?: string | null;
+    to_number: string;
+    status: string;
+    started_at?: string | null;
+    answered_at?: string | null;
+    ended_at?: string | null;
+    duration_seconds?: number | null;
+    outcome?: string | null;
+    campaign_id?: string | null;
+    campaign_name?: string | null;
+    lead_id?: string | null;
+    caller_id?: string | null;
+    direction?: "inbound" | "outbound";
+    caller_ani?: string | null;
+    called_did?: string | null;
+    admission_status?: string | null;
+    consent_status?: string | null;
+    processing_status?: string | null;
+    termination_status?: CallTerminationStatus;
+    termination_requested_at?: string | null;
+    termination_error?: string | null;
+    provider_hangup_requested?: boolean | null;
+    provider_hangup_confirmed?: boolean;
+}
+
+export const HangupCallResponseSchema = z.object({
+    status: z.enum(["confirmed", "requested", "failed", "already_terminal"]),
+    call_id: z.string(),
+    call_status: z.string(),
+    termination_status: z.enum(["none", "requested", "confirmed", "failed"]),
+    provider_hangup_requested: z.boolean(),
+    provider_hangup_confirmed: z.boolean(),
+    provider_hangup_error: z.string().nullable(),
+});
+
+export type HangupCallResponse = z.infer<typeof HangupCallResponseSchema>;
 
 /* ------------------------------------------------------------------ */
 /*  API Client                                                         */
@@ -181,7 +192,7 @@ export function sharedHttpClient() {
 
 export type KnowledgeMode = "none" | "inline" | "map_retrieve" | "retrieve";
 
-/** A stuck/failed dial attempt, explained for the operator (GET /calls/issues). */
+/** A durable outbound placement or inbound processing issue (GET /calls/issues). */
 export interface CallIssue {
     job_id: string;
     phone_number: string;
@@ -196,6 +207,36 @@ export interface CallIssue {
     stage: string;
     attempts: number;
     updated_at?: string | null;
+    /** Stable outbound block code (e.g. `schedule_outside_window`); absent on inbound. */
+    block_code?: string | null;
+    /** The dialer's plain-language reason this call was not placed. */
+    block_message?: string | null;
+    /** When the call becomes eligible again, if the server can compute it. */
+    next_eligible_at?: string | null;
+}
+
+export interface RejectedInboundCallItem {
+    id: string;
+    source: "pre_row" | "call";
+    occurred_at: string;
+    status: "denied" | "after_hours";
+    reason: string;
+    provider?: string | null;
+    provider_call_id?: string | null;
+    caller_ani?: string | null;
+    called_did?: string | null;
+    campaign_id?: string | null;
+    campaign_name?: string | null;
+    inbound_config_id?: string | null;
+    assignment_id?: string | null;
+}
+
+export interface RejectedInboundCallsResponse {
+    items: RejectedInboundCallItem[];
+    page: number;
+    page_size: number;
+    total: number;
+    server_time: string;
 }
 
 export interface KnowledgeNode {
@@ -249,6 +290,32 @@ export interface KnowledgeHit {
     sim?: number | null;
 }
 
+export const KnowledgeTestResponseSchema = z.object({
+    query: z.string(),
+    // Legacy raw candidates are retained for compatibility, never used as
+    // factual admission or as a fallback for missing evidence.
+    hits: z.array(z.object({
+        id: z.string(), heading: z.string().nullish(),
+        voice_answer: z.string().nullish(), summary: z.string().nullish(),
+        fts: z.number().finite().nullish(), sim: z.number().finite().nullish(),
+    })),
+    evidence: z.object({
+        status: z.enum(["matched", "weak_match", "no_match"]),
+        passages: z.array(z.object({
+            node_id: z.string(), version: z.string().nullable(),
+            source_id: z.string().nullable(), source_version: z.number().int().positive().nullable(),
+            text: z.string().min(1), coverage: z.number().finite().min(0).max(1).nullable(),
+        })),
+        text: z.string(),
+    }).refine((evidence) => (
+        (evidence.status === "no_match" ? evidence.passages.length === 0 : evidence.passages.length > 0)
+        && evidence.text === evidence.passages.map((passage) => passage.text).join("\n")
+        && (evidence.status !== "matched" || evidence.passages.every((passage) => passage.coverage !== null))
+    ), "Inconsistent knowledge evidence"),
+});
+
+export type KnowledgeTestResponse = z.infer<typeof KnowledgeTestResponseSchema>;
+
 class ApiClient {
     private client() {
         return sharedHttpClient();
@@ -271,7 +338,7 @@ class ApiClient {
     }
 
     setToken(token: string) {
-        setBrowserAuthToken(token);
+        this.client().setToken(token);
         // A fresh token re-arms the http-client's session-expired
         // latch.  Without this, login → expire → login → expire only
         // bounces to /auth/login on the FIRST expiry of the process.
@@ -279,7 +346,7 @@ class ApiClient {
     }
 
     clearToken() {
-        setBrowserAuthToken(null);
+        this.client().setToken(null);
     }
 
     /**
@@ -308,7 +375,11 @@ class ApiClient {
      * The backend decides which path it serves based on whether
      * `password` is in the body.
      */
-    async login(email: string, password?: string): Promise<LoginResponse> {
+    async login(
+        email: string,
+        password?: string,
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
+    ): Promise<LoginResponse> {
         const path = "/auth/login";
         const method = "POST" as const;
         const body: Record<string, string> = { email };
@@ -319,6 +390,8 @@ class ApiClient {
             path,
             method,
             body,
+            signal: options?.signal,
+            ownsOperation: options?.ownsOperation,
             timeoutMs: 12_000,
         });
         return this.parseOrThrow(LoginResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
@@ -394,48 +467,16 @@ class ApiClient {
         return this.parseOrThrow(SignupCompleteResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
-    async register(
-        email: string,
-        password: string,
-        businessName: string,
-        planId: string = "basic",
-        name?: string,
-    ): Promise<RegisterResponse> {
-        const path = "/auth/register";
-        const method = "POST" as const;
-        const data = await this.client().request({
-            path,
-            method,
-            body: {
-                email,
-                password,
-                business_name: businessName,
-                plan_id: planId,
-                ...(name ? { name } : {}),
-            },
-            timeoutMs: 12_000,
-        });
-        return this.parseOrThrow(RegisterResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
-    }
-
-    async getMe(): Promise<MeResponse> {
+    // With accessToken, checks that exact credential (an emailed callback
+    // link) without falling back to the browser's current refresh cookie.
+    async getMe(accessToken?: string): Promise<MeResponse> {
+        const path = "/auth/me";
         const method = "GET" as const;
-        try {
-            const path = "/auth/me";
-            // Auth PROBE: a 401 means "not logged in", not "session expired".
-            // suppressAuthRedirect lets the auth-context decide (anonymous shell
-            // vs requireAuth bounce) instead of the http-client hard-redirecting
-            // every cold/anonymous visitor to /login.
-            const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
-            return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
-        } catch (err) {
-            if (err instanceof ApiClientError && err.status === 404) {
-                const path = "/me";
-                const data = await this.client().request({ path, method, timeoutMs: 12_000, suppressAuthRedirect: true });
-                return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
-            }
-            throw err;
-        }
+        const data = await this.client().request({
+            path, method, timeoutMs: 12_000, suppressAuthRedirect: true,
+            ...(accessToken ? { headers: { Authorization: `Bearer ${accessToken}` }, skipAuthRefresh: true } : {}),
+        });
+        return this.parseOrThrow(MeResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
     async updateMe(input: { name?: string; business_name?: string }): Promise<MeResponse> {
@@ -465,18 +506,12 @@ class ApiClient {
         return this.parseOrThrow(ChangePasswordResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
     }
 
-    async logout(): Promise<void> {
-        try {
-            await this.client().request({ path: "/auth/logout", method: "POST", timeoutMs: 12_000 });
-        } catch (err) {
-            if (err instanceof ApiClientError && (err.status === 404 || err.status === 405)) {
-                // Ignore
-            } else {
-                throw err;
-            }
-        } finally {
-            this.clearToken();
-        }
+    async logout(expectedIdentity?: RequestIdentity): Promise<void> {
+        // AuthContext clears local state for this specific logout attempt.
+        // A late API response must never clear a newer session.
+        await this.client().request({ path: "/auth/logout", method: "POST", timeoutMs: 12_000,
+            headers: expectedIdentity ? { "X-Talky-Expected-User": expectedIdentity.userId,
+                "X-Talky-Expected-Tenant": expectedIdentity.tenantId ?? "" } : undefined });
     }
 
     async health(): Promise<{ status: string }> {
@@ -546,13 +581,16 @@ class ApiClient {
     async verifyMfaChallenge(
         challengeToken: string,
         code?: string,
-        recoveryCode?: string
+        recoveryCode?: string,
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
     ): Promise<LoginResponse> {
         const path = "/auth/mfa/verify";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
+            signal: options?.signal,
+            ownsOperation: options?.ownsOperation,
             body: {
                 challenge_token: challengeToken,
                 ...(code ? { code } : {}),
@@ -634,27 +672,18 @@ class ApiClient {
      * Designed to be polled every 1-2s by the live panel — the backend
      * intentionally keeps the shape lean so frequent polling is cheap.
      */
-    async listLiveCalls(input?: { campaignId?: string; recentWindowSeconds?: number }): Promise<{
-        items: Array<{
-            id: string;
-            talklee_call_id?: string | null;
-            to_number: string;
-            status: string;
-            started_at?: string | null;
-            answered_at?: string | null;
-            ended_at?: string | null;
-            duration_seconds?: number | null;
-            outcome?: string | null;
-            campaign_id?: string | null;
-            campaign_name?: string | null;
-            lead_id?: string | null;
-            caller_id?: string | null;
-        }>;
+    async listLiveCalls(input?: {
+        campaignId?: string;
+        direction?: "inbound" | "outbound";
+        recentWindowSeconds?: number;
+    }): Promise<{
+        items: LiveCallItem[];
         server_time: string;
     }> {
         const path = "/calls/live";
         const query: Record<string, string | number> = {};
         if (input?.campaignId) query.campaign_id = input.campaignId;
+        if (input?.direction) query.direction = input.direction;
         if (input?.recentWindowSeconds !== undefined) query.recent_window_seconds = input.recentWindowSeconds;
         const data = await this.client().request({
             path,
@@ -663,49 +692,53 @@ class ApiClient {
             timeoutMs: 8_000,
         });
         return data as {
-            items: Array<{
-                id: string;
-                talklee_call_id?: string | null;
-                to_number: string;
-                status: string;
-                started_at?: string | null;
-                answered_at?: string | null;
-                ended_at?: string | null;
-                duration_seconds?: number | null;
-                outcome?: string | null;
-                campaign_id?: string | null;
-                campaign_name?: string | null;
-                lead_id?: string | null;
-                caller_id?: string | null;
-            }>;
+            items: LiveCallItem[];
             server_time: string;
         };
     }
 
+    /** Durable inbound denials, including calls received after business hours. */
+    async listRejectedInboundCalls(input?: {
+        campaignId?: string;
+        page?: number;
+        pageSize?: number;
+    }): Promise<RejectedInboundCallsResponse> {
+        const query: Record<string, string | number> = {};
+        if (input?.campaignId) query.campaign_id = input.campaignId;
+        if (input?.page !== undefined) query.page = input.page;
+        if (input?.pageSize !== undefined) query.page_size = input.pageSize;
+        const data = await this.client().request({
+            path: "/calls/rejected",
+            method: "GET",
+            query,
+            timeoutMs: 8_000,
+        });
+        return data as RejectedInboundCallsResponse;
+    }
+
     /** Hang up a single in-flight call from the live panel (operator action). */
-    async hangupCall(callId: string): Promise<{ status: string; call_id: string }> {
+    async hangupCall(callId: string): Promise<HangupCallResponse> {
         const data = await this.client().request({
             path: `/calls/${callId}/hangup`,
             method: "POST",
             timeoutMs: 8_000,
         });
-        return data as { status: string; call_id: string };
+        return HangupCallResponseSchema.parse(data);
     }
 
-    /**
-     * Recent dial attempts that DIDN'T place a call, each explained with a
-     * title + actionable suggestion. These come from the dialer (out of
-     * minutes, outside hours, caller-ID unverified, TTS warmup failure, rate
-     * limits) — failures that never create a `calls` row, so the live panel
-     * can't show them. This is what tells the operator WHY nothing dialed.
-     */
-    async listCallIssues(input?: { campaignId?: string; windowMinutes?: number }): Promise<{
+    /** Recent durable call issues, selected from the direction's real source. */
+    async listCallIssues(input?: {
+        campaignId?: string;
+        windowMinutes?: number;
+        direction?: "inbound" | "outbound";
+    }): Promise<{
         items: CallIssue[];
         server_time: string;
     }> {
         const query: Record<string, string | number> = {};
         if (input?.campaignId) query.campaign_id = input.campaignId;
         if (input?.windowMinutes !== undefined) query.window_minutes = input.windowMinutes;
+        if (input?.direction) query.direction = input.direction;
         const data = await this.client().request({
             path: "/calls/issues",
             method: "GET",
@@ -762,14 +795,17 @@ class ApiClient {
         campaignId: string,
         query: string,
         k = 3,
-    ): Promise<{ query: string; hits: KnowledgeHit[] }> {
+    ): Promise<KnowledgeTestResponse> {
         const data = await this.client().request({
             path: `/campaigns/${campaignId}/knowledge/test`,
             method: "POST",
             body: { query, k },
             timeoutMs: 12_000,
         });
-        return data as { query: string; hits: KnowledgeHit[] };
+        return this.parseOrThrow(
+            KnowledgeTestResponseSchema.refine((result) => result.query === query.trim()), data,
+            { url: `/campaigns/${campaignId}/knowledge/test`, method: "POST" },
+        );
     }
 
     async deleteKnowledgeSource(
@@ -817,20 +853,23 @@ class ApiClient {
         });
         return z.object({
             ceremony_id: z.string(),
-            options: z.record(z.unknown()),
+            options: z.record(z.string(), z.unknown()),
             has_passkeys: z.boolean(),
         }).parse(data);
     }
 
     async completePasskeyLogin(
         ceremonyId: string,
-        credentialResponse: Record<string, unknown>
+        credentialResponse: Record<string, unknown>,
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
     ): Promise<LoginResponse> {
         const path = "/auth/passkeys/login/complete";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
+            signal: options?.signal,
+            ownsOperation: options?.ownsOperation,
             body: {
                 ceremony_id: ceremonyId,
                 credential_response: credentialResponse,
@@ -857,7 +896,7 @@ class ApiClient {
         });
         return z.object({
             ceremony_id: z.string(),
-            options: z.record(z.unknown()),
+            options: z.record(z.string(), z.unknown()),
         }).parse(data);
     }
 

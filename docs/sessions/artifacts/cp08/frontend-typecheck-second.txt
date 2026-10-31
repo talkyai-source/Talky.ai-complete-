@@ -1,0 +1,6 @@
+
+> frontend@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+src/components/auth/logout-controls.test.tsx(40,18): error TS2352: Conversion of type '{ push: (path: string) => void; replace(): void; refresh(): void; back(): void; forward(): void; prefetch(): Promise<void>; }' to type 'AppRouterInstance' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+  Property 'bfcacheId' is missing in type '{ push: (path: string) => void; replace(): void; refresh(): void; back(): void; forward(): void; prefetch(): Promise<void>; }' but required in type 'AppRouterInstance'.

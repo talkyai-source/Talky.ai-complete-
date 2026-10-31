@@ -1,0 +1,4 @@
+tenant_ai_config_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic AI lookup unavailable � falling back to process default
+voice_tuning_db_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic tuning lookup unavailable � falling back to env+defaults
+tenant_ai_config_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic AI lookup unavailable � falling back to process default
+tenant_ai_config_lookup_failed tenant=c4442497-fbc8-4675-8424-995456831b39 err=synthetic AI lookup unavailable � falling back to process default

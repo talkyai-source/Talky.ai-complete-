@@ -1,0 +1,121 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_ test_consumer_close_at_transcript_yield_closes_provider_before_return[False] _
+
+fallback = False
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fallback", [False, True])
+    async def test_consumer_close_at_transcript_yield_closes_provider_before_return(fallback):
+        input_closed = asyncio.Event()
+
+        async def audio():
+            try:
+                yield AudioChunk(data=bytes(320), sample_rate=16000)
+                await asyncio.Event().wait()
+            finally:
+                input_closed.set()
+
+        class FailedPrimary:
+            name = "offline-failed"
+
+            async def stream_transcribe(self, audio, **kwargs):
+                raise RuntimeError("synthetic transport failure")
+                yield
+
+        held = HeldProvider()
+        wrapper = (
+            ResilientSTTProvider(FailedPrimary(), held)
+            if fallback
+            else ResilientSTTProvider(held)
+        )
+        stream = wrapper.stream_transcribe(audio(), call_id="offline-close")
+        try:
+            assert (await anext(stream)).text == "synthetic partial"
+            await stream.aclose()
+            assert input_closed.is_set()
+>           assert held.closed == 1, "close returned while the provider still owned its stream"
+E           AssertionError: close returned while the provider still owned its stream
+E           assert 0 == 1
+E            +  where 0 = <tests.unit.test_op03_audio_ownership.HeldProvider object at 0x00000289484A27B0>.closed
+
+tests\unit\test_op03_audio_ownership.py:64: AssertionError
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-3' coro=<<async_generator_athrow without __name__>()>>
+_ test_consumer_close_at_transcript_yield_closes_provider_before_return[True] _
+
+fallback = True
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("fallback", [False, True])
+    async def test_consumer_close_at_transcript_yield_closes_provider_before_return(fallback):
+        input_closed = asyncio.Event()
+
+        async def audio():
+            try:
+                yield AudioChunk(data=bytes(320), sample_rate=16000)
+                await asyncio.Event().wait()
+            finally:
+                input_closed.set()
+
+        class FailedPrimary:
+            name = "offline-failed"
+
+            async def stream_transcribe(self, audio, **kwargs):
+                raise RuntimeError("synthetic transport failure")
+                yield
+
+        held = HeldProvider()
+        wrapper = (
+            ResilientSTTProvider(FailedPrimary(), held)
+            if fallback
+            else ResilientSTTProvider(held)
+        )
+        stream = wrapper.stream_transcribe(audio(), call_id="offline-close")
+        try:
+            assert (await anext(stream)).text == "synthetic partial"
+            await stream.aclose()
+            assert input_closed.is_set()
+>           assert held.closed == 1, "close returned while the provider still owned its stream"
+E           AssertionError: close returned while the provider still owned its stream
+E           assert 0 == 1
+E            +  where 0 = <tests.unit.test_op03_audio_ownership.HeldProvider object at 0x00000289486FF530>.closed
+
+tests\unit\test_op03_audio_ownership.py:64: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.resilient_stt:resilient_stt.py:685 resilient_stt_primary_failed provider=offline-failed err=synthetic transport failure
+---------------------------- Captured log teardown ----------------------------
+ERROR    asyncio:base_events.py:1833 Task was destroyed but it is pending!
+task: <Task pending name='Task-6' coro=<<async_generator_athrow without __name__>()>>
+______ test_new_browser_completion_cannot_complete_superseded_utterance _______
+
+    @pytest.mark.asyncio
+    async def test_new_browser_completion_cannot_complete_superseded_utterance():
+        gateway = BrowserMediaGateway()
+        socket = BrowserSocket()
+        await gateway.on_call_started("offline-playback", {"websocket": socket})
+        await gateway.begin_playback("offline-playback", "old-utterance")
+        old_waiter = asyncio.create_task(gateway.finish_playback("offline-playback", "old-utterance"))
+        try:
+            # Ensure A is actually waiting on the gateway's event before B begins.
+            for _ in range(10):
+                await asyncio.sleep(0)
+            assert not old_waiter.done()
+            await gateway.begin_playback("offline-playback", "new-utterance")
+            gateway.mark_playback_complete("offline-playback", "new-utterance")
+            old_receipt = await asyncio.wait_for(old_waiter, 1)
+>           assert old_receipt["status"] != "completed"
+E           AssertionError: assert 'completed' != 'completed'
+
+tests\unit\test_op03_audio_ownership.py:94: AssertionError
+============================== warnings summary ===============================
+tests/unit/test_op03_audio_ownership.py::test_new_browser_completion_cannot_complete_superseded_utterance
+  <string>:5: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op03_audio_ownership.py::test_consumer_close_at_transcript_yield_closes_provider_before_return[False]
+FAILED tests/unit/test_op03_audio_ownership.py::test_consumer_close_at_transcript_yield_closes_provider_before_return[True]
+FAILED tests/unit/test_op03_audio_ownership.py::test_new_browser_completion_cannot_complete_superseded_utterance
+3 failed, 1 warning in 1.29s

@@ -41,12 +41,22 @@ from dataclasses import dataclass, field
 from datetime import datetime, time
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import asyncpg
 
+from app.core.db_utils import acquire_with_tenant
 from app.domain.services.telephony_rate_limiter import TelephonyRateLimiter, RateLimitAction
 from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter, LeaseKind
+from app.domain.services.phone_number_normalizer import normalize_e164_digits
+from app.domain.services.platform_runtime_controls import get_outbound_call_pause
+from app.domain.services.telephony.call_authority import read_call_authority
+from app.domain.services.subscription_status import (
+    SUBSCRIPTION_BLOCKED_STATUSES,
+    TENANT_BLOCKED_STATUSES,
+    canonical as canonical_subscription_status,
+    is_blocked as subscription_status_is_blocked,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +66,7 @@ _E164_RE = re.compile(r"^\+[1-9]\d{1,14}$")
 
 class GuardDecision(str, Enum):
     """Possible decisions from the call guard."""
+
     ALLOW = "allow"
     BLOCK = "block"
     QUEUE = "queue"
@@ -64,6 +75,8 @@ class GuardDecision(str, Enum):
 
 class GuardCheck(str, Enum):
     """Individual guard checks performed."""
+
+    PLATFORM_CALLS_ENABLED = "platform_calls_enabled"
     TENANT_ACTIVE = "tenant_active"
     PARTNER_ACTIVE = "partner_active"
     SUBSCRIPTION_VALID = "subscription_valid"
@@ -87,15 +100,24 @@ class GuardCheck(str, Enum):
 # experience. Keep this set narrow — everything NOT listed here keeps the
 # original fail-open-on-infra-error behavior intentionally, so a DB blip in
 # e.g. the rate limiter or concurrency lookup never blocks legitimate calls.
-_FAIL_CLOSED_ON_ERROR_CHECKS = frozenset({
-    GuardCheck.DNC_CHECK,
-    GuardCheck.SPEND_LIMIT,
-})
+_FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
+    {
+        GuardCheck.PLATFORM_CALLS_ENABLED,
+        GuardCheck.TENANT_ACTIVE,
+        GuardCheck.DNC_CHECK,
+        GuardCheck.SPEND_LIMIT,
+        GuardCheck.MINUTES_QUOTA,
+    }
+)
+
+
+_ESTIMATED_COST_PER_MINUTE = 0.05
 
 
 @dataclass
 class CheckResult:
     """Result of a single guard check."""
+
     check: GuardCheck
     passed: bool
     latency_ms: int = 0
@@ -112,9 +134,44 @@ class CheckResult:
         }
 
 
+# Reason prefix of a check that could not be answered because of an
+# infrastructure error. It is the vocabulary ``dialer_worker`` recognises
+# (``_GUARD_INFRA_REASON_PREFIXES``) as a TRANSIENT denial: the job is deferred
+# ~60 s and retried, never terminally blocked and never dialled.
+_CHECK_ERROR_BLOCKED = "check_error_blocked"
+# Reason of an account gate that passed only because its schema is not there.
+_SCHEMA_CHECK_SKIPPED = "schema_check_skipped"
+
+
+def _is_missing_schema_error(exc: BaseException) -> bool:
+    """True only when ``exc`` means "that table / column does not exist".
+
+    This is the single case in which an account gate or the limits loader may
+    stand down (the deployment predates the column). Every other database
+    error -- a dropped connection, a timeout, a server in recovery -- says
+    nothing about the tenant's state, so it must not be read as "fine".
+    """
+    return isinstance(exc, (asyncpg.UndefinedTableError, asyncpg.UndefinedColumnError))
+
+
+def _check_unavailable(check: GuardCheck, exc: BaseException) -> CheckResult:
+    """Fail-closed result for a check whose lookup errored (transient)."""
+    logger.warning(
+        "guard check %s could not be answered -- failing CLOSED (call deferred): %s: %s",
+        check.value, type(exc).__name__, exc,
+    )
+    return CheckResult(
+        check=check,
+        passed=False,
+        reason=f"{_CHECK_ERROR_BLOCKED}: {type(exc).__name__}",
+        details={"error": str(exc)},
+    )
+
+
 @dataclass
 class GuardResult:
     """Complete result from call guard evaluation."""
+
     decision: GuardDecision
     tenant_id: str
     phone_number: str
@@ -142,6 +199,7 @@ class GuardResult:
 @dataclass
 class TenantCallLimits:
     """Tenant call limits configuration."""
+
     calls_per_minute: int = 60
     calls_per_hour: int = 1000
     calls_per_day: int = 10000
@@ -168,6 +226,7 @@ class TenantCallLimits:
 @dataclass
 class PartnerLimits:
     """Partner aggregate limits."""
+
     max_tenants: int = 10
     current_tenant_count: int = 0
     aggregate_calls_per_minute: int = 600
@@ -229,6 +288,8 @@ class CallGuard:
         call_type: str = "outbound",
         estimated_duration_seconds: Optional[int] = None,
         feature_required: Optional[str] = None,
+        lead_id: Optional[str] = None,
+        call_id: Optional[str] = None,
     ) -> GuardResult:
         """
         Evaluate if a call should be allowed.
@@ -244,6 +305,10 @@ class CallGuard:
             call_type: outbound, inbound, or transfer
             estimated_duration_seconds: Estimated call duration for spend checks
             feature_required: Feature flag to check (e.g., "international_calls")
+            lead_id: Optional lead being dialled. Supplied by the dialer so
+                the DNC check can also honour the per-lead
+                ``leads.do_not_call`` suppression flag; omit it and only the
+                tenant DNC list is consulted.
 
         Returns:
             GuardResult with decision and details of all checks
@@ -289,6 +354,7 @@ class CallGuard:
 
         # Define checks in priority order
         checks: List[Tuple[GuardCheck, callable]] = [
+            (GuardCheck.PLATFORM_CALLS_ENABLED, self._check_platform_calls_enabled),
             (GuardCheck.TENANT_ACTIVE, self._check_tenant_active),
             (GuardCheck.PARTNER_ACTIVE, self._check_partner_active),
             (GuardCheck.SUBSCRIPTION_VALID, self._check_subscription),
@@ -314,6 +380,9 @@ class CallGuard:
                     partner_limits=partner_limits,
                     partner_id=partner_id,
                     campaign_id=campaign_id,
+                    lead_id=lead_id,
+                    call_id=call_id,
+                    call_type=call_type,
                     feature_required=feature_required,
                     estimated_duration_seconds=estimated_duration_seconds,
                 )
@@ -342,7 +411,10 @@ class CallGuard:
                     passed=not fail_closed,
                     latency_ms=int((time.time() - check_start) * 1000),
                     reason=(
-                        f"check_error_blocked: {str(e)}" if fail_closed
+                        "metering_unavailable"
+                        if check_type == GuardCheck.MINUTES_QUOTA
+                        else f"check_error_blocked: {str(e)}"
+                        if fail_closed
                         else f"check_error_skipped: {str(e)}"
                     ),
                 )
@@ -398,56 +470,57 @@ class CallGuard:
     # Guard Check Methods
     # -------------------------------------------------------------------------
 
-    async def _check_tenant_active(
+    async def _check_platform_calls_enabled(
         self,
         tenant_id: str,
-        **kwargs
+        call_type: str = "outbound",
+        **kwargs,
     ) -> CheckResult:
-        """Check if tenant is active and not suspended."""
-        try:
-            async with self._db_pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    """
-                    SELECT id, subscription_status
-                    FROM tenants
-                    WHERE id = $1
-                    """,
-                    tenant_id,
-                )
+        """Enforce the platform operator's persisted emergency pause.
 
-                if not row:
-                    return CheckResult(
-                        check=GuardCheck.TENANT_ACTIVE,
-                        passed=False,
-                        reason="tenant_not_found",
-                    )
-
-                status = row.get("subscription_status", "active")
-                if status in ("suspended", "cancelled"):
-                    return CheckResult(
-                        check=GuardCheck.TENANT_ACTIVE,
-                        passed=False,
-                        reason=f"tenant_{status}",
-                    )
-
-                return CheckResult(
-                    check=GuardCheck.TENANT_ACTIVE,
-                    passed=True,
-                )
-        except asyncpg.PostgresError as e:
-            logger.debug(f"tenant active check failed (column may not exist): {e}")
+        Inbound calls and transfers are deliberately unaffected: the control is
+        labelled "Pause outbound calls" and must not make an inbound support
+        number unreachable or break a call already in progress.
+        """
+        if call_type != "outbound":
             return CheckResult(
-                check=GuardCheck.TENANT_ACTIVE,
+                check=GuardCheck.PLATFORM_CALLS_ENABLED,
                 passed=True,
-                reason="schema_check_skipped",
+                reason="not_outbound",
             )
+
+        state = await get_outbound_call_pause(self._db_pool)
+        return CheckResult(
+            check=GuardCheck.PLATFORM_CALLS_ENABLED,
+            passed=not state.paused,
+            reason="platform_outbound_calls_paused" if state.paused else None,
+            details={
+                "paused_at": state.paused_at.isoformat() if state.paused_at else None,
+                "reason": state.reason,
+            },
+        )
+
+    async def _check_tenant_active(self, tenant_id: str, **kwargs) -> CheckResult:
+        """Read current tenant, formal parent and active holds before admission."""
+        try:
+            # The formal parent/audit rows belong to another tenant. Use the
+            # existing service read with an explicit bound tenant predicate;
+            # child-scoped RLS would hide required authority evidence.
+            async with acquire_with_tenant(self._db_pool, None) as conn:
+                authority = await read_call_authority(conn, tenant_id)
+            return CheckResult(check=GuardCheck.TENANT_ACTIVE,
+                               passed=authority.allowed, reason=authority.reason)
+        except Exception as e:
+            # Missing formal schema is unknown authority, not a compatibility
+            # permission. The dialer already defers this transient vocabulary.
+            return _check_unavailable(GuardCheck.TENANT_ACTIVE, e)
 
     async def _check_partner_active(
         self,
         tenant_id: str,
         partner_id: Optional[str] = None,
         partner_limits: Optional[PartnerLimits] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check if partner (if applicable) is active."""
         if not partner_id:
@@ -475,8 +548,8 @@ class CallGuard:
                         reason="partner_not_found",
                     )
 
-                status = row.get("subscription_status", "active")
-                if status in ("suspended", "cancelled"):
+                status = canonical_subscription_status(row.get("subscription_status") or "active")
+                if subscription_status_is_blocked(status, TENANT_BLOCKED_STATUSES):
                     return CheckResult(
                         check=GuardCheck.PARTNER_ACTIVE,
                         passed=False,
@@ -487,19 +560,17 @@ class CallGuard:
                     check=GuardCheck.PARTNER_ACTIVE,
                     passed=True,
                 )
-        except asyncpg.PostgresError as e:
-            logger.debug(f"partner active check failed: {e}")
+        except Exception as e:
+            if not _is_missing_schema_error(e):
+                return _check_unavailable(GuardCheck.PARTNER_ACTIVE, e)
+            logger.debug(f"partner active check skipped (schema missing): {e}")
             return CheckResult(
                 check=GuardCheck.PARTNER_ACTIVE,
                 passed=True,
-                reason="schema_check_skipped",
+                reason=_SCHEMA_CHECK_SKIPPED,
             )
 
-    async def _check_subscription(
-        self,
-        tenant_id: str,
-        **kwargs
-    ) -> CheckResult:
+    async def _check_subscription(self, tenant_id: str, **kwargs) -> CheckResult:
         """Check if tenant has valid subscription/billing status.
 
         Cached in Redis for 60s (guard:subscription:{tenant_id}) — subscription
@@ -528,16 +599,22 @@ class CallGuard:
 
         result = await self._check_subscription_uncached(tenant_id)
 
-        if self._redis:
+        # Never cache a degraded answer: an error ("check_error_blocked") would
+        # hold the tenant blocked for 60 s after the database recovered, and a
+        # skipped schema check is not a verdict about the tenant at all.
+        degraded = (result.reason or "").startswith((_CHECK_ERROR_BLOCKED, _SCHEMA_CHECK_SKIPPED))
+        if self._redis and not degraded:
             try:
                 await self._redis.setex(
                     cache_key,
                     60,
-                    json.dumps({
-                        "passed": result.passed,
-                        "reason": result.reason,
-                        "details": result.details,
-                    }),
+                    json.dumps(
+                        {
+                            "passed": result.passed,
+                            "reason": result.reason,
+                            "details": result.details,
+                        }
+                    ),
                 )
             except Exception as e:
                 logger.debug(f"subscription cache write failed: {e}")
@@ -569,9 +646,9 @@ class CallGuard:
                         reason="tenant_not_found",
                     )
 
-                status = row.get("subscription_status", "active")
+                status = canonical_subscription_status(row.get("subscription_status") or "active")
 
-                if status in ("suspended", "cancelled", "past_due"):
+                if subscription_status_is_blocked(status, SUBSCRIPTION_BLOCKED_STATUSES):
                     return CheckResult(
                         check=GuardCheck.SUBSCRIPTION_VALID,
                         passed=False,
@@ -583,12 +660,14 @@ class CallGuard:
                     passed=True,
                     details={"status": status},
                 )
-        except asyncpg.PostgresError as e:
-            logger.debug(f"subscription check failed (column may not exist): {e}")
+        except Exception as e:
+            if not _is_missing_schema_error(e):
+                return _check_unavailable(GuardCheck.SUBSCRIPTION_VALID, e)
+            logger.debug(f"subscription check skipped (column may not exist): {e}")
             return CheckResult(
                 check=GuardCheck.SUBSCRIPTION_VALID,
                 passed=True,
-                reason="schema_check_skipped",
+                reason=_SCHEMA_CHECK_SKIPPED,
             )
 
     async def _check_feature_enabled(
@@ -597,7 +676,7 @@ class CallGuard:
         tenant_limits: Optional[TenantCallLimits] = None,
         partner_limits: Optional[PartnerLimits] = None,
         feature_required: Optional[str] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check if required feature is enabled."""
         if not feature_required:
@@ -649,11 +728,7 @@ class CallGuard:
             reason="feature_default_allowed",
         )
 
-    async def _check_number_valid(
-        self,
-        phone_number: str,
-        **kwargs
-    ) -> CheckResult:
+    async def _check_number_valid(self, phone_number: str, **kwargs) -> CheckResult:
         """Check if phone number is valid E.164 format."""
         if not phone_number:
             return CheckResult(
@@ -676,10 +751,7 @@ class CallGuard:
         )
 
     async def _check_rate_limit(
-        self,
-        tenant_id: str,
-        tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        self, tenant_id: str, tenant_limits: Optional[TenantCallLimits] = None, **kwargs
     ) -> CheckResult:
         """Check rate limits using TelephonyRateLimiter."""
         if not tenant_limits:
@@ -689,7 +761,9 @@ class CallGuard:
                 reason="no_limits_configured",
             )
 
-        async with self._db_pool.acquire() as conn:
+        # The limiter's tables are FORCE RLS: without the tenant scope the
+        # event insert fails its WITH CHECK once the role loses BYPASSRLS.
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             decision = await self._rate_limiter.evaluate(
                 conn=conn,
                 tenant_id=tenant_id,
@@ -709,10 +783,7 @@ class CallGuard:
         )
 
     async def _check_concurrency(
-        self,
-        tenant_id: str,
-        tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        self, tenant_id: str, tenant_limits: Optional[TenantCallLimits] = None, **kwargs
     ) -> CheckResult:
         """Check concurrency limits."""
         if not tenant_limits:
@@ -722,8 +793,9 @@ class CallGuard:
                 reason="no_limits_configured",
             )
 
-        # Get current status without acquiring lease
-        async with self._db_pool.acquire() as conn:
+        # Get current status without acquiring lease. Leases are FORCE RLS:
+        # an unscoped read counts 0 and the cap could never trip.
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
             status = await self._concurrency_limiter.get_status(
                 conn=conn,
                 tenant_id=tenant_id,
@@ -735,7 +807,11 @@ class CallGuard:
         return CheckResult(
             check=GuardCheck.CONCURRENCY_LIMIT,
             passed=current_calls < max_calls,
-            reason=None if current_calls < max_calls else f"concurrency_limit: {current_calls}/{max_calls}",
+            reason=(
+                None
+                if current_calls < max_calls
+                else f"concurrency_limit: {current_calls}/{max_calls}"
+            ),
             details={
                 "active_calls": current_calls,
                 "max_calls": max_calls,
@@ -743,10 +819,7 @@ class CallGuard:
         )
 
     async def _check_geographic(
-        self,
-        phone_number: str,
-        tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        self, phone_number: str, tenant_limits: Optional[TenantCallLimits] = None, **kwargs
     ) -> CheckResult:
         """Check if destination is in allowed countries."""
         country_code = self._extract_country_code(phone_number)
@@ -776,7 +849,10 @@ class CallGuard:
             )
 
         # Check blocked country codes
-        if tenant_limits.blocked_country_codes and country_code in tenant_limits.blocked_country_codes:
+        if (
+            tenant_limits.blocked_country_codes
+            and country_code in tenant_limits.blocked_country_codes
+        ):
             return CheckResult(
                 check=GuardCheck.GEOGRAPHIC_ALLOWED,
                 passed=False,
@@ -784,7 +860,10 @@ class CallGuard:
             )
 
         # Check allowed country codes (if set, must be in list)
-        if tenant_limits.allowed_country_codes and country_code not in tenant_limits.allowed_country_codes:
+        if (
+            tenant_limits.allowed_country_codes
+            and country_code not in tenant_limits.allowed_country_codes
+        ):
             return CheckResult(
                 check=GuardCheck.GEOGRAPHIC_ALLOWED,
                 passed=False,
@@ -798,14 +877,60 @@ class CallGuard:
         )
 
     async def _check_dnc(
-        self,
-        tenant_id: str,
-        phone_number: str,
-        **kwargs
+        self, tenant_id: str, phone_number: str, lead_id: Optional[str] = None, **kwargs
     ) -> CheckResult:
-        """Check Do-Not-Call list."""
+        """Check Do-Not-Call suppression: the per-lead flag, then the list.
+
+        Two DISTINCT mechanisms, both enforced here:
+
+          * ``leads.do_not_call`` — the per-contact suppression flag the CSV
+            import and the manual contact form write (migration 0020). It is
+            ADDITIVE to the list below, never a replacement.
+          * ``dnc_entries`` — the tenant's DNC *list*, keyed by normalised
+            phone number.
+
+        ``campaign_service._get_pending_leads`` already excludes flagged leads
+        at the selection boundary, so a flagged lead is never enqueued. This
+        check is defence in depth for the jobs that were created BEFORE the
+        flag was set and are still sitting in Redis (scheduled-set promotion,
+        crash-orphan reclaim) — those re-enqueue an existing job without
+        re-reading the lead.
+        """
         try:
-            async with self._db_pool.acquire() as conn:
+            # This query intentionally includes platform-global DNC rows
+            # (tenant_id IS NULL), so use bypass with explicit tenant predicates.
+            async with acquire_with_tenant(self._db_pool, None) as conn:
+                # Per-lead suppression flag. Only queried on the dialer path,
+                # which is the only caller that knows a lead_id.
+                #
+                # `AND do_not_call` keeps the predicate on the bare column so
+                # the partial index idx_leads_do_not_call ON leads (tenant_id)
+                # WHERE do_not_call is usable, and gives NULL-as-not-flagged
+                # for free (`x IS TRUE` semantics) — COALESCE(...) here would
+                # cost the index and change nothing else. tenant_id is an
+                # explicit predicate because the prod app role is
+                # superuser+BYPASSRLS; RLS alone is not enforcement.
+                if lead_id:
+                    lead_row = await conn.fetchrow(
+                        """
+                        SELECT id
+                        FROM leads
+                        WHERE id = $1
+                          AND tenant_id = $2
+                          AND do_not_call
+                        LIMIT 1
+                        """,
+                        str(lead_id),
+                        tenant_id,
+                    )
+                    if lead_row:
+                        return CheckResult(
+                            check=GuardCheck.DNC_CHECK,
+                            passed=False,
+                            reason="lead_marked_do_not_call",
+                            details={"lead_id": str(lead_id)},
+                        )
+
                 # Check tenant-specific DNC
                 row = await conn.fetchrow(
                     """
@@ -859,7 +984,7 @@ class CallGuard:
         tenant_id: str,
         tenant_limits: Optional[TenantCallLimits] = None,
         estimated_duration_seconds: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check monthly spend limit."""
         if not tenant_limits or tenant_limits.monthly_spend_cap is None:
@@ -878,11 +1003,22 @@ class CallGuard:
         # is in _FAIL_CLOSED_ON_ERROR_CHECKS, that TypeError would fail
         # closed and block every call for that tenant -- not just calls that
         # are actually over cap.
-        current_spend = float(tenant_limits.monthly_spend_used or 0)
+        # Nothing in the app accrues monthly_spend_used, so on its own it is a
+        # constant 0.0 and the cap could never trip. Derive this month's spend
+        # from the settled-minutes meter at the same per-minute rate the
+        # estimate below uses; keep the stored figure as a floor. A meter
+        # failure raises, and SPEND_LIMIT fails closed on error.
+        from app.domain.services.minutes_quota import compute_minutes_status
+
+        async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
+            quota = await compute_minutes_status(conn, str(tenant_id))
+        quota.require_available()
+        metered_spend = (quota.used_minutes or 0) * _ESTIMATED_COST_PER_MINUTE
+        current_spend = max(float(tenant_limits.monthly_spend_used or 0), metered_spend)
         cap = float(tenant_limits.monthly_spend_cap)
 
         # Estimate call cost (simplified - $0.05/minute)
-        estimated_cost = (estimated_duration_seconds or 60) / 60 * 0.05
+        estimated_cost = (estimated_duration_seconds or 60) / 60 * _ESTIMATED_COST_PER_MINUTE
 
         if current_spend + estimated_cost > cap:
             return CheckResult(
@@ -911,65 +1047,60 @@ class CallGuard:
         tenant_id: str,
         tenant_limits: Optional[TenantCallLimits] = None,
         estimated_duration_seconds: Optional[int] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
-        """Block origination once the tenant's monthly minutes are exhausted.
-
-        Closes the direct-origination revenue leak: campaigns + dialer enforce
-        minutes elsewhere, but ``POST /sip/telephony/call`` reached the carrier
-        with NO minutes gate, so an exhausted tenant billed unmetered calls.
-
-        Fail-OPEN by design (matches _check_spend_limit): a missing/zero
-        allocation = "no quota configured" -> pass; any load/logic error is
-        caught by evaluate()'s per-check try/except and treated as passed, so a
-        metering hiccup never strands legitimate calls.
-        """
-        allocated = (tenant_limits.monthly_minutes_allocated if tenant_limits else 0) or 0
-        if not tenant_limits or allocated <= 0:
-            return CheckResult(
-                check=GuardCheck.MINUTES_QUOTA,
-                passed=True,
-                reason="no_minutes_quota",
-            )
-
-        # LIVE usage, not the stored column (2026-08-03).
-        #
-        # `tenant_call_limits.monthly_minutes_used` is written by exactly ONE
-        # thing in this codebase: the admin PUT /admin/tenants/{id}/call-limits
-        # endpoint. NOTHING increments it when a call actually happens. So this
-        # check was comparing an estimate against a number frozen at whatever
-        # an operator last typed in — usually 0.
-        #
-        # That matters because POST /sip/telephony/call is reachable by any
-        # logged-in user, not just the dialer, and this guard was its only
-        # quota gate. The docstring above claimed it "closes the direct-
-        # origination revenue leak"; it did not, because the counter never
-        # moved. Unmetered calls, indefinitely.
-        #
-        # `compute_minutes_status` is the same live computation the dialer's
-        # own gate uses — summed from the `calls` table — so the two paths now
-        # agree instead of enforcing against different realities.
-        used = tenant_limits.monthly_minutes_used or 0
+        """Use the canonical live allowance; uncertainty defers new admission."""
         try:
-            from app.domain.services.minutes_quota import compute_minutes_status
-
-            async with self._db_pool.acquire() as conn:
-                _status = await compute_minutes_status(conn, str(tenant_id))
-            if _status.used_minutes is not None:
-                used = int(_status.used_minutes)
-        except Exception as exc:  # noqa: BLE001
-            # Fails OPEN to the stored value, matching this method's stated
-            # contract that a metering hiccup never strands legitimate calls.
-            logger.warning(
-                "call_guard: live minutes lookup failed for tenant=%s (%s) — "
-                "falling back to the stored counter, which may be stale",
-                str(tenant_id)[:8], exc,
+            from app.domain.services.minutes_quota import (
+                compute_minutes_status,
+                inflight_outbound_minutes,
             )
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
+                quota = await compute_minutes_status(conn, str(tenant_id))
+                inflight, inflight_minutes = (
+                    (0, 0) if quota.unlimited or quota.state == "unavailable"
+                    else await inflight_outbound_minutes(
+                        conn, str(tenant_id), exclude_call_id=kwargs.get("call_id"),
+                    )
+                )
+            quota.require_available()
+        except Exception:
+            return CheckResult(check=GuardCheck.MINUTES_QUOTA, passed=False,
+                               reason="metering_unavailable", details={"minutes_state": "unavailable"})
+        if quota.unlimited:
+            return CheckResult(check=GuardCheck.MINUTES_QUOTA, passed=True,
+                               reason="verified_unlimited", details={"minutes_state": "unlimited"})
+        allocated, used = quota.allocated, quota.used_minutes
 
         # Round this call's minutes UP (carriers bill per started minute).
         est_minutes = -(-(estimated_duration_seconds or 60) // 60)  # ceil division
 
-        if used + est_minutes > allocated:
+        # Calls already dialled but not yet settled have NULL duration, so
+        # `used` cannot see them: reserve at least one estimate for each, and
+        # the minutes a long live call has already run.
+        reserved = max(inflight * est_minutes, inflight_minutes)
+
+        redis = getattr(self, "_redis", None)
+        over = used + reserved + est_minutes > allocated
+        if redis is not None and not over:
+            # Atomic per-tenant check-and-reserve: concurrent evaluations
+            # before any calls row exists must not all pass the same room.
+            try:
+                from app.domain.services.minutes_quota import reserve_outbound_minutes
+                # The dialer and the bridge re-check both pass the lead, so one
+                # call keeps one reservation across the two evaluations.
+                member = str(kwargs.get("lead_id") or kwargs.get("call_id")
+                             or kwargs.get("job_id") or uuid4())
+                over = not await reserve_outbound_minutes(
+                    redis, str(tenant_id), member, used=used,
+                    reserved_inflight=reserved, est_minutes=est_minutes,
+                    allocated=allocated,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "minutes_reservation_unavailable tenant=%s error_type=%s; using non-atomic check",
+                    tenant_id, type(exc).__name__)
+        if over:
             return CheckResult(
                 check=GuardCheck.MINUTES_QUOTA,
                 passed=False,
@@ -978,6 +1109,8 @@ class CallGuard:
                     "minutes_used": used,
                     "minutes_allocated": allocated,
                     "estimated_minutes": est_minutes,
+                    "inflight_calls": inflight,
+                    "reserved_minutes": reserved,
                 },
             )
 
@@ -996,7 +1129,7 @@ class CallGuard:
         tenant_id: str,
         phone_number: str = "",
         tenant_limits: Optional[TenantCallLimits] = None,
-        **kwargs
+        **kwargs,
     ) -> CheckResult:
         """Check business hours restriction.
 
@@ -1062,8 +1195,8 @@ class CallGuard:
                         "business_hours": f"{start.isoformat()}-{end.isoformat()}",
                         "timezone": tz_used,
                         "tz_source": (
-                            "callee" if tz_used == callee_tz_name
-                            and callee_tz_name != tenant_tz
+                            "callee"
+                            if tz_used == callee_tz_name and callee_tz_name != tenant_tz
                             else "tenant_fallback"
                         ),
                         "phone_number": phone_number,
@@ -1076,21 +1209,17 @@ class CallGuard:
             details={
                 "timezone": tz_used,
                 "tz_source": (
-                    "callee" if tz_used == callee_tz_name
-                    and callee_tz_name != tenant_tz
+                    "callee"
+                    if tz_used == callee_tz_name and callee_tz_name != tenant_tz
                     else "tenant_fallback"
                 ),
             },
         )
 
-    async def _check_velocity(
-        self,
-        tenant_id: str,
-        **kwargs
-    ) -> CheckResult:
+    async def _check_velocity(self, tenant_id: str, **kwargs) -> CheckResult:
         """Check for recent abuse events indicating velocity anomalies."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 recent_events = await conn.fetchval(
                     """
                     SELECT COUNT(*)
@@ -1123,22 +1252,14 @@ class CallGuard:
     # -------------------------------------------------------------------------
 
     def _normalize_phone_number(self, phone_number: str) -> str:
-        """Normalize phone number to E.164 format."""
-        if not phone_number:
-            return ""
+        """Normalize phone number to E.164 format.
 
-        # Remove all non-digit characters except leading +
-        has_plus = phone_number.startswith("+")
-        digits = re.sub(r"\D", "", phone_number)
-
-        if has_plus:
-            return f"+{digits}"
-
-        # Assume US/Canada if no country code
-        if len(digits) == 10:
-            return f"+1{digits}"
-
-        return f"+{digits}"
+        Thin wrapper over the canonical
+        ``phone_number_normalizer.normalize_e164_digits`` -- see that module
+        for why the guard uses the never-raising digit form and how it
+        differs from the DNC list's stored form.
+        """
+        return normalize_e164_digits(phone_number)
 
     def _extract_country_code(self, phone_number: str) -> Optional[str]:
         """Extract ISO country code from E.164 phone number."""
@@ -1214,13 +1335,20 @@ class CallGuard:
                 cached = await self._redis.get(cache_key)
                 if cached:
                     data = json.loads(cached)
-                    return TenantCallLimits(**data)
+                    # The hours travel as ISO strings. An entry without them
+                    # predates their caching; trusting it would switch the
+                    # business-hours check off, so reload it instead.
+                    if not data.get("respect_business_hours") or "business_hours_start" in data:
+                        for key in ("business_hours_start", "business_hours_end"):
+                            if data.get(key):
+                                data[key] = time.fromisoformat(data[key])
+                        return TenantCallLimits(**data)
             except Exception:
                 pass
 
         # Fetch from database
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(self._db_pool, str(tenant_id)) as conn:
                 row = await conn.fetchrow(
                     """
                     SELECT *
@@ -1232,7 +1360,13 @@ class CallGuard:
                     tenant_id,
                 )
         except asyncpg.PostgresError as e:
-            # Table may not exist yet — return permissive defaults
+            # Permissive defaults only when the table/column is not there yet.
+            # Any other error (dropped connection, recovery mode, ...) used to
+            # fall through to the same defaults, silently dropping the tenant's
+            # blocked countries, spend cap and business hours for that call.
+            # Re-raise: evaluate() turns it into a BLOCK the dialer defers.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"tenant_call_limits query failed (table may not exist): {e}")
             return TenantCallLimits()
 
@@ -1255,12 +1389,10 @@ class CallGuard:
             # arithmetic (raises TypeError) or `json.dumps` (raises
             # TypeError, silently swallowed by the cache try/except below).
             monthly_spend_cap=(
-                float(row["monthly_spend_cap"])
-                if row["monthly_spend_cap"] is not None else None
+                float(row["monthly_spend_cap"]) if row["monthly_spend_cap"] is not None else None
             ),
             monthly_spend_used=(
-                float(row["monthly_spend_used"])
-                if row["monthly_spend_used"] is not None else 0.0
+                float(row["monthly_spend_used"]) if row["monthly_spend_used"] is not None else 0.0
             ),
             max_call_duration_seconds=row["max_call_duration_seconds"],
             min_call_interval_seconds=row["min_call_interval_seconds"],
@@ -1286,27 +1418,37 @@ class CallGuard:
                 await self._redis.setex(
                     cache_key,
                     60,
-                    json.dumps({
-                        "calls_per_minute": limits.calls_per_minute,
-                        "calls_per_hour": limits.calls_per_hour,
-                        "calls_per_day": limits.calls_per_day,
-                        "max_concurrent_calls": limits.max_concurrent_calls,
-                        "max_queue_size": limits.max_queue_size,
-                        "monthly_minutes_allocated": limits.monthly_minutes_allocated,
-                        "monthly_minutes_used": limits.monthly_minutes_used,
-                        "monthly_spend_cap": limits.monthly_spend_cap,
-                        "monthly_spend_used": limits.monthly_spend_used,
-                        "max_call_duration_seconds": limits.max_call_duration_seconds,
-                        "min_call_interval_seconds": limits.min_call_interval_seconds,
-                        "allowed_country_codes": limits.allowed_country_codes,
-                        "blocked_country_codes": limits.blocked_country_codes,
-                        "blocked_prefixes": limits.blocked_prefixes,
-                        "features_enabled": limits.features_enabled,
-                        "features_disabled": limits.features_disabled,
-                        "respect_business_hours": limits.respect_business_hours,
-                        "business_hours_timezone": limits.business_hours_timezone,
-                        "is_active": limits.is_active,
-                    }),
+                    json.dumps(
+                        {
+                            "calls_per_minute": limits.calls_per_minute,
+                            "calls_per_hour": limits.calls_per_hour,
+                            "calls_per_day": limits.calls_per_day,
+                            "max_concurrent_calls": limits.max_concurrent_calls,
+                            "max_queue_size": limits.max_queue_size,
+                            "monthly_minutes_allocated": limits.monthly_minutes_allocated,
+                            "monthly_minutes_used": limits.monthly_minutes_used,
+                            "monthly_spend_cap": limits.monthly_spend_cap,
+                            "monthly_spend_used": limits.monthly_spend_used,
+                            "max_call_duration_seconds": limits.max_call_duration_seconds,
+                            "min_call_interval_seconds": limits.min_call_interval_seconds,
+                            "allowed_country_codes": limits.allowed_country_codes,
+                            "blocked_country_codes": limits.blocked_country_codes,
+                            "blocked_prefixes": limits.blocked_prefixes,
+                            "features_enabled": limits.features_enabled,
+                            "features_disabled": limits.features_disabled,
+                            "respect_business_hours": limits.respect_business_hours,
+                            "business_hours_start": (
+                                limits.business_hours_start.isoformat()
+                                if limits.business_hours_start else None
+                            ),
+                            "business_hours_end": (
+                                limits.business_hours_end.isoformat()
+                                if limits.business_hours_end else None
+                            ),
+                            "business_hours_timezone": limits.business_hours_timezone,
+                            "is_active": limits.is_active,
+                        }
+                    ),
                 )
             except Exception:
                 pass
@@ -1343,6 +1485,10 @@ class CallGuard:
                     partner_id,
                 )
         except asyncpg.PostgresError as e:
+            # Same rule as _get_tenant_limits: only a missing table means "no
+            # partner limits"; any other error must not drop the partner caps.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"partner_limits query failed (table may not exist): {e}")
             return None
 
@@ -1360,15 +1506,14 @@ class CallGuard:
             # above: coerce here so the JSON cache write below never raises.
             revenue_share_percent=(
                 float(row["revenue_share_percent"])
-                if row["revenue_share_percent"] is not None else None
+                if row["revenue_share_percent"] is not None
+                else None
             ),
             min_billing_amount=(
-                float(row["min_billing_amount"])
-                if row["min_billing_amount"] is not None else None
+                float(row["min_billing_amount"]) if row["min_billing_amount"] is not None else None
             ),
             max_billing_amount=(
-                float(row["max_billing_amount"])
-                if row["max_billing_amount"] is not None else None
+                float(row["max_billing_amount"]) if row["max_billing_amount"] is not None else None
             ),
             feature_whitelist=row["feature_whitelist"] or [],
             feature_blacklist=row["feature_blacklist"] or [],
@@ -1382,21 +1527,23 @@ class CallGuard:
                 await self._redis.setex(
                     cache_key,
                     60,
-                    json.dumps({
-                        "max_tenants": limits.max_tenants,
-                        "current_tenant_count": limits.current_tenant_count,
-                        "aggregate_calls_per_minute": limits.aggregate_calls_per_minute,
-                        "aggregate_calls_per_hour": limits.aggregate_calls_per_hour,
-                        "aggregate_calls_per_day": limits.aggregate_calls_per_day,
-                        "aggregate_concurrent_calls": limits.aggregate_concurrent_calls,
-                        "revenue_share_percent": limits.revenue_share_percent,
-                        "min_billing_amount": limits.min_billing_amount,
-                        "max_billing_amount": limits.max_billing_amount,
-                        "feature_whitelist": limits.feature_whitelist,
-                        "feature_blacklist": limits.feature_blacklist,
-                        "fraud_detection_sensitivity": limits.fraud_detection_sensitivity,
-                        "is_active": limits.is_active,
-                    }),
+                    json.dumps(
+                        {
+                            "max_tenants": limits.max_tenants,
+                            "current_tenant_count": limits.current_tenant_count,
+                            "aggregate_calls_per_minute": limits.aggregate_calls_per_minute,
+                            "aggregate_calls_per_hour": limits.aggregate_calls_per_hour,
+                            "aggregate_calls_per_day": limits.aggregate_calls_per_day,
+                            "aggregate_concurrent_calls": limits.aggregate_concurrent_calls,
+                            "revenue_share_percent": limits.revenue_share_percent,
+                            "min_billing_amount": limits.min_billing_amount,
+                            "max_billing_amount": limits.max_billing_amount,
+                            "feature_whitelist": limits.feature_whitelist,
+                            "feature_blacklist": limits.feature_blacklist,
+                            "fraud_detection_sensitivity": limits.fraud_detection_sensitivity,
+                            "is_active": limits.is_active,
+                        }
+                    ),
                 )
             except Exception:
                 pass
@@ -1422,7 +1569,11 @@ class CallGuard:
                 )
                 return str(row["partner_id"]) if row and row.get("partner_id") else None
         except asyncpg.PostgresError as e:
-            # partner_id column may not exist yet
+            # Only a missing partner_id column means "no partner". Any other
+            # error must not read as "no partner": that would let
+            # _check_partner_active pass a suspended partner's tenant.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"partner_id lookup failed (column may not exist): {e}")
             return None
 
@@ -1451,7 +1602,9 @@ class CallGuard:
     ) -> None:
         """Log guard decision to database."""
         try:
-            async with self._db_pool.acquire() as conn:
+            async with acquire_with_tenant(
+                self._db_pool, str(result.tenant_id)
+            ) as conn:
                 await conn.execute(
                     """
                     INSERT INTO call_guard_decisions (

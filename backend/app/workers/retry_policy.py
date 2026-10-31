@@ -44,6 +44,7 @@ Feature flag: ``RETRY_POLICY`` env var.
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Optional
@@ -139,6 +140,13 @@ _CODE_TO_CATEGORY: dict[str, FailureCategory] = {
     "invalid_phone_number": FailureCategory.INVALID_INPUT,
     "blocked_region": FailureCategory.INVALID_INPUT,
     "dnc_match": FailureCategory.INVALID_INPUT,
+    "cloud_telephony_unavailable": FailureCategory.INVALID_INPUT,
+    # The bridge's own CallGuard run said BLOCK. It covers DNC / geography /
+    # compliance, so it is never retried (the worker's own guard already
+    # defers the transient denials before the bridge is called).
+    "call_blocked": FailureCategory.INVALID_INPUT,
+    # A deterministic conflict: the campaign belongs to the inbound path.
+    "inbound_campaign_managed_separately": FailureCategory.INVALID_INPUT,
     # Carrier
     "carrier_rejected": FailureCategory.CARRIER_REJECT,
     "no_answer": FailureCategory.CARRIER_REJECT,
@@ -148,9 +156,25 @@ _CODE_TO_CATEGORY: dict[str, FailureCategory] = {
     "pipeline_unavailable": FailureCategory.TRANSIENT_NETWORK,
     "pod_at_capacity": FailureCategory.TRANSIENT_NETWORK,
     "pod_draining": FailureCategory.TRANSIENT_NETWORK,
+    "telephony_not_active_on_node": FailureCategory.TRANSIENT_NETWORK,
+    "telephony_disabled_on_node": FailureCategory.TRANSIENT_NETWORK,
+    # The bridge has no connected telephony adapter (the PBX/ARI link is down).
+    # A 503 like the codes above, instead of the old bare 400.
+    "telephony_adapter_unavailable": FailureCategory.TRANSIENT_NETWORK,
+    # Tenant-fixable / self-clearing: a trunk that is re-registering, the
+    # bridge guard's rate limiter. (dialer_worker re-defers the SAME attempt
+    # for these two; this table is the backstop.)
+    "call_throttled": FailureCategory.TRANSIENT_NETWORK,
+    "tenant_pbx_required": FailureCategory.TRANSIENT_NETWORK,
     "bad_gateway": FailureCategory.TRANSIENT_NETWORK,
     "service_unavailable": FailureCategory.TRANSIENT_NETWORK,
     "gateway_timeout": FailureCategory.TRANSIENT_NETWORK,
+    # The bridge's own generic envelope codes (core/error_handlers.py): a plain
+    # 500 (an ARI/originate error after the claim -- the commonest failure) and a
+    # slowapi 429. Known, so they never raise the "unrecognised code" alert; same
+    # category as their HTTP-status fallbacks below.
+    "internal_error": FailureCategory.TRANSIENT_NETWORK,
+    "rate_limited": FailureCategory.TRANSIENT_NETWORK,
 }
 
 
@@ -177,8 +201,12 @@ def classify_telephony_response(
         category = _CODE_TO_CATEGORY.get(error_code)
         if category is not None:
             return category, error_code
-        # Unknown code — treat as internal so we get observability but
-        # don't retry forever.
+        # Unknown code. On a transient HTTP status (5xx / 429) keep the
+        # status family so a new infra code is not turned into a permanently
+        # failed lead after one retry; the reason still carries the code for
+        # observability. Anything else is INTERNAL (visible, one retry).
+        if http_status is not None and (http_status >= 500 or http_status == 429):
+            return FailureCategory.TRANSIENT_NETWORK, f"unknown_code_{error_code}"
         return FailureCategory.INTERNAL, f"unknown_code_{error_code}"
 
     if http_status is None:
@@ -284,11 +312,18 @@ def use_smart_policy() -> bool:
 # ─────────────────────────────────────────────────────────────────────
 
 
+_CODE_SHAPE = re.compile(r"^[a-z][a-z0-9_]*$")
+
+
 def parse_bridge_error(body_text: str | None) -> tuple[Optional[str], Optional[str]]:
     """Extract ``(code, message)`` from a bridge error body.
 
-    Accepts the canonical envelope as JSON. Returns ``(None, None)``
-    when the body isn't parseable JSON or doesn't contain the envelope
+    Accepts the canonical envelope (``{"error": {"code", "message"}}``) and
+    the two other shapes the bridge emits: a flat body
+    (``{"error": "<code>"}``) and FastAPI's native ``{"detail": {...}}``.
+    A string ``error`` only counts as a code when it looks like one
+    (snake_case), so free text is never mistaken for a code. Returns
+    ``(None, None)`` when the body isn't parseable JSON or carries no code
     — callers should fall back to HTTP-status classification.
     """
     if not body_text:
@@ -300,9 +335,73 @@ def parse_bridge_error(body_text: str | None) -> tuple[Optional[str], Optional[s
         return None, None
     if not isinstance(parsed, dict):
         return None, None
-    err = parsed.get("error")
-    if not isinstance(err, dict):
-        return None, None
-    code = err.get("code") if isinstance(err.get("code"), str) else None
-    message = err.get("message") if isinstance(err.get("message"), str) else None
-    return code, message
+    containers = [parsed]
+    if isinstance(parsed.get("detail"), dict):
+        containers.append(parsed["detail"])
+    for container in containers:
+        err = container.get("error")
+        if isinstance(err, dict):
+            code = err.get("code") if isinstance(err.get("code"), str) else None
+            message = err.get("message") if isinstance(err.get("message"), str) else None
+            return code, message
+        raw_code = err if isinstance(err, str) else container.get("code")
+        if isinstance(raw_code, str) and _CODE_SHAPE.match(raw_code):
+            message = container.get("message")
+            return raw_code, message if isinstance(message, str) else None
+    return None, None
+
+
+def parse_bridge_reason(body_text: str | None) -> Optional[str]:
+    """The machine ``reason`` the bridge attached to a refusal, if any.
+
+    ``tenant_pbx_required`` (422) carries *why* the line was refused
+    (``selected_trunk_not_ready``, ``trunk_caller_id_not_verified``,
+    ``no_own_trunk`` ...). Looks in the canonical envelope's ``details``, the
+    flat body and FastAPI's ``detail``; only a snake_case token counts, so free
+    text is never mistaken for a reason.
+    """
+    if not body_text:
+        return None
+    try:
+        import json
+        parsed: Any = json.loads(body_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    candidates = [parsed]
+    if isinstance(parsed.get("detail"), dict):
+        candidates.append(parsed["detail"])
+    if isinstance(parsed.get("error"), dict) and isinstance(parsed["error"].get("details"), dict):
+        candidates.append(parsed["error"]["details"])
+    for container in candidates:
+        value = container.get("reason")
+        if isinstance(value, str) and _CODE_SHAPE.match(value):
+            return value
+    return None
+
+
+def parse_bridge_retry_after(body_text: str | None) -> Optional[int]:
+    """Seconds the bridge asked us to wait (``retry_after_seconds``), if any.
+
+    Looks in the envelope's ``details``, the flat body and ``detail``.
+    """
+    if not body_text:
+        return None
+    try:
+        import json
+        parsed: Any = json.loads(body_text)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(parsed, dict):
+        return None
+    candidates = [parsed]
+    if isinstance(parsed.get("detail"), dict):
+        candidates.append(parsed["detail"])
+    if isinstance(parsed.get("error"), dict) and isinstance(parsed["error"].get("details"), dict):
+        candidates.append(parsed["error"]["details"])
+    for container in candidates:
+        value = container.get("retry_after_seconds")
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+            return int(value)
+    return None

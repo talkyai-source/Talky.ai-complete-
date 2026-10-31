@@ -244,7 +244,13 @@ class TestWsSessionRaceReleasesLease:
             ),
         )
         monkeypatch.setattr(lifecycle, "_pop_ringing_warmup", lambda _cid: None)
-        monkeypatch.setattr(lifecycle, "get_adapter", lambda: None)
+
+        class ConfirmingAdapter:
+            async def hangup_confirmed(self, actual_call_id):
+                assert actual_call_id == call_id
+                return True
+
+        monkeypatch.setattr(lifecycle, "get_adapter", lambda: ConfirmingAdapter())
 
         await lifecycle._force_end_and_hangup(call_id)
 

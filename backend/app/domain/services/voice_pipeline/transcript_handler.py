@@ -20,6 +20,7 @@ from typing import Optional
 from fastapi import WebSocket
 
 from app.core.log_redact import install_pii_log_redaction
+from app.domain.services.explicit_secrets import sanitize_explicit_secrets, sanitize_transcript_metadata
 from app.domain.models.conversation import BargeInSignal
 from app.domain.models.session import CallSession
 from app.domain.services.voice_pipeline.backchannel import is_backchannel
@@ -33,6 +34,50 @@ logger = logging.getLogger(__name__)
 # logging (API bootstrap, voice worker, dialer worker, a script or a test).
 # See app/core/log_redact.py for the mechanism and LOG_REDACT_PII to disable.
 install_pii_log_redaction()
+
+
+def _bind_caller_turn(session, transcript_service, order) -> None:
+    bind = getattr(transcript_service, "bind_caller_turn", None)
+    if callable(bind):
+        bind(session.call_id, getattr(session, "_latest_final_transcript_turn", None),
+             caller_turn_order=order)
+
+
+def _answers_agent_or_first_turn(session) -> bool:
+    """Same two exemptions turn_ender applies to a backchannel over agent audio:
+    the caller's FIRST utterance, and a reply to an agent question. Without
+    them a "Yes." answering "Is this John?" was dropped here, before
+    turn_ender could exempt it (listen-2, audit 2026-10-20)."""
+    import re
+
+    from app.domain.models.conversation import MessageRole
+
+    history = getattr(session, "conversation_history", None) or []
+    if not any(m.role == MessageRole.USER for m in history):
+        return True
+    last = next((m.content for m in reversed(history) if m.role == MessageRole.ASSISTANT), "") or ""
+    return any(
+        sent.strip().endswith("?")
+        for sent in re.split(r"(?<=[.!?])\s+", last.strip())
+        if sent.strip()
+    )
+
+
+def _join_words(*parts) -> str:
+    """Caller words in the order they were said, as one turn."""
+    return " ".join(part.strip() for part in parts if part and part.strip())
+
+
+def _accept_caller_turn(session: CallSession, transcript_service=None) -> int:
+    """Stamp accepted finals, independently of suppressed/reused media seqs.
+
+    Called synchronously before dispatch or queue insertion. Queue draining
+    and false-barge replay copy this identity instead of creating a new turn.
+    """
+    order = getattr(session, "_accepted_caller_turn_order", 0) + 1
+    session._accepted_caller_turn_order = order
+    _bind_caller_turn(session, transcript_service, order)
+    return order
 
 
 class TranscriptHandler:
@@ -50,38 +95,58 @@ class TranscriptHandler:
         call_id = session.call_id
 
         if isinstance(transcript, BargeInSignal):
-            await self._p.handle_barge_in(
-                session, websocket,
-                transcript_text=getattr(transcript, "text", "") or "",
+            from app.domain.services.voice_pipeline.barge_in_pause import (
+                end_pause_for_interruption,
+                pause_for_caller,
+                resume_after_caller,
             )
+
+            phase = getattr(transcript, "phase", "confirm")
+            text = sanitize_explicit_secrets(getattr(transcript, "text", "") or "")
+            from app.domain.services.voice_pipeline.first_line_guard import (
+                is_first_line_greeting_repeat,
+            )
+            # A repeated bare "Hello?" during the agent's first line neither
+            # holds nor stops it (see first_line_guard).
+            repeat_greeting = bool(text) and is_first_line_greeting_repeat(session, text)
+            if repeat_greeting:
+                session._first_line_barge_skipped = True
+            if phase == "pause":
+                if not repeat_greeting:
+                    await pause_for_caller(session, websocket, text=text)
+                return
+            if phase == "resume":
+                # The utterance was withdrawn: nothing is left to grow.
+                session._first_line_barge_skipped = False
+                await resume_after_caller(session, websocket, reason="backchannel")
+                return
+            if repeat_greeting:
+                await resume_after_caller(session, websocket, reason="first_line_greeting")
+                return
+            end_pause_for_interruption(session)
+            await self._p.handle_barge_in(session, websocket, transcript_text=text)
             return
 
+        # Before websocket, history, contact parsing and transcript persistence.
+        # Copy the recognition event so its producer's object is not mutated.
+        from copy import copy
+        transcript = copy(transcript)
+        transcript.text = sanitize_explicit_secrets(transcript.text)
+        transcript.metadata = sanitize_transcript_metadata(transcript.metadata)
+
         if transcript.metadata and transcript.metadata.get("resumed"):
-            # TurnResumed cancels SPECULATIVE work only. If a confirmed final
-            # answer is already in flight (a speculative task promoted on
-            # EndOfTurn), it must NOT be killed — doing so leaves the caller in
-            # silence. (Per Deepgram: TurnResumed targets the in-progress
-            # speculative response, not a committed turn.)
-            existing = self._p._pending_llm_tasks.get(call_id)
-            if existing is not None and getattr(existing, "_turn_type", "speculative") == "final":
-                logger.info(
-                    "TurnResumed ignored — final answer in flight for %s", call_id[:12]
-                )
-                return
-            logger.info(f"TurnResumed for call {call_id} — cancelling speculative LLM")
-            session.llm_active = False
-            if call_id in self._p._pending_llm_tasks:
-                task = self._p._pending_llm_tasks.pop(call_id)
-                # Bounded, non-blocking cancel (see _cancel_turn_task) so the
-                # consumer keeps draining events instead of freezing here.
-                await self._p._cancel_turn_task(task, call_id, "speculative_llm")
-            # Roll back any messages the speculative handle_turn_end appended
-            # before being cancelled.  Without this, orphaned user/assistant
-            # messages corrupt the conversation context for subsequent turns.
-            restore_len = getattr(session, "_speculative_history_len", None)
-            if restore_len is not None and len(session.conversation_history) > restore_len:
-                session.conversation_history = session.conversation_history[:restore_len]
-            session._speculative_history_len = None
+            # TurnResumed targets Deepgram's in-progress SPECULATIVE response.
+            # Nothing speculative runs here any more: the eager branch below
+            # stashes text only ("do NOT launch a speculative turn on eager"),
+            # and every task this handler dispatches is a confirmed FINAL turn,
+            # which a bare resume must never cancel (that is the caller-in-
+            # silence bug). The cancel-and-rollback branch that used to live
+            # here could therefore never fire — except for its stray
+            # `session.llm_active = False` when nothing was pending, which could
+            # clear the flag out from under an in-flight greeting. Removed
+            # 2026-09-02. The caller kept talking; the confirmed EndOfTurn that
+            # follows carries their full words.
+            logger.debug("TurnResumed for %s — nothing speculative to cancel", call_id[:12])
             return
 
         # ── The caller has yielded the floor. Say so NOW. ────────────────────
@@ -119,8 +184,19 @@ class TranscriptHandler:
                 mark_caller_stopped,
             )
             mark_caller_stopped(session)
+            # The utterance whose "Hello" skipped its interrupt is over; the
+            # next one starts with its own StartOfTurn.
+            session._first_line_barge_skipped = False
 
         metadata = transcript.metadata or {}
+        if _is_turn_end and metadata.get("provider") == "assemblyai" and metadata.get("empty_turn") is True:
+            # A revised turn may finalize with no words. Release the speaking
+            # gate above, but never promote its earlier partial into an answer.
+            session.current_user_input = ""
+            session._last_transcript_confidence = None
+            session._last_transcript_alternatives = ()
+            session._suppressed_backchannel_seq = None
+            return
         self._p.transcript_service.bind_call_identity(call_id, session.talklee_call_id)
 
         # Ensure latency tracker is aligned with current turn ID.
@@ -158,6 +234,39 @@ class TranscriptHandler:
             except Exception as e:
                 logger.warning(f"Failed to send transcript to websocket: {e}")
 
+        # A bare "Hello?" / "Are you there?" while the agent speaks (any turn), or
+        # in its first line's sentence gaps: the speech playing is the answer, so
+        # like a backchannel it gets no interrupt and no reply. Marking the seq
+        # swallows its empty EOT.
+        from app.domain.services.voice_pipeline.first_line_guard import (
+            is_first_line_greeting_repeat,
+        )
+        if transcript.text and is_first_line_greeting_repeat(session, transcript.text):
+            logger.info(
+                "first_line_greeting transcript=%r during the agent's speech — ignored (no interrupt, no reply)",
+                (transcript.text or "")[:24],
+            )
+            # A finished greeting cannot grow; a later utterance (a "yeah") must
+            # not inherit its skipped interrupt.
+            session._first_line_barge_skipped = not bool(getattr(transcript, "is_final", False))
+            session._suppressed_backchannel_seq = self._p._utterance_seq.get(call_id, 0)
+            return
+        # An utterance whose opening "Hello" skipped the interrupt has grown into
+        # real words ("Hello? Who is this?"): interrupt now, with the StartOfTurn
+        # bookkeeping the skip left out, instead of talking over it to EndOfTurn.
+        if transcript.text and getattr(session, "_first_line_barge_skipped", False):
+            session._first_line_barge_skipped = False
+            if getattr(session, "tts_active", False):
+                from app.domain.services.voice_pipeline.playback_gate import mark_caller_speaking
+
+                mark_caller_speaking(session)
+                self._p._utterance_seq[call_id] = self._p._utterance_seq.get(call_id, 0) + 1
+                logger.info(
+                    "first_line_greeting_grew transcript=%r — interrupting now",
+                    (transcript.text or "")[:24],
+                )
+                await self._p.handle_barge_in(session, websocket, transcript_text=transcript.text)
+
         # Backchannel guard (Deepgram leaves this to the app). If the agent is
         # currently speaking and the user only made a short acknowledgement
         # ("yeah", "ok", "mhm"), that's a backchannel — NOT a turn. Don't reply
@@ -165,7 +274,11 @@ class TranscriptHandler:
         # (StartOfTurn already suppressed the audio barge-in for this; this stops
         # the spurious reply.) Only while the agent is talking — a "yeah" when
         # it's the caller's turn is a real answer and falls through normally.
-        if getattr(session, "tts_active", False) and is_backchannel(transcript.text):
+        if (
+            getattr(session, "tts_active", False)
+            and is_backchannel(transcript.text)
+            and not _answers_agent_or_first_turn(session)
+        ):
             logger.info(
                 # `transcript=` names the placeholder so the log redactor can
                 # tell this argument is caller speech (see log_redact).
@@ -203,12 +316,38 @@ class TranscriptHandler:
                 return
 
         if _is_turn_end:
+            # Capture the transcript NOW and carry it into the turn, before the
+            # stop below: interrupt._do_interrupt clears current_user_input, and
+            # reading it afterwards dispatched an empty turn that turn_ender
+            # skipped without a word (test calls 08b2791d "Okay. Thank you.
+            # Bye." and 6b9cd4c4 "No", 2026-10-08). The same capture keeps a
+            # later barge-in from stranding the detached task.
+            _user_text = session.current_user_input
+            # F-05(ii): confidence is captured at this SAME synchronous point —
+            # a later transcript event can overwrite it before the detached
+            # task body (turn_ender.handle) reads it, feeding the turn-0
+            # rejection floor a stale value.
+            _confidence = getattr(session, "_last_transcript_confidence", None)
+            _alternatives = tuple(
+                getattr(session, "_last_transcript_alternatives", ()) or ()
+            )
             # Grow case: a turn that began as a backchannel (so the StartOfTurn
             # audio barge-in was suppressed) but turned into real speech. The
             # agent's TTS may still be playing — stop it now before we respond.
             # No-op if it already stopped (normal interruptions clear it).
+            _held = None
             if getattr(session, "tts_active", False):
+                # Words still waiting behind the reply being stopped belong with
+                # these. Left queued, the stopped reply would release them as a
+                # turn of their own and these would wait behind its answer
+                # (synthetic caller, 2026-10-09: "Okay. Thank you. Bye." waited
+                # 20 s behind an answer to the earlier "What do you do?").
+                _held = getattr(session, "_queued_next_turn", None)
+                session._queued_next_turn = None
                 await self._p.handle_barge_in(session, websocket)
+                # The stop resets input for a new utterance; this one has ended
+                # and is about to be answered, exactly as on the normal path.
+                session.current_user_input = _user_text
 
             # Run as a task (not awaited) so the consumer stays unblocked and
             # can process a TurnResumed that arrives before the LLM completes.
@@ -245,12 +384,15 @@ class TranscriptHandler:
                 # duplicate — zero behavior change for that case.
                 _current_seq = self._p._utterance_seq.get(call_id, 0)
                 _existing_seq = getattr(existing, "_utterance_seq", _current_seq)
-                _existing_text = (getattr(existing, "_source_text", None) or "").strip()
-                _new_text = (session.current_user_input or "").strip()
+                _existing_text = (getattr(existing, "_latest_text", None)
+                                  or getattr(existing, "_source_text", None) or "").strip()
+                _new_text = (_user_text or "").strip()
                 _is_distinct = (_current_seq != _existing_seq) or (
                     _new_text and _new_text != _existing_text
                 )
                 if not _is_distinct:
+                    _bind_caller_turn(session, self._p.transcript_service,
+                                      getattr(existing, "_caller_turn_order", None))
                     # Same utterance: two cases —
                     #  * speculative (started on EagerEndOfTurn) — Deepgram
                     #    guarantees this EndOfTurn's transcript matches that
@@ -263,6 +405,8 @@ class TranscriptHandler:
                     #    no-op and we simply skip the duplicate.
                     # Either way we must NOT drop the turn into silence.
                     existing._turn_type = "final"
+                    if _held is not None and getattr(session, "_queued_next_turn", None) is None:
+                        session._queued_next_turn = _held  # still waiting on that task
                     logger.debug(
                         "turn_end: existing task kept as final for %s", call_id[:12]
                     )
@@ -270,14 +414,39 @@ class TranscriptHandler:
                 # F-08: a genuinely different utterance finished while turn 1
                 # is still running (LLM in flight / thinking). Don't drop it —
                 # queue it depth-1 so turn_ender dispatches it the instant
-                # turn 1 releases the turn slot. A 3rd distinct utterance
-                # simply overwrites the queued slot (coalesces onto the
-                # latest, matching how a live caller would expect their most
-                # recent words to be the ones answered).
+                # turn 1 releases the turn slot. A 3rd distinct utterance joins
+                # the queued words, newest last: it used to overwrite them, so
+                # the caller's earlier words never reached the model.
+                _previous_queue = getattr(session, "_queued_next_turn", None) or _held
+                _queued_duplicate = (
+                    _previous_queue is not None
+                    and _previous_queue.get("seq") == _current_seq
+                    and (_previous_queue.get("latest_text")
+                         or _previous_queue.get("text") or "").strip() == _new_text
+                )
+                _caller_order = (
+                    _previous_queue.get("caller_turn_order") if _queued_duplicate
+                    else _accept_caller_turn(session, self._p.transcript_service)
+                )
+                if _queued_duplicate:
+                    _bind_caller_turn(session, self._p.transcript_service, _caller_order)
+                    _waiting_text = _previous_queue.get("text") or _user_text
+                    _prior_orders = tuple(_previous_queue.get("prior_caller_turn_orders") or ())
+                elif _previous_queue is not None:
+                    _waiting_text = _join_words(_previous_queue.get("text"), _user_text)
+                    _prior_orders = (*(_previous_queue.get("prior_caller_turn_orders") or ()),
+                                     _previous_queue.get("caller_turn_order"))
+                else:
+                    _waiting_text, _prior_orders = _user_text, ()
                 session._queued_next_turn = {
-                    "text": session.current_user_input,
+                    "text": _waiting_text,
+                    "latest_text": _user_text,
                     "seq": _current_seq,
+                    "caller_turn_order": _caller_order,
+                    "prior_caller_turn_orders": _prior_orders,
                     "queued_monotonic": time.monotonic(),
+                    "confidence": _confidence,
+                    "alternatives": _alternatives,
                 }
                 logger.info(
                     "turn_queued_behind_pending call=%s seq=%d",
@@ -285,21 +454,17 @@ class TranscriptHandler:
                 )
                 return
             session._speculative_history_len = len(session.conversation_history)
-            # Capture the transcript NOW and carry it into the turn. A barge-in
-            # can reset session.current_user_input to "" before this task reads
-            # it, which would strand the turn ("Empty transcript, skipping") and
-            # drop the caller's words — the dropped-turn half of the silence bug.
-            _user_text = session.current_user_input
-            # F-05(ii): capture confidence at this SAME synchronous point, for
-            # the same reason as _user_text above — session._last_transcript_
-            # confidence can be overwritten by a later transcript event before
-            # the detached task body (turn_ender.handle) reads it, feeding the
-            # turn-0 rejection floor a stale value.
-            _confidence = getattr(session, "_last_transcript_confidence", None)
+            _caller_order = _accept_caller_turn(session, self._p.transcript_service)
+            _latest_text, _prior_orders = _user_text, ()
+            if _held is not None and (_held.get("text") or "").strip():
+                _user_text = _join_words(_held.get("text"), _user_text)
+                _prior_orders = (*(_held.get("prior_caller_turn_orders") or ()),
+                                 _held.get("caller_turn_order"))
             task = asyncio.create_task(
                 self._p.handle_turn_end(
                     session, websocket, source="final", user_text=_user_text,
                     confidence=_confidence,
+                    transcript_alternatives=_alternatives,
                 )
             )
             # Tag: a FINAL task answers a confirmed, completed utterance. It is
@@ -311,7 +476,10 @@ class TranscriptHandler:
             # tell a genuine duplicate from a genuinely new utterance (see the
             # branch above).
             task._utterance_seq = self._p._utterance_seq.get(call_id, 0)
+            task._caller_turn_order = _caller_order
+            task._prior_caller_turn_orders = _prior_orders
             task._source_text = _user_text
+            task._latest_text = _latest_text
             self._p._pending_llm_tasks[call_id] = task
             return
 
@@ -341,6 +509,9 @@ class TranscriptHandler:
                 # unconditionally so the eager-only turn keeps the caller's words.
                 if getattr(transcript, "is_final", True):
                     session._last_transcript_confidence = transcript.confidence
+                    session._last_transcript_alternatives = tuple(
+                        (metadata or {}).get("alternatives") or ()
+                    )
             return
 
         # Real-time machine detection on EVERY transcript, interims included.
@@ -357,6 +528,7 @@ class TranscriptHandler:
             if await handle_machine_interim(
                 call_id, session, transcript.text,
                 media_gateway=getattr(self._p, "media_gateway", None),
+                pipeline=self._p, websocket=websocket,
             ):
                 return
 
@@ -376,7 +548,7 @@ class TranscriptHandler:
             if transcript.is_final:
                 event_type = "end_of_turn"
 
-            self._p.transcript_service.accumulate_turn(
+            recorded_turn = self._p.transcript_service.accumulate_turn(
                 call_id=call_id,
                 role="user",
                 content=transcript.text,
@@ -390,6 +562,8 @@ class TranscriptHandler:
                 include_in_plaintext=transcript.is_final,
                 metadata=metadata,
             )
+            if transcript.is_final:
+                session._latest_final_transcript_turn = recorded_turn
             self._p.latency_tracker.mark_stt_first_transcript(call_id)
             session.current_user_input = transcript.text
             # Store confidence ONLY from a FINAL recognition (Case 2): the turn-0
@@ -400,5 +574,7 @@ class TranscriptHandler:
             # assumption. (On Flux confidence is always None regardless.)
             if getattr(transcript, "is_final", True):
                 session._last_transcript_confidence = transcript.confidence
+                session._last_transcript_alternatives = tuple(
+                    (metadata or {}).get("alternatives") or ()
+                )
             session.update_activity()
-

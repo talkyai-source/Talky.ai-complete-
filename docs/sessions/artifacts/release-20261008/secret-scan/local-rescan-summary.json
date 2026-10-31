@@ -1,0 +1,5 @@
+{
+  "range": "--no-merges --first-parent e551a9487d7b79db541655bd14cb3e987311ee45^..84ab5bfbc6f58595487b09ba44fd574f18012ebd",
+  "scanner_version": "8.24.3",
+  "exit_code": 0
+}

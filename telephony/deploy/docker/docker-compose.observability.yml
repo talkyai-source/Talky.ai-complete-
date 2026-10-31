@@ -6,6 +6,8 @@ services:
     container_name: talky-prometheus
     restart: unless-stopped
     network_mode: host
+    group_add:
+      - ${PROMETHEUS_SECRET_GID:?set PROMETHEUS_SECRET_GID to the numeric GID allowed to read the metrics-token file}
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -13,6 +15,7 @@ services:
     volumes:
       - ../../observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ../../observability/prometheus/rules:/etc/prometheus/rules:ro
+      - ${TELEPHONY_METRICS_TOKEN_FILE:?set TELEPHONY_METRICS_TOKEN_FILE to the host secret file}:/etc/prometheus/secrets/talky_metrics_token:ro
       - talky_prometheus_data:/prometheus
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:9090/-/healthy >/dev/null 2>&1 || exit 1"]

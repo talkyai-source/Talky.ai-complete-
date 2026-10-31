@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider } from './lib/auth';
+import { AuthProvider, useAuth } from './lib/auth';
+import { adminLanding } from './lib/admin-routes';
 import { AdminRouteGuard } from './components/AdminRouteGuard';
 import { LoginPage } from './pages/LoginPage';
 import { CommandCenterPage } from './pages/CommandCenterPage';
@@ -11,7 +12,20 @@ import { UsersPage } from './pages/UsersPage';
 import { UsageCostPage } from './pages/UsageCostPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
+import { InboundControlPage } from './pages/InboundControlPage';
+import { ContactEnquiriesPage } from './pages/ContactEnquiriesPage';
+import { SupportTicketsPage } from './pages/SupportTicketsPage';
+import { SupportTicketPage } from './pages/SupportTicketPage';
+import { SupportArticlesPage } from './pages/SupportArticlesPage';
 import './index.css';
+
+const PLATFORM_ROLES = ['platform_admin', 'super_admin'];
+
+function HomeRoute() {
+  const { user, isAuthenticated } = useAuth();
+  if (isAuthenticated && adminLanding(user?.role) !== '/') return <Navigate to={adminLanding(user?.role)} replace />;
+  return <AdminRouteGuard><CommandCenterPage /></AdminRouteGuard>;
+}
 
 function App() {
   return (
@@ -22,18 +36,21 @@ function App() {
           <Route path="/login" element={<LoginPage />} />
 
           {/* Protected Admin Routes */}
+          <Route path="/enquiries" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <ContactEnquiriesPage />
+            </AdminRouteGuard>
+          } />
           <Route
             path="/"
             element={
-              <AdminRouteGuard>
-                <CommandCenterPage />
-              </AdminRouteGuard>
+              <HomeRoute />
             }
           />
           <Route
             path="/command-center"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <CommandCenterPage />
               </AdminRouteGuard>
             }
@@ -41,7 +58,7 @@ function App() {
           <Route
             path="/tenants"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <TenantsPage />
               </AdminRouteGuard>
             }
@@ -49,8 +66,16 @@ function App() {
           <Route
             path="/calls"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <CallsPage />
+              </AdminRouteGuard>
+            }
+          />
+          <Route
+            path="/inbound"
+            element={
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+                <InboundControlPage />
               </AdminRouteGuard>
             }
           />
@@ -65,7 +90,7 @@ function App() {
           <Route
             path="/connectors"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <ConnectorsPage />
               </AdminRouteGuard>
             }
@@ -73,7 +98,7 @@ function App() {
           <Route
             path="/users"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <UsersPage />
               </AdminRouteGuard>
             }
@@ -81,7 +106,7 @@ function App() {
           <Route
             path="/usage-cost"
             element={
-              <AdminRouteGuard>
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <UsageCostPage />
               </AdminRouteGuard>
             }
@@ -102,6 +127,21 @@ function App() {
               </AdminRouteGuard>
             }
           />
+          <Route path="/support" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <SupportTicketsPage />
+            </AdminRouteGuard>
+          } />
+          <Route path="/support/articles" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <SupportArticlesPage />
+            </AdminRouteGuard>
+          } />
+          <Route path="/support/:id" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <SupportTicketPage />
+            </AdminRouteGuard>
+          } />
 
           {/* Catch all - redirect to dashboard */}
           <Route path="*" element={<Navigate to="/" replace />} />

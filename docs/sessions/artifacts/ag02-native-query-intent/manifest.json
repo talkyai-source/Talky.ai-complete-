@@ -1,0 +1,57 @@
+{
+  "source_commit": "d389c60c8a9ad04b602f57a3125bbb7e5e819040",
+  "base_commit": "76ba91eabfea5cbf1f6b106202e16a5dbf858b1b",
+  "hash_encoding": "SHA-256; CRLF normalized to LF",
+  "changed_source_lf_sha256": {
+    "backend/app/realtime/openai.py": "ace9e72aff7717d6305de70c3400904f8114dff877929f05b97d04ce93c3a3b4",
+    "backend/app/realtime/prompts.py": "2ceef7c2287583f5ba2c444438c29df58a035ded879ebee61f9042fedee83b9a",
+    "backend/tests/unit/test_explicit_secret_boundary.py": "269435732115c55a5164693061a054727405eb3e624a928ac9f52b25e581d21c",
+    "backend/tests/unit/test_realtime_profile_contract.py": "a72d7b37788258ee3678e9d1ad878147ef7b5152066a5b8cf0536a7e65633b66",
+    "backend/tests/unit/test_realtime_quality_pass.py": "dd520670f22f77a44a4d5e2ae8bb20c187719d834479344514a0bfdb77949cc0",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "a9d7a922534b1ee29bc5b4d124732fe1a9757af60cb9436505df54936bd61ffc"
+  },
+  "executed_input_lf_sha256": {
+    "backend/app/realtime/prompts.py": "2ceef7c2287583f5ba2c444438c29df58a035ded879ebee61f9042fedee83b9a",
+    "backend/app/realtime/openai.py": "ace9e72aff7717d6305de70c3400904f8114dff877929f05b97d04ce93c3a3b4",
+    "backend/app/realtime/prompt_config.py": "855dcb8cfaa45c0288ac13344019d043e3673c11ca19ab564e9808ffa0d51e2d",
+    "backend/app/realtime/runtime.py": "c23f47977d85ec2e021e21944ee127df91154f027aed420b8f16dfecd983342a",
+    "backend/app/realtime/personas.py": "9b36c03a6b386751a45dab9913567b0d22b68abb8245cc4f4947b0b7d024dd1f",
+    "backend/app/realtime/xai.py": "1b33ccdda11f4e823e296e44bd906799be71916320fcc196dea5fc9b7a005740",
+    "backend/app/domain/services/telephony_session_config.py": "b08317afbfcd26c2339d1562f8ae61dcad00bf33da1d07aa4be6b564ad8ec516",
+    "backend/app/domain/services/voice_orchestrator.py": "676c61fa5d4c4681094e9c2fbc374898096bcdb32fe19decc5ac41e66df1a922",
+    "backend/app/services/scripts/prompts/versions.py": "931fe3d94ff60f71087033dc8ccf72a14d3319fc6f556d100e6937ca0d449fee",
+    "backend/tests/unit/test_realtime_quality_pass.py": "dd520670f22f77a44a4d5e2ae8bb20c187719d834479344514a0bfdb77949cc0",
+    "backend/tests/unit/test_realtime_profile_contract.py": "a72d7b37788258ee3678e9d1ad878147ef7b5152066a5b8cf0536a7e65633b66",
+    "backend/tests/unit/test_realtime_independent.py": "7fef4dca86648302ea163f69e6b7a767134751b98e8145d122078038fa86a0bc",
+    "backend/tests/unit/test_explicit_secret_boundary.py": "269435732115c55a5164693061a054727405eb3e624a928ac9f52b25e581d21c",
+    "backend/tests/unit/test_true_inbound_prompt_separation.py": "a9d7a922534b1ee29bc5b4d124732fe1a9757af60cb9436505df54936bd61ffc",
+    "backend/tests/unit/test_prompt_versions.py": "d7333cc9d461576a1b0b9a9ce9d3fa280b087e2a179e165c04ccb5e03a9c55ea"
+  },
+  "source_unchanged_during_final": true,
+  "final_inputs_match_source_commit": true,
+  "baseline": {
+    "failed": 2,
+    "warnings": 3,
+    "seconds": 4.63
+  },
+  "final": {
+    "passed": 222,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 108,
+    "modules": 6,
+    "seconds": 4.62
+  },
+  "artifacts_lf_sha256": {
+    "docs/sessions/2026-10-07-ag02-native-query-intent.md": "26110c8a1089488dc001ae29a950647268accdf4f6cbf8f0e4d211d8ababf6f9",
+    "docs/sessions/artifacts/ag02-native-query-intent/baseline.json": "384f2b42c5057a8485395e47d84b2fcb19154f8a39c5aeee6f2386ef22efe08e",
+    "docs/sessions/artifacts/ag02-native-query-intent/baseline.txt": "05913a65a46bce62156ed52a09d37f0dada5b10ea88adb24785d4b3ba0ba7274",
+    "docs/sessions/artifacts/ag02-native-query-intent/commands.json": "1130fa4c1737dff8fa39343734aafb052be9945bd8fab28e13d40fc7ee548892",
+    "docs/sessions/artifacts/ag02-native-query-intent/diff-check.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "docs/sessions/artifacts/ag02-native-query-intent/final.json": "37e757c85ec818ca178de1ac77869693feec95f0ca3385d96bd170e75eba3c2c",
+    "docs/sessions/artifacts/ag02-native-query-intent/final.txt": "ed349a98021cef3249d4ce72d0f2612d83751e7c9c57faa1323cf285733758ba",
+    "docs/sessions/artifacts/ag02-native-query-intent/lint.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "docs/sessions/artifacts/ag02-native-query-intent/runner.py": "fa4ba216137c5882f176859e4aacf785bf19cba6b6a51d6537d2dde6ed23be1f"
+  },
+  "limits": "No model behavior, provider, DB, speech, browser or customer qualification; no quality-gate change."
+}

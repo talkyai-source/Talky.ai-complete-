@@ -1,0 +1,45 @@
+{
+  "candidate": "69d09fe575831c42a14b28c0a7417ca1b388c492",
+  "scope": "Traditional knowledge instructions, setup scope, current live reads, actual streamer admission and safe provenance",
+  "before_repair": [
+    {
+      "cases": 7,
+      "failed": 7,
+      "contract": "no/weak/inline promise and outbound/inbound tenant/campaign mismatch",
+      "fixture_note": "Initial pinned fixture lacked depth; corrected then all seven failed for intended assertions."
+    },
+    {
+      "cases": 4,
+      "failed": 4,
+      "contract": "repeated live question after edit/disable/error/timeout was served from old local cache"
+    },
+    {
+      "cases": 1,
+      "failed": 1,
+      "contract": "poisoned inline qualifier line removed while price remained"
+    },
+    {
+      "cases": 7,
+      "failed": 7,
+      "contract": "profile hashes over-redacted inside JSON; nine negative identifier controls passed"
+    },
+    {
+      "cases": 1,
+      "failed": 1,
+      "contract": "source revision change not represented in dynamic version digest"
+    }
+  ],
+  "final_combined_tests": {
+    "passed": 791,
+    "skipped": 0,
+    "warnings": 368,
+    "command_artifact": "backend-final-command.json",
+    "output": "backend-final.txt"
+  },
+  "review": "Independent native-agent review found raw query logging, pre-normalization coverage logging and inconsistent weak-result wording; all repaired and regression-tested before source commit. Independent shared-agent review found no remaining material defect in scoped retrieval/update/admission changes.",
+  "limits": [
+    "Synthetic generated text tests prove actual prompt and submitted-speech admission, not provider reasoning or heard audio.",
+    "Persona registry unchanged because modified traditional blocks are dynamic; governed native prompt is realtime@6.",
+    "No live provider action, remote CI, push or deployment."
+  ]
+}

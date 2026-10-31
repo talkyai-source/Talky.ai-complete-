@@ -1,0 +1,51 @@
+{
+  "python": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "environment": {
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-model-sections-20261007\\backend",
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1"
+  },
+  "installed_versions": {
+    "pytest": "7.4.4",
+    "pytest-asyncio": "0.23.3",
+    "pydantic": "2.12.5",
+    "fastapi": "0.139.0",
+    "groq": "0.37.0"
+  },
+  "runs": [
+    {
+      "command": "python -m pytest backend/tests/unit/test_gemini_tools.py -q --tb=short --disable-warnings",
+      "log": "first-fixture.txt",
+      "passed": 3,
+      "failed": 9,
+      "scope": "Includes one incomplete migration of old query fixture; not valid baseline for new controls."
+    },
+    {
+      "command": "python -m pytest backend/tests/unit/test_gemini_tools.py -q --tb=short --disable-warnings",
+      "log": "baseline.txt",
+      "passed": 4,
+      "failed": 8,
+      "scope": "Corrected fixture; unchanged provider implementation."
+    },
+    {
+      "command": "python -m pytest backend/tests/unit/test_gemini_tools.py -q --tb=short --disable-warnings",
+      "log": "focused.txt",
+      "passed": 12,
+      "failed": 0
+    },
+    {
+      "command": "python docs/sessions/artifacts/ag02-gemini-sections/unit_probe.py final",
+      "log": "final.txt",
+      "result": "unit-final-result.json",
+      "passed": 94,
+      "failed": 0,
+      "warnings": 0,
+      "seconds": 4.61
+    }
+  ],
+  "lint": "21 existing diagnostics by code unchanged on two source paths; lint-comparison.json compares git f44af7d6 to tested source. No lint-clean claim.",
+  "diff_check": {
+    "command": "git diff --check",
+    "exit_code": 0
+  }
+}

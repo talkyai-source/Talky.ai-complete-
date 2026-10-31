@@ -1,0 +1,3179 @@
+FF.F................FF.......FF..F...................................... [ 39%]
+...........F..FFFFFFFFFFFFFF............................................ [ 78%]
+........................................                                 [100%]
+================================== FAILURES ===================================
+_ test_pricing_questions_get_extended_sentence_budget_for_custom_prompt_sessions _
+
+    def test_pricing_questions_get_extended_sentence_budget_for_custom_prompt_sessions():
+        service = VoicePipelineService(
+            stt_provider=MagicMock(),
+            llm_provider=AsyncMock(),
+            tts_provider=AsyncMock(),
+            media_gateway=AsyncMock(),
+        )
+    
+>       limit = service._response_max_sentences_for_turn(
+            _make_session(),
+            "Can you explain all your plans and pricing?",
+            has_custom_prompt=True,
+        )
+E       AttributeError: 'VoicePipelineService' object has no attribute '_response_max_sentences_for_turn'
+
+backend\tests\unit\test_voice_pipeline_service.py:45: AttributeError
+___________ test_non_pricing_questions_keep_default_sentence_budget ___________
+
+    def test_non_pricing_questions_keep_default_sentence_budget():
+        service = VoicePipelineService(
+            stt_provider=MagicMock(),
+            llm_provider=AsyncMock(),
+            tts_provider=AsyncMock(),
+            media_gateway=AsyncMock(),
+        )
+    
+>       limit = service._response_max_sentences_for_turn(
+            _make_session(),
+            "What does Talky do?",
+            has_custom_prompt=True,
+        )
+E       AttributeError: 'VoicePipelineService' object has no attribute '_response_max_sentences_for_turn'
+
+backend\tests\unit\test_voice_pipeline_service.py:62: AttributeError
+_____ test_streamed_response_strips_reasoning_and_keeps_grounded_pricing ______
+
+    @pytest.mark.asyncio
+    async def test_streamed_response_strips_reasoning_and_keeps_grounded_pricing():
+        service = VoicePipelineService(
+            stt_provider=MagicMock(),
+            llm_provider=_StreamingLLMProvider([
+                "<think>I should outline the pricing plan first.</think>",
+                "\n### Plans\n",
+                "1. **Basic** is $29 per month. ",
+                "2. **Professional** is $79 per month. ",
+                "3. **Enterprise** is custom pricing.",
+            ]),
+            tts_provider=AsyncMock(),
+            media_gateway=AsyncMock(),
+        )
+        service.latency_tracker = MagicMock()
+    
+        session = _make_session()
+        session.system_prompt = "Use plain spoken text only."
+        session.conversation_history = [
+            Message(role=MessageRole.USER, content="What are your packages and pricing?")
+        ]
+    
+        session.system_prompt += (
+            "\n<company_knowledge>Basic is $29 per month. Professional is $79 per month. "
+            "Enterprise is custom pricing.</company_knowledge>"
+        )
+        session.turn_id = 3
+        session.knowledge_mode = "inline"
+        service.synthesize_and_send_audio = AsyncMock(return_value=False)
+        service._barge_in_events[session.call_id] = session.barge_in_event
+        response, _, _ = await service._stream_llm_and_tts(session)
+        submitted = " ".join(c.args[1] for c in service.synthesize_and_send_audio.await_args_list)
+        assert response == submitted
+    
+        assert "<think>" not in response
+        assert "**" not in response
+        assert "#" not in response
+        assert "outline the pricing plan first" not in response
+        assert "Basic" in response
+        assert "Professional" in response
+>       assert "Enterprise" in response
+E       AssertionError: assert 'Enterprise' in 'Plans 1. Basic is $29 per month. 2. Professional is $79 per month.'
+
+backend\tests\unit\test_voice_pipeline_service.py:141: AssertionError
+________________ test_caller_dnc_persists_opt_out_and_hangs_up ________________
+
+    @pytest.mark.asyncio
+    async def test_caller_dnc_persists_opt_out_and_hangs_up():
+        # F-13: the deterministic DNC path SPOKE "I'll take you off the list" but
+        # never set _caller_opted_out, so teardown's opt-out purge never ran. It
+        # must now mirror the LLM-JSON path and flag the session.
+        service = _make_service_for_disposition(["Understood."])
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.current_user_input = "Please stop calling me."
+        websocket = AsyncMock()
+    
+>       await service.handle_turn_end(session, websocket)
+
+backend\tests\unit\test_voice_pipeline_service.py:663: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\domain\services\voice_pipeline_service.py:559: in handle_turn_end
+    return await self._turn_ender.handle(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.voice_pipeline.turn_ender.TurnEnder object at 0x0000013CA3310170>
+session = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...transcript_buffer=None, barge_in_event=<asyncio.locks.Event object at 0x0000013CA330B110 [unset]>, captured_slots=None)
+websocket = <AsyncMock id='1359947542944'>, source = 'final', user_text = None
+confidence = <object object at 0x0000013C9283EC20>
+transcript_alternatives = <object object at 0x0000013C9283EC90>
+
+    async def handle(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket] = None,
+        source: str = "final",
+        user_text: Optional[str] = None,
+        confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
+    ) -> None:
+        call_id = session.call_id
+        turn_started_at = time.monotonic()
+        # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
+        # session.current_user_input to "" before this (detached) task reads it,
+        # which would strand the turn as "Empty transcript, skipping" and
+        # silently drop the caller's utterance. Carrying the text makes the turn
+        # immune to that reset. Falls back to the session field for callers that
+        # don't pass it.
+        full_transcript = (
+            user_text if user_text is not None else session.current_user_input
+        ).strip()
+        resolved_contact_confidence = (
+            confidence
+            if confidence is not _CONFIDENCE_UNSET
+            else getattr(session, "_last_transcript_confidence", None)
+        )
+        resolved_contact_alternatives = (
+            tuple(transcript_alternatives or ())
+            if transcript_alternatives is not _CONTACT_EVIDENCE_UNSET
+            else tuple(getattr(session, "_last_transcript_alternatives", ()) or ())
+        )
+        tenant_id = getattr(session, "tenant_id", None)
+    
+        if not full_transcript:
+            logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
+            return
+    
+        # Turn-0 floor — protects the first AI reply (the one that "anchors"
+        # the conversation) from being driven by a misheard fragment. A bad
+        # turn 0 is uniquely costly: the LLM commits to a wrong topic and
+        # subsequent turns inherit that drift. A bad turn N+1 is a normal
+        # disfluency the model can recover from.
+        # Only the very first user utterance is gated; once the conversation
+        # is open we trust the existing repetitive/backchannel filters below.
+        _has_prior_user_turn_for_floor = any(
+            m.role == MessageRole.USER for m in session.conversation_history
+        )
+        if not _has_prior_user_turn_for_floor:
+            # F-05(ii): prefer the confidence captured synchronously at
+            # dispatch time (transcript_handler.py) over the live session
+            # attribute, which a later transcript event can have overwritten
+            # by the time this detached task body runs. Callers that don't
+            # pass confidence at all (e.g. the F-08 queued dispatch below,
+            # which is never turn-0) fall back to the live read unchanged.
+            resolved_confidence = (
+                confidence if confidence is not _CONFIDENCE_UNSET
+                else getattr(session, "_last_transcript_confidence", None)
+            )
+            min_conf, min_chars = _resolve_turn_0_floors(session)
+            reject_reason = _should_reject_turn_0(
+                full_transcript,
+                resolved_confidence,
+                min_confidence=min_conf,
+                min_alpha_chars=min_chars,
+            )
+            if reject_reason is not None:
+                logger.info(
+                    "turn_0_transcript_rejected reason=%s call=%s "
+                    "transcript_chars=%d confidence=%s min_conf=%s min_chars=%d "
+                    "— letting Flux re-emit",
+                    reject_reason, call_id[:12], len(full_transcript),
+                    resolved_confidence, min_conf, min_chars,
+                )
+                try:
+                    from app.infrastructure.metrics.voice_metrics import (
+                        record_turn_0_rejection,
+                    )
+                    record_turn_0_rejection(reject_reason)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice_metrics_rejection_record_failed err=%s", exc,
+                    )
+                # Clear so the next real transcript isn't merged with this one.
+                try:
+                    session.current_user_input = ""
+                except AttributeError:
+                    pass
+                # NEVER silent (Case 2): a dropped first utterance used to return
+                # to dead air, so the caller heard nothing until they spoke again
+                # — the single highest-abandon moment of a cold call. Speak a
+                # short reprompt so rejection is never the silent path. Fail-soft:
+                # a reprompt-TTS failure must not mask the drop.
+                try:
+                    reprompt = "Sorry, I didn't catch that — could you say that again?"
+                    interrupted = await self._p.synthesize_and_send_audio(
+                        session,
+                        reprompt,
+                        websocket,
+                    )
+                    if not interrupted and not getattr(session, "_tts_delivery_failed", False):
+                        from app.domain.models.conversation import Message as _Msg
+    
+                        # Keep the actual submitted clarification in context,
+                        # without treating rejected recognition as caller facts
+                        # or promoting a TTS submission to proof of hearing.
+                        session.conversation_history.append(
+                            _Msg(role=MessageRole.ASSISTANT, content=reprompt)
+                        )
+                        session._speculative_history_len = None
+                        self._p.transcript_service.accumulate_turn(
+                            call_id=call_id, role="assistant", content=reprompt,
+                            talklee_call_id=session.talklee_call_id, turn_index=session.turn_id,
+                            event_type="assistant_clarification", is_final=True,
+                            metadata={"delivery_evidence": "submitted"},
+                        )
+                        await self._flush_transcript(session)
+                except Exception:
+                    pass
+                return
+    
+        # Caller-first speech reaches the model unchanged, including a bare
+        # greeting. Do not play a separate scripted opener before this reply.
+    
+        # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
+        # where the STT model outputs repetitive nonsense text ("blah blah blah…").
+        # Heuristic: if a single word accounts for >50% of a 6+ word transcript,
+        # treat it as a hallucination and skip — avoids sending garbage to the LLM.
+        # EXCEPT a directed do-not-call (F-13 fix 2026-07-20): an emphatic
+        # "no no no no no no stop calling me" is >50% one word, so this guard
+        # used to drop the opt-out before it could be classified/persisted.
+        # A real STT hallucination almost never contains a verbatim DNC phrase,
+        # so exempting it is a safe trade against silently losing an opt-out.
+        if self._p._is_repetitive_transcript(full_transcript) and not contains_dnc(full_transcript):
+            logger.warning(
+                "Repetitive STT transcript likely hallucination, skipping turn",
+                extra={"call_id": call_id, "transcript_chars": len(full_transcript)},
+            )
+            return
+    
+        # Backchannel suppression — short listening sounds ("hmm",
+        # "yeah", "uh huh", "mm") are NOT real turns. Without this, the
+        # LLM generates a full response to a non-event and loses the
+        # conversation's thread. The persona prompts also instruct the
+        # model on this at the language level — belt AND braces.
+        #
+        # Exception: never suppress the callee's FIRST utterance of the
+        # call. In user-first mode that utterance IS the conversation
+        # opener (a "Hello?" that the STT may briefly mis-hear as "No.")
+        # — suppressing it leaves the agent silent, the callee repeats
+        # themselves, and 5–6 seconds of perceived dead air pile up
+        # before Flux finally lands a clean transcript. In agent-first
+        # mode the first user utterance is their reply to the greeting
+        # ("yeah", "sure", "uh-huh") and must reach the LLM as a real
+        # affirmative, not be filtered out as noise.
+        _has_prior_user_turn = _has_prior_user_turn_for_floor
+    
+        # Interruption lifecycle (gap #2). If the caller cut off ACTIVE agent
+        # speech (flagged by tts_playback when it silenced the agent), classify
+        # what they did and record it. Pure observability — the suppress / echo
+        # decisions below are unchanged. A "false" interruption (we stopped
+        # speaking for a backchannel / noise) is the signal operators alert on
+        # that the barge-in guard is too eager.
+        if getattr(session, "_agent_was_interrupted", False):
+            session._agent_was_interrupted = False  # consume per-turn
+            try:
+                from app.services.scripts.interruption_classifier import (
+                    classify_interruption,
+                    is_false_interruption,
+                    InterruptionType,
+                )
+                from app.infrastructure.metrics.voice_metrics import (
+                    record_interruption,
+                )
+    
+                _itype = classify_interruption(full_transcript)
+                record_interruption(
+                    _itype.value, false_interrupt=is_false_interruption(_itype),
+                )
+                if _itype == InterruptionType.ESCALATION:
+                    # Surface so the top-interrupted-calls review (Hamming) and
+                    # any future human-handoff can find these fast.
+                    logger.info(
+                        "interruption_escalation transcript_chars=%d call=%s",
+                        len(full_transcript), call_id[:12],
+                    )
+            except Exception as exc:  # metrics must never break a turn
+                logger.debug("interruption_classify_failed err=%s", exc)
+    
+        # Exception: if the agent's LAST turn was a QUESTION, a short
+        # "yep / yes / no / sure" is the ANSWER, not a listening noise —
+        # suppressing it strands the call in silence (observed 2026-07-08:
+        # agent asked "is that Sam?", caller said "Yep", it was dropped and
+        # the agent never replied). A question ends with "?" — when it does,
+        # let the affirmative through to the LLM.
+        #
+        # Checking only whether the WHOLE message ends in "?" missed an
+        # embedded permission question followed by a declarative clause
+        # (Dojo-PC opener: "Alex here from Dojo — got a minute? We're
+        # checking in on your payment setup." — ends in "."). The caller's
+        # "Yes." was dropped as a backchannel and the agent sat mute for
+        # 9.3s until the tester hung up (call 36357ad0, 2026-09-23 18:14:49;
+        # also 2b36df30, 2026-09-22). A question anywhere in the agent's
+        # last turn — i.e. ANY of its sentences ending in "?" — counts.
+        _agent_last_msg = next(
+            (m.content for m in reversed(session.conversation_history)
+             if m.role == MessageRole.ASSISTANT),
+            "",
+        )
+        _agent_asked_question = any(
+            _sentence.strip().endswith("?")
+            for _sentence in re.split(r"(?<=[.!?])\s+", _agent_last_msg.strip())
+            if _sentence.strip()
+        )
+    
+        if (
+            _is_backchannel(full_transcript)
+            and _has_prior_user_turn
+            and not _agent_asked_question
+        ):
+            logger.info(
+                "backchannel_suppressed transcript_chars=%d call=%s",
+                len(full_transcript), call_id[:12],
+            )
+            # A backchannel IS caller presence. It never enters history, so
+            # the silence monitor's turn-count check can't see it — stamp it
+            # so "Okay" doesn't get answered with "Sorry, did I lose you?"
+            # eight seconds later (Lukaz call, 2026-07-08).
+            try:
+                session._last_backchannel_monotonic = time.monotonic()
+            except Exception:
+                pass
+            # Clear the session's pending input so the old transcript
+            # doesn't carry into the next real turn.
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+            return
+        elif _is_backchannel(full_transcript):
+            # This branch is reached when the transcript IS a backchannel but one
+            # of the two exemptions applies. Log WHICH one: the message used to
+            # say "first user utterance" unconditionally, so a mid-call "Yes"
+            # answering "Are you the homeowner?" was reported as a turn-0 event.
+            # The behaviour was right; the reason was wrong, which is exactly
+            # what misleads an incident review.
+            _reason = (
+                "turn_0_first_utterance" if not _has_prior_user_turn
+                else "answers_agent_question"
+            )
+            logger.info(
+                "backchannel_allowed reason=%s transcript_chars=%d call=%s "
+                "agent_last_was_question=%s",
+                _reason, len(full_transcript), call_id[:12], _agent_asked_question,
+            )
+    
+        # Clear any barge-in event that was set by the user's own StartOfTurn that
+        # triggered this turn.  Deepgram Flux fires StartOfTurn for ALL speech —
+        # including normal listening-phase input — which sets barge_in_event via
+        # _on_barge_in_direct().  Without this clear, synthesize_and_send_audio sees
+        # the stale event as a "barge-in during LLM" and returns immediately without
+        # playing any audio, leaving the caller in silence.
+        # If the user speaks AGAIN while the LLM is generating, Deepgram fires a new
+        # StartOfTurn → event is set again → TTS is correctly suppressed at that point.
+        barge_in_event = self._p._barge_in_events.get(call_id)
+        if barge_in_event:
+            barge_in_event.clear()
+    
+        current_task = asyncio.current_task()
+        pending_task = self._p._pending_llm_tasks.get(call_id)
+        if pending_task and pending_task.done():
+            self._p._pending_llm_tasks.pop(call_id, None)
+            pending_task = None
+    
+        if pending_task and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — when this guard fires, a turn
+            # is silently dropped, which has historically masked "the
+            # agent went silent" mysteries during latency triage. INFO
+            # keeps it visible without polluting hot-path logs.
+            logger.info(
+                "turn_skipped_pending_task",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Guard: skip if a concurrent LLM/TTS (e.g. greeting) is already running.
+        # session.llm_active is set True in _send_outbound_greeting and in this
+        # function; it is reset to False in the finally block below.
+        if session.llm_active and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — same reason as above. If this
+            # ever fires on turn 0 of a real call, it indicates llm_active
+            # leaked True from a previous flow (e.g. a greeting that
+            # raised before its finally-reset ran).
+            logger.info(
+                "turn_skipped_llm_busy",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Self-echo guard: if the agent's own recent words were transcribed back
+        # into this caller turn (carrier echo + open mic during TTS), strip them.
+        # If nothing real remains, skip the turn — answering our own echo derails
+        # the call (observed in production). Short backchannels never match the
+        # 5+ word run, so they pass through untouched.
+        # EVERY agent utterance since the caller last spoke — not just the most
+        # recent one. That set is exactly the audio still capable of echoing
+        # into this turn, and it is self-limiting: normally one, TWO on the
+        # opening turn (the recording disclosure is now spoken before the
+        # greeting), three when a silence nudge intervened.
+        #
+        # Looking at only the last message was a latent assumption that exactly
+        # one agent utterance precedes each caller turn. The spoken recording
+        # disclosure broke it — the notice ends up two messages back, so it was
+        # never compared, and production transcripts show it being accepted as
+        # caller speech and answered:
+        #
+        #     User: This call may be recorded.        <- the agent's own notice
+        #     Assistant: happy to continue. ...       <- agent answers itself
+        #
+        # Bounding by "since the caller last spoke" rather than a fixed count is
+        # what stops a caller who legitimately echoes the agent's wording from a
+        # minute ago being stripped.
+        _agent_since_user: list[str] = []
+        for _m in reversed(session.conversation_history):
+            if _m.role == MessageRole.USER:
+                break
+            if _m.role == MessageRole.ASSISTANT and _m.content:
+                _agent_since_user.append(_m.content)
+        _deechoed = strip_self_echo_multi(full_transcript, _agent_since_user)
+        if _deechoed != full_transcript:
+            if not _deechoed.strip():
+                logger.info(
+                    "turn_skipped_self_echo",
+                    extra={
+                        "call_id": call_id,
+                        "turn_id": session.turn_id,
+                        "transcript_chars": len(full_transcript),
+                    },
+                )
+                return
+            logger.info(
+                "self_echo_stripped",
+                extra={
+                    "call_id": call_id,
+                    "before_chars": len(full_transcript),
+                    "after_chars": len(_deechoed),
+                },
+            )
+            full_transcript = _deechoed
+    
+        logger.info(
+            "turn_end",
+            extra={
+                "call_id": call_id,
+                "turn_id": session.turn_id,
+                "source": source,
+                "transcript_chars": len(full_transcript),
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+    
+        # The caller has yielded the floor. Releases any playback held by
+        # playback_gate.await_caller_pause — a FINAL answer that finished
+        # generating while the caller was still talking can now speak without
+        # talking over them.
+        from app.domain.services.voice_pipeline.playback_gate import (
+            mark_caller_stopped,
+        )
+        mark_caller_stopped(session)
+    
+        # (The stale barge-in event from the caller's own StartOfTurn was
+        # cleared above; nothing between there and here awaits, so a second
+        # clear could only ever wipe a NEW barge-in, which must survive.)
+    
+        # Persist a directed opt-out before the model reports its result.
+        # This fact does not prescribe wording or an identity dialogue.
+        if (not self._p._is_ask_ai_session(session)
+                and self._p._supports_llm_end_session_action(session)
+                and contains_dnc(full_transcript)):
+            from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+    
+            session._caller_opted_out = True
+            recorded = await purge_opt_out_before_farewell(session)
+>           session.conversation_history.append(Message(
+                role=MessageRole.SYSTEM,
+                content="Caller opt-out persistence result: " + (
+                    "recorded." if recorded else "unconfirmed; removal has not been confirmed."
+                ),
+            ))
+E           NameError: name 'Message' is not defined
+
+backend\app\domain\services\voice_pipeline\turn_ender.py:571: NameError
+__________________ test_caller_dnc_survives_repetition_guard __________________
+
+    @pytest.mark.asyncio
+    async def test_caller_dnc_survives_repetition_guard():
+        # F-13(d): an emphatic repeated "no ... stop calling me" is >50% one word,
+        # so the repetitive-STT guard used to drop it before classification. It must
+        # now reach the DNC path and persist the opt-out.
+        service = _make_service_for_disposition(["Understood."])
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.current_user_input = "no no no no no no stop calling me"
+        websocket = AsyncMock()
+    
+>       await service.handle_turn_end(session, websocket)
+
+backend\tests\unit\test_voice_pipeline_service.py:680: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\domain\services\voice_pipeline_service.py:559: in handle_turn_end
+    return await self._turn_ender.handle(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.voice_pipeline.turn_ender.TurnEnder object at 0x0000013CA32EDF40>
+session = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...transcript_buffer=None, barge_in_event=<asyncio.locks.Event object at 0x0000013CA32EEE70 [unset]>, captured_slots=None)
+websocket = <AsyncMock id='1359947427344'>, source = 'final', user_text = None
+confidence = <object object at 0x0000013C9283EC20>
+transcript_alternatives = <object object at 0x0000013C9283EC90>
+
+    async def handle(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket] = None,
+        source: str = "final",
+        user_text: Optional[str] = None,
+        confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
+    ) -> None:
+        call_id = session.call_id
+        turn_started_at = time.monotonic()
+        # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
+        # session.current_user_input to "" before this (detached) task reads it,
+        # which would strand the turn as "Empty transcript, skipping" and
+        # silently drop the caller's utterance. Carrying the text makes the turn
+        # immune to that reset. Falls back to the session field for callers that
+        # don't pass it.
+        full_transcript = (
+            user_text if user_text is not None else session.current_user_input
+        ).strip()
+        resolved_contact_confidence = (
+            confidence
+            if confidence is not _CONFIDENCE_UNSET
+            else getattr(session, "_last_transcript_confidence", None)
+        )
+        resolved_contact_alternatives = (
+            tuple(transcript_alternatives or ())
+            if transcript_alternatives is not _CONTACT_EVIDENCE_UNSET
+            else tuple(getattr(session, "_last_transcript_alternatives", ()) or ())
+        )
+        tenant_id = getattr(session, "tenant_id", None)
+    
+        if not full_transcript:
+            logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
+            return
+    
+        # Turn-0 floor — protects the first AI reply (the one that "anchors"
+        # the conversation) from being driven by a misheard fragment. A bad
+        # turn 0 is uniquely costly: the LLM commits to a wrong topic and
+        # subsequent turns inherit that drift. A bad turn N+1 is a normal
+        # disfluency the model can recover from.
+        # Only the very first user utterance is gated; once the conversation
+        # is open we trust the existing repetitive/backchannel filters below.
+        _has_prior_user_turn_for_floor = any(
+            m.role == MessageRole.USER for m in session.conversation_history
+        )
+        if not _has_prior_user_turn_for_floor:
+            # F-05(ii): prefer the confidence captured synchronously at
+            # dispatch time (transcript_handler.py) over the live session
+            # attribute, which a later transcript event can have overwritten
+            # by the time this detached task body runs. Callers that don't
+            # pass confidence at all (e.g. the F-08 queued dispatch below,
+            # which is never turn-0) fall back to the live read unchanged.
+            resolved_confidence = (
+                confidence if confidence is not _CONFIDENCE_UNSET
+                else getattr(session, "_last_transcript_confidence", None)
+            )
+            min_conf, min_chars = _resolve_turn_0_floors(session)
+            reject_reason = _should_reject_turn_0(
+                full_transcript,
+                resolved_confidence,
+                min_confidence=min_conf,
+                min_alpha_chars=min_chars,
+            )
+            if reject_reason is not None:
+                logger.info(
+                    "turn_0_transcript_rejected reason=%s call=%s "
+                    "transcript_chars=%d confidence=%s min_conf=%s min_chars=%d "
+                    "— letting Flux re-emit",
+                    reject_reason, call_id[:12], len(full_transcript),
+                    resolved_confidence, min_conf, min_chars,
+                )
+                try:
+                    from app.infrastructure.metrics.voice_metrics import (
+                        record_turn_0_rejection,
+                    )
+                    record_turn_0_rejection(reject_reason)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice_metrics_rejection_record_failed err=%s", exc,
+                    )
+                # Clear so the next real transcript isn't merged with this one.
+                try:
+                    session.current_user_input = ""
+                except AttributeError:
+                    pass
+                # NEVER silent (Case 2): a dropped first utterance used to return
+                # to dead air, so the caller heard nothing until they spoke again
+                # — the single highest-abandon moment of a cold call. Speak a
+                # short reprompt so rejection is never the silent path. Fail-soft:
+                # a reprompt-TTS failure must not mask the drop.
+                try:
+                    reprompt = "Sorry, I didn't catch that — could you say that again?"
+                    interrupted = await self._p.synthesize_and_send_audio(
+                        session,
+                        reprompt,
+                        websocket,
+                    )
+                    if not interrupted and not getattr(session, "_tts_delivery_failed", False):
+                        from app.domain.models.conversation import Message as _Msg
+    
+                        # Keep the actual submitted clarification in context,
+                        # without treating rejected recognition as caller facts
+                        # or promoting a TTS submission to proof of hearing.
+                        session.conversation_history.append(
+                            _Msg(role=MessageRole.ASSISTANT, content=reprompt)
+                        )
+                        session._speculative_history_len = None
+                        self._p.transcript_service.accumulate_turn(
+                            call_id=call_id, role="assistant", content=reprompt,
+                            talklee_call_id=session.talklee_call_id, turn_index=session.turn_id,
+                            event_type="assistant_clarification", is_final=True,
+                            metadata={"delivery_evidence": "submitted"},
+                        )
+                        await self._flush_transcript(session)
+                except Exception:
+                    pass
+                return
+    
+        # Caller-first speech reaches the model unchanged, including a bare
+        # greeting. Do not play a separate scripted opener before this reply.
+    
+        # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
+        # where the STT model outputs repetitive nonsense text ("blah blah blah…").
+        # Heuristic: if a single word accounts for >50% of a 6+ word transcript,
+        # treat it as a hallucination and skip — avoids sending garbage to the LLM.
+        # EXCEPT a directed do-not-call (F-13 fix 2026-07-20): an emphatic
+        # "no no no no no no stop calling me" is >50% one word, so this guard
+        # used to drop the opt-out before it could be classified/persisted.
+        # A real STT hallucination almost never contains a verbatim DNC phrase,
+        # so exempting it is a safe trade against silently losing an opt-out.
+        if self._p._is_repetitive_transcript(full_transcript) and not contains_dnc(full_transcript):
+            logger.warning(
+                "Repetitive STT transcript likely hallucination, skipping turn",
+                extra={"call_id": call_id, "transcript_chars": len(full_transcript)},
+            )
+            return
+    
+        # Backchannel suppression — short listening sounds ("hmm",
+        # "yeah", "uh huh", "mm") are NOT real turns. Without this, the
+        # LLM generates a full response to a non-event and loses the
+        # conversation's thread. The persona prompts also instruct the
+        # model on this at the language level — belt AND braces.
+        #
+        # Exception: never suppress the callee's FIRST utterance of the
+        # call. In user-first mode that utterance IS the conversation
+        # opener (a "Hello?" that the STT may briefly mis-hear as "No.")
+        # — suppressing it leaves the agent silent, the callee repeats
+        # themselves, and 5–6 seconds of perceived dead air pile up
+        # before Flux finally lands a clean transcript. In agent-first
+        # mode the first user utterance is their reply to the greeting
+        # ("yeah", "sure", "uh-huh") and must reach the LLM as a real
+        # affirmative, not be filtered out as noise.
+        _has_prior_user_turn = _has_prior_user_turn_for_floor
+    
+        # Interruption lifecycle (gap #2). If the caller cut off ACTIVE agent
+        # speech (flagged by tts_playback when it silenced the agent), classify
+        # what they did and record it. Pure observability — the suppress / echo
+        # decisions below are unchanged. A "false" interruption (we stopped
+        # speaking for a backchannel / noise) is the signal operators alert on
+        # that the barge-in guard is too eager.
+        if getattr(session, "_agent_was_interrupted", False):
+            session._agent_was_interrupted = False  # consume per-turn
+            try:
+                from app.services.scripts.interruption_classifier import (
+                    classify_interruption,
+                    is_false_interruption,
+                    InterruptionType,
+                )
+                from app.infrastructure.metrics.voice_metrics import (
+                    record_interruption,
+                )
+    
+                _itype = classify_interruption(full_transcript)
+                record_interruption(
+                    _itype.value, false_interrupt=is_false_interruption(_itype),
+                )
+                if _itype == InterruptionType.ESCALATION:
+                    # Surface so the top-interrupted-calls review (Hamming) and
+                    # any future human-handoff can find these fast.
+                    logger.info(
+                        "interruption_escalation transcript_chars=%d call=%s",
+                        len(full_transcript), call_id[:12],
+                    )
+            except Exception as exc:  # metrics must never break a turn
+                logger.debug("interruption_classify_failed err=%s", exc)
+    
+        # Exception: if the agent's LAST turn was a QUESTION, a short
+        # "yep / yes / no / sure" is the ANSWER, not a listening noise —
+        # suppressing it strands the call in silence (observed 2026-07-08:
+        # agent asked "is that Sam?", caller said "Yep", it was dropped and
+        # the agent never replied). A question ends with "?" — when it does,
+        # let the affirmative through to the LLM.
+        #
+        # Checking only whether the WHOLE message ends in "?" missed an
+        # embedded permission question followed by a declarative clause
+        # (Dojo-PC opener: "Alex here from Dojo — got a minute? We're
+        # checking in on your payment setup." — ends in "."). The caller's
+        # "Yes." was dropped as a backchannel and the agent sat mute for
+        # 9.3s until the tester hung up (call 36357ad0, 2026-09-23 18:14:49;
+        # also 2b36df30, 2026-09-22). A question anywhere in the agent's
+        # last turn — i.e. ANY of its sentences ending in "?" — counts.
+        _agent_last_msg = next(
+            (m.content for m in reversed(session.conversation_history)
+             if m.role == MessageRole.ASSISTANT),
+            "",
+        )
+        _agent_asked_question = any(
+            _sentence.strip().endswith("?")
+            for _sentence in re.split(r"(?<=[.!?])\s+", _agent_last_msg.strip())
+            if _sentence.strip()
+        )
+    
+        if (
+            _is_backchannel(full_transcript)
+            and _has_prior_user_turn
+            and not _agent_asked_question
+        ):
+            logger.info(
+                "backchannel_suppressed transcript_chars=%d call=%s",
+                len(full_transcript), call_id[:12],
+            )
+            # A backchannel IS caller presence. It never enters history, so
+            # the silence monitor's turn-count check can't see it — stamp it
+            # so "Okay" doesn't get answered with "Sorry, did I lose you?"
+            # eight seconds later (Lukaz call, 2026-07-08).
+            try:
+                session._last_backchannel_monotonic = time.monotonic()
+            except Exception:
+                pass
+            # Clear the session's pending input so the old transcript
+            # doesn't carry into the next real turn.
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+            return
+        elif _is_backchannel(full_transcript):
+            # This branch is reached when the transcript IS a backchannel but one
+            # of the two exemptions applies. Log WHICH one: the message used to
+            # say "first user utterance" unconditionally, so a mid-call "Yes"
+            # answering "Are you the homeowner?" was reported as a turn-0 event.
+            # The behaviour was right; the reason was wrong, which is exactly
+            # what misleads an incident review.
+            _reason = (
+                "turn_0_first_utterance" if not _has_prior_user_turn
+                else "answers_agent_question"
+            )
+            logger.info(
+                "backchannel_allowed reason=%s transcript_chars=%d call=%s "
+                "agent_last_was_question=%s",
+                _reason, len(full_transcript), call_id[:12], _agent_asked_question,
+            )
+    
+        # Clear any barge-in event that was set by the user's own StartOfTurn that
+        # triggered this turn.  Deepgram Flux fires StartOfTurn for ALL speech —
+        # including normal listening-phase input — which sets barge_in_event via
+        # _on_barge_in_direct().  Without this clear, synthesize_and_send_audio sees
+        # the stale event as a "barge-in during LLM" and returns immediately without
+        # playing any audio, leaving the caller in silence.
+        # If the user speaks AGAIN while the LLM is generating, Deepgram fires a new
+        # StartOfTurn → event is set again → TTS is correctly suppressed at that point.
+        barge_in_event = self._p._barge_in_events.get(call_id)
+        if barge_in_event:
+            barge_in_event.clear()
+    
+        current_task = asyncio.current_task()
+        pending_task = self._p._pending_llm_tasks.get(call_id)
+        if pending_task and pending_task.done():
+            self._p._pending_llm_tasks.pop(call_id, None)
+            pending_task = None
+    
+        if pending_task and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — when this guard fires, a turn
+            # is silently dropped, which has historically masked "the
+            # agent went silent" mysteries during latency triage. INFO
+            # keeps it visible without polluting hot-path logs.
+            logger.info(
+                "turn_skipped_pending_task",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Guard: skip if a concurrent LLM/TTS (e.g. greeting) is already running.
+        # session.llm_active is set True in _send_outbound_greeting and in this
+        # function; it is reset to False in the finally block below.
+        if session.llm_active and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — same reason as above. If this
+            # ever fires on turn 0 of a real call, it indicates llm_active
+            # leaked True from a previous flow (e.g. a greeting that
+            # raised before its finally-reset ran).
+            logger.info(
+                "turn_skipped_llm_busy",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Self-echo guard: if the agent's own recent words were transcribed back
+        # into this caller turn (carrier echo + open mic during TTS), strip them.
+        # If nothing real remains, skip the turn — answering our own echo derails
+        # the call (observed in production). Short backchannels never match the
+        # 5+ word run, so they pass through untouched.
+        # EVERY agent utterance since the caller last spoke — not just the most
+        # recent one. That set is exactly the audio still capable of echoing
+        # into this turn, and it is self-limiting: normally one, TWO on the
+        # opening turn (the recording disclosure is now spoken before the
+        # greeting), three when a silence nudge intervened.
+        #
+        # Looking at only the last message was a latent assumption that exactly
+        # one agent utterance precedes each caller turn. The spoken recording
+        # disclosure broke it — the notice ends up two messages back, so it was
+        # never compared, and production transcripts show it being accepted as
+        # caller speech and answered:
+        #
+        #     User: This call may be recorded.        <- the agent's own notice
+        #     Assistant: happy to continue. ...       <- agent answers itself
+        #
+        # Bounding by "since the caller last spoke" rather than a fixed count is
+        # what stops a caller who legitimately echoes the agent's wording from a
+        # minute ago being stripped.
+        _agent_since_user: list[str] = []
+        for _m in reversed(session.conversation_history):
+            if _m.role == MessageRole.USER:
+                break
+            if _m.role == MessageRole.ASSISTANT and _m.content:
+                _agent_since_user.append(_m.content)
+        _deechoed = strip_self_echo_multi(full_transcript, _agent_since_user)
+        if _deechoed != full_transcript:
+            if not _deechoed.strip():
+                logger.info(
+                    "turn_skipped_self_echo",
+                    extra={
+                        "call_id": call_id,
+                        "turn_id": session.turn_id,
+                        "transcript_chars": len(full_transcript),
+                    },
+                )
+                return
+            logger.info(
+                "self_echo_stripped",
+                extra={
+                    "call_id": call_id,
+                    "before_chars": len(full_transcript),
+                    "after_chars": len(_deechoed),
+                },
+            )
+            full_transcript = _deechoed
+    
+        logger.info(
+            "turn_end",
+            extra={
+                "call_id": call_id,
+                "turn_id": session.turn_id,
+                "source": source,
+                "transcript_chars": len(full_transcript),
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+    
+        # The caller has yielded the floor. Releases any playback held by
+        # playback_gate.await_caller_pause — a FINAL answer that finished
+        # generating while the caller was still talking can now speak without
+        # talking over them.
+        from app.domain.services.voice_pipeline.playback_gate import (
+            mark_caller_stopped,
+        )
+        mark_caller_stopped(session)
+    
+        # (The stale barge-in event from the caller's own StartOfTurn was
+        # cleared above; nothing between there and here awaits, so a second
+        # clear could only ever wipe a NEW barge-in, which must survive.)
+    
+        # Persist a directed opt-out before the model reports its result.
+        # This fact does not prescribe wording or an identity dialogue.
+        if (not self._p._is_ask_ai_session(session)
+                and self._p._supports_llm_end_session_action(session)
+                and contains_dnc(full_transcript)):
+            from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+    
+            session._caller_opted_out = True
+            recorded = await purge_opt_out_before_farewell(session)
+>           session.conversation_history.append(Message(
+                role=MessageRole.SYSTEM,
+                content="Caller opt-out persistence result: " + (
+                    "recorded." if recorded else "unconfirmed; removal has not been confirmed."
+                ),
+            ))
+E           NameError: name 'Message' is not defined
+
+backend\app\domain\services\voice_pipeline\turn_ender.py:571: NameError
+__________ test_dnc_record_is_written_before_the_farewell_is_spoken ___________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA31C1E20>
+
+    @pytest.mark.asyncio
+    async def test_dnc_record_is_written_before_the_farewell_is_spoken(monkeypatch):
+        from app.domain.services.dialer import opt_out as opt_out_mod
+    
+        order: list[str] = []
+    
+        async def fake_purge(session, **_kw):
+            order.append("purge")
+            return True
+    
+        monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", fake_purge)
+    
+        service = _make_service_for_disposition(["Understood."])
+        original_tts = service.synthesize_and_send_audio
+    
+        async def spy_tts(session, text, websocket, **kw):
+            order.append(f"speak:{text[:20]}")
+            return await original_tts(session, text, websocket, **kw)
+    
+        service.synthesize_and_send_audio = spy_tts
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.current_user_input = "Please stop calling me."
+    
+>       await service.handle_turn_end(session, AsyncMock())
+
+backend\tests\unit\test_voice_pipeline_service.py:932: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\domain\services\voice_pipeline_service.py:559: in handle_turn_end
+    return await self._turn_ender.handle(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.voice_pipeline.turn_ender.TurnEnder object at 0x0000013CA276E9F0>
+session = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...transcript_buffer=None, barge_in_event=<asyncio.locks.Event object at 0x0000013CA276DB80 [unset]>, captured_slots=None)
+websocket = <AsyncMock id='1359935363728'>, source = 'final', user_text = None
+confidence = <object object at 0x0000013C9283EC20>
+transcript_alternatives = <object object at 0x0000013C9283EC90>
+
+    async def handle(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket] = None,
+        source: str = "final",
+        user_text: Optional[str] = None,
+        confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
+    ) -> None:
+        call_id = session.call_id
+        turn_started_at = time.monotonic()
+        # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
+        # session.current_user_input to "" before this (detached) task reads it,
+        # which would strand the turn as "Empty transcript, skipping" and
+        # silently drop the caller's utterance. Carrying the text makes the turn
+        # immune to that reset. Falls back to the session field for callers that
+        # don't pass it.
+        full_transcript = (
+            user_text if user_text is not None else session.current_user_input
+        ).strip()
+        resolved_contact_confidence = (
+            confidence
+            if confidence is not _CONFIDENCE_UNSET
+            else getattr(session, "_last_transcript_confidence", None)
+        )
+        resolved_contact_alternatives = (
+            tuple(transcript_alternatives or ())
+            if transcript_alternatives is not _CONTACT_EVIDENCE_UNSET
+            else tuple(getattr(session, "_last_transcript_alternatives", ()) or ())
+        )
+        tenant_id = getattr(session, "tenant_id", None)
+    
+        if not full_transcript:
+            logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
+            return
+    
+        # Turn-0 floor — protects the first AI reply (the one that "anchors"
+        # the conversation) from being driven by a misheard fragment. A bad
+        # turn 0 is uniquely costly: the LLM commits to a wrong topic and
+        # subsequent turns inherit that drift. A bad turn N+1 is a normal
+        # disfluency the model can recover from.
+        # Only the very first user utterance is gated; once the conversation
+        # is open we trust the existing repetitive/backchannel filters below.
+        _has_prior_user_turn_for_floor = any(
+            m.role == MessageRole.USER for m in session.conversation_history
+        )
+        if not _has_prior_user_turn_for_floor:
+            # F-05(ii): prefer the confidence captured synchronously at
+            # dispatch time (transcript_handler.py) over the live session
+            # attribute, which a later transcript event can have overwritten
+            # by the time this detached task body runs. Callers that don't
+            # pass confidence at all (e.g. the F-08 queued dispatch below,
+            # which is never turn-0) fall back to the live read unchanged.
+            resolved_confidence = (
+                confidence if confidence is not _CONFIDENCE_UNSET
+                else getattr(session, "_last_transcript_confidence", None)
+            )
+            min_conf, min_chars = _resolve_turn_0_floors(session)
+            reject_reason = _should_reject_turn_0(
+                full_transcript,
+                resolved_confidence,
+                min_confidence=min_conf,
+                min_alpha_chars=min_chars,
+            )
+            if reject_reason is not None:
+                logger.info(
+                    "turn_0_transcript_rejected reason=%s call=%s "
+                    "transcript_chars=%d confidence=%s min_conf=%s min_chars=%d "
+                    "— letting Flux re-emit",
+                    reject_reason, call_id[:12], len(full_transcript),
+                    resolved_confidence, min_conf, min_chars,
+                )
+                try:
+                    from app.infrastructure.metrics.voice_metrics import (
+                        record_turn_0_rejection,
+                    )
+                    record_turn_0_rejection(reject_reason)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice_metrics_rejection_record_failed err=%s", exc,
+                    )
+                # Clear so the next real transcript isn't merged with this one.
+                try:
+                    session.current_user_input = ""
+                except AttributeError:
+                    pass
+                # NEVER silent (Case 2): a dropped first utterance used to return
+                # to dead air, so the caller heard nothing until they spoke again
+                # — the single highest-abandon moment of a cold call. Speak a
+                # short reprompt so rejection is never the silent path. Fail-soft:
+                # a reprompt-TTS failure must not mask the drop.
+                try:
+                    reprompt = "Sorry, I didn't catch that — could you say that again?"
+                    interrupted = await self._p.synthesize_and_send_audio(
+                        session,
+                        reprompt,
+                        websocket,
+                    )
+                    if not interrupted and not getattr(session, "_tts_delivery_failed", False):
+                        from app.domain.models.conversation import Message as _Msg
+    
+                        # Keep the actual submitted clarification in context,
+                        # without treating rejected recognition as caller facts
+                        # or promoting a TTS submission to proof of hearing.
+                        session.conversation_history.append(
+                            _Msg(role=MessageRole.ASSISTANT, content=reprompt)
+                        )
+                        session._speculative_history_len = None
+                        self._p.transcript_service.accumulate_turn(
+                            call_id=call_id, role="assistant", content=reprompt,
+                            talklee_call_id=session.talklee_call_id, turn_index=session.turn_id,
+                            event_type="assistant_clarification", is_final=True,
+                            metadata={"delivery_evidence": "submitted"},
+                        )
+                        await self._flush_transcript(session)
+                except Exception:
+                    pass
+                return
+    
+        # Caller-first speech reaches the model unchanged, including a bare
+        # greeting. Do not play a separate scripted opener before this reply.
+    
+        # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
+        # where the STT model outputs repetitive nonsense text ("blah blah blah…").
+        # Heuristic: if a single word accounts for >50% of a 6+ word transcript,
+        # treat it as a hallucination and skip — avoids sending garbage to the LLM.
+        # EXCEPT a directed do-not-call (F-13 fix 2026-07-20): an emphatic
+        # "no no no no no no stop calling me" is >50% one word, so this guard
+        # used to drop the opt-out before it could be classified/persisted.
+        # A real STT hallucination almost never contains a verbatim DNC phrase,
+        # so exempting it is a safe trade against silently losing an opt-out.
+        if self._p._is_repetitive_transcript(full_transcript) and not contains_dnc(full_transcript):
+            logger.warning(
+                "Repetitive STT transcript likely hallucination, skipping turn",
+                extra={"call_id": call_id, "transcript_chars": len(full_transcript)},
+            )
+            return
+    
+        # Backchannel suppression — short listening sounds ("hmm",
+        # "yeah", "uh huh", "mm") are NOT real turns. Without this, the
+        # LLM generates a full response to a non-event and loses the
+        # conversation's thread. The persona prompts also instruct the
+        # model on this at the language level — belt AND braces.
+        #
+        # Exception: never suppress the callee's FIRST utterance of the
+        # call. In user-first mode that utterance IS the conversation
+        # opener (a "Hello?" that the STT may briefly mis-hear as "No.")
+        # — suppressing it leaves the agent silent, the callee repeats
+        # themselves, and 5–6 seconds of perceived dead air pile up
+        # before Flux finally lands a clean transcript. In agent-first
+        # mode the first user utterance is their reply to the greeting
+        # ("yeah", "sure", "uh-huh") and must reach the LLM as a real
+        # affirmative, not be filtered out as noise.
+        _has_prior_user_turn = _has_prior_user_turn_for_floor
+    
+        # Interruption lifecycle (gap #2). If the caller cut off ACTIVE agent
+        # speech (flagged by tts_playback when it silenced the agent), classify
+        # what they did and record it. Pure observability — the suppress / echo
+        # decisions below are unchanged. A "false" interruption (we stopped
+        # speaking for a backchannel / noise) is the signal operators alert on
+        # that the barge-in guard is too eager.
+        if getattr(session, "_agent_was_interrupted", False):
+            session._agent_was_interrupted = False  # consume per-turn
+            try:
+                from app.services.scripts.interruption_classifier import (
+                    classify_interruption,
+                    is_false_interruption,
+                    InterruptionType,
+                )
+                from app.infrastructure.metrics.voice_metrics import (
+                    record_interruption,
+                )
+    
+                _itype = classify_interruption(full_transcript)
+                record_interruption(
+                    _itype.value, false_interrupt=is_false_interruption(_itype),
+                )
+                if _itype == InterruptionType.ESCALATION:
+                    # Surface so the top-interrupted-calls review (Hamming) and
+                    # any future human-handoff can find these fast.
+                    logger.info(
+                        "interruption_escalation transcript_chars=%d call=%s",
+                        len(full_transcript), call_id[:12],
+                    )
+            except Exception as exc:  # metrics must never break a turn
+                logger.debug("interruption_classify_failed err=%s", exc)
+    
+        # Exception: if the agent's LAST turn was a QUESTION, a short
+        # "yep / yes / no / sure" is the ANSWER, not a listening noise —
+        # suppressing it strands the call in silence (observed 2026-07-08:
+        # agent asked "is that Sam?", caller said "Yep", it was dropped and
+        # the agent never replied). A question ends with "?" — when it does,
+        # let the affirmative through to the LLM.
+        #
+        # Checking only whether the WHOLE message ends in "?" missed an
+        # embedded permission question followed by a declarative clause
+        # (Dojo-PC opener: "Alex here from Dojo — got a minute? We're
+        # checking in on your payment setup." — ends in "."). The caller's
+        # "Yes." was dropped as a backchannel and the agent sat mute for
+        # 9.3s until the tester hung up (call 36357ad0, 2026-09-23 18:14:49;
+        # also 2b36df30, 2026-09-22). A question anywhere in the agent's
+        # last turn — i.e. ANY of its sentences ending in "?" — counts.
+        _agent_last_msg = next(
+            (m.content for m in reversed(session.conversation_history)
+             if m.role == MessageRole.ASSISTANT),
+            "",
+        )
+        _agent_asked_question = any(
+            _sentence.strip().endswith("?")
+            for _sentence in re.split(r"(?<=[.!?])\s+", _agent_last_msg.strip())
+            if _sentence.strip()
+        )
+    
+        if (
+            _is_backchannel(full_transcript)
+            and _has_prior_user_turn
+            and not _agent_asked_question
+        ):
+            logger.info(
+                "backchannel_suppressed transcript_chars=%d call=%s",
+                len(full_transcript), call_id[:12],
+            )
+            # A backchannel IS caller presence. It never enters history, so
+            # the silence monitor's turn-count check can't see it — stamp it
+            # so "Okay" doesn't get answered with "Sorry, did I lose you?"
+            # eight seconds later (Lukaz call, 2026-07-08).
+            try:
+                session._last_backchannel_monotonic = time.monotonic()
+            except Exception:
+                pass
+            # Clear the session's pending input so the old transcript
+            # doesn't carry into the next real turn.
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+            return
+        elif _is_backchannel(full_transcript):
+            # This branch is reached when the transcript IS a backchannel but one
+            # of the two exemptions applies. Log WHICH one: the message used to
+            # say "first user utterance" unconditionally, so a mid-call "Yes"
+            # answering "Are you the homeowner?" was reported as a turn-0 event.
+            # The behaviour was right; the reason was wrong, which is exactly
+            # what misleads an incident review.
+            _reason = (
+                "turn_0_first_utterance" if not _has_prior_user_turn
+                else "answers_agent_question"
+            )
+            logger.info(
+                "backchannel_allowed reason=%s transcript_chars=%d call=%s "
+                "agent_last_was_question=%s",
+                _reason, len(full_transcript), call_id[:12], _agent_asked_question,
+            )
+    
+        # Clear any barge-in event that was set by the user's own StartOfTurn that
+        # triggered this turn.  Deepgram Flux fires StartOfTurn for ALL speech —
+        # including normal listening-phase input — which sets barge_in_event via
+        # _on_barge_in_direct().  Without this clear, synthesize_and_send_audio sees
+        # the stale event as a "barge-in during LLM" and returns immediately without
+        # playing any audio, leaving the caller in silence.
+        # If the user speaks AGAIN while the LLM is generating, Deepgram fires a new
+        # StartOfTurn → event is set again → TTS is correctly suppressed at that point.
+        barge_in_event = self._p._barge_in_events.get(call_id)
+        if barge_in_event:
+            barge_in_event.clear()
+    
+        current_task = asyncio.current_task()
+        pending_task = self._p._pending_llm_tasks.get(call_id)
+        if pending_task and pending_task.done():
+            self._p._pending_llm_tasks.pop(call_id, None)
+            pending_task = None
+    
+        if pending_task and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — when this guard fires, a turn
+            # is silently dropped, which has historically masked "the
+            # agent went silent" mysteries during latency triage. INFO
+            # keeps it visible without polluting hot-path logs.
+            logger.info(
+                "turn_skipped_pending_task",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Guard: skip if a concurrent LLM/TTS (e.g. greeting) is already running.
+        # session.llm_active is set True in _send_outbound_greeting and in this
+        # function; it is reset to False in the finally block below.
+        if session.llm_active and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — same reason as above. If this
+            # ever fires on turn 0 of a real call, it indicates llm_active
+            # leaked True from a previous flow (e.g. a greeting that
+            # raised before its finally-reset ran).
+            logger.info(
+                "turn_skipped_llm_busy",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Self-echo guard: if the agent's own recent words were transcribed back
+        # into this caller turn (carrier echo + open mic during TTS), strip them.
+        # If nothing real remains, skip the turn — answering our own echo derails
+        # the call (observed in production). Short backchannels never match the
+        # 5+ word run, so they pass through untouched.
+        # EVERY agent utterance since the caller last spoke — not just the most
+        # recent one. That set is exactly the audio still capable of echoing
+        # into this turn, and it is self-limiting: normally one, TWO on the
+        # opening turn (the recording disclosure is now spoken before the
+        # greeting), three when a silence nudge intervened.
+        #
+        # Looking at only the last message was a latent assumption that exactly
+        # one agent utterance precedes each caller turn. The spoken recording
+        # disclosure broke it — the notice ends up two messages back, so it was
+        # never compared, and production transcripts show it being accepted as
+        # caller speech and answered:
+        #
+        #     User: This call may be recorded.        <- the agent's own notice
+        #     Assistant: happy to continue. ...       <- agent answers itself
+        #
+        # Bounding by "since the caller last spoke" rather than a fixed count is
+        # what stops a caller who legitimately echoes the agent's wording from a
+        # minute ago being stripped.
+        _agent_since_user: list[str] = []
+        for _m in reversed(session.conversation_history):
+            if _m.role == MessageRole.USER:
+                break
+            if _m.role == MessageRole.ASSISTANT and _m.content:
+                _agent_since_user.append(_m.content)
+        _deechoed = strip_self_echo_multi(full_transcript, _agent_since_user)
+        if _deechoed != full_transcript:
+            if not _deechoed.strip():
+                logger.info(
+                    "turn_skipped_self_echo",
+                    extra={
+                        "call_id": call_id,
+                        "turn_id": session.turn_id,
+                        "transcript_chars": len(full_transcript),
+                    },
+                )
+                return
+            logger.info(
+                "self_echo_stripped",
+                extra={
+                    "call_id": call_id,
+                    "before_chars": len(full_transcript),
+                    "after_chars": len(_deechoed),
+                },
+            )
+            full_transcript = _deechoed
+    
+        logger.info(
+            "turn_end",
+            extra={
+                "call_id": call_id,
+                "turn_id": session.turn_id,
+                "source": source,
+                "transcript_chars": len(full_transcript),
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+    
+        # The caller has yielded the floor. Releases any playback held by
+        # playback_gate.await_caller_pause — a FINAL answer that finished
+        # generating while the caller was still talking can now speak without
+        # talking over them.
+        from app.domain.services.voice_pipeline.playback_gate import (
+            mark_caller_stopped,
+        )
+        mark_caller_stopped(session)
+    
+        # (The stale barge-in event from the caller's own StartOfTurn was
+        # cleared above; nothing between there and here awaits, so a second
+        # clear could only ever wipe a NEW barge-in, which must survive.)
+    
+        # Persist a directed opt-out before the model reports its result.
+        # This fact does not prescribe wording or an identity dialogue.
+        if (not self._p._is_ask_ai_session(session)
+                and self._p._supports_llm_end_session_action(session)
+                and contains_dnc(full_transcript)):
+            from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+    
+            session._caller_opted_out = True
+            recorded = await purge_opt_out_before_farewell(session)
+>           session.conversation_history.append(Message(
+                role=MessageRole.SYSTEM,
+                content="Caller opt-out persistence result: " + (
+                    "recorded." if recorded else "unconfirmed; removal has not been confirmed."
+                ),
+            ))
+E           NameError: name 'Message' is not defined
+
+backend\app\domain\services\voice_pipeline\turn_ender.py:571: NameError
+________________ test_failed_dnc_write_is_not_confirmed_aloud _________________
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA314D400>
+
+    @pytest.mark.asyncio
+    async def test_failed_dnc_write_is_not_confirmed_aloud(monkeypatch):
+        from app.domain.services.dialer import opt_out as opt_out_mod
+    
+        async def failing_purge(session, **_kw):
+            return False
+    
+        monkeypatch.setattr(opt_out_mod, "purge_opt_out_before_farewell", failing_purge)
+    
+        service = _make_service_for_disposition(["Understood."])
+        spoken: list[str] = []
+    
+        async def spy_tts(session, text, websocket, **kw):
+            spoken.append(text)
+            return False
+    
+        service.synthesize_and_send_audio = spy_tts
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.current_user_input = "Please stop calling me."
+    
+>       await service.handle_turn_end(session, AsyncMock())
+
+backend\tests\unit\test_voice_pipeline_service.py:960: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\domain\services\voice_pipeline_service.py:559: in handle_turn_end
+    return await self._turn_ender.handle(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.voice_pipeline.turn_ender.TurnEnder object at 0x0000013CA3241580>
+session = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...transcript_buffer=None, barge_in_event=<asyncio.locks.Event object at 0x0000013CA32404A0 [unset]>, captured_slots=None)
+websocket = <AsyncMock id='1359946712080'>, source = 'final', user_text = None
+confidence = <object object at 0x0000013C9283EC20>
+transcript_alternatives = <object object at 0x0000013C9283EC90>
+
+    async def handle(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket] = None,
+        source: str = "final",
+        user_text: Optional[str] = None,
+        confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
+    ) -> None:
+        call_id = session.call_id
+        turn_started_at = time.monotonic()
+        # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
+        # session.current_user_input to "" before this (detached) task reads it,
+        # which would strand the turn as "Empty transcript, skipping" and
+        # silently drop the caller's utterance. Carrying the text makes the turn
+        # immune to that reset. Falls back to the session field for callers that
+        # don't pass it.
+        full_transcript = (
+            user_text if user_text is not None else session.current_user_input
+        ).strip()
+        resolved_contact_confidence = (
+            confidence
+            if confidence is not _CONFIDENCE_UNSET
+            else getattr(session, "_last_transcript_confidence", None)
+        )
+        resolved_contact_alternatives = (
+            tuple(transcript_alternatives or ())
+            if transcript_alternatives is not _CONTACT_EVIDENCE_UNSET
+            else tuple(getattr(session, "_last_transcript_alternatives", ()) or ())
+        )
+        tenant_id = getattr(session, "tenant_id", None)
+    
+        if not full_transcript:
+            logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
+            return
+    
+        # Turn-0 floor — protects the first AI reply (the one that "anchors"
+        # the conversation) from being driven by a misheard fragment. A bad
+        # turn 0 is uniquely costly: the LLM commits to a wrong topic and
+        # subsequent turns inherit that drift. A bad turn N+1 is a normal
+        # disfluency the model can recover from.
+        # Only the very first user utterance is gated; once the conversation
+        # is open we trust the existing repetitive/backchannel filters below.
+        _has_prior_user_turn_for_floor = any(
+            m.role == MessageRole.USER for m in session.conversation_history
+        )
+        if not _has_prior_user_turn_for_floor:
+            # F-05(ii): prefer the confidence captured synchronously at
+            # dispatch time (transcript_handler.py) over the live session
+            # attribute, which a later transcript event can have overwritten
+            # by the time this detached task body runs. Callers that don't
+            # pass confidence at all (e.g. the F-08 queued dispatch below,
+            # which is never turn-0) fall back to the live read unchanged.
+            resolved_confidence = (
+                confidence if confidence is not _CONFIDENCE_UNSET
+                else getattr(session, "_last_transcript_confidence", None)
+            )
+            min_conf, min_chars = _resolve_turn_0_floors(session)
+            reject_reason = _should_reject_turn_0(
+                full_transcript,
+                resolved_confidence,
+                min_confidence=min_conf,
+                min_alpha_chars=min_chars,
+            )
+            if reject_reason is not None:
+                logger.info(
+                    "turn_0_transcript_rejected reason=%s call=%s "
+                    "transcript_chars=%d confidence=%s min_conf=%s min_chars=%d "
+                    "— letting Flux re-emit",
+                    reject_reason, call_id[:12], len(full_transcript),
+                    resolved_confidence, min_conf, min_chars,
+                )
+                try:
+                    from app.infrastructure.metrics.voice_metrics import (
+                        record_turn_0_rejection,
+                    )
+                    record_turn_0_rejection(reject_reason)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice_metrics_rejection_record_failed err=%s", exc,
+                    )
+                # Clear so the next real transcript isn't merged with this one.
+                try:
+                    session.current_user_input = ""
+                except AttributeError:
+                    pass
+                # NEVER silent (Case 2): a dropped first utterance used to return
+                # to dead air, so the caller heard nothing until they spoke again
+                # — the single highest-abandon moment of a cold call. Speak a
+                # short reprompt so rejection is never the silent path. Fail-soft:
+                # a reprompt-TTS failure must not mask the drop.
+                try:
+                    reprompt = "Sorry, I didn't catch that — could you say that again?"
+                    interrupted = await self._p.synthesize_and_send_audio(
+                        session,
+                        reprompt,
+                        websocket,
+                    )
+                    if not interrupted and not getattr(session, "_tts_delivery_failed", False):
+                        from app.domain.models.conversation import Message as _Msg
+    
+                        # Keep the actual submitted clarification in context,
+                        # without treating rejected recognition as caller facts
+                        # or promoting a TTS submission to proof of hearing.
+                        session.conversation_history.append(
+                            _Msg(role=MessageRole.ASSISTANT, content=reprompt)
+                        )
+                        session._speculative_history_len = None
+                        self._p.transcript_service.accumulate_turn(
+                            call_id=call_id, role="assistant", content=reprompt,
+                            talklee_call_id=session.talklee_call_id, turn_index=session.turn_id,
+                            event_type="assistant_clarification", is_final=True,
+                            metadata={"delivery_evidence": "submitted"},
+                        )
+                        await self._flush_transcript(session)
+                except Exception:
+                    pass
+                return
+    
+        # Caller-first speech reaches the model unchanged, including a bare
+        # greeting. Do not play a separate scripted opener before this reply.
+    
+        # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
+        # where the STT model outputs repetitive nonsense text ("blah blah blah…").
+        # Heuristic: if a single word accounts for >50% of a 6+ word transcript,
+        # treat it as a hallucination and skip — avoids sending garbage to the LLM.
+        # EXCEPT a directed do-not-call (F-13 fix 2026-07-20): an emphatic
+        # "no no no no no no stop calling me" is >50% one word, so this guard
+        # used to drop the opt-out before it could be classified/persisted.
+        # A real STT hallucination almost never contains a verbatim DNC phrase,
+        # so exempting it is a safe trade against silently losing an opt-out.
+        if self._p._is_repetitive_transcript(full_transcript) and not contains_dnc(full_transcript):
+            logger.warning(
+                "Repetitive STT transcript likely hallucination, skipping turn",
+                extra={"call_id": call_id, "transcript_chars": len(full_transcript)},
+            )
+            return
+    
+        # Backchannel suppression — short listening sounds ("hmm",
+        # "yeah", "uh huh", "mm") are NOT real turns. Without this, the
+        # LLM generates a full response to a non-event and loses the
+        # conversation's thread. The persona prompts also instruct the
+        # model on this at the language level — belt AND braces.
+        #
+        # Exception: never suppress the callee's FIRST utterance of the
+        # call. In user-first mode that utterance IS the conversation
+        # opener (a "Hello?" that the STT may briefly mis-hear as "No.")
+        # — suppressing it leaves the agent silent, the callee repeats
+        # themselves, and 5–6 seconds of perceived dead air pile up
+        # before Flux finally lands a clean transcript. In agent-first
+        # mode the first user utterance is their reply to the greeting
+        # ("yeah", "sure", "uh-huh") and must reach the LLM as a real
+        # affirmative, not be filtered out as noise.
+        _has_prior_user_turn = _has_prior_user_turn_for_floor
+    
+        # Interruption lifecycle (gap #2). If the caller cut off ACTIVE agent
+        # speech (flagged by tts_playback when it silenced the agent), classify
+        # what they did and record it. Pure observability — the suppress / echo
+        # decisions below are unchanged. A "false" interruption (we stopped
+        # speaking for a backchannel / noise) is the signal operators alert on
+        # that the barge-in guard is too eager.
+        if getattr(session, "_agent_was_interrupted", False):
+            session._agent_was_interrupted = False  # consume per-turn
+            try:
+                from app.services.scripts.interruption_classifier import (
+                    classify_interruption,
+                    is_false_interruption,
+                    InterruptionType,
+                )
+                from app.infrastructure.metrics.voice_metrics import (
+                    record_interruption,
+                )
+    
+                _itype = classify_interruption(full_transcript)
+                record_interruption(
+                    _itype.value, false_interrupt=is_false_interruption(_itype),
+                )
+                if _itype == InterruptionType.ESCALATION:
+                    # Surface so the top-interrupted-calls review (Hamming) and
+                    # any future human-handoff can find these fast.
+                    logger.info(
+                        "interruption_escalation transcript_chars=%d call=%s",
+                        len(full_transcript), call_id[:12],
+                    )
+            except Exception as exc:  # metrics must never break a turn
+                logger.debug("interruption_classify_failed err=%s", exc)
+    
+        # Exception: if the agent's LAST turn was a QUESTION, a short
+        # "yep / yes / no / sure" is the ANSWER, not a listening noise —
+        # suppressing it strands the call in silence (observed 2026-07-08:
+        # agent asked "is that Sam?", caller said "Yep", it was dropped and
+        # the agent never replied). A question ends with "?" — when it does,
+        # let the affirmative through to the LLM.
+        #
+        # Checking only whether the WHOLE message ends in "?" missed an
+        # embedded permission question followed by a declarative clause
+        # (Dojo-PC opener: "Alex here from Dojo — got a minute? We're
+        # checking in on your payment setup." — ends in "."). The caller's
+        # "Yes." was dropped as a backchannel and the agent sat mute for
+        # 9.3s until the tester hung up (call 36357ad0, 2026-09-23 18:14:49;
+        # also 2b36df30, 2026-09-22). A question anywhere in the agent's
+        # last turn — i.e. ANY of its sentences ending in "?" — counts.
+        _agent_last_msg = next(
+            (m.content for m in reversed(session.conversation_history)
+             if m.role == MessageRole.ASSISTANT),
+            "",
+        )
+        _agent_asked_question = any(
+            _sentence.strip().endswith("?")
+            for _sentence in re.split(r"(?<=[.!?])\s+", _agent_last_msg.strip())
+            if _sentence.strip()
+        )
+    
+        if (
+            _is_backchannel(full_transcript)
+            and _has_prior_user_turn
+            and not _agent_asked_question
+        ):
+            logger.info(
+                "backchannel_suppressed transcript_chars=%d call=%s",
+                len(full_transcript), call_id[:12],
+            )
+            # A backchannel IS caller presence. It never enters history, so
+            # the silence monitor's turn-count check can't see it — stamp it
+            # so "Okay" doesn't get answered with "Sorry, did I lose you?"
+            # eight seconds later (Lukaz call, 2026-07-08).
+            try:
+                session._last_backchannel_monotonic = time.monotonic()
+            except Exception:
+                pass
+            # Clear the session's pending input so the old transcript
+            # doesn't carry into the next real turn.
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+            return
+        elif _is_backchannel(full_transcript):
+            # This branch is reached when the transcript IS a backchannel but one
+            # of the two exemptions applies. Log WHICH one: the message used to
+            # say "first user utterance" unconditionally, so a mid-call "Yes"
+            # answering "Are you the homeowner?" was reported as a turn-0 event.
+            # The behaviour was right; the reason was wrong, which is exactly
+            # what misleads an incident review.
+            _reason = (
+                "turn_0_first_utterance" if not _has_prior_user_turn
+                else "answers_agent_question"
+            )
+            logger.info(
+                "backchannel_allowed reason=%s transcript_chars=%d call=%s "
+                "agent_last_was_question=%s",
+                _reason, len(full_transcript), call_id[:12], _agent_asked_question,
+            )
+    
+        # Clear any barge-in event that was set by the user's own StartOfTurn that
+        # triggered this turn.  Deepgram Flux fires StartOfTurn for ALL speech —
+        # including normal listening-phase input — which sets barge_in_event via
+        # _on_barge_in_direct().  Without this clear, synthesize_and_send_audio sees
+        # the stale event as a "barge-in during LLM" and returns immediately without
+        # playing any audio, leaving the caller in silence.
+        # If the user speaks AGAIN while the LLM is generating, Deepgram fires a new
+        # StartOfTurn → event is set again → TTS is correctly suppressed at that point.
+        barge_in_event = self._p._barge_in_events.get(call_id)
+        if barge_in_event:
+            barge_in_event.clear()
+    
+        current_task = asyncio.current_task()
+        pending_task = self._p._pending_llm_tasks.get(call_id)
+        if pending_task and pending_task.done():
+            self._p._pending_llm_tasks.pop(call_id, None)
+            pending_task = None
+    
+        if pending_task and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — when this guard fires, a turn
+            # is silently dropped, which has historically masked "the
+            # agent went silent" mysteries during latency triage. INFO
+            # keeps it visible without polluting hot-path logs.
+            logger.info(
+                "turn_skipped_pending_task",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Guard: skip if a concurrent LLM/TTS (e.g. greeting) is already running.
+        # session.llm_active is set True in _send_outbound_greeting and in this
+        # function; it is reset to False in the finally block below.
+        if session.llm_active and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — same reason as above. If this
+            # ever fires on turn 0 of a real call, it indicates llm_active
+            # leaked True from a previous flow (e.g. a greeting that
+            # raised before its finally-reset ran).
+            logger.info(
+                "turn_skipped_llm_busy",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Self-echo guard: if the agent's own recent words were transcribed back
+        # into this caller turn (carrier echo + open mic during TTS), strip them.
+        # If nothing real remains, skip the turn — answering our own echo derails
+        # the call (observed in production). Short backchannels never match the
+        # 5+ word run, so they pass through untouched.
+        # EVERY agent utterance since the caller last spoke — not just the most
+        # recent one. That set is exactly the audio still capable of echoing
+        # into this turn, and it is self-limiting: normally one, TWO on the
+        # opening turn (the recording disclosure is now spoken before the
+        # greeting), three when a silence nudge intervened.
+        #
+        # Looking at only the last message was a latent assumption that exactly
+        # one agent utterance precedes each caller turn. The spoken recording
+        # disclosure broke it — the notice ends up two messages back, so it was
+        # never compared, and production transcripts show it being accepted as
+        # caller speech and answered:
+        #
+        #     User: This call may be recorded.        <- the agent's own notice
+        #     Assistant: happy to continue. ...       <- agent answers itself
+        #
+        # Bounding by "since the caller last spoke" rather than a fixed count is
+        # what stops a caller who legitimately echoes the agent's wording from a
+        # minute ago being stripped.
+        _agent_since_user: list[str] = []
+        for _m in reversed(session.conversation_history):
+            if _m.role == MessageRole.USER:
+                break
+            if _m.role == MessageRole.ASSISTANT and _m.content:
+                _agent_since_user.append(_m.content)
+        _deechoed = strip_self_echo_multi(full_transcript, _agent_since_user)
+        if _deechoed != full_transcript:
+            if not _deechoed.strip():
+                logger.info(
+                    "turn_skipped_self_echo",
+                    extra={
+                        "call_id": call_id,
+                        "turn_id": session.turn_id,
+                        "transcript_chars": len(full_transcript),
+                    },
+                )
+                return
+            logger.info(
+                "self_echo_stripped",
+                extra={
+                    "call_id": call_id,
+                    "before_chars": len(full_transcript),
+                    "after_chars": len(_deechoed),
+                },
+            )
+            full_transcript = _deechoed
+    
+        logger.info(
+            "turn_end",
+            extra={
+                "call_id": call_id,
+                "turn_id": session.turn_id,
+                "source": source,
+                "transcript_chars": len(full_transcript),
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+    
+        # The caller has yielded the floor. Releases any playback held by
+        # playback_gate.await_caller_pause — a FINAL answer that finished
+        # generating while the caller was still talking can now speak without
+        # talking over them.
+        from app.domain.services.voice_pipeline.playback_gate import (
+            mark_caller_stopped,
+        )
+        mark_caller_stopped(session)
+    
+        # (The stale barge-in event from the caller's own StartOfTurn was
+        # cleared above; nothing between there and here awaits, so a second
+        # clear could only ever wipe a NEW barge-in, which must survive.)
+    
+        # Persist a directed opt-out before the model reports its result.
+        # This fact does not prescribe wording or an identity dialogue.
+        if (not self._p._is_ask_ai_session(session)
+                and self._p._supports_llm_end_session_action(session)
+                and contains_dnc(full_transcript)):
+            from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+    
+            session._caller_opted_out = True
+            recorded = await purge_opt_out_before_farewell(session)
+>           session.conversation_history.append(Message(
+                role=MessageRole.SYSTEM,
+                content="Caller opt-out persistence result: " + (
+                    "recorded." if recorded else "unconfirmed; removal has not been confirmed."
+                ),
+            ))
+E           NameError: name 'Message' is not defined
+
+backend\app\domain\services\voice_pipeline\turn_ender.py:571: NameError
+____________ test_live_turn_prompt_carries_the_floor_once_and_last ____________
+
+    @pytest.mark.asyncio
+    async def test_live_turn_prompt_carries_the_floor_once_and_last():
+        """The composed base ends with the full NON-NEGOTIABLES floor; per-turn
+        blocks landed after it, so a compact copy was re-appended every turn. Now
+        the base floor is relocated to the end and there is exactly one copy."""
+        from app.services.scripts.prompts.composer import compose_prompt
+    
+        service = _make_service_for_disposition(["Sure — what's the best email?"])
+        llm = _CapturingLLMProvider(["Sure — what's the best email?"])
+        service.llm_provider = llm
+        session = _make_session()
+        session.campaign_id = "campaign-123"
+        session.system_prompt = compose_prompt(
+            "lead_gen", "Sarah", "Acme", {}, knowledge_driven=True,
+            additional_instructions="Call UK retailers about card terminals.",
+        )
+        session.current_user_input = "Can you send me something?"
+        session.conversation_history.append(Message(role=MessageRole.USER, content="Hi"))
+        session.conversation_history.append(Message(role=MessageRole.ASSISTANT, content="Sarah here from Acme — got a minute?"))
+    
+        await service.handle_turn_end(session, AsyncMock())
+    
+        assert llm.system_prompts, "the LLM was not called"
+        sp = llm.system_prompts[-1]
+        assert sp.count("## NON-NEGOTIABLES") == 1
+>       assert sp.rstrip().endswith("never repeat a mis-heard version back to them.")
+E       assert False
+E        +  where False = <built-in method endswith of str object at 0x0000013CA1962610>('never repeat a mis-heard version back to them.')
+E        +    where <built-in method endswith of str object at 0x0000013CA1962610> = "## CONVERSATION GUIDE\nYou are Sarah, an AI assistant for Acme. Be honest about that identity.\nHelp with the caller'...ailed work\nis not complete. Never promise an unavailable follow-up or conceal that you are an AI\nassistant for Acme.".endswith
+E        +      where "## CONVERSATION GUIDE\nYou are Sarah, an AI assistant for Acme. Be honest about that identity.\nHelp with the caller'...ailed work\nis not complete. Never promise an unavailable follow-up or conceal that you are an AI\nassistant for Acme." = <built-in method rstrip of str object at 0x0000013CA1962610>()
+E        +        where <built-in method rstrip of str object at 0x0000013CA1962610> = "## CONVERSATION GUIDE\nYou are Sarah, an AI assistant for Acme. Be honest about that identity.\nHelp with the caller'...ailed work\nis not complete. Never promise an unavailable follow-up or conceal that you are an AI\nassistant for Acme.".rstrip
+
+backend\tests\unit\test_voice_pipeline_service.py:1057: AssertionError
+_____ test_end_call_tool_uses_current_caller_not_previous_assistant_words _____
+
+    def test_end_call_tool_uses_current_caller_not_previous_assistant_words():
+        provider = SimpleNamespace(supports_tools=True, stream_chat_with_tools=AsyncMock())
+        messages = [
+            Message(role=MessageRole.ASSISTANT, content="Goodbye."),
+            Message(role=MessageRole.USER, content="Wait, can you explain the price?"),
+        ]
+>       assert not any(tool["function"]["name"] == "end_call" for tool in action_tools_for_turn(messages, provider))
+E       assert not True
+E        +  where True = any(<generator object test_end_call_tool_uses_current_caller_not_previous_assistant_words.<locals>.<genexpr> at 0x0000013CA3330790>)
+
+backend\tests\unit\test_caller_authorized_end_call.py:112: AssertionError
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-What does 'do not call me again' mean?] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA33A4590>
+text = "What does 'do not call me again' mean?", reply = 'Goodbye. [[END_CALL]]'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-Don't stop calling me] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA333EE70>
+text = "Don't stop calling me", reply = 'Goodbye. [[END_CALL]]'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-She said goodbye, but I still have a question] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA35A5C10>
+text = 'She said goodbye, but I still have a question'
+reply = 'Goodbye. [[END_CALL]]'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-I don't want to hang up; I need help] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA35940E0>
+text = "I don't want to hang up; I need help", reply = 'Goodbye. [[END_CALL]]'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-Please don't hang up] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA359D370>
+text = "Please don't hang up", reply = 'Goodbye. [[END_CALL]]'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-I don't call it Acme anymore] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA345C200>
+text = "I don't call it Acme anymore", reply = 'Goodbye. [[END_CALL]]'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-What does 'do not call me again' mean?] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA347B6E0>
+text = "What does 'do not call me again' mean?"
+reply = '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_runner:turn_runner.py:276 Empty LLM response for call call-123 — rolling back user message
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-Don't stop calling me] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA3573CE0>
+text = "Don't stop calling me"
+reply = '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_runner:turn_runner.py:276 Empty LLM response for call call-123 — rolling back user message
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-She said goodbye, but I still have a question] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA33B2CC0>
+text = 'She said goodbye, but I still have a question'
+reply = '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_runner:turn_runner.py:276 Empty LLM response for call call-123 — rolling back user message
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-I don't want to hang up; I need help] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA35663F0>
+text = "I don't want to hang up; I need help"
+reply = '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_runner:turn_runner.py:276 Empty LLM response for call call-123 — rolling back user message
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-Please don't hang up] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA3441580>
+text = "Please don't hang up"
+reply = '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_runner:turn_runner.py:276 Empty LLM response for call call-123 — rolling back user message
+_ test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-I don't call it Acme anymore] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA34672C0>
+text = "I don't call it Acme anymore"
+reply = '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}'
+
+    @pytest.mark.parametrize('text', [
+        "What does 'do not call me again' mean?", "Don't stop calling me",
+        "She said goodbye, but I still have a question", "I don't want to hang up; I need help",
+        "Please don't hang up", "I don't call it Acme anymore",
+    ])
+    @pytest.mark.parametrize('reply', [
+        'Goodbye. [[END_CALL]]',
+        '{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}',
+    ])
+    async def test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close(monkeypatch, text, reply):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        from app.services.scripts.call_state_tracker import CallState
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition([reply])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.captured_slots = CallState(declined_count=2)
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+>       assert session._turn_disposition != IdentityDisposition.DNC
+
+backend\tests\unit\test_caller_authorized_end_call.py:169: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=2, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.voice_pipeline.turn_runner:turn_runner.py:276 Empty LLM response for call call-123 — rolling back user message
+_ test_real_finisher_preserves_actual_optout_and_goodbye[Please stop calling me-True] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA320D100>
+text = 'Please stop calling me', dnc = True
+
+    @pytest.mark.parametrize('text,dnc', [('Please stop calling me', True), ('Goodbye, take care', False)])
+    async def test_real_finisher_preserves_actual_optout_and_goodbye(monkeypatch, text, dnc):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition(['Goodbye. [[END_CALL]]'])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.current_user_input = text
+>       await service.handle_turn_end(session, AsyncMock())
+
+backend\tests\unit\test_caller_authorized_end_call.py:187: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+backend\app\domain\services\voice_pipeline_service.py:559: in handle_turn_end
+    return await self._turn_ender.handle(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = <app.domain.services.voice_pipeline.turn_ender.TurnEnder object at 0x0000013CA335CCE0>
+session = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...transcript_buffer=None, barge_in_event=<asyncio.locks.Event object at 0x0000013CA335E7E0 [unset]>, captured_slots=None)
+websocket = <AsyncMock id='1359947884752'>, source = 'final', user_text = None
+confidence = <object object at 0x0000013C9283EC20>
+transcript_alternatives = <object object at 0x0000013C9283EC90>
+
+    async def handle(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket] = None,
+        source: str = "final",
+        user_text: Optional[str] = None,
+        confidence: Any = _CONFIDENCE_UNSET,
+        transcript_alternatives: Any = _CONTACT_EVIDENCE_UNSET,
+    ) -> None:
+        call_id = session.call_id
+        turn_started_at = time.monotonic()
+        # Prefer the transcript captured at SCHEDULE time. A barge-in can reset
+        # session.current_user_input to "" before this (detached) task reads it,
+        # which would strand the turn as "Empty transcript, skipping" and
+        # silently drop the caller's utterance. Carrying the text makes the turn
+        # immune to that reset. Falls back to the session field for callers that
+        # don't pass it.
+        full_transcript = (
+            user_text if user_text is not None else session.current_user_input
+        ).strip()
+        resolved_contact_confidence = (
+            confidence
+            if confidence is not _CONFIDENCE_UNSET
+            else getattr(session, "_last_transcript_confidence", None)
+        )
+        resolved_contact_alternatives = (
+            tuple(transcript_alternatives or ())
+            if transcript_alternatives is not _CONTACT_EVIDENCE_UNSET
+            else tuple(getattr(session, "_last_transcript_alternatives", ()) or ())
+        )
+        tenant_id = getattr(session, "tenant_id", None)
+    
+        if not full_transcript:
+            logger.debug("Empty transcript, skipping turn", extra={"call_id": call_id})
+            return
+    
+        # Turn-0 floor — protects the first AI reply (the one that "anchors"
+        # the conversation) from being driven by a misheard fragment. A bad
+        # turn 0 is uniquely costly: the LLM commits to a wrong topic and
+        # subsequent turns inherit that drift. A bad turn N+1 is a normal
+        # disfluency the model can recover from.
+        # Only the very first user utterance is gated; once the conversation
+        # is open we trust the existing repetitive/backchannel filters below.
+        _has_prior_user_turn_for_floor = any(
+            m.role == MessageRole.USER for m in session.conversation_history
+        )
+        if not _has_prior_user_turn_for_floor:
+            # F-05(ii): prefer the confidence captured synchronously at
+            # dispatch time (transcript_handler.py) over the live session
+            # attribute, which a later transcript event can have overwritten
+            # by the time this detached task body runs. Callers that don't
+            # pass confidence at all (e.g. the F-08 queued dispatch below,
+            # which is never turn-0) fall back to the live read unchanged.
+            resolved_confidence = (
+                confidence if confidence is not _CONFIDENCE_UNSET
+                else getattr(session, "_last_transcript_confidence", None)
+            )
+            min_conf, min_chars = _resolve_turn_0_floors(session)
+            reject_reason = _should_reject_turn_0(
+                full_transcript,
+                resolved_confidence,
+                min_confidence=min_conf,
+                min_alpha_chars=min_chars,
+            )
+            if reject_reason is not None:
+                logger.info(
+                    "turn_0_transcript_rejected reason=%s call=%s "
+                    "transcript_chars=%d confidence=%s min_conf=%s min_chars=%d "
+                    "— letting Flux re-emit",
+                    reject_reason, call_id[:12], len(full_transcript),
+                    resolved_confidence, min_conf, min_chars,
+                )
+                try:
+                    from app.infrastructure.metrics.voice_metrics import (
+                        record_turn_0_rejection,
+                    )
+                    record_turn_0_rejection(reject_reason)
+                except Exception as exc:  # noqa: BLE001
+                    logger.debug(
+                        "voice_metrics_rejection_record_failed err=%s", exc,
+                    )
+                # Clear so the next real transcript isn't merged with this one.
+                try:
+                    session.current_user_input = ""
+                except AttributeError:
+                    pass
+                # NEVER silent (Case 2): a dropped first utterance used to return
+                # to dead air, so the caller heard nothing until they spoke again
+                # — the single highest-abandon moment of a cold call. Speak a
+                # short reprompt so rejection is never the silent path. Fail-soft:
+                # a reprompt-TTS failure must not mask the drop.
+                try:
+                    reprompt = "Sorry, I didn't catch that — could you say that again?"
+                    interrupted = await self._p.synthesize_and_send_audio(
+                        session,
+                        reprompt,
+                        websocket,
+                    )
+                    if not interrupted and not getattr(session, "_tts_delivery_failed", False):
+                        from app.domain.models.conversation import Message as _Msg
+    
+                        # Keep the actual submitted clarification in context,
+                        # without treating rejected recognition as caller facts
+                        # or promoting a TTS submission to proof of hearing.
+                        session.conversation_history.append(
+                            _Msg(role=MessageRole.ASSISTANT, content=reprompt)
+                        )
+                        session._speculative_history_len = None
+                        self._p.transcript_service.accumulate_turn(
+                            call_id=call_id, role="assistant", content=reprompt,
+                            talklee_call_id=session.talklee_call_id, turn_index=session.turn_id,
+                            event_type="assistant_clarification", is_final=True,
+                            metadata={"delivery_evidence": "submitted"},
+                        )
+                        await self._flush_transcript(session)
+                except Exception:
+                    pass
+                return
+    
+        # Caller-first speech reaches the model unchanged, including a bare
+        # greeting. Do not play a separate scripted opener before this reply.
+    
+        # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
+        # where the STT model outputs repetitive nonsense text ("blah blah blah…").
+        # Heuristic: if a single word accounts for >50% of a 6+ word transcript,
+        # treat it as a hallucination and skip — avoids sending garbage to the LLM.
+        # EXCEPT a directed do-not-call (F-13 fix 2026-07-20): an emphatic
+        # "no no no no no no stop calling me" is >50% one word, so this guard
+        # used to drop the opt-out before it could be classified/persisted.
+        # A real STT hallucination almost never contains a verbatim DNC phrase,
+        # so exempting it is a safe trade against silently losing an opt-out.
+        if self._p._is_repetitive_transcript(full_transcript) and not contains_dnc(full_transcript):
+            logger.warning(
+                "Repetitive STT transcript likely hallucination, skipping turn",
+                extra={"call_id": call_id, "transcript_chars": len(full_transcript)},
+            )
+            return
+    
+        # Backchannel suppression — short listening sounds ("hmm",
+        # "yeah", "uh huh", "mm") are NOT real turns. Without this, the
+        # LLM generates a full response to a non-event and loses the
+        # conversation's thread. The persona prompts also instruct the
+        # model on this at the language level — belt AND braces.
+        #
+        # Exception: never suppress the callee's FIRST utterance of the
+        # call. In user-first mode that utterance IS the conversation
+        # opener (a "Hello?" that the STT may briefly mis-hear as "No.")
+        # — suppressing it leaves the agent silent, the callee repeats
+        # themselves, and 5–6 seconds of perceived dead air pile up
+        # before Flux finally lands a clean transcript. In agent-first
+        # mode the first user utterance is their reply to the greeting
+        # ("yeah", "sure", "uh-huh") and must reach the LLM as a real
+        # affirmative, not be filtered out as noise.
+        _has_prior_user_turn = _has_prior_user_turn_for_floor
+    
+        # Interruption lifecycle (gap #2). If the caller cut off ACTIVE agent
+        # speech (flagged by tts_playback when it silenced the agent), classify
+        # what they did and record it. Pure observability — the suppress / echo
+        # decisions below are unchanged. A "false" interruption (we stopped
+        # speaking for a backchannel / noise) is the signal operators alert on
+        # that the barge-in guard is too eager.
+        if getattr(session, "_agent_was_interrupted", False):
+            session._agent_was_interrupted = False  # consume per-turn
+            try:
+                from app.services.scripts.interruption_classifier import (
+                    classify_interruption,
+                    is_false_interruption,
+                    InterruptionType,
+                )
+                from app.infrastructure.metrics.voice_metrics import (
+                    record_interruption,
+                )
+    
+                _itype = classify_interruption(full_transcript)
+                record_interruption(
+                    _itype.value, false_interrupt=is_false_interruption(_itype),
+                )
+                if _itype == InterruptionType.ESCALATION:
+                    # Surface so the top-interrupted-calls review (Hamming) and
+                    # any future human-handoff can find these fast.
+                    logger.info(
+                        "interruption_escalation transcript_chars=%d call=%s",
+                        len(full_transcript), call_id[:12],
+                    )
+            except Exception as exc:  # metrics must never break a turn
+                logger.debug("interruption_classify_failed err=%s", exc)
+    
+        # Exception: if the agent's LAST turn was a QUESTION, a short
+        # "yep / yes / no / sure" is the ANSWER, not a listening noise —
+        # suppressing it strands the call in silence (observed 2026-07-08:
+        # agent asked "is that Sam?", caller said "Yep", it was dropped and
+        # the agent never replied). A question ends with "?" — when it does,
+        # let the affirmative through to the LLM.
+        #
+        # Checking only whether the WHOLE message ends in "?" missed an
+        # embedded permission question followed by a declarative clause
+        # (Dojo-PC opener: "Alex here from Dojo — got a minute? We're
+        # checking in on your payment setup." — ends in "."). The caller's
+        # "Yes." was dropped as a backchannel and the agent sat mute for
+        # 9.3s until the tester hung up (call 36357ad0, 2026-09-23 18:14:49;
+        # also 2b36df30, 2026-09-22). A question anywhere in the agent's
+        # last turn — i.e. ANY of its sentences ending in "?" — counts.
+        _agent_last_msg = next(
+            (m.content for m in reversed(session.conversation_history)
+             if m.role == MessageRole.ASSISTANT),
+            "",
+        )
+        _agent_asked_question = any(
+            _sentence.strip().endswith("?")
+            for _sentence in re.split(r"(?<=[.!?])\s+", _agent_last_msg.strip())
+            if _sentence.strip()
+        )
+    
+        if (
+            _is_backchannel(full_transcript)
+            and _has_prior_user_turn
+            and not _agent_asked_question
+        ):
+            logger.info(
+                "backchannel_suppressed transcript_chars=%d call=%s",
+                len(full_transcript), call_id[:12],
+            )
+            # A backchannel IS caller presence. It never enters history, so
+            # the silence monitor's turn-count check can't see it — stamp it
+            # so "Okay" doesn't get answered with "Sorry, did I lose you?"
+            # eight seconds later (Lukaz call, 2026-07-08).
+            try:
+                session._last_backchannel_monotonic = time.monotonic()
+            except Exception:
+                pass
+            # Clear the session's pending input so the old transcript
+            # doesn't carry into the next real turn.
+            try:
+                session.current_user_input = ""
+            except AttributeError:
+                pass
+            return
+        elif _is_backchannel(full_transcript):
+            # This branch is reached when the transcript IS a backchannel but one
+            # of the two exemptions applies. Log WHICH one: the message used to
+            # say "first user utterance" unconditionally, so a mid-call "Yes"
+            # answering "Are you the homeowner?" was reported as a turn-0 event.
+            # The behaviour was right; the reason was wrong, which is exactly
+            # what misleads an incident review.
+            _reason = (
+                "turn_0_first_utterance" if not _has_prior_user_turn
+                else "answers_agent_question"
+            )
+            logger.info(
+                "backchannel_allowed reason=%s transcript_chars=%d call=%s "
+                "agent_last_was_question=%s",
+                _reason, len(full_transcript), call_id[:12], _agent_asked_question,
+            )
+    
+        # Clear any barge-in event that was set by the user's own StartOfTurn that
+        # triggered this turn.  Deepgram Flux fires StartOfTurn for ALL speech —
+        # including normal listening-phase input — which sets barge_in_event via
+        # _on_barge_in_direct().  Without this clear, synthesize_and_send_audio sees
+        # the stale event as a "barge-in during LLM" and returns immediately without
+        # playing any audio, leaving the caller in silence.
+        # If the user speaks AGAIN while the LLM is generating, Deepgram fires a new
+        # StartOfTurn → event is set again → TTS is correctly suppressed at that point.
+        barge_in_event = self._p._barge_in_events.get(call_id)
+        if barge_in_event:
+            barge_in_event.clear()
+    
+        current_task = asyncio.current_task()
+        pending_task = self._p._pending_llm_tasks.get(call_id)
+        if pending_task and pending_task.done():
+            self._p._pending_llm_tasks.pop(call_id, None)
+            pending_task = None
+    
+        if pending_task and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — when this guard fires, a turn
+            # is silently dropped, which has historically masked "the
+            # agent went silent" mysteries during latency triage. INFO
+            # keeps it visible without polluting hot-path logs.
+            logger.info(
+                "turn_skipped_pending_task",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Guard: skip if a concurrent LLM/TTS (e.g. greeting) is already running.
+        # session.llm_active is set True in _send_outbound_greeting and in this
+        # function; it is reset to False in the finally block below.
+        if session.llm_active and pending_task is not current_task:
+            # Elevated to INFO from DEBUG — same reason as above. If this
+            # ever fires on turn 0 of a real call, it indicates llm_active
+            # leaked True from a previous flow (e.g. a greeting that
+            # raised before its finally-reset ran).
+            logger.info(
+                "turn_skipped_llm_busy",
+                extra={
+                    "call_id": call_id,
+                    "turn_id": session.turn_id,
+                    "source": source,
+                    "transcript_chars": len(full_transcript),
+                },
+            )
+            return
+    
+        # Self-echo guard: if the agent's own recent words were transcribed back
+        # into this caller turn (carrier echo + open mic during TTS), strip them.
+        # If nothing real remains, skip the turn — answering our own echo derails
+        # the call (observed in production). Short backchannels never match the
+        # 5+ word run, so they pass through untouched.
+        # EVERY agent utterance since the caller last spoke — not just the most
+        # recent one. That set is exactly the audio still capable of echoing
+        # into this turn, and it is self-limiting: normally one, TWO on the
+        # opening turn (the recording disclosure is now spoken before the
+        # greeting), three when a silence nudge intervened.
+        #
+        # Looking at only the last message was a latent assumption that exactly
+        # one agent utterance precedes each caller turn. The spoken recording
+        # disclosure broke it — the notice ends up two messages back, so it was
+        # never compared, and production transcripts show it being accepted as
+        # caller speech and answered:
+        #
+        #     User: This call may be recorded.        <- the agent's own notice
+        #     Assistant: happy to continue. ...       <- agent answers itself
+        #
+        # Bounding by "since the caller last spoke" rather than a fixed count is
+        # what stops a caller who legitimately echoes the agent's wording from a
+        # minute ago being stripped.
+        _agent_since_user: list[str] = []
+        for _m in reversed(session.conversation_history):
+            if _m.role == MessageRole.USER:
+                break
+            if _m.role == MessageRole.ASSISTANT and _m.content:
+                _agent_since_user.append(_m.content)
+        _deechoed = strip_self_echo_multi(full_transcript, _agent_since_user)
+        if _deechoed != full_transcript:
+            if not _deechoed.strip():
+                logger.info(
+                    "turn_skipped_self_echo",
+                    extra={
+                        "call_id": call_id,
+                        "turn_id": session.turn_id,
+                        "transcript_chars": len(full_transcript),
+                    },
+                )
+                return
+            logger.info(
+                "self_echo_stripped",
+                extra={
+                    "call_id": call_id,
+                    "before_chars": len(full_transcript),
+                    "after_chars": len(_deechoed),
+                },
+            )
+            full_transcript = _deechoed
+    
+        logger.info(
+            "turn_end",
+            extra={
+                "call_id": call_id,
+                "turn_id": session.turn_id,
+                "source": source,
+                "transcript_chars": len(full_transcript),
+                "timestamp": datetime.utcnow().isoformat(),
+            },
+        )
+    
+        # The caller has yielded the floor. Releases any playback held by
+        # playback_gate.await_caller_pause — a FINAL answer that finished
+        # generating while the caller was still talking can now speak without
+        # talking over them.
+        from app.domain.services.voice_pipeline.playback_gate import (
+            mark_caller_stopped,
+        )
+        mark_caller_stopped(session)
+    
+        # (The stale barge-in event from the caller's own StartOfTurn was
+        # cleared above; nothing between there and here awaits, so a second
+        # clear could only ever wipe a NEW barge-in, which must survive.)
+    
+        # Persist a directed opt-out before the model reports its result.
+        # This fact does not prescribe wording or an identity dialogue.
+        if (not self._p._is_ask_ai_session(session)
+                and self._p._supports_llm_end_session_action(session)
+                and contains_dnc(full_transcript)):
+            from app.domain.services.dialer.opt_out import purge_opt_out_before_farewell
+    
+            session._caller_opted_out = True
+            recorded = await purge_opt_out_before_farewell(session)
+>           session.conversation_history.append(Message(
+                role=MessageRole.SYSTEM,
+                content="Caller opt-out persistence result: " + (
+                    "recorded." if recorded else "unconfirmed; removal has not been confirmed."
+                ),
+            ))
+E           NameError: name 'Message' is not defined
+
+backend\app\domain\services\voice_pipeline\turn_ender.py:571: NameError
+_ test_real_finisher_preserves_actual_optout_and_goodbye[Goodbye, take care-False] _
+
+monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x0000013CA35950A0>
+text = 'Goodbye, take care', dnc = False
+
+    @pytest.mark.parametrize('text,dnc', [('Please stop calling me', True), ('Goodbye, take care', False)])
+    async def test_real_finisher_preserves_actual_optout_and_goodbye(monkeypatch, text, dnc):
+        from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
+        monkeypatch.setenv('TELEPHONY_FILLER_DELAY_MS', '0')
+        service = _make_service_for_disposition(['Goodbye. [[END_CALL]]'])
+        service._shutdown_session_for_end_action = AsyncMock()
+        session = _make_session()
+        session.campaign_id = 'campaign-123'
+        session.turn_id = 4
+        session.current_user_input = text
+        await service.handle_turn_end(session, AsyncMock())
+        service._shutdown_session_for_end_action.assert_awaited_once()
+        assert bool(getattr(session, '_caller_opted_out', False)) is dnc
+>       assert (session._turn_disposition == IdentityDisposition.DNC) is dnc
+
+backend\tests\unit\test_caller_authorized_end_call.py:190: 
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+self = CallSession(call_id='call-123', campaign_id='campaign-123', lead_id='lead-123', tenant_id=None, provider_call_id='prov...eclined_count=0, contact_ask_objections=0, contact_capture_paused=False, caller_asked_question=False, line_phone=None))
+item = '_turn_disposition'
+
+    def __getattr__(self, item: str) -> Any:
+        private_attributes = object.__getattribute__(self, '__private_attributes__')
+        if item in private_attributes:
+            attribute = private_attributes[item]
+            if hasattr(attribute, '__get__'):
+                return attribute.__get__(self, type(self))  # type: ignore
+    
+            try:
+                # Note: self.__pydantic_private__ cannot be None if self.__private_attributes__ has items
+                return self.__pydantic_private__[item]  # type: ignore
+            except KeyError as exc:
+                raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}') from exc
+        else:
+            # `__pydantic_extra__` can fail to be set if the model is not yet fully initialized.
+            # See `BaseModel.__repr_args__` for more details
+            try:
+                pydantic_extra = object.__getattribute__(self, '__pydantic_extra__')
+            except AttributeError:
+                pydantic_extra = None
+    
+            if pydantic_extra and item in pydantic_extra:
+                return pydantic_extra[item]
+            else:
+                if hasattr(self.__class__, item):
+                    return super().__getattribute__(item)  # Raises AttributeError if appropriate
+                else:
+                    # this is the current error
+>                   raise AttributeError(f'{type(self).__name__!r} object has no attribute {item!r}')
+E                   AttributeError: 'CallSession' object has no attribute '_turn_disposition'
+
+..\..\backend\.venv\Lib\site-packages\pydantic\main.py:1026: AttributeError
+=========================== short test summary info ===========================
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_pricing_questions_get_extended_sentence_budget_for_custom_prompt_sessions
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_non_pricing_questions_keep_default_sentence_budget
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_streamed_response_strips_reasoning_and_keeps_grounded_pricing
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_caller_dnc_persists_opt_out_and_hangs_up
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_caller_dnc_survives_repetition_guard
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_dnc_record_is_written_before_the_farewell_is_spoken
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_failed_dnc_write_is_not_confirmed_aloud
+FAILED backend\tests\unit\test_voice_pipeline_service.py::test_live_turn_prompt_carries_the_floor_once_and_last
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_end_call_tool_uses_current_caller_not_previous_assistant_words
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-What does 'do not call me again' mean?]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-Don't stop calling me]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-She said goodbye, but I still have a question]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-I don't want to hang up; I need help]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-Please don't hang up]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[Goodbye. [[END_CALL]]-I don't call it Acme anymore]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-What does 'do not call me again' mean?]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-Don't stop calling me]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-She said goodbye, but I still have a question]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-I don't want to hang up; I need help]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-Please don't hang up]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_never_opts_out_or_hangs_up_on_non_asserted_close[{"action":"end_session","reason":"conversation_complete","farewell":"Goodbye.","do_not_call":true}-I don't call it Acme anymore]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_preserves_actual_optout_and_goodbye[Please stop calling me-True]
+FAILED backend\tests\unit\test_caller_authorized_end_call.py::test_real_finisher_preserves_actual_optout_and_goodbye[Goodbye, take care-False]
+23 failed, 161 passed, 540 warnings in 17.80s

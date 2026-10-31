@@ -1,0 +1,100 @@
+{
+  "recorded_at": "2026-10-05T21:00:03.934803+00:00",
+  "base_commit": "303268a7a293c5f91a6c8660fa36237d99eef290",
+  "source_commit": "5e586e4ec46de2ea6e68d8f661668446bf7419be",
+  "hash_scheme": "SHA-256 of raw file bytes after CRLF-to-LF normalization only",
+  "source_files": {
+    "backend/app/services/connector_resolver.py": "054e6f5a0e7824ce55dadc8c29c9665b65d7bb6aad113d6c96abf9704a2143e0",
+    "backend/app/api/v1/endpoints/admin/actions.py": "ccdeb3e084a6daf50c90b50786584671fc40463571de5282abb1c25693d84ee2",
+    "backend/tests/unit/test_admin_gmail_inspection.py": "ba8b55aa0d031345ef59fce95db9e867bcbeba729459578c238165bcdd14fc18",
+    "Admin/frontend/src/lib/api.ts": "08a02d548d8ea8f061217ccf98251a53f07394b54490e404d3f9798cef09c6c5",
+    "Admin/frontend/src/components/ActionReceiptPanel.tsx": "badaac1fff573a487a8c4fd45855e6fb6e31d962ef9bb9691627851fa155128c",
+    "Admin/frontend/tests/action-receipts.test.mjs": "4bb7253f2541f3e6b4445d0ace0aaf7e8fc1086eef3108f3a466d73af43ac709"
+  },
+  "artifacts": {
+    "admin-build.txt": "ecd63e1a350309703a49a72c5d0a07daaabe7df2598171e3a9c2015b1b8d7b25",
+    "admin-focused.txt": "cafe3caaf64d6fc54b9c64fb9c3c3d3fdcc5497b99daf26b6a72fd98a93b31ce",
+    "admin-lint.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "admin-regression.txt": "4167ac541c3d4c257ecb62b90dc4a65323f311976c08479932290f695b403626",
+    "admin-typecheck.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "backend-focused.txt": "d030beb9d14f4907db6436beba80555f760b3d63ddd944a7dda101e27859c123",
+    "backend-regression.txt": "2d76cdbb09ccc8bf44cf36a2b235d21aec06c810147b689c0272ac660ae6650c",
+    "backend-ruff.txt": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18",
+    "verification.md": "a7b71cfff27f60004ee3fa5c7e7dd7456ea93f152f2bbcbbb562eb89fbcf5779"
+  },
+  "backend": {
+    "command": "python -m pytest tests/unit/test_admin_gmail_inspection.py tests/unit/test_ag06_admin_actions.py tests/unit/test_ag06_dashboard_actions.py tests/unit/test_reviewed_account_identity.py tests/unit/test_reviewed_selector_identity_types.py tests/unit/test_admin_crm_inspection.py tests/unit/test_inbox_original_account.py tests/unit/test_inbox_authorization_health.py tests/unit/test_connector_health.py tests/unit/test_communication_delivery_contract.py tests/unit/test_calendar_delivery_contract.py tests/unit/test_crm_sync_service.py tests/unit/test_meeting_service.py tests/unit/assistant/test_calendar_and_drive_errors.py -q --no-cov",
+    "cwd": "backend",
+    "exit_code": 0,
+    "passed": 513,
+    "failed": 0,
+    "skipped": 0,
+    "warnings": 28,
+    "modules": 14,
+    "new_inspection_controls_included": 66,
+    "earlier_focused": {
+      "command": "python -m pytest tests/unit/test_admin_gmail_inspection.py -q --no-cov",
+      "passed": 65,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 1,
+      "limit": "Predates final wrong-wrapper-action-ID control and its production guard. Final regression includes all 66 controls; overlapping counts are not additive."
+    },
+    "python_executable": "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/backend/.venv/Scripts/python.exe",
+    "environment": {
+      "PYTHONUTF8": "1",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONPATH": [
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/postgres-matrix-20261005/tmp/exact-requirements-20261005/packages",
+        "C:/Users/AL AZIZ TECH/Desktop/Talky.ai-complete-/tmp/production-ready-ag07-20261005/tmp/op02-testdeps"
+      ]
+    },
+    "limits": "Synthetic DB and HTTP boundaries; not real PostgreSQL, live provider or clean transitive dependency acceptance."
+  },
+  "admin": {
+    "command": "npm test",
+    "cwd": "Admin/frontend",
+    "exit_code": 0,
+    "passed": 68,
+    "failed": 0,
+    "skipped": 0,
+    "new_controls_included": 16,
+    "focused_command": "node --test tests/action-receipts.test.mjs",
+    "focused_passed": 27,
+    "limits": "Actual component/API source using existing synthetic hook scheduler; not browser/React-concurrency acceptance.",
+    "dependencies": "Existing integration Admin node_modules through ignored local junction; no package manifest/lock changes."
+  },
+  "checks": [
+    {
+      "command": "npx tsc -b --pretty false",
+      "cwd": "Admin/frontend",
+      "exit_code": 0
+    },
+    {
+      "command": "npx eslint src/components/ActionReceiptPanel.tsx src/lib/api.ts tests/action-receipts.test.mjs",
+      "cwd": "Admin/frontend",
+      "exit_code": 0
+    },
+    {
+      "command": "npx vite build",
+      "cwd": "Admin/frontend",
+      "exit_code": 0
+    },
+    {
+      "command": "python -m ruff check app/api/v1/endpoints/admin/actions.py app/services/connector_resolver.py tests/unit/test_admin_gmail_inspection.py --select F",
+      "cwd": "backend",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "cwd": ".",
+      "exit_code": 0
+    }
+  ],
+  "reviews": {
+    "root": "Final four-production-file source review clear; source/evidence commits authorized after checks",
+    "account_review": "Independent read-only four-production-file and test review clear; no test execution or edits"
+  },
+  "integration_limit": "Separate integration voice projection fix 651fc90c is not in owner base; owner513 is not combined verification of that repair. Historical partial voice proofs remain unavailable; submit_form unsupported.",
+  "release_status": "AG06 in progress; no gates promoted; no push/deploy/provider/customer DB/real PostgreSQL/browser work."
+}

@@ -1,0 +1,57 @@
+FFFFFFFF.                                                                [100%]
+================================== FAILURES ===================================
+_ test_earlier_target_changes_its_lead_row_without_changing_current_recipient[set-email] _
+tests\unit\test_contact_target_recording.py:59: in test_earlier_target_changes_its_lead_row_without_changing_current_recipient
+    assert result["saved"] and result["field_key"] == kind
+E   assert (False)
+_ test_earlier_target_changes_its_lead_row_without_changing_current_recipient[set-phone] _
+tests\unit\test_contact_target_recording.py:59: in test_earlier_target_changes_its_lead_row_without_changing_current_recipient
+    assert result["saved"] and result["field_key"] == kind
+E   assert (False)
+_ test_earlier_target_changes_its_lead_row_without_changing_current_recipient[withdraw-email] _
+tests\unit\test_contact_target_recording.py:59: in test_earlier_target_changes_its_lead_row_without_changing_current_recipient
+    assert result["saved"] and result["field_key"] == kind
+E   assert (False)
+_ test_earlier_target_changes_its_lead_row_without_changing_current_recipient[withdraw-phone] _
+tests\unit\test_contact_target_recording.py:59: in test_earlier_target_changes_its_lead_row_without_changing_current_recipient
+    assert result["saved"] and result["field_key"] == kind
+E   assert (False)
+___ test_native_actual_tool_can_discover_and_withdraw_first_contact[openai] ___
+tests\unit\test_contact_target_recording.py:102: in test_native_actual_tool_can_discover_and_withdraw_first_contact
+    assert results[2]["contacts"]["email"]["value"] == first
+E   KeyError: 'contacts'
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-82d30f112a874eaeb24629a3f16b9d04 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-82d30f112a874eaeb24629a3f16b9d04 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-82d30f112a874eaeb24629a3f16b9d04 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-82d30f112a874eaeb24629a3f16b9d04 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-82d30f112a874eaeb24629a3f16b9d04 error_type=AssertionError
+____ test_native_actual_tool_can_discover_and_withdraw_first_contact[xai] _____
+tests\unit\test_contact_target_recording.py:102: in test_native_actual_tool_can_discover_and_withdraw_first_contact
+    assert results[2]["contacts"]["email"]["value"] == first
+E   KeyError: 'contacts'
+------------------------------ Captured log call ------------------------------
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-9e60a48f6663445dad6c79ff61562f06 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-9e60a48f6663445dad6c79ff61562f06 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-9e60a48f6663445dad6c79ff61562f06 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-9e60a48f6663445dad6c79ff61562f06 error_type=AssertionError
+WARNING  app.domain.services.transcript_service:transcript_service.py:630 transcript_flush_failed call=ag04-synthetic-9e60a48f6663445dad6c79ff61562f06 error_type=AssertionError
+______ test_archived_source_revision_demotes_only_its_owned_slot[value] _______
+tests\unit\test_contact_target_recording.py:118: in test_archived_source_revision_demotes_only_its_owned_slot
+    assert not snapshot_slots(s.captured_slots)["email"]["confirmed"]
+E   assert not True
+___ test_archived_source_revision_demotes_only_its_owned_slot[confirmation] ___
+tests\unit\test_contact_target_recording.py:118: in test_archived_source_revision_demotes_only_its_owned_slot
+    assert not snapshot_slots(s.captured_slots)["email"]["confirmed"]
+E   assert not True
+=========================== short test summary info ===========================
+FAILED tests/unit/test_contact_target_recording.py::test_earlier_target_changes_its_lead_row_without_changing_current_recipient[set-email]
+FAILED tests/unit/test_contact_target_recording.py::test_earlier_target_changes_its_lead_row_without_changing_current_recipient[set-phone]
+FAILED tests/unit/test_contact_target_recording.py::test_earlier_target_changes_its_lead_row_without_changing_current_recipient[withdraw-email]
+FAILED tests/unit/test_contact_target_recording.py::test_earlier_target_changes_its_lead_row_without_changing_current_recipient[withdraw-phone]
+FAILED tests/unit/test_contact_target_recording.py::test_native_actual_tool_can_discover_and_withdraw_first_contact[openai]
+FAILED tests/unit/test_contact_target_recording.py::test_native_actual_tool_can_discover_and_withdraw_first_contact[xai]
+FAILED tests/unit/test_contact_target_recording.py::test_archived_source_revision_demotes_only_its_owned_slot[value]
+FAILED tests/unit/test_contact_target_recording.py::test_archived_source_revision_demotes_only_its_owned_slot[confirmation]
+8 failed, 1 passed, 10 warnings in 6.14s
+OFFLINE_TRANSPORT_COUNTS {'internal_socketpairs': 19, 'prohibited': 0}

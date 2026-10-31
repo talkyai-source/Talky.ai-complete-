@@ -1,0 +1,160 @@
+FFF                                                                      [100%]
+================================== FAILURES ===================================
+_ test_delayed_denial_stops_remaining_audio_without_rewriting_prior_submission _
+
+    @pytest.mark.asyncio
+    async def test_delayed_denial_stops_remaining_audio_without_rewriting_prior_submission():
+        provider = Provider()
+        submitted = []
+        cleared = []
+        first_submission = asyncio.Event()
+        release = asyncio.Event()
+
+        async def send_audio(call_id, audio):
+            submitted.append(audio)
+            if len(submitted) == 1:
+                first_submission.set()
+                await release.wait()
+
+        async def clear_audio(call_id):
+            cleared.append(call_id)
+
+        bridge = RealtimeBridge(
+            call_id="synthetic-ag03-late-during-playback",
+            realtime_session=provider,
+            media_gateway=SimpleNamespace(send_audio=send_audio, clear_output_buffer=clear_audio),
+            greet_on_start=False,
+            call_direction="inbound",
+        )
+        response = candidate()
+        response.audio = b"\xff" * 640
+        provider.pending.extend([committed("current"), response])
+        await bridge._pump_model_events()
+        await asyncio.wait_for(first_submission.wait(), timeout=1)
+        try:
+            provider.pending.append(final("I am not your customer.", "current"))
+            await bridge._pump_model_events()
+        finally:
+            release.set()
+            if bridge._playback_task:
+                await asyncio.gather(bridge._playback_task, return_exceptions=True)
+        # The first submission is historical evidence, not proof it was heard.
+        # The remaining chunk must be withheld and queued output cleared.
+>       assert len(submitted) == 1
+E       AssertionError: assert 2 == 1
+E        +  where 2 = len([b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x0...0\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'])
+
+tests\unit\test_ag03_relationship_acceptance.py:243: AssertionError
+_____ test_harmless_late_final_does_not_cancel_valid_audio[before_start] ______
+
+arrival = 'before_start'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("arrival", ["before_start", "during_first_submission"])
+    async def test_harmless_late_final_does_not_cancel_valid_audio(arrival):
+        provider = Provider()
+        submitted = []
+        cleared = []
+        first_submission = asyncio.Event()
+        release = asyncio.Event()
+
+        async def send_audio(call_id, audio):
+            submitted.append(audio)
+            if arrival == "during_first_submission" and len(submitted) == 1:
+                first_submission.set()
+                await release.wait()
+
+        async def clear_audio(call_id):
+            cleared.append(call_id)
+
+        bridge = RealtimeBridge(
+            call_id="synthetic-ag03-harmless-late-final",
+            realtime_session=provider,
+            media_gateway=SimpleNamespace(send_audio=send_audio, clear_output_buffer=clear_audio),
+            greet_on_start=False,
+            call_direction="inbound",
+        )
+        response = candidate()
+        response.audio = b"\xff" * 640
+        events = [committed("current"), response]
+        harmless = final("What information is available about the product?", "current")
+        if arrival == "before_start":
+            events.append(harmless)
+        provider.pending.extend(events)
+        await bridge._pump_model_events()
+        try:
+            if arrival == "during_first_submission":
+                await asyncio.wait_for(first_submission.wait(), timeout=1)
+                provider.pending.append(harmless)
+                await bridge._pump_model_events()
+        finally:
+            release.set()
+            if bridge._playback_task:
+                await asyncio.gather(bridge._playback_task, return_exceptions=True)
+        assert len(submitted) == 2
+        assert cleared == []
+>       assert bridge._latest_caller_text == "I am not your customer."
+E       AssertionError: assert 'What informa... the product?' == 'I am not your customer.'
+E         - I am not your customer.
+E         + What information is available about the product?
+
+tests\unit\test_ag03_relationship_acceptance.py:291: AssertionError
+_ test_harmless_late_final_does_not_cancel_valid_audio[during_first_submission] _
+
+arrival = 'during_first_submission'
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("arrival", ["before_start", "during_first_submission"])
+    async def test_harmless_late_final_does_not_cancel_valid_audio(arrival):
+        provider = Provider()
+        submitted = []
+        cleared = []
+        first_submission = asyncio.Event()
+        release = asyncio.Event()
+
+        async def send_audio(call_id, audio):
+            submitted.append(audio)
+            if arrival == "during_first_submission" and len(submitted) == 1:
+                first_submission.set()
+                await release.wait()
+
+        async def clear_audio(call_id):
+            cleared.append(call_id)
+
+        bridge = RealtimeBridge(
+            call_id="synthetic-ag03-harmless-late-final",
+            realtime_session=provider,
+            media_gateway=SimpleNamespace(send_audio=send_audio, clear_output_buffer=clear_audio),
+            greet_on_start=False,
+            call_direction="inbound",
+        )
+        response = candidate()
+        response.audio = b"\xff" * 640
+        events = [committed("current"), response]
+        harmless = final("What information is available about the product?", "current")
+        if arrival == "before_start":
+            events.append(harmless)
+        provider.pending.extend(events)
+        await bridge._pump_model_events()
+        try:
+            if arrival == "during_first_submission":
+                await asyncio.wait_for(first_submission.wait(), timeout=1)
+                provider.pending.append(harmless)
+                await bridge._pump_model_events()
+        finally:
+            release.set()
+            if bridge._playback_task:
+                await asyncio.gather(bridge._playback_task, return_exceptions=True)
+        assert len(submitted) == 2
+        assert cleared == []
+>       assert bridge._latest_caller_text == "I am not your customer."
+E       AssertionError: assert 'What informa... the product?' == 'I am not your customer.'
+E         - I am not your customer.
+E         + What information is available about the product?
+
+tests\unit\test_ag03_relationship_acceptance.py:291: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag03_relationship_acceptance.py::test_delayed_denial_stops_remaining_audio_without_rewriting_prior_submission
+FAILED tests/unit/test_ag03_relationship_acceptance.py::test_harmless_late_final_does_not_cancel_valid_audio[before_start]
+FAILED tests/unit/test_ag03_relationship_acceptance.py::test_harmless_late_final_does_not_cancel_valid_audio[during_first_submission]
+3 failed, 30 deselected in 2.00s

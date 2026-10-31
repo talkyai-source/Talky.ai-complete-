@@ -49,7 +49,9 @@ class FakeConn:
         self.executed: list[tuple[str, tuple]] = []
         self.depth = 0
         self.max_depth = 0
-        self._user_row = user_row if user_row is not None else {"id": USER_ID}
+        self._user_row = user_row if user_row is not None else {
+            "id": USER_ID, "password_hash": "synthetic-current-password-generation",
+        }
 
     async def fetchrow(self, sql, *args):
         return self._user_row
@@ -88,6 +90,7 @@ def _fake_redis():
         "user_id": USER_ID,
         "email": EMAIL,
         "code_hash": hashlib.sha256(CODE.encode("utf-8")).hexdigest(),
+        "password_generation": hashlib.sha256(b"synthetic-current-password-generation").hexdigest(),
     }
     r = AsyncMock()
     r.get = AsyncMock(return_value=json.dumps(payload))

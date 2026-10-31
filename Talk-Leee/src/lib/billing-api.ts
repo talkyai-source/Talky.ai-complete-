@@ -2,41 +2,60 @@
 
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { ApiClientError } from "@/lib/http-client";
+import { billingCatalogSchema, billingSubscriptionSchema } from "@/lib/billing-purchase";
+import { dailyUsageSchema, invoiceListSchema, invoiceSchema, ledgerListSchema, overageAlertsSchema, usageSchema } from "@/lib/billing-read";
 
 // ── Fetch helper ──
 //
-// Phase 5 universal-auth-state: this helper used to bake its own auth
-// header from a localStorage read at request time. It now delegates to
-// the shared `api` client so requests participate in refresh-on-401,
-// single-flight refresh dedup, fresh-login grace, and the unified
-// session-expired redirect latch.
+// Phase 5 universal-auth-state: this helper delegates to the shared `api`
+// client so requests participate in refresh-on-401, single-flight refresh
+// dedup, fresh-login grace, and the unified session-expired redirect latch.
 //
-// Public contract preserved: returns null on any error (network, 4xx,
-// 5xx) so consuming pages render an honest empty state instead of
-// throwing. Callers rely on `useQuery`'s data-or-null surface.
+// FAILURES THROW. They used to be swallowed into `null` by a bare
+// `catch { return null }`, which meant a 403, an expired session or a
+// backend outage reached the billing page as an ordinary empty result — and
+// the page rendered it as "0 of 0 minutes used" with "No invoices yet".
+// That is a confident statement about a customer's money that nothing had
+// verified. Letting the rejection through is what gives the calling
+// `useQuery` a real `isError`, the same contract every other module in
+// `src/lib` already uses (see `topup-api.ts` and `extended-api.ts`).
 
 type BillingFetchInit = {
   method?: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   body?: string;
 };
 
-async function billingFetch<T>(path: string, options?: BillingFetchInit): Promise<T | null> {
-  try {
-    const method = (options?.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | undefined) ?? "GET";
-    // billing hooks historically pass `body` as a JSON-encoded string
-    // (JSON.stringify(...)); the shared client expects an object, so
-    // parse it back. Empty/no body stays undefined.
-    let body: unknown;
-    if (options?.body !== undefined) {
-      try {
-        body = JSON.parse(options.body);
-      } catch {
-        body = options.body;
-      }
+async function billingFetch<T>(path: string, options?: BillingFetchInit): Promise<T> {
+  const method = (options?.method as "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | undefined) ?? "GET";
+  // billing hooks historically pass `body` as a JSON-encoded string
+  // (JSON.stringify(...)); the shared client expects an object, so
+  // parse it back. Empty/no body stays undefined.
+  let body: unknown;
+  if (options?.body !== undefined) {
+    try {
+      body = JSON.parse(options.body);
+    } catch {
+      body = options.body;
     }
-    return await api.request<T>({ path, method, body });
-  } catch {
-    return null;
+  }
+  return await api.request<T>({ path, method, body });
+}
+
+/**
+ * For the one billing read where "not there" is a real answer rather than a
+ * failure: `GET /billing/invoices/{id}` answers 404 for an id that is not
+ * this tenant's, and the detail page has an honest "Invoice not found"
+ * screen for exactly that. Every other status still throws.
+ *
+ * Same shape as `extended-api.ts` `getCallFeedback` / `getMyReview`.
+ */
+async function billingFetchOptional<T>(path: string, parse: (data: unknown) => T): Promise<T | null> {
+  try {
+    return parse(await billingFetch(path));
+  } catch (err) {
+    if (err instanceof ApiClientError && err.status === 404) return null;
+    throw err;
   }
 }
 
@@ -67,14 +86,16 @@ export const billingKeys = {
 
 // ── Billing Hooks ──
 
-export function useBillingPlan() {
+export function useBillingPlan(scope?: string) {
   return useQuery({
-    queryKey: billingKeys.plan(),
+    queryKey: [...billingKeys.plan(), scope ?? "legacy"],
     queryFn: async () => {
       // Backend exposes /billing/subscription (plan + status + period).
-      // Previously this fetched /billing/plan which doesn't exist → null.
       const data = await billingFetch("/billing/subscription");
-      return data ?? null;
+      // A successful response with no body is a genuine "no subscription",
+      // which the page renders as "Choose a plan". A FAILED request now
+      // throws instead of arriving here as null.
+      return data == null ? null : billingSubscriptionSchema.parse(data);
     },
   });
 }
@@ -84,9 +105,8 @@ export function useBillingUsage() {
     queryKey: billingKeys.usage(),
     queryFn: async () => {
       // Backend exposes /billing/usage (summary for current period).
-      // Previously hit /billing/usage/summary which doesn't exist → null.
       const data = await billingFetch("/billing/usage");
-      return data ?? null;
+      return usageSchema.parse(data);
     },
   });
 }
@@ -96,7 +116,7 @@ export function useDailyUsage() {
     queryKey: billingKeys.dailyUsage(),
     queryFn: async () => {
       const data = await billingFetch("/billing/usage/daily");
-      return data ?? [];
+      return dailyUsageSchema.parse(data);
     },
   });
 }
@@ -106,7 +126,7 @@ export function useBillingInvoices() {
     queryKey: billingKeys.invoices(),
     queryFn: async () => {
       const data = await billingFetch("/billing/invoices");
-      return data ?? [];
+      return invoiceListSchema.parse(data);
     },
   });
 }
@@ -115,19 +135,20 @@ export function useBillingInvoice(id: string) {
   return useQuery({
     queryKey: billingKeys.invoice(id),
     queryFn: async () => {
-      const data = await billingFetch(`/billing/invoices/${encodeURIComponent(id)}`);
-      return data ?? null;
+      // 404 here means the invoice does not exist — an answer, not an
+      // outage — so it comes back as null and the page says so.
+      return billingFetchOptional(`/billing/invoices/${encodeURIComponent(id)}`, (data) => invoiceSchema.parse(data));
     },
     enabled: Boolean(id),
   });
 }
 
-export function useBillingPlans() {
+export function useBillingPlans(scope?: string) {
   return useQuery({
-    queryKey: billingKeys.plans(),
+    queryKey: [...billingKeys.plans(), scope ?? "legacy"],
     queryFn: async () => {
       const data = await billingFetch("/billing/plans");
-      return data ?? [];
+      return billingCatalogSchema.parse(data);
     },
   });
 }
@@ -137,7 +158,7 @@ export function useBillingAdjustments() {
     queryKey: billingKeys.adjustments(),
     queryFn: async () => {
       const data = await billingFetch("/billing/adjustments");
-      return data ?? [];
+      return ledgerListSchema.parse(data);
     },
   });
 }
@@ -147,7 +168,7 @@ export function useOverageAlerts() {
     queryKey: billingKeys.overageAlerts(),
     queryFn: async () => {
       const data = await billingFetch("/billing/overage-alerts");
-      return data ?? [];
+      return overageAlertsSchema.parse(data);
     },
   });
 }
@@ -401,19 +422,6 @@ export function useRotateSecret() {
       billingFetch(`/admin/secrets/${encodeURIComponent(id)}/rotate`, { method: "POST" }),
     onSettled: () => { void qc.invalidateQueries({ queryKey: billingKeys.secrets() }); },
     onError: (err) => { console.error("Failed to rotate secret:", err); },
-  });
-}
-
-export function useChangePlan() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (input: { planId: string; isYearly: boolean }) =>
-      billingFetch("/billing/plan/change", { method: "POST", body: JSON.stringify(input) }),
-    onSettled: () => {
-      void qc.invalidateQueries({ queryKey: billingKeys.plan() });
-      void qc.invalidateQueries({ queryKey: billingKeys.plans() });
-    },
-    onError: (err) => { console.error("Failed to change plan:", err); },
   });
 }
 

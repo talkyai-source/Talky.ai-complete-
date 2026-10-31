@@ -694,15 +694,22 @@ class QueryBuilder:
         if not items:
             return PostgrestResponse(data=[])
 
-        keys = list(items[0].keys())
-        cols = ", ".join(keys)
         results = []
         column_types = await self._get_table_column_types(conn)
 
         for item in items:
+            # Each row binds its OWN columns: rows in one batch may carry
+            # different key sets (blank CSV cells are dropped upstream), and
+            # using the first row's keys silently discarded later rows' values
+            # (e.g. do_not_call=True) or bound NULL into NOT NULL columns.
+            keys = list(item.keys())
+            cols = ", ".join(keys)
             args = [self._coerce_bind_value(item.get(k), column_types.get(k)) for k in keys]
             placeholders = ", ".join(f"${i + 1}" for i in range(len(args)))
-            sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders}) RETURNING *"
+            if keys:
+                sql = f"INSERT INTO {self.table_name} ({cols}) VALUES ({placeholders}) RETURNING *"
+            else:
+                sql = f"INSERT INTO {self.table_name} DEFAULT VALUES RETURNING *"
             row = await conn.fetchrow(sql, *args)
             if row:
                 results.append(self._decode_row(row, column_types))
@@ -881,48 +888,16 @@ class RpcBuilder:
         return PostgrestResponse(error=f"Unsupported RPC: {self.name}")
 
     async def _rpc_update_call_status(self, conn) -> PostgrestResponse:
-        call_id = self.params.get("p_call_uuid")
-        outcome = self.params.get("p_outcome")
-        duration = self.params.get("p_duration")
+        """Refuse the legacy RPC as proof of full terminal settlement.
 
-        row = await conn.fetchrow(
-            "SELECT id, lead_id, campaign_id FROM calls WHERE id = $1",
-            call_id,
-        )
-        if not row:
-            return PostgrestResponse(data={"found": False})
-
-        if duration is None:
-            await conn.execute(
-                """
-                UPDATE calls
-                SET status = 'completed', outcome = $2, ended_at = NOW(), updated_at = NOW()
-                WHERE id = $1
-                """,
-                call_id,
-                outcome,
-            )
-        else:
-            await conn.execute(
-                """
-                UPDATE calls
-                SET status = 'completed', outcome = $2, duration_seconds = $3,
-                    ended_at = NOW(), updated_at = NOW()
-                WHERE id = $1
-                """,
-                call_id,
-                outcome,
-                int(duration),
-            )
-
-        return PostgrestResponse(
-            data={
-                "found": True,
-                "call_id": str(row["id"]),
-                "lead_id": str(row["lead_id"]) if row.get("lead_id") else None,
-                "campaign_id": str(row["campaign_id"]) if row.get("campaign_id") else None,
-            }
-        )
+        The SQL function remains available only as a first-terminal-wins call
+        projection for old external callers. The application settlement also
+        owns lead/job/campaign writes and the retry outbox, which must commit
+        through ``CallService`` on one pooled transaction. Returning an error
+        here prevents an in-process caller from mistaking the projection for
+        that stronger durability guarantee.
+        """
+        return PostgrestResponse(error="atomic_pool_required")
 
     async def _rpc_increment_campaign_counter(self, conn) -> PostgrestResponse:
         campaign_id = self.params.get("p_campaign_id")

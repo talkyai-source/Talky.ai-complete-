@@ -100,6 +100,9 @@ class SecretsConn:
         self.row = row
         self.executed = []
 
+    def transaction(self):
+        return _AcquireCtx(self)
+
     def _visible(self, secret_id, tenant):
         r = self.row
         if r is None or str(r["secret_id"]) != str(secret_id):
@@ -140,8 +143,12 @@ class TestSecretsManagerTenantScoping:
     async def test_rotate_same_tenant_succeeds(self):
         sid = uuid4()
         mgr = _manager(_secret_row(sid, OWNER))
-        new_id = await mgr.rotate(secret_id=sid, rotated_by=uuid4(), tenant_id=OWNER)
-        assert isinstance(new_id, UUID)
+        # Rotation now requires the new value for non-API-key types
+        # (bug hunt billing-money-credentials-6: rotating without one used to
+        # blank the secret) and returns (new_id, generated_api_key).
+        new_id, api_key = await mgr.rotate(secret_id=sid, rotated_by=uuid4(), tenant_id=OWNER,
+                                           new_value={"secret": "synthetic-rotated-value"})
+        assert isinstance(new_id, UUID) and api_key is None
 
     async def test_rotate_cross_tenant_is_not_found(self):
         sid = uuid4()
@@ -194,7 +201,7 @@ class TestSecretsRouteThreadsAuthenticatedTenant:
         from app.api.v1.endpoints import secrets as sec
 
         mgr = MagicMock()
-        mgr.rotate = AsyncMock(return_value=uuid4())
+        mgr.rotate = AsyncMock(return_value=(uuid4(), None))
         await sec.rotate_secret(
             tenant_id=OWNER,
             secret_id=uuid4(),
@@ -266,6 +273,9 @@ def _event_row(event_id, tenant_id):
 class EventsConn:
     def __init__(self, row):
         self.row = row
+
+    def transaction(self):
+        return _AcquireCtx(self)
 
     async def fetchrow(self, query, *args):
         if "security_events" not in query:
@@ -445,6 +455,13 @@ async def test_recording_lookup_cannot_resolve_other_tenant_call():
         _dialer_tenant_id=str(OWNER),
         config=None,
         call_session=None,
+        # An OUTBOUND dialer session. Pinned explicitly because a bare
+        # MagicMock auto-creates `_inbound_admission` as a truthy child mock,
+        # which makes `recording._is_true_inbound_session()` classify this as a
+        # carrier inbound call and discard the audio before the lookup under
+        # test ever runs.
+        _inbound_admission=None,
+        _call_direction="outbound",
     )
 
     captured_save = {}
@@ -490,6 +507,8 @@ async def test_recording_lookup_same_tenant_resolves_its_own_call():
     vs = MagicMock(
         media_gateway=gateway, call_id="voice-id",
         _dialer_tenant_id=str(OWNER), config=None, call_session=None,
+        # Outbound — see the note in the sibling test above.
+        _inbound_admission=None, _call_direction="outbound",
     )
 
     captured_save = {}
@@ -567,13 +586,32 @@ class _CampQuery:
         self._filters.append(("in", col, [str(v) for v in vals]))
         return self
 
+    def is_(self, col, val):
+        self._filters.append(("is", col, val))
+        return self
+
     def order(self, *_a, **_k):
+        return self
+
+    def limit(self, *_a, **_k):
         return self
 
     def _match(self, row):
         for kind, col, val in self._filters:
-            rv = row.get(col)
-            rv = str(rv) if rv is not None else None
+            raw = row.get(col)
+            if kind == "is":
+                # SQL three-valued logic, as used by the do_not_call
+                # suppression predicate: `x IS NOT TRUE` holds for FALSE and
+                # for NULL; `x IS TRUE` only for TRUE.
+                token = None if val is None else str(val).strip().upper()
+                if token is None and raw is not None:
+                    return False
+                if token == "NOT TRUE" and raw is True:
+                    return False
+                if token == "TRUE" and raw is not True:
+                    return False
+                continue
+            rv = str(raw) if raw is not None else None
             if kind == "eq" and rv != val:
                 return False
             if kind == "in" and rv not in val:
@@ -609,10 +647,15 @@ def _campaign_service(db):
     return CampaignService(db, queue_service=None)
 
 
-def _seed_campaign(db, campaign_id, tenant_id, status="running"):
+def _seed_campaign(db, campaign_id, tenant_id, status="running", direction="outbound"):
+    # `direction` is NOT NULL DEFAULT 'outbound' in the schema, so a real row
+    # always carries it. The fixture predated the column; without it the
+    # outbound-only UPDATE predicate matches nothing and pause/stop raise
+    # CampaignDirectionError instead of exercising the tenant-scoping path
+    # these tests are about.
     db.tables["campaigns"].append({
         "id": campaign_id, "tenant_id": tenant_id, "status": status,
-        "name": "c", "total_leads": 0,
+        "name": "c", "total_leads": 0, "direction": direction,
     })
 
 

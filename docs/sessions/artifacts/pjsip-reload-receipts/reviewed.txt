@@ -1,0 +1,5 @@
+...................................s.................................... [ 83%]
+..............                                                           [100%]
+=========================== short test summary info ===========================
+SKIPPED [1] tests\unit\test_pjsip_config_generator.py:261: POSIX file modes only
+85 passed, 1 skipped in 4.24s

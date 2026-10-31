@@ -6,10 +6,11 @@ Step 1: POST /auth/signup/start    {name, business_name, email}
            created yet.
 Step 2: POST /auth/signup/complete {email, code, password, confirm_password}
         -> validates the code, creates tenants + user_profiles
-           (plan_id="free" hardcoded), issues JWT + session cookie.
+           (no plan, zero minutes), issues JWT + session cookie.
 
-plan_id is never accepted from the frontend — every new account lands
-on the `free` tier and upgrades happen later from the dashboard.
+plan_id is never accepted from the frontend. Since 2026-10-27 billing is
+paid-only: a new account has no plan and no minutes, and can place calls
+only after buying a monthly or yearly plan in Billing.
 """
 
 import hashlib
@@ -18,9 +19,12 @@ import logging
 import secrets
 import uuid
 
+from asyncpg import UniqueViolationError
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 
 from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.core.db_utils import acquire_with_tenant
+from app.core.errors import ApiError
 from app.core.postgres_adapter import Client
 from app.core.security.password import (
     PasswordValidationError,
@@ -35,8 +39,8 @@ from ._shared import (
     create_jwt,
     get_client_ip,
     get_user_agent,
-    limiter,
     issue_cookie_auth,
+    limiter,
     set_session_cookie,
 )
 from .schemas import (
@@ -54,6 +58,37 @@ router = APIRouter(tags=["auth"])
 
 _SIGNUP_CODE_TTL_SECONDS = 15 * 60   # 15 minutes
 _SIGNUP_REDIS_KEY_PREFIX = "signup:pending:"
+_SIGNUP_MAX_CODE_ATTEMPTS = 5
+_SIGNUP_MAX_SENDS_PER_WINDOW = 5
+
+# Atomically claim one guess against the pending code. Past the cap the
+# pending record is deleted (the code is burned). The counter is keyed by the
+# code hash, so a newly issued code starts a fresh count.
+_CLAIM_SIGNUP_ATTEMPT = """
+local n = redis.call('INCR', KEYS[2])
+if n == 1 then redis.call('EXPIRE', KEYS[2], tonumber(ARGV[2])) end
+if n > tonumber(ARGV[1]) then
+  redis.call('DEL', KEYS[1])
+  return -1
+end
+return n
+"""
+
+# Per-email send cap: INCR, TTL set on first send of the window.
+_CLAIM_SIGNUP_SEND = """
+local n = redis.call('INCR', KEYS[1])
+if n == 1 then redis.call('EXPIRE', KEYS[1], tonumber(ARGV[2])) end
+if n > tonumber(ARGV[1]) then return -1 end
+return n
+"""
+
+
+def _already_registered() -> ApiError:
+    return ApiError(
+        status=status.HTTP_409_CONFLICT,
+        code="email_already_registered",
+        message="You are already registered. Please sign in or try another email address.",
+    )
 
 
 def _hash_signup_code(code: str) -> str:
@@ -63,6 +98,51 @@ def _hash_signup_code(code: str) -> str:
 
 def _signup_redis_key(email: str) -> str:
     return f"{_SIGNUP_REDIS_KEY_PREFIX}{email.strip().lower()}"
+
+
+async def _claim_signup_attempt(redis, email: str, pending: dict) -> None:
+    """Burn one guess; 400 once the cap is exceeded. Fails closed (503)."""
+    attempts_key = (
+        f"signup:attempts:{email.strip().lower()}:"
+        f"{str(pending.get('code_hash') or '')[:16]}"
+    )
+    try:
+        claimed = await redis.eval(
+            _CLAIM_SIGNUP_ATTEMPT, 2, _signup_redis_key(email), attempts_key,
+            _SIGNUP_MAX_CODE_ATTEMPTS, _SIGNUP_CODE_TTL_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("signup_attempt_claim_unavailable err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Signup service temporarily unavailable.",
+        ) from exc
+    if int(claimed) < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code expired or not found. "
+                   "Please request a new code.",
+        )
+
+
+async def _claim_signup_send(redis, email: str) -> None:
+    """Cap code emails per address per window; 429 beyond it."""
+    try:
+        claimed = await redis.eval(
+            _CLAIM_SIGNUP_SEND, 1, f"signup:sends:{email.strip().lower()}",
+            _SIGNUP_MAX_SENDS_PER_WINDOW, _SIGNUP_CODE_TTL_SECONDS,
+        )
+    except Exception as exc:
+        logger.warning("signup_send_claim_unavailable err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Signup service temporarily unavailable.",
+        ) from exc
+    if int(claimed) < 0:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many verification emails requested. Please try again later.",
+        )
 
 
 def _get_redis_or_503():
@@ -94,17 +174,13 @@ async def signup_start(
     email = body.email.strip().lower()
 
     # Reject if a real account with this email already exists.
-    async with db_client.pool.acquire() as conn:
+    # Signup starts with an email, before a tenant identity exists.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
         existing = await conn.fetchrow(
-            "SELECT id FROM user_profiles WHERE email = $1", email
+            "SELECT id FROM user_profiles WHERE LOWER(email) = $1", email
         )
     if existing:
-        # Generic message — don't confirm/deny enumeration. Match
-        # /register's behaviour at line 322.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Registration failed. Please check your details.",
-        )
+        raise _already_registered()
 
     # 6-digit numeric code, zero-padded.
     code = f"{secrets.randbelow(1_000_000):06d}"
@@ -118,28 +194,37 @@ async def signup_start(
     }
 
     redis = _get_redis_or_503()
-    await redis.setex(
-        _signup_redis_key(email),
-        _SIGNUP_CODE_TTL_SECONDS,
-        json.dumps(pending_payload),
-    )
+    await _claim_signup_send(redis, email)
+    try:
+        await redis.setex(
+            _signup_redis_key(email),
+            _SIGNUP_CODE_TTL_SECONDS,
+            json.dumps(pending_payload),
+        )
+    except Exception as exc:
+        logger.warning("signup_pending_write_failed err=%s", type(exc).__name__)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Signup service temporarily unavailable.",
+        ) from exc
 
-    # Send email. We tolerate send failures (logged) so a misconfigured
-    # SMTP setup doesn't block development. In production, the SMTP env
-    # vars must be set or no codes will ever reach users — see README.
-    email_service = get_email_service()
-    sent = await email_service.send_signup_code_email(
-        recipient_email=email,
-        recipient_name=body.name,
-        code=code,
-        expires_in_minutes=_SIGNUP_CODE_TTL_SECONDS // 60,
-    )
+    # A stored code is not evidence that the mailbox provider accepted it, and
+    # a mail-service exception is the same outcome as a refused send.
+    try:
+        sent = await get_email_service().send_signup_code_email(
+            recipient_email=email,
+            recipient_name=body.name,
+            code=code,
+            expires_in_minutes=_SIGNUP_CODE_TTL_SECONDS // 60,
+        )
+    except Exception as exc:
+        logger.warning("signup_start_email_send_error err=%s", type(exc).__name__)
+        sent = False
     if not sent:
-        logger.warning(
-            "signup_start_email_send_failed email=%s — "
-            "code stored in Redis but no email was delivered. "
-            "Check SMTP_HOST / SMTP_USER / SMTP_PASSWORD env vars.",
-            email,
+        logger.warning("signup_start_email_send_unconfirmed")
+        raise HTTPException(
+            status_code=503,
+            detail="We could not confirm sending your verification email. Please try again shortly.",
         )
 
     return SignupStartResponse(
@@ -180,8 +265,9 @@ async def signup_verify_code(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signup record corrupted. Please request a new code.",
-        )
+        ) from None
 
+    await _claim_signup_attempt(redis, email, pending)
     if not secrets.compare_digest(
         _hash_signup_code(body.code.strip()),
         pending["code_hash"],
@@ -207,8 +293,8 @@ async def signup_complete(
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> AuthTokenResponse:
     """Step 2 of signup. Validate the code stored in Redis, then
-    create tenant + user_profiles (plan_id always "free") and issue
-    a JWT + session cookie just like /register does."""
+    create tenant + user_profiles (no plan, zero minutes) and issue
+    a session-bound JWT and cookie pair atomically."""
 
     email = body.email.strip().lower()
 
@@ -248,9 +334,10 @@ async def signup_complete(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Signup record corrupted. Please request a new code.",
-        )
+        ) from None
 
     # Constant-time-ish comparison via secrets.compare_digest.
+    await _claim_signup_attempt(redis, email, pending)
     if not secrets.compare_digest(
         _hash_signup_code(body.code.strip()),
         pending["code_hash"],
@@ -260,29 +347,28 @@ async def signup_complete(
             detail="Invalid verification code.",
         )
 
-    # All checks passed — create the account. plan_id is hardcoded.
-    forced_plan_id = "free"
+    # All checks passed — create the account with no plan and no minutes.
+    # Free minutes ended 2026-10-27 (owner decision); a plan is bought later.
+    # The meter reads a planless zero allowance as known and exhausted.
 
-    async with db_client.pool.acquire() as conn:
-        plan = await conn.fetchrow(
-            "SELECT id, minutes FROM plans WHERE id = $1", forced_plan_id
+    # The tenant is created in this transaction, so no tenant UUID exists yet.
+    async with acquire_with_tenant(db_client.pool, None) as conn:
+        tenant_admin_role_id = await conn.fetchval(
+            "SELECT id FROM roles WHERE name = 'tenant_admin'"
         )
-        if not plan:
+        if not tenant_admin_role_id:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Default plan unavailable; contact support.",
+                detail="Default account role unavailable; contact support.",
             )
 
         # Race: someone may have registered with the same email between
         # /signup/start and /signup/complete. Re-check.
         existing = await conn.fetchrow(
-            "SELECT id FROM user_profiles WHERE email = $1", email
+            "SELECT id FROM user_profiles WHERE LOWER(email) = $1", email
         )
         if existing:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Registration failed. Please check your details.",
-            )
+            raise _already_registered()
 
         # Wrap tenant + user_profile + session in a single transaction so a
         # failed user INSERT (e.g. constraint violation) rolls back the
@@ -292,12 +378,10 @@ async def signup_complete(
             tenant = await conn.fetchrow(
                 """
                 INSERT INTO tenants (business_name, plan_id, minutes_allocated, minutes_used)
-                VALUES ($1, $2, $3, 0)
+                VALUES ($1, NULL, 0, 0)
                 RETURNING id, business_name, minutes_allocated
                 """,
                 pending["business_name"],
-                forced_plan_id,
-                plan["minutes"],
             )
 
             pw_hash = hash_password(body.password)
@@ -312,18 +396,42 @@ async def signup_complete(
             # (day4_rbac_tenant_isolation.sql renamed the legacy 'owner' role
             # and added chk_user_profiles_role_valid restricting role to
             # {platform_admin, partner_admin, tenant_admin, user, readonly}).
+            try:
+                await conn.execute(
+                    """
+                    INSERT INTO user_profiles
+                        (id, email, name, tenant_id, role, password_hash,
+                         is_verified, email_verified_at)
+                    VALUES ($1, $2, $3, $4, 'tenant_admin', $5, TRUE, NOW())
+                    """,
+                    user_id,
+                    email,
+                    pending["name"],
+                    tenant["id"],
+                    pw_hash,
+                )
+            except UniqueViolationError as exc:
+                # Concurrent completions can pass the pre-check. Exiting this
+                # transaction also rolls back the tenant created above.
+                if exc.constraint_name == "user_profiles_email_key":
+                    raise _already_registered() from exc
+                raise
+
+            # RBAC reads membership from tenant_users (role_permissions and
+            # active tenant_users rows drive every DB-backed permission
+            # check — see app/core/security/rbac.py). Creating only the
+            # user_profiles row produces a valid login token but leaves the
+            # new owner unable to read dashboard data once those checks are
+            # active, because no membership row exists for them.
             await conn.execute(
                 """
-                INSERT INTO user_profiles
-                    (id, email, name, tenant_id, role, password_hash,
-                     is_verified, email_verified_at)
-                VALUES ($1, $2, $3, $4, 'tenant_admin', $5, TRUE, NOW())
+                INSERT INTO tenant_users
+                    (user_id, tenant_id, role_id, is_primary, status, joined_at)
+                VALUES ($1, $2, $3, TRUE, 'active', NOW())
                 """,
                 user_id,
-                email,
-                pending["name"],
                 tenant["id"],
-                pw_hash,
+                tenant_admin_role_id,
             )
 
             # Seed the platform-default SIP trunk so the new tenant can
@@ -345,47 +453,53 @@ async def signup_complete(
                 return_session_id=True,
             )
 
-    # Pending record served its purpose — drop it from Redis.
-    await redis.delete(_signup_redis_key(email))
+            # Account, membership, login session and refresh family are one
+            # transaction. A cookie-auth persistence failure leaves no orphan
+            # account that the customer cannot finish creating.
+            token = create_jwt(user_id, email, "tenant_admin", str(tenant["id"]), session_id)
+            set_session_cookie(response, raw_session_token)
+            await issue_cookie_auth(
+                response, conn, user_id=user_id, email=email, role="tenant_admin",
+                tenant_id=str(tenant["id"]), session_id=session_id, ip=ip, user_agent=ua,
+            )
 
-    token = create_jwt(user_id, email, "tenant_admin", str(tenant["id"]), session_id)
-    set_session_cookie(response, raw_session_token)
+    # The database unique email constraint is the durable one-account fence.
+    # Cleanup failure after commit must not misreport successful registration.
+    try:
+        await redis.delete(_signup_redis_key(email))
+    except Exception:
+        logger.warning("signup_pending_cleanup_failed")
 
-    async with db_client.pool.acquire() as conn:
-        await issue_cookie_auth(
-            response,
-            conn,
-            user_id=user_id,
-            email=email,
-            role="tenant_admin",
+    # The account is committed; an audit outage must not report a failed
+    # signup (the customer would retry and be told the email is taken).
+    try:
+        await audit_logger.log(
+            event_type=AuditEvent.USER_CREATED,
+            actor_id=user_id,
+            actor_type="user",
             tenant_id=str(tenant["id"]),
-            session_id=session_id,
-            ip=ip,
+            action="user_registered_two_step",
+            description=f"New user registered (two-step): {email}",
+            metadata={
+                "plan_id": None,
+                "business_name": pending["business_name"],
+                "flow": "signup/start+complete",
+            },
+            ip_address=ip,
             user_agent=ua,
         )
+    except Exception:
+        logger.warning("signup_completed_audit_failed")
 
-    await audit_logger.log(
-        event_type=AuditEvent.USER_CREATED,
-        actor_id=user_id,
-        actor_type="user",
-        tenant_id=str(tenant["id"]),
-        action="user_registered_two_step",
-        description=f"New user registered (two-step): {email}",
-        metadata={
-            "plan_id": forced_plan_id,
-            "business_name": pending["business_name"],
-            "flow": "signup/start+complete",
-        },
-        ip_address=ip,
-        user_agent=ua,
-    )
-
+    from app.services.scripts.tenant_minutes import compute_tenant_minutes_status
+    meter = await compute_tenant_minutes_status(db_client.pool, str(tenant["id"]))
     return AuthTokenResponse(
         access_token=token,
         user_id=user_id,
+        tenant_id=str(tenant["id"]),
         email=email,
-        role="owner",
+        role="tenant_admin",
         business_name=pending["business_name"],
-        minutes_remaining=plan["minutes"],
+        **meter.allowance(),
         message="Account created successfully.",
     )

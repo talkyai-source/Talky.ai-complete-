@@ -1,0 +1,306 @@
+{
+  "package": "CP08",
+  "slice": "Backend current authority and existing account/session lifecycle",
+  "status": "Owned implementation frozen; root integrated validation and release remain separate.",
+  "source_files": [
+    "backend/app/core/security/principal.py",
+    "backend/Alembic/versions/0059_auth_identity_contract.py",
+    "backend/database/complete_schema.sql",
+    "backend/app/api/v1/dependencies.py",
+    "backend/app/api/v1/endpoints/auth/login.py",
+    "backend/app/api/v1/endpoints/auth/refresh.py",
+    "backend/app/api/v1/endpoints/auth/sessions.py",
+    "backend/app/api/v1/endpoints/auth/registration.py",
+    "backend/app/api/v1/endpoints/auth/__init__.py",
+    "backend/app/api/v1/endpoints/auth/schemas.py",
+    "backend/app/api/v1/endpoints/auth/signup.py",
+    "backend/app/api/v1/endpoints/rbac/tenant_users.py",
+    "backend/app/api/v1/endpoints/rbac/schemas.py",
+    "backend/app/core/security/rbac.py",
+    "backend/app/core/app_bootstrap.py",
+    "backend/app/core/session_security_middleware.py",
+    "backend/app/api/v1/endpoints/assistant_ws.py",
+    "backend/app/api/v1/endpoints/assistant_voice_ws.py",
+    "backend/app/infrastructure/assistant/tools/dispatch.py",
+    "backend/app/api/v1/endpoints/campaign_test_ws.py",
+    "backend/app/api/v1/endpoints/admin/users.py"
+  ],
+  "owned_test_files": [
+    "backend/tests/integration/test_cp08_current_identity.py",
+    "backend/tests/security/test_cp08_principal_contract.py",
+    "backend/tests/unit/test_refresh_session_binding.py",
+    "backend/tests/unit/test_signup_complete_membership.py",
+    "backend/tests/unit/test_rbac_tenant_users_escalation.py",
+    "backend/tests/unit/test_assistant_ws.py",
+    "backend/tests/unit/test_ag06_dashboard_actions.py",
+    "backend/tests/unit/test_session_middleware_rls_bypass.py",
+    "backend/tests/unit/test_campaign_test_hardening.py",
+    "backend/tests/integration/test_ag06_dashboard_receipts.py"
+  ],
+  "unit_security": {
+    "working_directory": "backend",
+    "modules": [
+      "tests/unit/test_signup_complete_membership.py",
+      "tests/unit/test_signup_duplicate_email.py",
+      "tests/unit/test_refresh_session_binding.py",
+      "tests/unit/test_auth_login_route.py",
+      "tests/unit/test_rbac_tenant_users_escalation.py",
+      "tests/unit/test_session_middleware_rls_bypass.py",
+      "tests/security/test_auth_cookie_issuance_invariant.py",
+      "tests/unit/assistant/test_dispatch_authorization.py",
+      "tests/unit/test_assistant_ws.py",
+      "tests/unit/test_ag06_dashboard_actions.py",
+      "tests/security/test_cp08_principal_contract.py",
+      "tests/unit/test_campaign_test_hardening.py",
+      "tests/unit/test_campaign_test_ws.py"
+    ],
+    "command": "python -m pytest tests/unit/test_signup_complete_membership.py tests/unit/test_signup_duplicate_email.py tests/unit/test_refresh_session_binding.py tests/unit/test_auth_login_route.py tests/unit/test_rbac_tenant_users_escalation.py tests/unit/test_session_middleware_rls_bypass.py tests/security/test_auth_cookie_issuance_invariant.py tests/unit/assistant/test_dispatch_authorization.py tests/unit/test_assistant_ws.py tests/unit/test_ag06_dashboard_actions.py tests/security/test_cp08_principal_contract.py tests/unit/test_campaign_test_hardening.py tests/unit/test_campaign_test_ws.py -q",
+    "result": {
+      "passed": 172,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 31,
+      "duration_seconds": 5.06
+    },
+    "log": "docs/sessions/artifacts/cp08/principal-unit-final.txt",
+    "cors_control": "tests/security/test_cp08_principal_contract.py::test_configured_cors_allows_identity_consistency_headers",
+    "cors_scope": "Actual Starlette CORS preflight uses configure_middleware registration and accepts both identity-consistency headers; not deployed proxy/browser evidence.",
+    "timing": "Completed before the final Admin read projection edit, which is directly covered by the subsequent 54-case PostgreSQL run."
+  },
+  "postgres": {
+    "working_directory": "backend",
+    "modules": [
+      "tests/integration/test_cp08_current_identity.py"
+    ],
+    "command": "python -m pytest tests/integration/test_cp08_current_identity.py -q",
+    "environment": "Explicit TEST_DATABASE_URL points only to the retained loopback disposable *_test database.",
+    "migration_head": "0059_auth_identity_contract",
+    "schema": "Actual complete_schema bootstrap and retained Alembic chain through 0059; no fixture-created auth columns.",
+    "role": "Per-test NOSUPERUSER NOBYPASSRLS role, SET ROLE, both flags asserted false. Privileged connection only provisions/cleans synthetic fixtures.",
+    "result": {
+      "passed": 54,
+      "failed": 0,
+      "skipped": 0,
+      "warnings": 1,
+      "duration_seconds": 47.49
+    },
+    "log": "docs/sessions/artifacts/cp08/identity-lifecycle-postgres-final.txt",
+    "case_inventory_source": "docs/sessions/artifacts/cp08/identity-postgres-case-inventory.txt",
+    "synthetic_boundaries": [
+      "JWT decoding/signing",
+      "password checking/hashing for controlled outcomes",
+      "mail/Redis signup seams",
+      "WebSocket and assistant tool/provider seams"
+    ],
+    "real_boundaries": [
+      "PostgreSQL transactions and rollback",
+      "session and refresh-family records",
+      "active verified membership authority",
+      "role and target-tenant queries",
+      "current grants",
+      "Admin account creation and role projection"
+    ],
+    "concurrency": [
+      "Concurrent refresh has one winner and durable reuse revocation.",
+      "Revocation during permission lookup stops the existing assistant effect."
+    ],
+    "scope_limit": "No external identity provider, real mailbox, real WebAuthn device, production cookie topology or provider effect.",
+    "case_inventory": [
+      "tests/integration/test_cp08_current_identity.py::test_revoked_session_is_denied_in_both_transports[cookie]",
+      "tests/integration/test_cp08_current_identity.py::test_revoked_session_is_denied_in_both_transports[bearer]",
+      "tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[removed]",
+      "tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[suspended]",
+      "tests/integration/test_cp08_current_identity.py::test_current_inactive_membership_blocks_profile_admin_and_direct_grant[pending]",
+      "tests/integration/test_cp08_current_identity.py::test_membership_demotion_overrides_stale_profile_role",
+      "tests/integration/test_cp08_current_identity.py::test_current_profile_admission_is_rechecked[inactive]",
+      "tests/integration/test_cp08_current_identity.py::test_current_profile_admission_is_rechecked[unverified]",
+      "tests/integration/test_cp08_current_identity.py::test_member_list_checks_exact_requested_tenant",
+      "tests/integration/test_cp08_current_identity.py::test_explicit_active_verified_platform_admin_preserved",
+      "tests/integration/test_cp08_current_identity.py::test_conflicting_browser_identity_is_denied_before_effects[headers0]",
+      "tests/integration/test_cp08_current_identity.py::test_conflicting_browser_identity_is_denied_before_effects[headers1]",
+      "tests/integration/test_cp08_current_identity.py::test_conflicting_browser_identity_is_denied_before_effects[headers2]",
+      "tests/integration/test_cp08_current_identity.py::test_logout_revokes_authenticated_session_without_legacy_cookie",
+      "tests/integration/test_cp08_current_identity.py::test_logout_mixed_refresh_owner_cannot_revoke_either_account",
+      "tests/integration/test_cp08_current_identity.py::test_refresh_checks_current_role_and_returns_bound_token",
+      "tests/integration/test_cp08_current_identity.py::test_refresh_expected_mismatch_does_not_rotate_or_clear_cookie",
+      "tests/integration/test_cp08_current_identity.py::test_removed_membership_refresh_is_denied_and_revocation_commits",
+      "tests/integration/test_cp08_current_identity.py::test_concurrent_refresh_has_one_winner_and_reuse_revocation_commits",
+      "tests/integration/test_cp08_current_identity.py::test_actual_rejected_login_keeps_durable_failure_counter",
+      "tests/integration/test_cp08_current_identity.py::test_legacy_registration_is_retired_without_database_effect",
+      "tests/integration/test_cp08_current_identity.py::test_direct_grant_cannot_cross_removed_target_membership",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_socket_admission_uses_current_session_and_membership[active-text]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_socket_admission_uses_current_session_and_membership[active-voice]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_socket_admission_uses_current_session_and_membership[revoked-text]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_socket_admission_uses_current_session_and_membership[revoked-voice]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_socket_admission_uses_current_session_and_membership[removed-text]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_socket_admission_uses_current_session_and_membership[removed-voice]",
+      "tests/integration/test_cp08_current_identity.py::test_open_socket_rechecks_authority_before_accepting_next_message",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_dispatch_rechecks_bound_session_and_live_grants[none]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_dispatch_rechecks_bound_session_and_live_grants[revoked]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_dispatch_rechecks_bound_session_and_live_grants[removed]",
+      "tests/integration/test_cp08_current_identity.py::test_assistant_dispatch_rechecks_bound_session_and_live_grants[demoted]",
+      "tests/integration/test_cp08_current_identity.py::test_signup_cookie_persistence_failure_rolls_back_entire_account",
+      "tests/integration/test_cp08_current_identity.py::test_signup_send_failure_never_claims_email_sent",
+      "tests/integration/test_cp08_current_identity.py::test_tenant_admin_cannot_modify_higher_tier_existing_member[patch]",
+      "tests/integration/test_cp08_current_identity.py::test_tenant_admin_cannot_modify_higher_tier_existing_member[delete]",
+      "tests/integration/test_cp08_current_identity.py::test_tenant_admin_cannot_modify_higher_tier_existing_member[post]",
+      "tests/integration/test_cp08_current_identity.py::test_session_revocation_during_permission_lookup_stops_effect",
+      "tests/integration/test_cp08_current_identity.py::test_login_refresh_insert_failure_does_not_leave_new_session[runtime]",
+      "tests/integration/test_cp08_current_identity.py::test_login_refresh_insert_failure_does_not_leave_new_session[http_rejection]",
+      "tests/integration/test_cp08_current_identity.py::test_campaign_test_session_gate_uses_same_current_principal[active]",
+      "tests/integration/test_cp08_current_identity.py::test_campaign_test_session_gate_uses_same_current_principal[inactive]",
+      "tests/integration/test_cp08_current_identity.py::test_campaign_test_session_gate_uses_same_current_principal[unverified]",
+      "tests/integration/test_cp08_current_identity.py::test_campaign_test_session_gate_uses_same_current_principal[removed]",
+      "tests/integration/test_cp08_current_identity.py::test_campaign_test_session_gate_uses_same_current_principal[tenant_changed]",
+      "tests/integration/test_cp08_current_identity.py::test_admin_created_tenant_user_can_sign_in_with_current_membership",
+      "tests/integration/test_cp08_current_identity.py::test_admin_role_edit_changes_effective_membership_not_just_profile",
+      "tests/integration/test_cp08_current_identity.py::test_admin_create_membership_failure_rolls_back_new_profile",
+      "tests/integration/test_cp08_current_identity.py::test_admin_role_edit_does_not_create_missing_legacy_membership",
+      "tests/integration/test_cp08_current_identity.py::test_tenant_admin_cannot_use_platform_user_creation",
+      "tests/integration/test_cp08_current_identity.py::test_admin_create_requires_tenant_for_nonplatform_role",
+      "tests/integration/test_cp08_current_identity.py::test_admin_directory_reflects_rbac_role_edit_and_effective_role_filter",
+      "tests/integration/test_cp08_current_identity.py::test_admin_directory_distinguishes_historical_assignment_from_current_access"
+    ]
+  },
+  "lint": {
+    "command": "python -m ruff check app/core/security/principal.py Alembic/versions/0059_auth_identity_contract.py app/api/v1/dependencies.py app/api/v1/endpoints/auth/login.py app/api/v1/endpoints/auth/refresh.py app/api/v1/endpoints/auth/sessions.py app/api/v1/endpoints/auth/registration.py app/api/v1/endpoints/auth/schemas.py app/api/v1/endpoints/auth/signup.py app/api/v1/endpoints/rbac/tenant_users.py app/api/v1/endpoints/rbac/schemas.py app/core/security/rbac.py app/core/app_bootstrap.py app/core/session_security_middleware.py app/api/v1/endpoints/assistant_ws.py app/api/v1/endpoints/assistant_voice_ws.py app/infrastructure/assistant/tools/dispatch.py app/api/v1/endpoints/campaign_test_ws.py app/api/v1/endpoints/admin/users.py tests/integration/test_cp08_current_identity.py tests/security/test_cp08_principal_contract.py --select F --extend-ignore F401,F841",
+    "result": "All checks passed",
+    "log": "docs/sessions/artifacts/cp08/principal-ruff.txt",
+    "policy": "Same F selection and ignored F401/F841 as repository CI; not a claim that every optional style rule passes.",
+    "files": [
+      "app/core/security/principal.py",
+      "Alembic/versions/0059_auth_identity_contract.py",
+      "app/api/v1/dependencies.py",
+      "app/api/v1/endpoints/auth/login.py",
+      "app/api/v1/endpoints/auth/refresh.py",
+      "app/api/v1/endpoints/auth/sessions.py",
+      "app/api/v1/endpoints/auth/registration.py",
+      "app/api/v1/endpoints/auth/schemas.py",
+      "app/api/v1/endpoints/auth/signup.py",
+      "app/api/v1/endpoints/rbac/tenant_users.py",
+      "app/api/v1/endpoints/rbac/schemas.py",
+      "app/core/security/rbac.py",
+      "app/core/app_bootstrap.py",
+      "app/core/session_security_middleware.py",
+      "app/api/v1/endpoints/assistant_ws.py",
+      "app/api/v1/endpoints/assistant_voice_ws.py",
+      "app/infrastructure/assistant/tools/dispatch.py",
+      "app/api/v1/endpoints/campaign_test_ws.py",
+      "app/api/v1/endpoints/admin/users.py",
+      "tests/integration/test_cp08_current_identity.py",
+      "tests/security/test_cp08_principal_contract.py"
+    ]
+  },
+  "confirmed_repairs": [
+    "Revoked bearer/access-cookie sessions require current live persisted sid; inactive/unverified profiles and removed/suspended/pending memberships cannot retain profile-role authority.",
+    "Active membership role overrides stale profile role. Direct grants require current eligible membership. Exact requested tenant and both existing/requested role ceilings are checked.",
+    "Optional expected-user/tenant headers reject changed identity before endpoint effects, refresh rotation or logout revocation/cookie clearing. Conflicting bearer/cookie principals are rejected.",
+    "Refresh returns current verified user/tenant/role plus access token; concurrent rotation and reuse revocations are transactional.",
+    "Known rejected login accounting commits; unexpected issuance errors, including HTTP 4xx, roll back session/account side effects.",
+    "Legacy register is retired in favor of verified signup. Known failed signup mail does not claim delivery. Signup issuance failure rolls back account, membership and session.",
+    "Text assistant, voice assistant and campaign-test browser sockets use current sid/principal. Assistant tools recheck before effects. Campaign tests recheck before provider allocation and retain periodic monitoring.",
+    "Authorized Admin creation writes canonical active membership in the same transaction; failure rolls back the new profile. Admin role edits change active membership and refuse to manufacture missing historical membership.",
+    "Actual RBAC role edit is visible in Admin detail/list/effective-role filter. Historical assignment is separate from nullable effective_role and membership_status; explicit global platform policy is preserved."
+  ],
+  "preserved_red_evidence": [
+    {
+      "path": "docs/sessions/artifacts/cp08/identity-postgres-initial.txt",
+      "interpretation": "10 setup errors exposed missing verification columns in the actual schema chain."
+    },
+    {
+      "path": "docs/sessions/artifacts/cp08/identity-postgres-red.txt",
+      "interpretation": "9 failed/1 passed after schema admission; two revoked-session fixture writes initially omitted required revoked_at, so not all nine represent independent application defects."
+    },
+    {
+      "path": "docs/sessions/artifacts/cp08/admin-account-parity-red.txt",
+      "interpretation": "Three actual PostgreSQL red controls for missing canonical Admin membership, role parity and rollback."
+    },
+    {
+      "path": "docs/sessions/artifacts/cp08/admin-authority-projection-red.txt",
+      "interpretation": "Initial run: one fixture used role instead of role_name; the other exposed absent explicit unavailable-authority fields."
+    },
+    {
+      "path": "docs/sessions/artifacts/cp08/admin-authority-projection-confirmed-red.txt",
+      "interpretation": "Corrected RBAC request; both projection contract controls failed before the read fix."
+    },
+    {
+      "path": "docs/sessions/artifacts/cp08/admin-authority-stale-role-red.txt",
+      "interpretation": "Actual RBAC edit changed membership to readonly; old Admin GET still returned tenant_admin. One direct application assertion failed."
+    },
+    {
+      "path": "docs/sessions/artifacts/cp08/identity-lifecycle-postgres-fixture-error.txt",
+      "interpretation": "Preserved intermediate 44-pass/one-NameError fixture run; not a final acceptance or application defect."
+    }
+  ],
+  "migration": {
+    "revision": "0059_auth_identity_contract",
+    "previous": "0058_crm_contact_effect",
+    "policy": "Add existing canonical verification and MFA-attempt fields with default false/zero and consistency checks, preserving prior values without inferred verification/membership. Short lock timeout. Data-retaining downgrade and idempotent re-upgrade.",
+    "prerequisite": "Operator reconciliation of historical verification/membership evidence before release. Missing verification defaults false; inconsistent previously provisioned values can intentionally fail validation.",
+    "evidence_limit": "migration-0059.txt records the first upgrade before the later attempts-field addition. Final authority/credential tests use completed0059. Root owns final clean-bootstrap acceptance."
+  },
+  "wire_contract": {
+    "expected_headers": [
+      "X-Talky-Expected-User",
+      "X-Talky-Expected-Tenant"
+    ],
+    "semantics": "Optional consistency only, never authentication or tenant selection. Empty expected tenant explicitly means tenant-less.",
+    "mismatch": {
+      "status": 409,
+      "code": "identity_changed"
+    },
+    "refresh": {
+      "status": 200,
+      "fields": [
+        "access_token",
+        "token_type",
+        "user_id",
+        "tenant_id",
+        "role"
+      ]
+    },
+    "admin_directory": {
+      "role": "Membership assignment where present, historical profile assignment otherwise; not sufficient alone to prove access.",
+      "effective_role": "Nullable eligible role from active/verified profile and current membership, with explicit global platform override.",
+      "membership_status": "Current membership status, missing, or not_required for explicit platform policy.",
+      "role_filter": "Current effective role; unavailable historical assignments do not match."
+    }
+  },
+  "acceptance_limits": [
+    "No deployment, live provider or customer action. Root integrated unit/security/PG union remains separate.",
+    "Coordinated frontend/backend rollout is required for expected-identity headers and refresh response. Legacy refresh families without a live bound sid require fresh login.",
+    "No automatic verification or membership backfill. Operators must use supported historical evidence; unavailable accounts remain unavailable.",
+    "Already admitted concurrent responses can still race browser Set-Cookie commits. Server admission/local state/effect guards do not provide browser cookie compare-and-swap.",
+    "Assistant checks run at message/non-token result/tool effect admission, not each audio byte/token. Campaign-test monitoring remains periodic plus provider-allocation-time validation.",
+    "A revocation after final authorization admission cannot atomically undo an external operation; durable unknown/no-resend receipt semantics remain required.",
+    "Existing Admin temporary-password flow is repaired; separate invitation delivery/acceptance remains absent.",
+    "MFA/passkey/reset evidence belongs to the separate credential slice and is not included in these 54 cases.",
+    "Next legacy authority containment and browser lifecycle validation are separately owned; this artifact does not claim those checks."
+  ],
+  "recorded_at": "2026-10-05T01:53:45.362572+00:00",
+  "base_commit": "d8ecd6d0d183e304e21453857619f36330f836bd",
+  "python_version": "3.12.12",
+  "source_lf_sha256": {
+    "backend/app/core/security/principal.py": "b92254a403c14b9b4590e450ea70a1132243b849a6f002f46eafaad1c15f618b",
+    "backend/Alembic/versions/0059_auth_identity_contract.py": "c51610e4014c5c2daa79cf016297e37af87157d5b313e61aaa23eac83ef4a4df",
+    "backend/database/complete_schema.sql": "14598518e889157b30de23584457a50997551491cddb465aab4b849a5d925d17",
+    "backend/app/api/v1/dependencies.py": "8ebc1e964899cfd35801915c81bf153ce50ecbe22871fe9664791345144de009",
+    "backend/app/api/v1/endpoints/auth/login.py": "b644c83dbacb9f0515095d40a236d8f29bc3527deb22b1efda23bdfcab7712eb",
+    "backend/app/api/v1/endpoints/auth/refresh.py": "a2b36621d9875617103703f795008c061b46ce324795c825536a165e8fb97a2d",
+    "backend/app/api/v1/endpoints/auth/sessions.py": "3d7d7227ad732747a9382abcde500b10847879fa5bbd1a7560e6f3b506522d27",
+    "backend/app/api/v1/endpoints/auth/registration.py": "f938d6c85d28c5c51134193d58912e508d3ebb2528d7fe39e0e8b45ed9ce5a56",
+    "backend/app/api/v1/endpoints/auth/__init__.py": "deada7a43a44d6e98da3b5137c337b02089c47b9caee086043f5a6bb0e42e13d",
+    "backend/app/api/v1/endpoints/auth/schemas.py": "4b62cbb49a802053bde74bd623e192c2dc2b3f5ed172a1043e88a1f35246dc6a",
+    "backend/app/api/v1/endpoints/auth/signup.py": "6d50d6cde376ae975c9006088a970eafe5629044f0eaa2874841a582e6e156e5",
+    "backend/app/api/v1/endpoints/rbac/tenant_users.py": "1a75abbae40137c7dce52e17b5a874c8bb8fa6e31319f550f73bdf93b4238758",
+    "backend/app/api/v1/endpoints/rbac/schemas.py": "46e4daa4ed4e934eea1ecf529a138a21544a2c49bdff0c13e128e8e041dc7076",
+    "backend/app/core/security/rbac.py": "cb770066ded35a08a40b609cce0fe5811e7f61a21329f63c7a76ef3a0d981a79",
+    "backend/app/core/app_bootstrap.py": "e99ac4ad1a4314d64ca2fa97cd30c05dceab49e585eb9589459c7d82b5dded6a",
+    "backend/app/core/session_security_middleware.py": "8395c8e4641b7ead488dfde8408353cc961855e4f313ca17a55f6c70eb3d134f",
+    "backend/app/api/v1/endpoints/assistant_ws.py": "5acf5d54f610cf24b9f809824501aa118dde81b6de385a8d8a44f5e721a43696",
+    "backend/app/api/v1/endpoints/assistant_voice_ws.py": "b1a76633ff9a67b07bd81676aba3aaf306aac16ca0eec2cc196ed36f20beb5f6",
+    "backend/app/infrastructure/assistant/tools/dispatch.py": "6f4f8db38880ff3cc5ebce10c47a8e7d89a1cefa76174702441f2dfba6dada07",
+    "backend/app/api/v1/endpoints/campaign_test_ws.py": "47d41c076fcbd3a5b8bc09b3ae259207e29868a96f9516ee83f63625557bc435",
+    "backend/app/api/v1/endpoints/admin/users.py": "7ddffc75a38434e8bda241a8071b83e8de06a0877dd43601fb6a4bd12cdf44e5"
+  }
+}

@@ -2,13 +2,14 @@
 Configuration Management
 Loads settings from YAML files and environment variables
 """
+import json
 import yaml
 import os
 from pathlib import Path
 from typing import Any, Dict
 from functools import lru_cache
 from urllib.parse import urlsplit, urlunsplit
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -71,9 +72,11 @@ class Settings(BaseSettings):
     # API Settings
     api_prefix: str = "/api/v1"
 
-    # CORS — populated from CORS_ORIGINS env var (comma-separated)
-    # Falls back to FRONTEND_URL if CORS_ORIGINS is not set
-    cors_origins: list[str] = ["http://localhost:3000"]
+    # CORS — populated from CORS_ORIGINS env var (comma-separated or a JSON
+    # array). Falls back to FRONTEND_URL if CORS_ORIGINS is not set. The str
+    # arm lets a comma-separated value reach _split_cors_origins: for a plain
+    # list field pydantic-settings JSON-decodes first and refused to boot.
+    cors_origins: list[str] | str = ["http://localhost:3000"]
     frontend_url: str = "http://localhost:3000"
     api_base_url: str = "http://localhost:8000"
 
@@ -85,6 +88,9 @@ class Settings(BaseSettings):
     kms_provider: str = "local"
     jwt_secret: str | None = None
     secret_key: str | None = None
+    # Dedicated write-only Alertmanager ingestion credential; not user/internal auth.
+    alertmanager_ingest_token: SecretStr | None = None
+    alertmanager_source_id: str = "platform-alertmanager"
     # AH-Phase-C: previous signing key during graceful rotation.
     # When the operator rotates `JWT_SECRET`, the previous value is
     # moved into `JWT_SECRET_PREVIOUS` for one window of (access TTL
@@ -134,6 +140,16 @@ class Settings(BaseSettings):
         if cleaned.lower() in {"null", "none", "undefined"}:
             return None
         return cleaned
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors_origins(cls, value: Any) -> Any:
+        if isinstance(value, str):
+            text = value.strip()
+            if text.startswith("["):
+                return json.loads(text)
+            return [part.strip() for part in text.split(",") if part.strip()]
+        return value
 
     @property
     def allowed_origins(self) -> list[str]:

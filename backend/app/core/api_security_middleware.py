@@ -13,6 +13,7 @@ Provides:
 - Suspicious pattern detection
 """
 
+import ipaddress
 import logging
 import re
 from typing import Optional, Any
@@ -22,6 +23,58 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
 logger = logging.getLogger(__name__)
+
+
+_TRUSTED_PROXY_NETS = tuple(
+    ipaddress.ip_network(n)
+    for n in ("10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "fc00::/7")
+)
+
+
+def _is_trusted_proxy_hop(value: str) -> bool:
+    """Loopback / private / link-local addresses are our own proxy tier."""
+    try:
+        addr = ipaddress.ip_address(value.strip())
+    except ValueError:
+        return False
+    # NOT is_private: it also matches the TEST-NET documentation ranges.
+    return addr.is_loopback or addr.is_link_local or any(addr in n for n in _TRUSTED_PROXY_NETS)
+
+
+def _valid_ip(value: Optional[str]) -> Optional[str]:
+    if not value:
+        return None
+    try:
+        return str(ipaddress.ip_address(value.strip()))
+    except ValueError:
+        return None
+
+
+def resolve_client_ip(request: Request) -> str:
+    """Real client address behind nginx; forwarded headers are never trusted
+    unless the TCP peer is our own proxy tier (loopback/private).
+
+    nginx overwrites X-Real-IP with $remote_addr and APPENDS to a
+    client-supplied X-Forwarded-For, so the leftmost XFF entry is attacker
+    controlled. Prefer X-Real-IP, then the rightmost untrusted XFF hop.
+    """
+    peer = request.client.host if request.client and request.client.host else None
+    if not peer:
+        return "unknown"
+    if not _is_trusted_proxy_hop(peer):
+        return peer
+    real = _valid_ip(request.headers.get("X-Real-IP"))
+    if real:
+        return real
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        for hop in reversed([h.strip() for h in forwarded.split(",")]):
+            valid = _valid_ip(hop)
+            if valid is None:
+                break  # garbage in the chain: stop trusting it
+            if not _is_trusted_proxy_hop(valid):
+                return valid
+    return peer
 
 # Configuration
 MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024  # 10MB
@@ -296,10 +349,7 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
 
                 # We can't easily get user_id/tenant_id yet as auth middleware might run after
                 # But we can at least check IP tier early
-                ip = request.client.host if request.client else "unknown"
-                forwarded = request.headers.get("X-Forwarded-For")
-                if forwarded:
-                    ip = forwarded.split(",")[0].strip()
+                ip = resolve_client_ip(request)
                 
                 allowed, headers, error = await limiter.check_all_tiers(
                     ip=ip,
@@ -357,9 +407,18 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             return True
         return False
 
+    # Public inbound webhooks whose path does not contain "/webhook". The
+    # Salesforce Outbound Message endpoint receives SOAP (text/xml) from
+    # Salesforce and would otherwise be rejected by the content-type gate.
+    _WEBHOOK_PATH_PREFIXES = (
+        "/api/v1/connectors/salesforce/outbound-message/",
+        "/api/v1/connectors/salesforce/callback-requests/",
+    )
+
     def _is_webhook_path(self, path: str) -> bool:
         """Check if path is a webhook endpoint."""
-        return "/webhook" in path.lower()
+        lowered = path.lower()
+        return "/webhook" in lowered or lowered.startswith(self._WEBHOOK_PATH_PREFIXES)
 
     def _is_suspicious_ua(self, ua: str) -> bool:
         """Check if user agent is suspicious."""

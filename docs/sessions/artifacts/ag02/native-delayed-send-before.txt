@@ -1,0 +1,11 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+__ test_result_superseded_while_waiting_for_playback_is_not_sent_as_matched ___
+tests\unit\test_realtime_knowledge_evidence.py:245: in test_result_superseded_while_waiting_for_playback_is_not_sent_as_matched
+    assert outputs["old-fc"]["status"] == "superseded"
+E   AssertionError: assert 'matched' == 'superseded'
+E     - superseded
+E     + matched
+=========================== short test summary info ===========================
+FAILED tests/unit/test_realtime_knowledge_evidence.py::test_result_superseded_while_waiting_for_playback_is_not_sent_as_matched
+1 failed, 20 deselected in 1.06s

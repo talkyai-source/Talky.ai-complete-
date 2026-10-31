@@ -2,9 +2,87 @@
 from __future__ import annotations
 
 import re
+import pytz
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from app.domain.services.voice_action_config import VoiceEmailAction, VoiceFormAction
+
+
+CampaignNextAction = Literal[
+    "schedule_callback",
+    "send_email",
+    "submit_form",
+    "transfer",
+    "end_call",
+]
+
+
+class CampaignBriefLeadField(BaseModel):
+    """One campaign field the operator marked as required."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    field_key: str = Field(..., min_length=1, max_length=64, pattern=r"^[A-Za-z][A-Za-z0-9_]*$")
+    label: str = Field(..., min_length=1, max_length=255)
+
+
+class CampaignBriefInput(BaseModel):
+    """Typed strategy persisted inside ``campaigns.script_config`` JSONB."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    representative_name: str = Field(..., min_length=1, max_length=120)
+    brand: str = Field(..., min_length=1, max_length=120)
+    decision_maker_role: Optional[str] = Field(default=None, max_length=160)
+    approved_next_actions: List[CampaignNextAction] = Field(default_factory=list, max_length=5)
+    transfer_destination: Optional[str] = Field(default=None, max_length=255)
+    email_action: Optional[VoiceEmailAction] = None
+    form_action: Optional[VoiceFormAction] = None
+    required_lead_fields: List[CampaignBriefLeadField] = Field(default_factory=list, max_length=20)
+    opening_objective: Optional[str] = Field(default=None, max_length=500)
+    max_objection_attempts: int = Field(default=2, ge=1, le=5)
+
+    @field_validator("approved_next_actions")
+    @classmethod
+    def _unique_actions(cls, value: List[CampaignNextAction]) -> List[CampaignNextAction]:
+        return list(dict.fromkeys(value))
+
+    @field_validator("required_lead_fields")
+    @classmethod
+    def _unique_required_fields(
+        cls, value: List[CampaignBriefLeadField]
+    ) -> List[CampaignBriefLeadField]:
+        seen: set[str] = set()
+        result: List[CampaignBriefLeadField] = []
+        for item in value:
+            key = item.field_key.casefold()
+            if key not in seen:
+                seen.add(key)
+                result.append(item)
+        return result
+
+    @model_validator(mode="after")
+    def _transfer_is_complete(self) -> "CampaignBriefInput":
+        transfer_approved = "transfer" in self.approved_next_actions
+        has_destination = bool((self.transfer_destination or "").strip())
+        if transfer_approved and not has_destination:
+            raise ValueError(
+                "transfer_destination is required when transfer is approved"
+            )
+        if has_destination and not transfer_approved:
+            raise ValueError(
+                "transfer_destination requires transfer in approved_next_actions"
+            )
+        return self
+
+
+class CampaignPromptLayerResponse(BaseModel):
+    """A real prompt-composer boundary rendered as one collapsible UI layer."""
+
+    key: str
+    label: str
+    content: str
 
 
 class CampaignStartRequest(BaseModel):
@@ -44,6 +122,17 @@ class CampaignCallingSchedule(BaseModel):
         description="When true, dial regardless of the window (override). The UI still shows out-of-hours warnings.",
     )
 
+    @field_validator("timezone")
+    @classmethod
+    def _validate_timezone(cls, v: Optional[str]) -> Optional[str]:
+        # An unknown zone used to be stored as-is and the dialer then evaluated
+        # the window in UTC. Refuse it here so the user hears about it at save.
+        if v is None or v == "":
+            return None
+        if v not in pytz.all_timezones_set:
+            raise ValueError("timezone must be a valid IANA name, e.g. America/New_York")
+        return v
+
     @field_validator("time_window_start", "time_window_end")
     @classmethod
     def _validate_hhmm(cls, v: Optional[str]) -> Optional[str]:
@@ -66,8 +155,34 @@ class CampaignCallingSchedule(BaseModel):
             raise ValueError("allowed_days entries must be 0–6 (Mon–Sun)")
         return sorted(set(v))
 
+    @model_validator(mode="after")
+    def _window_starts_before_it_ends(self) -> "CampaignCallingSchedule":
+        # The dialer keeps an inverted window closed (invalid_time_window);
+        # refuse it here so the user hears about it at save, not as silence.
+        start, end = self.time_window_start, self.time_window_end
+        if start and end:
+            sh, sm = (int(x) for x in start.split(":"))
+            eh, em = (int(x) for x in end.split(":"))
+            if (sh, sm) > (eh, em):
+                raise ValueError(
+                    "calling hours must start before they end on the same day "
+                    "(calling hours can't run past midnight)"
+                )
+        return self
 
-class CampaignCreateRequest(BaseModel):
+
+from app.realtime.config import RealtimePrompt, RealtimeSettings
+
+
+class CampaignVoiceSelection(BaseModel):
+    pipeline_mode: Optional[Literal["cascaded", "realtime"]] = None
+    realtime_model: Optional[str] = None
+    realtime_voice: Optional[str] = None
+    realtime_settings: Optional[RealtimeSettings] = None
+    realtime_prompt: Optional[RealtimePrompt] = None
+
+
+class CampaignCreateRequest(CampaignVoiceSelection):
     """Request body for creating a campaign.
 
     Persona fields are mandatory for new campaigns. This prevents new
@@ -78,7 +193,7 @@ class CampaignCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     system_prompt: str = Field(default="")
-    voice_id: str = Field(..., min_length=1, max_length=100)
+    voice_id: str = Field(default="", max_length=100)
     goal: Optional[str] = None
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
@@ -92,6 +207,10 @@ class CampaignCreateRequest(BaseModel):
     )
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
+    campaign_brief: Optional[CampaignBriefInput] = Field(
+        default=None,
+        description="Structured campaign strategy persisted in script_config JSONB.",
+    )
     knowledge_driven: bool = Field(
         default=False,
         description=(
@@ -111,6 +230,14 @@ class CampaignCreateRequest(BaseModel):
     calling_schedule: Optional[CampaignCallingSchedule] = Field(
         default=None,
         description="Per-campaign calling hours + timezone (overlays tenant defaults).",
+    )
+    direction: Literal["outbound", "inbound"] = Field(
+        default="outbound",
+        description=(
+            "2026-09-09: an inbound campaign is created with the SAME creator and "
+            "options as an outbound one and is born inbound; the inbound number "
+            "and routing are attached afterwards. Nothing is converted."
+        ),
     )
 
     @field_validator("agent_names")
@@ -134,7 +261,7 @@ class CampaignCreateRequest(BaseModel):
         return out
 
 
-class CampaignUpdateRequest(BaseModel):
+class CampaignUpdateRequest(CampaignVoiceSelection):
     """Request body for editing a campaign.
 
     Edits also require persona fields so an update cannot strip script_config
@@ -144,7 +271,7 @@ class CampaignUpdateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     system_prompt: str = Field(default="")
-    voice_id: str = Field(..., min_length=1, max_length=100)
+    voice_id: str = Field(default="", max_length=100)
     goal: Optional[str] = None
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
@@ -158,6 +285,10 @@ class CampaignUpdateRequest(BaseModel):
     )
     company_name: str = Field(..., min_length=1)
     campaign_slots: dict = Field(default_factory=dict)
+    campaign_brief: Optional[CampaignBriefInput] = Field(
+        default=None,
+        description="Structured campaign strategy persisted in script_config JSONB.",
+    )
     knowledge_driven: bool = Field(
         default=False,
         description=(
@@ -200,7 +331,7 @@ class CampaignUpdateRequest(BaseModel):
         return out
 
 
-class CampaignPromptPreviewRequest(BaseModel):
+class CampaignPromptPreviewRequest(CampaignVoiceSelection):
     """Request body for ``POST /campaigns/preview-prompt`` (T4-B4).
 
     Mirrors the fields ``CampaignCreateRequest`` carries that affect the
@@ -220,8 +351,17 @@ class CampaignPromptPreviewRequest(BaseModel):
         ),
     )
     campaign_slots: dict = Field(default_factory=dict)
+    campaign_brief: Optional[CampaignBriefInput] = None
     additional_instructions: Optional[str] = None
     direction: Literal["outbound", "inbound"] = "outbound"
+    opening_mode: Optional[Literal["agent_first", "callee_first"]] = Field(
+        None,
+        description=(
+            "Who talks first. Independent of direction: an outbound campaign "
+            "can let the callee say hello first. None keeps the legacy "
+            "direction-derived opening."
+        ),
+    )
     knowledge_driven: bool = Field(
         default=False,
         description="Preview the lean knowledge-first prompt (skips content slots).",
@@ -246,13 +386,31 @@ class CampaignPromptPreviewResponse(BaseModel):
     has_inbound_directive: bool = Field(
         ...,
         description=(
-            "True when the assembled prompt carries the canonical inbound "
-            "directive sentinel — i.e. the AI is shaped to behave as the "
-            "receiver, not the caller."
+            "Legacy field name: true when the prompt carries a true-inbound "
+            "or outbound callee-first opening directive. The direction field "
+            "identifies who originated the call."
         ),
     )
     prompt_chars: int = Field(
         ..., description="Length of the assembled system_prompt in characters.",
+    )
+    opening_mode: Literal["agent_first", "callee_first"]
+    campaign_guidance_chars: int = Field(
+        ..., description="Characters of operator guidance (additional_instructions).",
+    )
+    campaign_guidance_budget_chars: int = Field(
+        ..., description="The budget the save/start paths enforce for that guidance.",
+    )
+    layers: List[CampaignPromptLayerResponse] = Field(
+        ...,
+        description="Ordered prompt-composer boundaries; joining their content reproduces system_prompt exactly.",
+    )
+    over_budget: bool = Field(
+        ...,
+        description=(
+            "Always false for a successful preview. Over-budget drafts are rejected "
+            "with the same error as save/start; content is never elided."
+        ),
     )
 
 
@@ -275,7 +433,17 @@ class ContactCreate(BaseModel):
     phone_number: str = Field(..., description="Phone number in any format (will be normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=511)
     email: Optional[str] = Field(None, max_length=255)
+    mobile_number: Optional[str] = Field(None, max_length=32)
+    business_number: Optional[str] = Field(None, max_length=32)
+    company_name: Optional[str] = Field(None, max_length=255)
+    job_title: Optional[str] = Field(None, max_length=255)
+    best_time_to_call: Optional[str] = Field(None, max_length=64)
+    timezone: Optional[str] = Field(None, max_length=64)
+    calling_notes: Optional[str] = Field(None, max_length=4000)
+    preferred_contact_method: Optional[str] = Field(None, max_length=32)
+    do_not_call: bool = False
     custom_fields: Optional[dict] = Field(default_factory=dict)
 
     @field_validator("phone_number")
@@ -297,7 +465,18 @@ class ContactUpdate(BaseModel):
     phone_number: Optional[str] = Field(None, description="New phone number (normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
+    full_name: Optional[str] = Field(None, max_length=511)
     email: Optional[str] = Field(None, max_length=255)
+    mobile_number: Optional[str] = Field(None, max_length=32)
+    business_number: Optional[str] = Field(None, max_length=32)
+    company_name: Optional[str] = Field(None, max_length=255)
+    job_title: Optional[str] = Field(None, max_length=255)
+    best_time_to_call: Optional[str] = Field(None, max_length=64)
+    timezone: Optional[str] = Field(None, max_length=64)
+    calling_notes: Optional[str] = Field(None, max_length=4000)
+    preferred_contact_method: Optional[str] = Field(None, max_length=32)
+    do_not_call: Optional[bool] = None
+    custom_fields: Optional[dict] = None
 
     @field_validator("phone_number")
     @classmethod

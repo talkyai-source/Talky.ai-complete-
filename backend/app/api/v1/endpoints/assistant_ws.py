@@ -11,11 +11,17 @@ import uuid
 from typing import Optional
 from datetime import datetime
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query, HTTPException
 from fastapi.encoders import jsonable_encoder
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.core.db_utils import acquire_with_tenant
+from app.core.security.principal import (
+    PrincipalUnavailable, load_session_principal, assistant_session_context, check_assistant_session,
+)
+from app.core.security.assistant_session_watch import AssistantSessionWatch
+from app.core.security.assistant_runtime import AssistantRuntime, owned_stream, runtime_context
 from app.core.config import get_settings
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
 from app.infrastructure.assistant.agent import assistant_graph, AgentState
@@ -27,9 +33,58 @@ from app.infrastructure.assistant.proposals import (
     clear_proposal,
 )
 
+from app.services.action_execution import find_owned_action_receipt, public_action_receipt
+
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assistant", tags=["Assistant"])
+
+
+def proposal_receipt_result(proposal_id, receipt=None):
+    """A read-only saved outcome; missing evidence never invites another send."""
+    if receipt is None:
+        return {"type": "proposal_result", "proposal_id": proposal_id, "applied": False,
+                "action_id": None, "status": "unavailable", "confirmation_allowed": False,
+                "receipt": {}, "error": "No durable outcome is available yet. Check this request again or ask support to review it; do not submit a replacement action."}
+    return {"type": "proposal_result", "proposal_id": proposal_id,
+            "applied": receipt.get("success") is True and receipt.get("confirmation_allowed") is True, "action_id": receipt.get("action_id"),
+            "status": receipt.get("status", "unknown"),
+            "confirmation_allowed": receipt.get("confirmation_allowed") is True,
+            "receipt": receipt.get("receipt") or {}, "error": receipt.get("error")}
+
+
+def proposal_apply_result(proposal_id, proposal, result):
+    applied = (isinstance(result, dict) and
+               (result.get("applied") is True or result.get("success") is True) and not result.get("error"))
+    error = (result.get("error") or result.get("message")) if isinstance(result, dict) and not applied else None
+    outcome = {"type": "proposal_result", "proposal_id": proposal_id,
+               "applied": applied, "changes": proposal["changes"], "campaigns": proposal["campaigns"],
+               "action_id": None, "status": "completed" if applied else (result.get("status", "failed") if isinstance(result, dict) else "unknown"),
+               "confirmation_allowed": applied, "receipt": {},
+               "error": None if applied else (error or "Could not apply the changes.")}
+    if isinstance(result, dict) and result.get("action_id"):
+        saved = public_action_receipt({"id": result["action_id"], "type": proposal["tool"],
+            "status": ("scheduled" if result.get("status") == "scheduled" else "completed") if applied
+                else result.get("status", "unknown"), "output_data": result})
+        outcome.update(proposal_receipt_result(proposal_id, saved))
+    return outcome
+
+
+def proposal_outcome_note(outcome):
+    if outcome.get("applied"):
+        if outcome.get("receipt", {}).get("provider_status") in {"accepted", "provider_accepted"}:
+            return "The provider accepted the request. Delivery is not confirmed."
+        return "Applied the proposed changes."
+    return outcome.get("error") or "The outcome is unconfirmed. Check the saved request before repeating it."
+
+
+async def _proposal_status(db_client, tenant_id, user_id, proposal_id):
+    try:
+        receipt = await find_owned_action_receipt(db_client, tenant_id=tenant_id, user_id=user_id,
+                                            proposal_id=proposal_id)
+    except Exception:
+        receipt = None
+    return proposal_receipt_result(proposal_id, receipt)
 
 
 # =============================================================================
@@ -239,6 +294,10 @@ async def assistant_chat(
 
     # STEP 1: Accept WebSocket connection (per FastAPI docs)
     await manager.connect(websocket, connection_id)
+    identity_context = None
+    authority_watch = None
+    runtime = None
+    runtime_token = None
 
     try:
         # STEP 2: Resolve auth token (first-message preferred, ?token= fallback for 24h soak)
@@ -273,27 +332,58 @@ async def assistant_chat(
             return
         user_id = str(user_id)
 
-        # STEP 4: Resolve tenant via DB lookup (same flow as before).
+        # STEP 4: Resolve the tenant. No tenant context exists yet on a WS, so
+        # this MUST NOT go through the tenant-scoped .table() adapter: under
+        # forced RLS that query runs as the nil tenant and the user's own
+        # profile is invisible (every socket closed here 2026-08-30 → 09-08).
         db_client = get_db_client()
         try:
-            profile = db_client.table("user_profiles").select(
-                "tenant_id"
-            ).eq("id", user_id).single().execute()
-            tenant_id = (
-                str(profile.data.get("tenant_id"))
-                if profile.data and profile.data.get("tenant_id")
-                else None
-            )
+            async with acquire_with_tenant(db_client.pool, None) as conn:
+                principal = await load_session_principal(conn, payload)
+            tenant_id = principal["tenant_id"]
+        except PrincipalUnavailable:
+            await manager.send_json(connection_id, {"type": "error", "content": "Your account access or login session has ended. Please sign in again."})
+            await websocket.close(code=1008, reason="Session unavailable")
+            return
         except Exception as profile_err:
             logger.error("assistant_ws: profile lookup failed: %s", profile_err)
-            tenant_id = None
+            await manager.send_json(connection_id, {
+                "type": "error",
+                "content": "The assistant is temporarily unavailable. Please try again."
+            })
+            await websocket.close(code=1011, reason="Profile lookup failed")
+            return
 
         if not tenant_id:
+            logger.warning("assistant_ws: no tenant profile for user %s", user_id)
             await manager.send_json(connection_id, {
                 "type": "error",
                 "content": "User profile not found."
             })
+            await websocket.close(code=1008, reason="No tenant")
             return
+
+        identity_context = assistant_session_context.set({
+            "sub": user_id, "sid": payload["sid"], "tenant_id": tenant_id,
+        })
+        try:
+            runtime = await AssistantRuntime.register(db_client.pool,
+                assistant_session_context.get(), endpoint_kind="chat")
+        except Exception as exc:
+            await websocket.close(code=1008 if isinstance(exc, PrincipalUnavailable) else 1011,
+                                  reason="Session unavailable")
+            return
+        runtime_token = runtime_context.set(runtime)
+        authority_watch = AssistantSessionWatch(websocket, db_client.pool,
+                                               assistant_session_context.get())
+
+        async def require_current_socket():
+            try:
+                await check_assistant_session(db_client.pool, user_id, tenant_id)
+            except Exception:
+                await manager.send_json(connection_id, {"type": "error", "content": "Your account access or login session changed. Please sign in again."})
+                await websocket.close(code=1008, reason="Session unavailable")
+                raise WebSocketDisconnect(code=1008)
 
         # Set the RLS tenant context for this WS connection's task. The agent's
         # tools and the conversation-history queries below go through
@@ -314,16 +404,22 @@ async def assistant_chat(
         })
         
         # Initialize conversation
-        current_conversation_id = conversation_id
+        # Only adopt a conversation the tenant-scoped lookup actually returned.
+        # An id that is missing, belongs to another tenant, or whose lookup
+        # failed starts a new conversation instead of being updated by id.
+        current_conversation_id = None
         messages_history = []
         
         if conversation_id:
             try:
                 conv_response = db_client.table("assistant_conversations").select(
                     "messages"
-                ).eq("id", conversation_id).eq("tenant_id", tenant_id).single().execute()
+                ).eq("id", conversation_id).eq("tenant_id", tenant_id).eq(
+                    "user_id", user_id
+                ).single().execute()
                 
                 if conv_response.data:
+                    current_conversation_id = conversation_id
                     raw_messages = conv_response.data.get("messages", [])
                     if isinstance(raw_messages, str):
                         try:
@@ -351,7 +447,9 @@ async def assistant_chat(
                         "messages": json.dumps(messages_history),
                         "message_count": len(messages_history),
                         "last_message_at": datetime.utcnow().isoformat()
-                    }).eq("id", current_conversation_id).execute()
+                    }).eq("id", current_conversation_id).eq("tenant_id", tenant_id).eq(
+                        "user_id", user_id
+                    ).execute()
                 else:
                     title = (title_hint or "New conversation")[:50]
                     if title_hint and len(title_hint) > 50:
@@ -388,6 +486,7 @@ async def assistant_chat(
         while True:
             # Wait for message from client
             data = await websocket.receive_json()
+            await require_current_socket()
             
             if data.get("type") == "user_message":
                 user_content = data.get("content", "").strip()
@@ -431,145 +530,150 @@ async def assistant_chat(
                     buf: list[str] = []  # tokens for the currently-open bubble
 
                     tenant_model = await get_tenant_assistant_model(db_client, tenant_id)
-                    async for ev in stream_assistant_reply(
+                    await require_current_socket()
+                    async with owned_stream(stream_assistant_reply(
                         chat_messages=chat_messages,
                         tenant_id=tenant_id,
                         user_id=user_id,
                         conversation_id=current_conversation_id,
                         db_client=db_client,
                         model=tenant_model,
-                    ):
-                        etype = ev.get("type")
+                    )) as reply_stream:
+                        async for ev in reply_stream:
+                            etype = ev.get("type")
+                            if etype != "token":
+                                await require_current_socket()
 
-                        if etype == "token":
-                            if current_msg_id is None:
-                                current_msg_id = str(uuid.uuid4())
+                            if etype == "token":
+                                if current_msg_id is None:
+                                    current_msg_id = str(uuid.uuid4())
+                                    buf = []
+                                    # first token: drop the thinking indicator and
+                                    # open a fresh assistant bubble on the client
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_typing", "content": False
+                                    })
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_start", "id": current_msg_id
+                                    })
+                                buf.append(ev.get("delta", ""))
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_token",
+                                    "id": current_msg_id,
+                                    "delta": ev.get("delta", ""),
+                                })
+
+                            elif etype == "tool_start":
+                                # close any open preamble bubble, then show the
+                                # thinking indicator while the tool runs
+                                if current_msg_id is not None:
+                                    text = "".join(buf)
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": current_msg_id,
+                                        "content": text,
+                                    })
+                                    if text.strip():
+                                        messages_history.append({
+                                            "role": "assistant",
+                                            "content": text,
+                                            "timestamp": datetime.utcnow().isoformat(),
+                                        })
+                                    current_msg_id = None
+                                    buf = []
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_typing", "content": True
+                                })
+
+                            elif etype == "final":
+                                final_text = ev.get("content", "") or "".join(buf)
+                                if current_msg_id is not None:
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": current_msg_id,
+                                        "content": final_text,
+                                    })
+                                else:
+                                    # no tokens streamed this turn (e.g. empty answer)
+                                    msg_id = str(uuid.uuid4())
+                                    if not final_text.strip():
+                                        final_text = "I processed your request."
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_start", "id": msg_id
+                                    })
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": msg_id, "content": final_text,
+                                    })
+                                if final_text.strip():
+                                    messages_history.append({
+                                        "role": "assistant",
+                                        "content": final_text,
+                                        "timestamp": datetime.utcnow().isoformat(),
+                                    })
+                                current_msg_id = None
                                 buf = []
-                                # first token: drop the thinking indicator and
-                                # open a fresh assistant bubble on the client
+
+                            elif etype == "proposal":
+                                # An edit tool returned a preview. Close any open
+                                # preamble bubble, register the proposal server-side,
+                                # and send a diff card for the user to Apply/Reject.
+                                if current_msg_id is not None:
+                                    text = "".join(buf)
+                                    await manager.send_json(connection_id, {
+                                        "type": "assistant_message_end",
+                                        "id": current_msg_id,
+                                        "content": text,
+                                    })
+                                    if text.strip():
+                                        messages_history.append({
+                                            "role": "assistant",
+                                            "content": text,
+                                            "timestamp": datetime.utcnow().isoformat(),
+                                        })
+                                    current_msg_id = None
+                                    buf = []
+                                await manager.send_json(connection_id, {
+                                    "type": "assistant_typing", "content": False
+                                })
+                                proposal = store_proposal(
+                                    tool=ev.get("tool", ""),
+                                    args=ev.get("args") or {},
+                                    result=ev.get("result") or {},
+                                    tenant_id=tenant_id,
+                                    actor_user_id=user_id,
+                                    conversation_id=current_conversation_id,
+                                )
+                                await manager.send_json(connection_id, {
+                                    "type": "edit_proposal",
+                                    "proposal_id": proposal["proposal_id"],
+                                    "tool": proposal["tool"],
+                                    "note": proposal["note"],
+                                    "warnings": proposal["warnings"],
+                                    "changes": proposal["changes"],
+                                    "campaigns": proposal["campaigns"],
+                                    "duplicate": proposal.get("duplicate"),
+                                })
+                                # Record a marker so reloading the thread stays coherent.
+                                messages_history.append({
+                                    "role": "assistant",
+                                    "content": "_Proposed changes — awaiting your approval._",
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                })
+
+                            elif etype == "error":
+                                err_text = ev.get("content", "Sorry, I encountered an error.")
                                 await manager.send_json(connection_id, {
                                     "type": "assistant_typing", "content": False
                                 })
                                 await manager.send_json(connection_id, {
-                                    "type": "assistant_message_start", "id": current_msg_id
+                                    "type": "assistant_message", "content": err_text
                                 })
-                            buf.append(ev.get("delta", ""))
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_token",
-                                "id": current_msg_id,
-                                "delta": ev.get("delta", ""),
-                            })
-
-                        elif etype == "tool_start":
-                            # close any open preamble bubble, then show the
-                            # thinking indicator while the tool runs
-                            if current_msg_id is not None:
-                                text = "".join(buf)
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": current_msg_id,
-                                    "content": text,
-                                })
-                                if text.strip():
-                                    messages_history.append({
-                                        "role": "assistant",
-                                        "content": text,
-                                        "timestamp": datetime.utcnow().isoformat(),
-                                    })
-                                current_msg_id = None
-                                buf = []
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_typing", "content": True
-                            })
-
-                        elif etype == "final":
-                            final_text = ev.get("content", "") or "".join(buf)
-                            if current_msg_id is not None:
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": current_msg_id,
-                                    "content": final_text,
-                                })
-                            else:
-                                # no tokens streamed this turn (e.g. empty answer)
-                                msg_id = str(uuid.uuid4())
-                                if not final_text.strip():
-                                    final_text = "I processed your request."
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_start", "id": msg_id
-                                })
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": msg_id, "content": final_text,
-                                })
-                            if final_text.strip():
                                 messages_history.append({
                                     "role": "assistant",
-                                    "content": final_text,
+                                    "content": err_text,
                                     "timestamp": datetime.utcnow().isoformat(),
                                 })
-                            current_msg_id = None
-                            buf = []
-
-                        elif etype == "proposal":
-                            # An edit tool returned a preview. Close any open
-                            # preamble bubble, register the proposal server-side,
-                            # and send a diff card for the user to Apply/Reject.
-                            if current_msg_id is not None:
-                                text = "".join(buf)
-                                await manager.send_json(connection_id, {
-                                    "type": "assistant_message_end",
-                                    "id": current_msg_id,
-                                    "content": text,
-                                })
-                                if text.strip():
-                                    messages_history.append({
-                                        "role": "assistant",
-                                        "content": text,
-                                        "timestamp": datetime.utcnow().isoformat(),
-                                    })
-                                current_msg_id = None
-                                buf = []
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_typing", "content": False
-                            })
-                            proposal = store_proposal(
-                                tool=ev.get("tool", ""),
-                                args=ev.get("args") or {},
-                                result=ev.get("result") or {},
-                                tenant_id=tenant_id,
-                                conversation_id=current_conversation_id,
-                            )
-                            await manager.send_json(connection_id, {
-                                "type": "edit_proposal",
-                                "proposal_id": proposal["proposal_id"],
-                                "tool": proposal["tool"],
-                                "note": proposal["note"],
-                                "warnings": proposal["warnings"],
-                                "changes": proposal["changes"],
-                                "campaigns": proposal["campaigns"],
-                                "duplicate": proposal.get("duplicate"),
-                            })
-                            # Record a marker so reloading the thread stays coherent.
-                            messages_history.append({
-                                "role": "assistant",
-                                "content": "_Proposed changes — awaiting your approval._",
-                                "timestamp": datetime.utcnow().isoformat(),
-                            })
-
-                        elif etype == "error":
-                            err_text = ev.get("content", "Sorry, I encountered an error.")
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_typing", "content": False
-                            })
-                            await manager.send_json(connection_id, {
-                                "type": "assistant_message", "content": err_text
-                            })
-                            messages_history.append({
-                                "role": "assistant",
-                                "content": err_text,
-                                "timestamp": datetime.utcnow().isoformat(),
-                            })
 
                     # Persist chat state without breaking the already-sent assistant reply.
                     await persist_conversation(user_content)
@@ -594,20 +698,24 @@ async def assistant_chat(
                         "content": False
                     })
             
+            elif data.get("type") == "proposal_status":
+                await manager.send_json(connection_id, await _proposal_status(
+                    db_client, tenant_id, user_id, data.get("proposal_id")))
+
             elif data.get("type") == "apply_proposal":
                 proposal_id = data.get("proposal_id")
                 # Atomic consume (Case 4): pop, so a concurrent second apply of
                 # the same proposal (two tabs / double-click) gets None below and
                 # cannot double-insert. On dispatch failure the proposal is gone —
                 # the user re-asks, same as a restart.
-                proposal = pop_proposal(proposal_id, tenant_id) if isinstance(proposal_id, str) else None
+                proposal = (
+                    pop_proposal(proposal_id, tenant_id, user_id)
+                    if isinstance(proposal_id, str)
+                    else None
+                )
                 if not proposal:
-                    await manager.send_json(connection_id, {
-                        "type": "proposal_result",
-                        "proposal_id": proposal_id,
-                        "applied": False,
-                        "error": "This proposal is no longer available — please ask again.",
-                    })
+                    await manager.send_json(connection_id, await _proposal_status(
+                        db_client, tenant_id, user_id, proposal_id))
                     continue
                 try:
                     from app.infrastructure.assistant.tools.dispatch import dispatch_tool
@@ -622,29 +730,14 @@ async def assistant_chat(
                     result = await dispatch_tool(
                         proposal["tool"], tenant_id, db_client,
                         current_conversation_id, apply_args,
+                        actor_user_id=user_id,
+                        trusted_proposal_apply=True,
+                        proposal_id=proposal_id,
                     )
-                    # Edit tools return {applied: True}; send_email returns
-                    # {success: True}. Either counts as a successful apply.
-                    applied = (
-                        isinstance(result, dict)
-                        and (result.get("applied") is True or result.get("success") is True)
-                        and not result.get("error")
-                    )
-                    err = result.get("error") if isinstance(result, dict) else "Apply failed"
-                    # proposal already consumed by pop_proposal above.
-                    await manager.send_json(connection_id, {
-                        "type": "proposal_result",
-                        "proposal_id": proposal_id,
-                        "applied": applied,
-                        "changes": proposal["changes"],
-                        "campaigns": proposal["campaigns"],
-                        "error": None if applied else (err or "Could not apply the changes."),
-                    })
-                    note = (
-                        "✓ Applied the proposed changes."
-                        if applied
-                        else f"Could not apply the changes: {err or 'unknown error'}"
-                    )
+                    outcome = proposal_apply_result(proposal_id, proposal, result)
+                    await manager.send_json(connection_id, outcome)
+                    applied = outcome["applied"]
+                    note = proposal_outcome_note(outcome)
                     messages_history.append({
                         "role": "assistant",
                         "content": note,
@@ -658,17 +751,13 @@ async def assistant_chat(
                 except Exception as apply_err:
                     logger.error("apply_proposal failed: %s", apply_err, exc_info=True)
                     # proposal already consumed by pop_proposal above.
-                    await manager.send_json(connection_id, {
-                        "type": "proposal_result",
-                        "proposal_id": proposal_id,
-                        "applied": False,
-                        "error": "Something went wrong applying the changes.",
-                    })
+                    await manager.send_json(connection_id, await _proposal_status(
+                        db_client, tenant_id, user_id, proposal_id))
 
             elif data.get("type") == "reject_proposal":
                 proposal_id = data.get("proposal_id")
                 if isinstance(proposal_id, str):
-                    clear_proposal(proposal_id)
+                    clear_proposal(proposal_id, tenant_id, user_id)
                 await manager.send_json(connection_id, {
                     "type": "proposal_result",
                     "proposal_id": proposal_id,
@@ -684,6 +773,9 @@ async def assistant_chat(
             elif data.get("type") == "ping":
                 await manager.send_json(connection_id, {"type": "pong"})
     
+    except asyncio.CancelledError:
+        if authority_watch is None or not authority_watch.terminated:
+            raise
     except WebSocketDisconnect:
         # Normal disconnection - per FastAPI docs, catch this exception
         logger.info(f"Client {connection_id} disconnected")
@@ -692,7 +784,19 @@ async def assistant_chat(
         logger.error(f"WebSocket error: {e}", exc_info=True)
     
     finally:
-        manager.disconnect(connection_id)
+        try:
+            if authority_watch is not None:
+                await authority_watch.stop()
+            if runtime is not None:
+                await runtime.stop_tasks()
+                await runtime.record_stopped(close_frame_status=(
+                    authority_watch.close_frame_status if authority_watch else "not_attempted"))
+        finally:
+            if runtime_token is not None:
+                runtime_context.reset(runtime_token)
+            if identity_context is not None:
+                assistant_session_context.reset(identity_context)
+            manager.disconnect(connection_id)
 
 
 # =============================================================================
@@ -718,7 +822,7 @@ async def list_conversations(
     response = db_client.table("assistant_conversations").select(
         "id, title, message_count, last_message_at, created_at",
         count="exact"
-    ).eq("tenant_id", current_user.tenant_id).order(
+    ).eq("tenant_id", current_user.tenant_id).eq("user_id", str(current_user.id)).order(
         "last_message_at", desc=True
     ).range(offset, offset + page_size - 1).execute()
 
@@ -744,7 +848,9 @@ async def get_conversation(
     """
     response = db_client.table("assistant_conversations").select(
         "id, title, messages, context, message_count, started_at, last_message_at"
-    ).eq("id", conversation_id).eq("tenant_id", current_user.tenant_id).single().execute()
+    ).eq("id", conversation_id).eq("tenant_id", current_user.tenant_id).eq(
+        "user_id", str(current_user.id)
+    ).single().execute()
 
     if not response.data:
         from fastapi import HTTPException
@@ -767,7 +873,7 @@ async def delete_conversation(
     """
     db_client.table("assistant_conversations").delete().eq(
         "id", conversation_id
-    ).eq("tenant_id", current_user.tenant_id).execute()
+    ).eq("tenant_id", current_user.tenant_id).eq("user_id", str(current_user.id)).execute()
 
     return {"success": True, "message": "Conversation deleted"}
 
@@ -777,27 +883,62 @@ async def list_actions(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     type: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
+    lead_id: Optional[uuid.UUID] = Query(None),
+    from_date: Optional[datetime] = Query(None),
+    to_date: Optional[datetime] = Query(None),
+    sort_by: str = Query("created_at", pattern="^(created_at|started_at|completed_at|type|status)$"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
     page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100)
+    page_size: int = Query(20, ge=1, le=100),
 ):
-    """List assistant actions (audit log)."""
-    offset = (page - 1) * page_size
-    
-    query = db_client.table("assistant_actions").select(
-        "id, type, status, triggered_by, input_data, output_data, created_at, completed_at",
-        count="exact"
-    ).eq("tenant_id", current_user.tenant_id)
-
+    """Tenant activity metadata. Provider payloads and recipient/content are private."""
+    from app.core.db_utils import acquire_with_tenant
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    if sort_by not in {"created_at", "started_at", "completed_at", "type", "status"} or sort_dir not in {"asc", "desc"}:
+        raise HTTPException(status_code=422, detail="Unsupported action sort")
+    if any(value is not None and (value.tzinfo is None or value.utcoffset() is None) for value in (from_date, to_date)):
+        raise HTTPException(status_code=422, detail="Action date filters require a UTC offset")
+    if from_date and to_date and from_date > to_date:
+        raise HTTPException(status_code=422, detail="Action date range is reversed")
+    predicates, values = ["tenant_id=$1::uuid"], [str(current_user.tenant_id)]
+    def add(predicate, value):
+        values.append(value)
+        predicates.append(predicate.format(index=len(values)))
     if type:
-        query = query.eq("type", type)
-    
-    response = query.order("created_at", desc=True).range(
-        offset, offset + page_size - 1
-    ).execute()
-    
-    return {
-        "actions": response.data,
-        "total": response.count,
-        "page": page,
-        "page_size": page_size
-    }
+        add("type=${index}", type)
+    if status:
+        statuses = list(dict.fromkeys(status.split(",")))
+        if not set(statuses) <= {"pending", "running", "completed", "failed", "unknown", "scheduled", "cancelled"}:
+            raise HTTPException(status_code=422, detail="Unsupported action status")
+        add("status=ANY(${index}::text[])", statuses)
+    if lead_id:
+        add("lead_id=${index}::uuid", str(lead_id))
+    if from_date:
+        add("created_at>=${index}::timestamptz", from_date)
+    if to_date:
+        add("created_at<=${index}::timestamptz", to_date)
+    where = " AND ".join(predicates)
+    async with acquire_with_tenant(db_client.pool, str(current_user.tenant_id)) as conn:
+        total = await conn.fetchval("SELECT COUNT(*) FROM assistant_actions WHERE " + where, *values)
+        rows = await conn.fetch(
+            "SELECT id,type,status,triggered_by,lead_id,output_data,created_at,started_at,completed_at "
+            f"FROM assistant_actions WHERE {where} ORDER BY {sort_by} {sort_dir} NULLS LAST,id {sort_dir} "
+            f"LIMIT ${len(values)+1} OFFSET ${len(values)+2}", *values, page_size, (page-1)*page_size)
+    return {"actions": [public_action_receipt(dict(row)) for row in rows],
+            "total": total, "page": page, "page_size": page_size}
+
+
+@router.get("/actions/{action_id}")
+async def get_action_receipt(
+    action_id: uuid.UUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Only the originating authenticated actor may recover their action receipt."""
+    receipt = await find_owned_action_receipt(db_client, tenant_id=current_user.tenant_id,
+                                       user_id=current_user.id, action_id=action_id)
+    if receipt is None:
+        raise HTTPException(status_code=404, detail="Action receipt not found")
+    return receipt

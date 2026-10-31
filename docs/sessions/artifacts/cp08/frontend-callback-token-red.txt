@@ -1,0 +1,54 @@
+✔ AuthProvider pins verified cookie-only tenant on writes and blocks them during account verification (151.0483ms)
+✔ a failed logout marker never submits an unbound logout for the next browser session (11.5307ms)
+✔ a legacy optimistic login verifies its missing tenant without pinning it to no tenant (25.2321ms)
+✔ refresh rotation updates the token owned by AuthProvider before retrying (36.2369ms)
+✖ callback token commitment reaches the live HTTP owner before its profile lookup (12.436ms)
+✔ confirmed B scope loads and creates normally without importing legacy A history or destination (48.4608ms)
+✔ logout clears notifications before server response and stale bootstrap cannot reactivate them (8.1216ms)
+✔ late A profile refresh cannot overwrite a newly verified B login (36.0674ms)
+✔ same verified identity refresh (silent=true) preserves notifications, settings and bound callback (16.3411ms)
+✔ same verified identity refresh (silent=false) preserves notifications, settings and bound callback (15.809ms)
+✔ foreground refresh preserves scope and latest read (silent=true) settles loading and identity (18.6132ms)
+✔ foreground refresh preserves scope and latest read (silent=false) settles loading and identity (25.3812ms)
+✔ cross-tab non-null token change masks A immediately and verifies B before enabling notifications (30.8466ms)
+✔ unverified same-account token rotation aborts old work but restores saved history after verification (24.9663ms)
+✔ cookie-only logout broadcasts an identity boundary even with no stored bearer token (25.4957ms)
+✔ cross-tab cookie logout fences an outstanding profile response without a bearer-key event (13.9657ms)
+✔ a verified user without tenant identity remains unscoped and cannot create notifications (9.3518ms)
+✔ logout then login as A creates a new generation that rejects pre-logout A work (36.3272ms)
+✔ a profile refresh started by an old timer after logout begins cannot restore the logged-out account (15.8878ms)
+✔ blocked storage still receives cookie logout over BroadcastChannel and fences delayed profile reads (15.945ms)
+✔ blocked-storage account change uses verified B scope and duplicate channel/storage marker verifies only once (20.2975ms)
+✔ local cookie logout and login publish secret-free BroadcastChannel markers when storage writes fail (39.1977ms)
+✔ notifications remain unscoped when neither storage nor BroadcastChannel can synchronize cookie identity (7.3028ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 22
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 5083.2175
+
+✖ failing tests:
+
+test at src\lib\notifications-isolation.test.tsx:2:8973
+✖ callback token commitment reaches the live HTTP owner before its profile lookup (12.436ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+
+    [
+  +   null
+  -   'Bearer callback-b'
+    ]
+
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\lib\notifications-isolation.test.tsx:144:12)
+      at async Test.run (node:internal/test_runner/test:1208:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:831:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ null ],
+    expected: [ 'Bearer callback-b' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

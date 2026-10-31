@@ -1,0 +1,78 @@
+.............FF.F.............                                           [100%]
+================================== FAILURES ===================================
+_ test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile _
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '...l_system_addendum at 0x000002932AB33560>, Provider=<class 'app.infrastructure.llm.groq.GroqLLMProvider'>, reserve=1024)
+
+    async def test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile(profile, rt):
+        calls = []
+        def handler(request):
+            payload = json.loads(request.content)
+            calls.append(payload)
+            return sse(tool=True) if len(calls) == 1 else sse(text="An approved refund takes five working days.")
+        transport = q.BoundedTransport(httpx.MockTransport(handler), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+>       assert result["completed"] and len(calls) == 2
+E       assert (False)
+
+tests\unit\test_ag02_semantic_qualification.py:156: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.29s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.74s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+________ test_wrong_final_answer_cannot_be_counted_as_semantic_success ________
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '...l_system_addendum at 0x000002932AB33560>, Provider=<class 'app.infrastructure.llm.groq.GroqLLMProvider'>, reserve=1024)
+
+    async def test_wrong_final_answer_cannot_be_counted_as_semantic_success(profile, rt):
+        calls = []
+        def handler(request):
+            calls.append(request)
+            return sse(tool=True) if len(calls) == 1 else sse(text="Refunds arrive instantly without approval.")
+        transport = q.BoundedTransport(httpx.MockTransport(handler), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+>       assert result["mechanical"]["matched_expected_passage"] is True
+E       assert False is True
+
+tests\unit\test_ag02_semantic_qualification.py:182: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.31s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.66s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+_________ test_provider_truncation_stays_failed_with_original_output __________
+
+profile = Profile(model='openai/gpt-oss-20b', knowledge_mode='retrieve', endpoint='https://api.groq.com/openai/v1/chat/completio...ens=204800, max_input_bytes=65536, max_total_input_bytes=10485760, case_timeout_seconds=30, total_timeout_seconds=2400)
+rt = namespace(models={'openai/gpt-oss-20b'}, Message=<class 'app.domain.models.conversation.Message'>, MessageRole=<enum '...l_system_addendum at 0x000002932AB33560>, Provider=<class 'app.infrastructure.llm.groq.GroqLLMProvider'>, reserve=1024)
+
+    async def test_provider_truncation_stays_failed_with_original_output(profile, rt):
+        transport = q.BoundedTransport(httpx.MockTransport(lambda _request: sse(text="Partial", finish="length")), profile)
+        provider = await q.build_provider(rt, profile, transport, "synthetic-not-a-real-key")
+        try:
+            result = await q.run_case(provider, transport, profile, rt, case())
+        finally:
+            await provider.cleanup()
+>       assert not result["completed"] and result["error_type"] == "LLMStreamStalled"
+E       AssertionError: assert (not False and 'RuntimeError' == 'LLMStreamStalled'
+E         - LLMStreamStalled
+E         + RuntimeError)
+
+tests\unit\test_ag02_semantic_qualification.py:206: AssertionError
+------------------------------ Captured log call ------------------------------
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 1/2 after 0.30s — Connection error.
+WARNING  app.infrastructure.llm.groq:groq.py:846 Groq retry 2/2 after 0.33s — Connection error.
+ERROR    app.infrastructure.llm.groq:groq.py:852 Groq LLM streaming failed after retries: Connection error.
+=========================== short test summary info ===========================
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_real_adapter_two_rounds_capture_original_query_evidence_answer_and_profile
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_wrong_final_answer_cannot_be_counted_as_semantic_success
+FAILED tests/unit/test_ag02_semantic_qualification.py::test_provider_truncation_stays_failed_with_original_output
+3 failed, 27 passed in 8.57s

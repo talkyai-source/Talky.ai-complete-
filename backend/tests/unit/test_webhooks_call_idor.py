@@ -219,10 +219,30 @@ def test_admin_configure_accepts_valid_internal_token(monkeypatch):
     from app.api.v1.dependencies import get_db_client
 
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "s3cret-internal")
+    # configure stores the HMAC secret encrypted (bh2) and fails closed (503)
+    # without a usable CONNECTOR_ENCRYPTION_KEY, so this happy path needs one.
+    from cryptography.fernet import Fernet
 
-    class _DB:
+    monkeypatch.setenv("CONNECTOR_ENCRYPTION_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("CONNECTOR_ENCRYPTION_KEYS_OLD", raising=False)
+    # Fresh service for this key; monkeypatch restores the previous singleton.
+    monkeypatch.setattr("app.infrastructure.connectors.encryption._encryption_service", None)
+
+    from contextlib import asynccontextmanager
+
+    class _Conn:
         async def execute(self, *a, **k):
             return None
+
+    @asynccontextmanager
+    async def _acquire(_pool, _tenant_id, **_kw):
+        yield _Conn()
+
+    # PostgresClient has no execute(); the route writes through the pool.
+    monkeypatch.setattr(ws, "acquire_with_tenant", _acquire)
+
+    class _DB:
+        pool = object()
 
     app = FastAPI()
     app.include_router(ws.router, prefix="/api/v1")

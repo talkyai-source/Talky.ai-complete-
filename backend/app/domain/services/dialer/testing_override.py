@@ -34,14 +34,12 @@ Two independent switches, both default-OFF
    to a single campaign. Preferred on merit: it limits the blast radius to the
    one campaign being tested.
 
-   ⚠️ Caveat, pre-existing and deliberately NOT changed here: the campaign
-   update endpoint rebuilds ``calling_config`` from the submitted schedule
-   (``campaigns._calling_config_from_schedule``), so editing a campaign's
-   calling hours through the UI REPLACES the whole blob and drops any key it
-   doesn't know about — this flag, and equally ``batch_size``,
-   ``call_gap_seconds`` and ``trunk``. Until that merge is fixed, set this key
-   directly on the row, and re-check it after any schedule edit. The env
-   switch (#1) is unaffected by that behaviour.
+   ⚠️ A schedule edit in the UI no longer turns this flag off: the campaign
+   update endpoint now MERGES the submitted schedule into ``calling_config``
+   (``campaigns._merge_calling_config_schedule``) and keeps every other key —
+   this flag, ``batch_size``, ``call_gap_seconds`` and ``trunk``. Unset the
+   key on the row to end a test window. The campaign page shows a
+   "Testing mode" banner while it is on.
 
 Not to be confused with ``calling_config.ignore_schedule``
 ---------------------------------------------------------

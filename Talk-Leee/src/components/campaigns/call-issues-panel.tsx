@@ -1,13 +1,12 @@
 "use client";
 
 /**
- * Call Issues panel — explains why calls AREN'T going through.
+ * Call Issues panel — explains durable, operator-actionable call failures.
  *
- * The live-calls panel only shows rows that made it into the `calls` table.
- * But most things that stop a call (out of minutes, outside calling hours,
- * campaign stopped, caller-ID not verified, voice-provider/TTS failure, rate
- * limits) happen in the dialer BEFORE a call row exists — so the operator was
- * blind to them. This polls GET /calls/issues live (4s).
+ * Outbound issues come from pre-call dialer jobs. Inbound issues are separate:
+ * calls with a durable failed processing state or failed voice-pipeline
+ * outcome appear here. Rejections and after-hours outcomes stay in their
+ * complete audit panel. This polls GET /calls/issues live (4s).
  *
  * Smart rendering, not a wall of cards:
  *   - issues are GROUPED by type (reason) — one compact row per problem,
@@ -18,7 +17,7 @@
  *     never appear — the backend excludes them as normal operation.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
     AlertTriangle, AlertCircle, Info, Clock, ChevronDown, ChevronRight, RefreshCw,
 } from "lucide-react";
@@ -63,11 +62,30 @@ function fmtTime(iso?: string | null): string {
     return new Date(t).toLocaleTimeString();
 }
 
+function fmtWhen(iso?: string | null): string {
+    if (!iso) return "";
+    const t = Date.parse(iso);
+    if (Number.isNaN(t)) return "";
+    return new Date(t).toLocaleString([], { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+// The classifier's catch-all codes carry a generic sentence that says nothing
+// the card's own title does not; the raw reason code is the more specific fact.
+const GENERIC_BLOCK_CODES = new Set(["originate_failed", "unknown"]);
+
+function issueReason(it: CallIssue): string {
+    const generic = Boolean(it.block_code && GENERIC_BLOCK_CODES.has(it.block_code));
+    return (generic ? null : it.block_message) || it.reason_code || it.block_message || "";
+}
+
 type IssueGroup = {
     key: string;
     title: string;
     suggestion: string;
     severity: string;
+    /** The dialer's own reason (block_message), else the raw reason code. */
+    reason: string;
+    nextEligibleAt: string | null;
     items: CallIssue[];
     latestAt: string | null;
 };
@@ -86,6 +104,9 @@ function groupIssues(items: CallIssue[]): IssueGroup[] {
                 title: it.title,
                 suggestion: it.suggestion,
                 severity: it.severity,
+                // Items arrive newest first, so the first one speaks for the group.
+                reason: issueReason(it),
+                nextEligibleAt: it.next_eligible_at ?? null,
                 items: [it],
                 latestAt: it.updated_at ?? null,
             });
@@ -101,32 +122,41 @@ function groupIssues(items: CallIssue[]): IssueGroup[] {
 export type CallIssuesPanelProps = {
     /** Scope to one campaign. Omit for tenant-wide. */
     campaignId?: string;
+    /** Omit to preserve the legacy outbound API default. */
+    direction?: "inbound" | "outbound";
     title?: string;
 };
 
-export function CallIssuesPanel({ campaignId, title = "Call issues" }: CallIssuesPanelProps) {
+export function CallIssuesPanel(props: CallIssuesPanelProps) {
+    return (
+        <CallIssuesPanelScope
+            key={`${props.campaignId ?? "all"}:${props.direction ?? "all"}`}
+            {...props}
+        />
+    );
+}
+
+function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: CallIssuesPanelProps) {
     const [items, setItems] = useState<CallIssue[]>([]);
     const [loaded, setLoaded] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [open, setOpen] = useState(false);
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
-    const aborted = useRef(false);
-
     useEffect(() => {
-        aborted.current = false;
+        let cancelled = false;
         let timer: number | undefined;
 
         const poll = async () => {
             try {
-                const res = await api.listCallIssues({ campaignId });
-                if (aborted.current) return;
+                const res = await api.listCallIssues({ campaignId, direction });
+                if (cancelled) return;
                 setItems(res.items);
                 setError(null);
             } catch (err) {
-                if (aborted.current) return;
+                if (cancelled) return;
                 setError(err instanceof Error ? err.message : "Failed to load call issues");
             } finally {
-                if (!aborted.current) {
+                if (!cancelled) {
                     setLoaded(true);
                     timer = window.setTimeout(poll, POLL_INTERVAL_MS);
                 }
@@ -135,13 +165,15 @@ export function CallIssuesPanel({ campaignId, title = "Call issues" }: CallIssue
 
         void poll();
         return () => {
-            aborted.current = true;
+            cancelled = true;
             if (timer !== undefined) window.clearTimeout(timer);
         };
-    }, [campaignId]);
+    }, [campaignId, direction]);
 
     const groups = useMemo(() => groupIssues(items), [items]);
     const worst = groups[0]?.severity ?? "info";
+    const singularItem = direction === "inbound" ? "call" : "number";
+    const pluralItems = direction === "inbound" ? "calls" : "numbers";
 
     // Nothing wrong → render nothing at all. A healthy campaign gets its
     // space back (this also auto-clears the moment the backend stops
@@ -170,8 +202,8 @@ export function CallIssuesPanel({ campaignId, title = "Call issues" }: CallIssue
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-zinc-100">{title}</h3>
                     <span className="text-xs text-muted-foreground truncate">
                         {groups.length === 1
-                            ? `${groups[0].title} · ${groups[0].items.length} ${groups[0].items.length === 1 ? "number" : "numbers"}`
-                            : `${groups.length} problems · ${items.length} numbers`}
+                            ? `${groups[0].title} · ${groups[0].items.length} ${groups[0].items.length === 1 ? singularItem : pluralItems}`
+                            : `${groups.length} problems · ${items.length} ${pluralItems}`}
                     </span>
                 </div>
                 {error ? (
@@ -201,7 +233,7 @@ export function CallIssuesPanel({ campaignId, title = "Call issues" }: CallIssue
                                         <div className="flex items-center gap-2 flex-wrap">
                                             <span className={`text-sm font-semibold ${look.titleColor}`}>{g.title}</span>
                                             <span className="text-xs rounded-full bg-gray-100 dark:bg-white/10 px-2 py-0.5 text-muted-foreground">
-                                                {g.items.length} {g.items.length === 1 ? "number" : "numbers"}
+                                                {g.items.length} {g.items.length === 1 ? singularItem : pluralItems}
                                             </span>
                                             {g.latestAt && (
                                                 <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground/70">
@@ -211,6 +243,15 @@ export function CallIssuesPanel({ campaignId, title = "Call issues" }: CallIssue
                                             )}
                                         </div>
                                         <p className="mt-0.5 text-xs text-muted-foreground">{g.suggestion}</p>
+                                        {/* Outbound only: the inbound feed's reason codes are internal. */}
+                                        {direction !== "inbound" && g.reason ? (
+                                            <p className="mt-0.5 text-xs font-medium text-foreground/80">
+                                                {`Reason: ${g.reason}`}
+                                                {g.nextEligibleAt && fmtWhen(g.nextEligibleAt)
+                                                    ? ` · Next attempt: ${fmtWhen(g.nextEligibleAt)}`
+                                                    : ""}
+                                            </p>
+                                        ) : null}
                                     </div>
                                     {isOpen ? (
                                         <ChevronDown className="h-3.5 w-3.5 mt-1 text-muted-foreground shrink-0" aria-hidden />
@@ -226,7 +267,7 @@ export function CallIssuesPanel({ campaignId, title = "Call issues" }: CallIssue
                                                 className="text-[11px] font-mono rounded-md bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 px-1.5 py-0.5 text-muted-foreground"
                                                 title={`${it.title} · attempt ${it.attempts}${it.updated_at ? ` · ${fmtTime(it.updated_at)}` : ""}`}
                                             >
-                                                {it.phone_number}
+                                                {it.phone_number || (direction === "inbound" ? "Private / unavailable" : "Unknown")}
                                             </span>
                                         ))}
                                     </div>

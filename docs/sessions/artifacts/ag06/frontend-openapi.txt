@@ -1,0 +1,5 @@
+
+> frontend@0.1.0 docs:openapi
+> node --import tsx scripts/generate-openapi.ts --write
+
+Wrote C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\public\openapi.json

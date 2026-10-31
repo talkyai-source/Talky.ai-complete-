@@ -53,6 +53,10 @@ export default function PasskeyList({ refreshKey = 0 }: PasskeyListProps) {
     }, []);
 
     useEffect(() => {
+        // Fetches passkeys on mount and whenever the parent bumps
+        // `refreshKey` after a successful registration; load() sets
+        // passkeys/error state once the request resolves.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches passkeys on mount/refreshKey change, load() sets state once the request resolves
         void load();
     }, [load, refreshKey]);
 

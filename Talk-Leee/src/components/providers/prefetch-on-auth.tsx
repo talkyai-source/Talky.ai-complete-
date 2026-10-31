@@ -8,23 +8,26 @@
  * Mounted once at the app root (inside AuthProvider + QueryClientProvider).
  * Best-effort: prefetch failures are swallowed and never affect the UI.
  */
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
-import { useAuth } from "@/hooks/useAuth";
-import { prefetchAiOptions } from "@/lib/queries/ai-options-queries";
+import { aiOptionsKeys, prefetchAiOptions, useAiOptionsScope } from "@/lib/queries/ai-options-queries";
 
 export function PrefetchOnAuth() {
-    const { user } = useAuth();
+    const scope = useAiOptionsScope();
     const queryClient = useQueryClient();
-    const done = useRef(false);
 
     useEffect(() => {
-        if (!user || done.current) return;
-        done.current = true;
+        if (!scope) return;
+        const lifetime = new AbortController();
         // Fire-and-forget; each prefetch is independently best-effort.
-        void prefetchAiOptions(queryClient);
-    }, [user, queryClient]);
+        void prefetchAiOptions(queryClient, scope, lifetime.signal);
+        return () => {
+            lifetime.abort();
+            void queryClient.cancelQueries({ queryKey: aiOptionsKeys.scoped(scope) });
+            queryClient.removeQueries({ queryKey: aiOptionsKeys.scoped(scope) });
+        };
+    }, [scope, queryClient]);
 
     return null;
 }

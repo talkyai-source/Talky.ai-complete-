@@ -1,0 +1,333 @@
+{
+  "scope": "Actual enabled WebSocket handlers, real token mint/verify, route decision/query method, real profile resolvers/builders. Fake socket, DB acquire/fetch, session factory and pipeline. Socket/DNS blocked; no external providers or real DB. Signed token represents existing /answer-minted credential, not provider webhook signature exercise.",
+  "results": [
+    {
+      "provider": "twilio",
+      "route_case": "resolved_saved",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": true,
+          "rejected": false,
+          "reason": "routed"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 1,
+      "tenant_tuning_lookup_count": 1,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39",
+          "pipeline_mode": "realtime",
+          "realtime_voice": "ash",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 1800
+        }
+      ]
+    },
+    {
+      "provider": "twilio",
+      "route_case": "query_failure",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": false,
+          "rejected": true,
+          "reason": "routing_dependency_unavailable"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "twilio",
+      "route_case": "pool_missing",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [],
+      "route_query_count": 0,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "twilio",
+      "route_case": "no_binding",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": false,
+          "rejected": true,
+          "reason": "unknown_did"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "twilio",
+      "route_case": "ambiguous",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": false,
+          "rejected": true,
+          "reason": "ambiguous_did"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "twilio",
+      "route_case": "disabled",
+      "enabled": false,
+      "actual_token_verified": true,
+      "socket_accept_count": 0,
+      "socket_closes": [
+        {
+          "code": 1008,
+          "reason": "Twilio bridge disabled"
+        }
+      ],
+      "route_results": [],
+      "route_query_count": 0,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 0,
+      "pipeline_start_count": 0,
+      "factory_configs": []
+    },
+    {
+      "provider": "vonage",
+      "route_case": "resolved_saved",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": true,
+          "rejected": false,
+          "reason": "routed"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 1,
+      "tenant_tuning_lookup_count": 1,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": "c4442497-fbc8-4675-8424-995456831b39",
+          "pipeline_mode": "realtime",
+          "realtime_voice": "ash",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 1800
+        }
+      ]
+    },
+    {
+      "provider": "vonage",
+      "route_case": "query_failure",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": false,
+          "rejected": true,
+          "reason": "routing_dependency_unavailable"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "vonage",
+      "route_case": "pool_missing",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [],
+      "route_query_count": 0,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "vonage",
+      "route_case": "no_binding",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": false,
+          "rejected": true,
+          "reason": "unknown_did"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "vonage",
+      "route_case": "ambiguous",
+      "enabled": true,
+      "actual_token_verified": true,
+      "socket_accept_count": 1,
+      "socket_closes": [],
+      "route_results": [
+        {
+          "resolved": false,
+          "rejected": true,
+          "reason": "ambiguous_did"
+        }
+      ],
+      "route_query_count": 1,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 1,
+      "pipeline_start_count": 1,
+      "factory_configs": [
+        {
+          "tenant_id": null,
+          "pipeline_mode": "cascaded",
+          "realtime_voice": "marin",
+          "llm_provider": "cerebras",
+          "llm_model": "gpt-oss-120b",
+          "stt_eot_timeout_ms": 500
+        }
+      ]
+    },
+    {
+      "provider": "vonage",
+      "route_case": "disabled",
+      "enabled": false,
+      "actual_token_verified": true,
+      "socket_accept_count": 0,
+      "socket_closes": [
+        {
+          "code": 1008,
+          "reason": "Vonage bridge disabled"
+        }
+      ],
+      "route_results": [],
+      "route_query_count": 0,
+      "tenant_ai_lookup_count": 0,
+      "tenant_tuning_lookup_count": 0,
+      "factory_count": 0,
+      "pipeline_start_count": 0,
+      "factory_configs": []
+    }
+  ]
+}

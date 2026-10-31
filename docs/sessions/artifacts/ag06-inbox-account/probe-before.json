@@ -1,0 +1,37 @@
+{
+  "source_sha256": "39ce6ffa4200f863821bad536d4c9d89f3a467292a6a7093ff9e12ecaeb1bd58",
+  "observations": [
+    {
+      "refresh_account": "synthetic-b",
+      "observed_accounts": [
+        "synthetic-a",
+        "synthetic-b"
+      ],
+      "result": {
+        "message_id": "synthetic-message",
+        "read_account": "synthetic-b"
+      },
+      "error_type": null,
+      "resolver_kwargs": {
+        "force_refresh": true
+      }
+    },
+    {
+      "refresh_account": "synthetic-a",
+      "observed_accounts": [
+        "synthetic-a",
+        "synthetic-a"
+      ],
+      "result": {
+        "message_id": "synthetic-message",
+        "read_account": "synthetic-a"
+      },
+      "error_type": null,
+      "resolver_kwargs": {
+        "force_refresh": true
+      }
+    }
+  ],
+  "provider_calls": 0,
+  "database_calls": 0
+}

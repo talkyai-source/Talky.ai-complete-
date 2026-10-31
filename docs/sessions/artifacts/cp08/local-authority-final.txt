@@ -1,0 +1,26 @@
+✔ local GET /auth cannot authenticate or mutate legacy identity (13.8657ms)
+✔ local GET /auth/me cannot authenticate or mutate legacy identity (1.3594ms)
+✔ local GET /me cannot authenticate or mutate legacy identity (1.4034ms)
+✔ local POST /auth/register cannot authenticate or mutate legacy identity (1.5933ms)
+✔ local POST /auth/login cannot authenticate or mutate legacy identity (1.3003ms)
+✔ local POST /auth/refresh cannot authenticate or mutate legacy identity (1.0194ms)
+✔ local POST /auth/mfa/verify cannot authenticate or mutate legacy identity (0.9913ms)
+✔ local DELETE /auth/passkeys/synthetic cannot authenticate or mutate legacy identity (0.9968ms)
+✔ local PATCH /auth/profile cannot authenticate or mutate legacy identity (1.6797ms)
+✔ local billing/plans fails before auth, body/idempotency work, or webhook acknowledgment (11.8187ms)
+✔ local billing/subscription fails before auth, body/idempotency work, or webhook acknowledgment (1.3591ms)
+✔ local billing/create-checkout-session fails before auth, body/idempotency work, or webhook acknowledgment (1.6785ms)
+✔ local billing/webhooks/stripe fails before auth, body/idempotency work, or webhook acknowledgment (1.006ms)
+✔ production local GET /partners cannot use a historical legacy session (18.2398ms)
+✔ production local POST /tenants/synthetic/users cannot use a historical legacy session (2.3621ms)
+✔ production local POST /email/send cannot use a historical legacy session (2.0218ms)
+✔ production local POST /calls cannot use a historical legacy session (1.7677ms)
+✔ explicit development keeps the existing unauthenticated health path (8.871ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 24571.9263

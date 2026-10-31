@@ -10,22 +10,27 @@ Covers the five fixes:
           transcripts (role-tagged, in order) into a TranscriptService; deltas
           do not double-count.
   FIX 3 — persona/instructions: the built string carries the new AI-disclosure
-          and lookup-filler direction and NOT the old "never as filler".
+          and conditional lookup updates without forced filler.
   FIX 5 — session controls: speed/temperature/max_output_tokens are omitted by
           default and included (clamped) only when configured.
 """
 from __future__ import annotations
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import asyncio
 
 import pytest
 
-from app.domain.services.voice_pipeline.realtime_bridge import RealtimeBridge
-from app.infrastructure.realtime.openai_realtime import (
+from app.realtime.bridge import (
+    _NO_KB_INFO,
+    RealtimeBridge,
+)
+from app.realtime.openai import (
     OpenAIRealtimeSession,
     RealtimeEvent,
 )
-from app.services.scripts.realtime_instructions import (
+from app.realtime.prompts import (
     RealtimePersona,
     build_realtime_instructions,
 )
@@ -50,29 +55,31 @@ def test_instructions_ai_disclosure_matches_compliance_floor():
     assert "I'm an AI assistant" in text
 
 
-def test_instructions_have_lookup_filler_and_drop_never_as_filler():
+def test_lookup_updates_are_conditional_and_not_forced_filler():
     text = build_realtime_instructions(RealtimePersona())
-    # The OLD, wrong guidance must be gone.
-    assert "never as filler" not in text
-    # The NEW lookup-hold direction must be present.
-    assert "let me check that for you" in text
-    assert "NEVER sit in dead silence" in text
+    assert "NEVER sit in dead silence" not in text
+    assert "let real emotion through" not in text
+    # The old stall template ("Give a brief update ... 'I'll check the
+    # details.'") was spoken back as "Let me think about the best next
+    # question here." (realtime test 1ddf8844, 2026-09-30). At most "One
+    # moment." before a lookup, and never narrated thinking.
+    assert "I'll check the details." not in text
+    assert 'say at most "One moment."' in text
+    assert "Never say that you are thinking" in text
 
 
-def test_instructions_have_opening_and_backchannels():
-    text = build_realtime_instructions(
-        RealtimePersona(agent_name="Sam", company_name="Acme")
-    )
+def test_instructions_keep_opening_and_short_natural_turns():
+    text = build_realtime_instructions(RealtimePersona(agent_name="Sam", company_name="Acme"))
     assert "HOW YOU OPEN" in text
     assert "Sam from Acme" in text
-    # Human backchannels / emotional signals.
-    assert "mm-hmm" in text
+    assert "one or two short sentences" in text
+    assert "without scripted filler or forced laughter" in text
 
 
 def test_instructions_dependency_free():
     # The composer must IMPORT nothing from the cascaded prompt machinery
     # (the docstring may name it — only real import statements matter).
-    import app.services.scripts.realtime_instructions as mod
+    import app.realtime.prompts as mod
     with open(mod.__file__, "r", encoding="utf-8") as fh:
         for line in fh:
             stripped = line.strip()
@@ -111,7 +118,8 @@ async def test_lookup_knowledge_fails_closed_on_missing_tenant(monkeypatch):
     )
     out = await bridge._lookup_knowledge("what are your hours")
     assert called["n"] == 0                     # retrieve NEVER called (no bypass)
-    assert "don't have specific information" in out.lower()
+    assert out["status"] == "unavailable"
+    assert "cannot confirm" in out["text"].lower()
 
 
 @pytest.mark.asyncio
@@ -120,7 +128,7 @@ async def test_lookup_knowledge_valid_tenant_returns_source_first(monkeypatch):
     top-of-node voice_answer summary) and never bumps hit_count."""
     captured = {}
 
-    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True):
+    async def _fake_retrieve(pool, *, tenant_id, campaign_id, query, k, bump_hits=True, raise_on_error=False):
         captured["tenant_id"] = tenant_id
         captured["campaign_id"] = campaign_id
         captured["bump_hits"] = bump_hits
@@ -130,6 +138,7 @@ async def test_lookup_knowledge_valid_tenant_returns_source_first(monkeypatch):
             "voice_answer": "We serve many areas.",
             "summary": None,
             "content": "We cover Texas, and we also cover Ohio and Florida.",
+            "coverage": 1.0,
         }]
 
     import app.services.scripts.knowledge.retrieval as retr
@@ -149,7 +158,8 @@ async def test_lookup_knowledge_valid_tenant_returns_source_first(monkeypatch):
     assert captured["tenant_id"] == tid         # the validated tenant, no bypass
     assert captured["campaign_id"] == "camp-1"
     assert captured["bump_hits"] is False       # voice hot path: no hit_count write
-    assert "Florida" in out                     # the SOURCE fact, not "many areas"
+    assert out["status"] == "matched"
+    assert "Florida" in out["text"]             # the SOURCE fact, not "many areas"
 
 
 @pytest.mark.asyncio
@@ -163,7 +173,11 @@ async def test_lookup_knowledge_no_pool_returns_graceful():
         campaign_id="camp-1",
     )
     out = await bridge._lookup_knowledge("hours")
-    assert "No company information" in out
+    # No pool and no pinned snapshot => the no-info sentinel: graceful, and
+    # crucially nothing for the model to invent from. Compared against the
+    # constant so a reworded sentinel can never silently drift this test.
+    assert out["status"] == "unavailable"
+    assert out["sources"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +193,8 @@ async def test_model_pump_accumulates_final_transcripts_in_order():
     async def _events():
         # Agent speaks (deltas then a final), caller replies (delta then final).
         yield RealtimeEvent(kind="agent_transcript", text="Hi ")
-        yield RealtimeEvent(kind="agent_transcript", text="there", is_final=True)
+        yield RealtimeEvent(kind="response_candidate", text="there", audio=b"\xff" * 160)
+        await asyncio.sleep(0.02)
         yield RealtimeEvent(kind="caller_transcript", text="hel")
         yield RealtimeEvent(kind="caller_transcript", text="Hello there", is_final=True)
 
@@ -190,7 +205,7 @@ async def test_model_pump_accumulates_final_transcripts_in_order():
     bridge = RealtimeBridge(
         call_id=call_id,
         realtime_session=_RT(),
-        media_gateway=object(),
+        media_gateway=SimpleNamespace(send_audio=AsyncMock()),
         internal_sample_rate=8000,
         transcript_service=ts,
         talklee_call_id="tk-1",
@@ -226,22 +241,24 @@ def test_record_turn_fail_soft_without_service():
 # FIX 5 — optional session controls
 # ---------------------------------------------------------------------------
 
-def test_session_update_omits_optional_controls_by_default():
+def test_session_update_uses_the_same_defaults_displayed_in_ai_options():
     s = OpenAIRealtimeSession(api_key="sk")._build_session_update()["session"]
-    assert "speed" not in s["audio"]["output"]
+    assert s["audio"]["output"]["speed"] == 1.0
     assert "temperature" not in s
-    assert "max_output_tokens" not in s
+    assert s["max_output_tokens"] == 1024
+    assert s["audio"]["input"]["noise_reduction"] == {"type": "near_field"}
 
 
-def test_session_update_includes_and_clamps_controls_when_set():
+def test_session_update_validates_controls_and_removes_legacy_temperature():
     s = OpenAIRealtimeSession(
         api_key="sk",
-        settings={"speed": 3.0, "temperature": 0.8, "max_output_tokens": 512},
+        settings={"speed": 1.5, "temperature": 0.8, "max_output_tokens": 512},
     )._build_session_update()["session"]
-    # Speed clamped to the documented 0.25–1.5 window.
     assert s["audio"]["output"]["speed"] == 1.5
-    assert s["temperature"] == 0.8
+    assert "temperature" not in s
     assert s["max_output_tokens"] == 512
+    with pytest.raises(ValueError):
+        OpenAIRealtimeSession(api_key="sk", settings={"speed": 3.0})
 
 
 # ---------------------------------------------------------------------------
@@ -354,7 +371,7 @@ class _ScriptedWS:
         has_reasoning = "reasoning" in payload.get("session", {})
         if has_reasoning:
             self._inbox.append(json.dumps(
-                {"type": "error", "error": {"message": "unknown parameter: reasoning"}}
+                {"type": "error", "error": {"code": "unknown_parameter", "param": "session.reasoning", "message": "unknown parameter: reasoning"}}
             ))
         else:
             self._inbox.append(json.dumps({"type": "session.updated"}))
@@ -387,7 +404,7 @@ async def test_connect_retries_without_reasoning_on_rejection(monkeypatch):
     async def _fake_connect(*a, **k):
         return fake
 
-    import app.infrastructure.realtime.openai_realtime as rt_mod
+    import app.realtime.openai as rt_mod
     monkeypatch.setattr(rt_mod.websockets, "connect", _fake_connect)
 
     sess = OpenAIRealtimeSession(api_key="sk", call_id="retry-test")
@@ -411,7 +428,7 @@ async def test_connect_no_retry_when_first_update_accepted(monkeypatch):
     async def _fake_connect(*a, **k):
         return fake
 
-    import app.infrastructure.realtime.openai_realtime as rt_mod
+    import app.realtime.openai as rt_mod
     monkeypatch.setattr(rt_mod.websockets, "connect", _fake_connect)
 
     sess = OpenAIRealtimeSession(
@@ -426,23 +443,41 @@ async def test_connect_no_retry_when_first_update_accepted(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# TASK 3 — restructured instructions keep the compliance floor + lookup preamble
+# TASK 3 — independent instructions preserve safety and explicit retrieval policy
 # ---------------------------------------------------------------------------
 
-def test_instructions_preserve_compliance_floor_verbatim():
+def test_instructions_preserve_honesty_and_protected_data_rules():
     text = build_realtime_instructions(RealtimePersona())
-    # Honesty floor preserved verbatim (aligned to guardrails.py Rule 1).
+    # Honesty remains explicit while the Realtime wording is independently maintained.
     assert "Be honest about what you are" in text
     assert "never claim or imply you're human" in text
-    assert "that you're an AI" in text
     assert "I'm an AI assistant" in text
+    for protected in ("payment-card", "social-security", "one-time passcodes"):
+        assert protected in text
     # No concealment framing may creep back in.
     assert "Do NOT volunteer" not in text
     assert "don't volunteer" not in text.lower()
 
 
-def test_instructions_keep_lookup_preamble():
+def test_knowledge_tool_and_prompt_require_evidence_not_model_confidence():
+    from app.realtime.openai import knowledge_lookup_tool
     text = build_realtime_instructions(RealtimePersona())
-    # The anti-dead-air preamble (a natural hold before the tool call) stays.
-    assert "NEVER sit in dead silence" in text
-    assert "let me check that for you" in text
+    tool = knowledge_lookup_tool()
+    description = tool["description"]
+    for fact in ("prices", "policies", "eligibility", "availability", "offers"):
+        assert fact in text and fact in description
+    assert "not certain" not in description
+    assert "verified result from this call" in text and "verified result from this call" in description
+    assert "without asking permission" in text
+    assert "not general knowledge or campaign sales claims" in text
+    query = tool["parameters"]["properties"]["query"]
+    assert tool["name"] == "knowledge_lookup"
+    assert tool["parameters"]["required"] == ["query"]
+    assert query["type"] == "string"
+    for constraint in ("named products", "country/location", "timing", "negation", "relationship"):
+        assert constraint in text and constraint in query["description"]
+    assert "clear references from context" in text and "clear references from context" in query["description"]
+    assert "clarify" in text and "clarify" in query["description"]
+    assert "assumptions to obtain a match" in text and "assumptions to obtain a match" in query["description"]
+    assert "original question and its constraints" in text
+    assert "matched label alone is not proof" in text

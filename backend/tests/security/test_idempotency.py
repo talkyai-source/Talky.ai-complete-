@@ -15,6 +15,7 @@ Tests cover:
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from unittest.mock import AsyncMock, MagicMock, PropertyMock
 
@@ -69,7 +70,7 @@ class TestIdempotencyManager:
     async def test_new_request_sets_lock(self, mock_redis, mock_request):
         """First request: no existing record, no lock → sets lock, returns is_new."""
         mock_redis.get.return_value = None
-        mock_redis.exists.return_value = 0
+        mock_redis.set = AsyncMock(return_value=True)  # SET NX EX acquired
         mgr = IdempotencyManager(redis_client=mock_redis)
         is_new, cached, error = await mgr.check_idempotency(
             "test-key", mock_request
@@ -77,8 +78,9 @@ class TestIdempotencyManager:
         assert is_new is True
         assert cached is None
         assert error is None
-        # Lock should be set
-        mock_redis.setex.assert_called_once()
+        # Lock is taken atomically (SET NX EX), not EXISTS-then-SETEX
+        mock_redis.set.assert_awaited_once()
+        assert mock_redis.set.await_args.kwargs == {"nx": True, "ex": 60}
 
     @pytest.mark.asyncio
     async def test_duplicate_returns_cached(self, mock_redis, mock_request):
@@ -121,8 +123,9 @@ class TestIdempotencyManager:
     @pytest.mark.asyncio
     async def test_concurrent_request_returns_error(self, mock_redis, mock_request):
         """Same key already in progress → conflict."""
-        mock_redis.get.return_value = None  # No completed request
-        mock_redis.exists.return_value = 1  # Lock exists
+        # No completed request; the NX lock is already held by the same body
+        mock_redis.get.side_effect = [None, hashlib.sha256(b'{"test": true}').hexdigest()]
+        mock_redis.set = AsyncMock(return_value=None)
         mgr = IdempotencyManager(redis_client=mock_redis)
         is_new, cached, error = await mgr.check_idempotency(
             "test-key", mock_request
@@ -132,20 +135,39 @@ class TestIdempotencyManager:
 
     @pytest.mark.asyncio
     async def test_store_response(self, mock_redis, mock_request):
-        """store_response should write to Redis with TTL."""
+        """store_response should write to Redis with TTL and release only OUR lock."""
+        mock_request.state.idempotency_lock_value = "owner-token:bodyhash"
         mgr = IdempotencyManager(redis_client=mock_redis)
         await mgr.store_response(
             "test-key", mock_request, 200, '{"result": "ok"}'
         )
-        # Should have called setex for the record and delete for the lock
+        # setex for the record; the lock goes through the atomic
+        # compare-and-delete on the value this request set, never a blind
+        # delete of the key (which could be a later request's lock).
         assert mock_redis.setex.called
-        assert mock_redis.delete.called
+        mock_redis.eval.assert_awaited_once()
+        assert mock_redis.eval.await_args.args[1:] == (
+            1, mgr._lock_key("test-key"), "owner-token:bodyhash",
+        )
+        assert not mock_redis.delete.called
 
     @pytest.mark.asyncio
     async def test_release_lock(self, mock_redis):
         mgr = IdempotencyManager(redis_client=mock_redis)
+        await mgr.release_lock("test-key", "owner-token:bodyhash")
+        # compare-and-delete on the caller's own lock value, not a blind delete
+        mock_redis.eval.assert_awaited_once()
+        assert mock_redis.eval.await_args.args[1:] == (
+            1, mgr._lock_key("test-key"), "owner-token:bodyhash",
+        )
+        assert not mock_redis.delete.called
+
+    @pytest.mark.asyncio
+    async def test_release_lock_without_an_owner_value_releases_nothing(self, mock_redis):
+        mgr = IdempotencyManager(redis_client=mock_redis)
         await mgr.release_lock("test-key")
-        mock_redis.delete.assert_called_once()
+        mock_redis.eval.assert_not_awaited()
+        assert not mock_redis.delete.called
 
     @pytest.mark.asyncio
     async def test_store_response_noop_without_redis(self, mock_request):

@@ -5,7 +5,8 @@ import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useCampaignContacts, useCampaigns, useSendEmail } from "@/lib/api-hooks";
+import { Select } from "@/components/ui/select";
+import { useCampaignContacts, useOutboundCampaigns, useSendEmail } from "@/lib/api-hooks";
 import type { EmailTemplate } from "@/lib/models";
 import { cn } from "@/lib/utils";
 import { HtmlPreview } from "@/components/email/html-preview";
@@ -42,7 +43,7 @@ export function SendEmailModal({
     connectorBlockReason?: string;
 }) {
     const send = useSendEmail();
-    const campaignsQ = useCampaigns();
+    const campaignsQ = useOutboundCampaigns();
 
     const [step, setStep] = useState<Step>("recipients");
     const [recipientsText, setRecipientsText] = useState("");
@@ -62,6 +63,10 @@ export function SendEmailModal({
 
     useEffect(() => {
         if (!open) return;
+        // Reset the whole wizard whenever the modal is (re-)opened — these
+        // are all local wizard fields, not derivable from props, and must
+        // go back to their initial values each time `open` flips true.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- resets wizard state on each modal open, not derivable during render
         setStep("recipients");
         setRecipientsText("");
         setSubject("");
@@ -77,6 +82,10 @@ export function SendEmailModal({
     useEffect(() => {
         if (!template) return;
         if (editingHtml) return;
+        // Seed the editable HTML from the selected template the first time
+        // (or after it's cleared on template switch) — only fires while
+        // editingHtml is empty, so it never clobbers in-progress edits.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- lazily seeds editor content from the selected template without clobbering in-progress edits
         setEditingHtml(template.html);
     }, [template, editingHtml]);
 
@@ -240,22 +249,23 @@ export function SendEmailModal({
                                 </div>
                                 <div className="mt-4 space-y-2">
                                     <Label htmlFor="template">Template</Label>
-                                    <select
+                                    <Select
                                         id="template"
+                                        ariaLabel="Template"
                                         value={templateId}
-                                        onChange={(e) => {
-                                            setTemplateId(e.target.value);
+                                        onChange={(next) => {
+                                            setTemplateId(next);
                                             setEditingHtml("");
                                             setAllowEditLocked(false);
                                         }}
-                                        className="h-10 w-full rounded-md border border-white/10 bg-white/5 px-2 text-sm text-white"
+                                        selectClassName="border-white/10 bg-white/5 px-2 pr-9 text-white hover:bg-white/10"
                                     >
                                         {templates.map((t) => (
                                             <option key={t.id} value={t.id}>
                                                 {t.name}
                                             </option>
                                         ))}
-                                    </select>
+                                    </Select>
                                 </div>
                                 <div className="mt-4 flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/5 px-3 py-3">
                                     <div className="min-w-0">
@@ -392,14 +402,15 @@ export function SendEmailModal({
                 <div className="space-y-4">
                     <div className="space-y-2">
                         <Label htmlFor="contactsCampaign">Campaign</Label>
-                        <select
+                        <Select
                             id="contactsCampaign"
+                            ariaLabel="Campaign"
                             value={contactsCampaignId}
-                            onChange={(e) => {
-                                setContactsCampaignId(e.target.value);
+                            onChange={(next) => {
+                                setContactsCampaignId(next);
                                 setContactsSelected({});
                             }}
-                            className="h-10 w-full rounded-md border border-white/10 bg-white/5 px-2 text-sm text-white"
+                            selectClassName="border-white/10 bg-white/5 px-2 pr-9 text-white hover:bg-white/10"
                         >
                             <option value="">Select campaign…</option>
                             {(campaignsQ.data ?? []).map((c) => (
@@ -407,7 +418,7 @@ export function SendEmailModal({
                                     {c.name}
                                 </option>
                             ))}
-                        </select>
+                        </Select>
                     </div>
 
                     {!contactsCampaignId ? (

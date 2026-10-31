@@ -1,0 +1,71 @@
+........................................................................ [ 59%]
+..................................ss.s.ss.ssFFF.s                        [100%]
+================================== FAILURES ===================================
+__________ TestPromptManagerIntegration.test_all_states_have_prompts __________
+
+self = <tests.integration.test_voice_pipeline_conversation.TestPromptManagerIntegration object at 0x000001AD72758410>
+voice_pipeline = <app.domain.services.voice_pipeline_service.VoicePipelineService object at 0x000001AD74585070>
+agent_config = AgentConfig(goal='appointment_confirmation', business_type='dental clinic', agent_name='Sarah', company_name='Bright S...personality_traits=['friendly', 'helpful', 'concise'], max_conversation_turns=10, response_max_sentences=2, context={})
+
+    def test_all_states_have_prompts(self, voice_pipeline, agent_config):
+        """Test that all conversation states have corresponding prompts"""
+        states = [
+            ConversationState.GREETING,
+            ConversationState.QUALIFICATION,
+            ConversationState.OBJECTION_HANDLING,
+            ConversationState.CLOSING,
+            ConversationState.TRANSFER,
+            ConversationState.GOODBYE
+        ]
+
+        for state in states:
+            # Generate prompt for each state
+>           prompt = voice_pipeline.prompt_manager.render_system_prompt(
+                agent_config=agent_config,
+                state=state,
+                greeting_context="test",
+                qualification_instruction="test",
+                user_concern="test",
+                objection_count=1,
+                max_objections=2
+            )
+E           AttributeError: 'VoicePipelineService' object has no attribute 'prompt_manager'
+
+tests\integration\test_voice_pipeline_conversation.py:354: AttributeError
+_______ TestPromptManagerIntegration.test_prompt_includes_agent_details _______
+
+self = <tests.integration.test_voice_pipeline_conversation.TestPromptManagerIntegration object at 0x000001AD72758590>
+voice_pipeline = <app.domain.services.voice_pipeline_service.VoicePipelineService object at 0x000001AD74546810>
+agent_config = AgentConfig(goal='appointment_confirmation', business_type='dental clinic', agent_name='Sarah', company_name='Bright S...personality_traits=['friendly', 'helpful', 'concise'], max_conversation_turns=10, response_max_sentences=2, context={})
+
+    def test_prompt_includes_agent_details(self, voice_pipeline, agent_config):
+        """Test that prompts include agent-specific details"""
+>       prompt = voice_pipeline.prompt_manager.render_system_prompt(
+            agent_config=agent_config,
+            state=ConversationState.GREETING,
+            greeting_context="confirming appointment"
+        )
+E       AttributeError: 'VoicePipelineService' object has no attribute 'prompt_manager'
+
+tests\integration\test_voice_pipeline_conversation.py:371: AttributeError
+___________ TestPromptManagerIntegration.test_prompt_includes_rules ___________
+
+self = <tests.integration.test_voice_pipeline_conversation.TestPromptManagerIntegration object at 0x000001AD727589B0>
+voice_pipeline = <app.domain.services.voice_pipeline_service.VoicePipelineService object at 0x000001AD74547080>
+agent_config = AgentConfig(goal='appointment_confirmation', business_type='dental clinic', agent_name='Sarah', company_name='Bright S...personality_traits=['friendly', 'helpful', 'concise'], max_conversation_turns=10, response_max_sentences=2, context={})
+
+    def test_prompt_includes_rules(self, voice_pipeline, agent_config):
+        """Test that prompts include do-not-say rules"""
+>       prompt = voice_pipeline.prompt_manager.render_system_prompt(
+            agent_config=agent_config,
+            state=ConversationState.GREETING,
+            greeting_context="test"
+        )
+E       AttributeError: 'VoicePipelineService' object has no attribute 'prompt_manager'
+
+tests\integration\test_voice_pipeline_conversation.py:385: AttributeError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_voice_pipeline_conversation.py::TestPromptManagerIntegration::test_all_states_have_prompts
+FAILED tests/integration/test_voice_pipeline_conversation.py::TestPromptManagerIntegration::test_prompt_includes_agent_details
+FAILED tests/integration/test_voice_pipeline_conversation.py::TestPromptManagerIntegration::test_prompt_includes_rules
+3 failed, 110 passed, 8 skipped, 253 warnings in 7.53s

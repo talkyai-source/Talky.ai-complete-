@@ -15,6 +15,7 @@ maps those raw reasons to "here's what happened and how to fix it".
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 
@@ -26,6 +27,42 @@ class IssueAdvice:
     stage: str      # quota | schedule | campaign | caller_id | voice | safety | concurrency | carrier | other
 
 
+_SCHEDULE_INVALID = IssueAdvice(
+    "Calling hours are invalid",
+    "No calls are going out because the calling hours can't be used: the start time must be before the end time on the same day (24-hour HH:MM, not past midnight). Fix the calling hours in the campaign's calling rules and calls resume within the hour.",
+    "error", "schedule",
+)
+
+_SCHEDULE_INVALID_TIMEZONE = IssueAdvice(
+    "Campaign timezone not recognised",
+    "No calls are going out because this campaign's timezone isn't a recognised timezone name (use one like Europe/London or America/New_York). Fix it in the campaign's calling rules and calls resume within the hour.",
+    "error", "schedule",
+)
+
+_LINE_CALLER_ID_UNVERIFIED = IssueAdvice(
+    "Phone line caller ID not verified",
+    "The caller ID on this phone line is not verified yet. Ask support to verify it; calls resume automatically once it is.",
+    "error", "caller_id",
+)
+
+_NO_LINE_READY = IssueAdvice(
+    "No phone line ready",
+    "No phone line is ready to dial out. Connect or switch on a line in Settings → Telephony. The call retries automatically once a line is registered.",
+    "error", "carrier",
+)
+
+_LINE_NOT_REGISTERED = IssueAdvice(
+    "Campaign phone line not registered",
+    "The phone line for this campaign is not registered with the carrier right now. Check its status in Settings → Telephony, or assign a different line to the campaign.",
+    "error", "carrier",
+)
+
+_SERVER_ERROR = IssueAdvice(
+    "Calling service error",
+    "The calling service hit an internal error while placing this call. It is retried automatically; if it keeps happening, contact support.",
+    "warning", "other",
+)
+
 # Order matters — first match wins. Keys are matched as substrings against
 # the lower-cased reason code.
 _RULES: list[tuple[str, IssueAdvice]] = [
@@ -34,9 +71,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "This account has used all its monthly call minutes. Add minutes or upgrade the plan, then start the campaign again.",
         "error", "quota",
     )),
+    # Must stay ABOVE ``caller_id_not_verified``: it is a substring match.
+    ("trunk_caller_id_not_verified", _LINE_CALLER_ID_UNVERIFIED),
     ("caller_id_not_verified", IssueAdvice(
         "Caller ID not verified",
-        "No verified caller ID is set for this account. Register and verify a phone number in Settings → Phone Numbers, then set it as the campaign's caller ID.",
+        "The caller ID these calls go out from is not verified for this account yet. Ask support to verify the number; calls resume automatically once it is verified.",
         "error", "caller_id",
     )),
     ("campaign_stopped", IssueAdvice(
@@ -49,6 +88,93 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "The campaign isn't running, so queued calls are skipped. Press Start to begin dialing.",
         "warning", "campaign",
     )),
+    ("campaign_paused", IssueAdvice(
+        "Campaign is paused",
+        "The campaign is paused, so its queued calls are on hold. Press Start to resume dialing.",
+        "warning", "campaign",
+    )),
+    ("job_not_active", IssueAdvice(
+        "Queued call no longer active",
+        "This queued call was cancelled or already handled, so it was skipped. No action needed.",
+        "info", "campaign",
+    )),
+    ("lead_not_dialable", IssueAdvice(
+        "Contact can't be dialed",
+        "This contact can't be dialed right now: it may have been deleted, opted out, or have no valid phone number. Fix the contact or remove it from the campaign.",
+        "warning", "campaign",
+    )),
+    # Phone line / route refusals (trunk_resolver + outbound readiness).
+    ("tenant_pbx_required", IssueAdvice(
+        "Phone line not ready",
+        "The campaign's phone line or caller ID is not ready, so the call was refused before dialing. Check the line in Settings → Telephony; the call retries automatically once it is registered.",
+        "error", "carrier",
+    )),
+    ("no_ready_trunk", _NO_LINE_READY),
+    ("no_own_trunk", _NO_LINE_READY),
+    ("selected_trunk_not_ready", _LINE_NOT_REGISTERED),
+    ("campaign_assigned_trunk_not_ready", _LINE_NOT_REGISTERED),
+    ("line_not_ready", IssueAdvice(
+        "Phone line not ready",
+        "The call was refused because no usable phone line was available: no line is switched on, the line is not registered with the carrier, or its caller ID is not verified. Check Settings → Telephony; if the caller ID is the problem, ask support to verify it. The call retries automatically.",
+        "error", "carrier",
+    )),
+    # Must precede ``telephony_unavailable``: it is a substring of this code.
+    ("cloud_telephony_unavailable", IssueAdvice(
+        "Cloud calling unavailable",
+        "Cloud calling is switched off in production. Select a ready phone line in Settings → Telephony to place calls.",
+        "error", "carrier",
+    )),
+    ("telephony_unavailable", IssueAdvice(
+        "Phone system not connected",
+        "The calling service is not connected to the phone system right now. This normally clears on its own and the call resumes automatically; if it lasts more than a few minutes, contact support.",
+        "warning", "carrier",
+    )),
+    ("telephony_selection_unavailable", IssueAdvice(
+        "Telephony settings unavailable",
+        "The account's saved phone-system selection could not be checked just now, so the call was held back. It retries automatically; if it persists, contact support.",
+        "warning", "carrier",
+    )),
+    ("origination_result_unknown", IssueAdvice(
+        "Call result unknown",
+        "The call was handed to the phone system but its result did not come back, so it is held to avoid dialing the same person twice. It is settled automatically once the status is confirmed.",
+        "warning", "carrier",
+    )),
+    # Account / platform state and held-back checks.
+    ("metering_unavailable", IssueAdvice(
+        "Minute allowance can't be checked",
+        "The plan-minutes check was unavailable, so the call was held back rather than risk going over the allowance. It retries automatically; if it persists, contact support.",
+        "warning", "quota",
+    )),
+    ("rules_unavailable", IssueAdvice(
+        "Calling rules unavailable",
+        "The campaign's calling rules (hours and limits) could not be loaded, so the call was held back for safety. It retries automatically; if it persists, contact support.",
+        "warning", "schedule",
+    )),
+    ("guard_check_unavailable", IssueAdvice(
+        "Safety check unavailable",
+        "A safety check (such as the Do-Not-Call or rate-limit lookup) could not be completed, so the call was held back instead of skipping it. It retries automatically; if it persists, contact support.",
+        "warning", "safety",
+    )),
+    ("platform_outbound_calls_paused", IssueAdvice(
+        "Calling paused platform-wide",
+        "Outbound calling is temporarily paused for the whole platform by the operator. Calls resume automatically when it is switched back on; contact support for an estimate.",
+        "warning", "safety",
+    )),
+    ("tenant_suspended", IssueAdvice(
+        "Account suspended",
+        "This account is suspended, so no calls are placed. Contact support to reactivate it.",
+        "error", "other",
+    )),
+    ("subscription_past_due", IssueAdvice(
+        "Subscription payment overdue",
+        "The subscription payment is overdue, so calling is paused. Update the payment method in Billing; calls resume once the payment goes through.",
+        "error", "quota",
+    )),
+    ("outside_business_hours", IssueAdvice(
+        "Outside business hours",
+        "The current time is outside the configured business hours, so the call was held back. It will go out when business hours start, or change the business hours in your settings.",
+        "warning", "schedule",
+    )),
     # TESTING MODE must be recognised BEFORE the schedule rules below — its
     # raw code mentions the schedule, but it is the opposite of a block: the
     # calling window was deliberately bypassed and the operator has to see it.
@@ -57,6 +183,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Calls are going out even though the current time is outside the configured calling hours, because the testing override is switched on. This is for testing only — turn it off before real calling, since calling-hour rules exist for legal/compliance reasons.",
         "warning", "schedule",
     )),
+    # The window itself is invalid (unreadable, or ends before it starts): it
+    # never opens, so it needs a person, not a wait.
+    ("invalid_timezone", _SCHEDULE_INVALID_TIMEZONE),
+    ("invalid_time_window", _SCHEDULE_INVALID),
+    ("schedule_invalid", _SCHEDULE_INVALID),
     # Day-of-week gate. The raw dialer code is `calling_not_allowed_on_Tue`
     # (from CallingRules.is_within_time_window) — it contains neither
     # "time_window" nor "day", so before this rule existed it fell through to
@@ -120,6 +251,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Cartesia failed to synthesize speech. Check the Cartesia API key/voice, or switch the campaign's voice provider.",
         "error", "voice",
     )),
+    ("assemblyai", IssueAdvice(
+        "Speech-to-text error (AssemblyAI)",
+        "AssemblyAI could not start or continue speech recognition. Check the AssemblyAI API key, streaming access and concurrency limit, then retry or select another speech-recognition engine in AI Options.",
+        "error", "voice",
+    )),
     ("deepgram", IssueAdvice(
         "Speech-to-text error",
         "The speech-to-text provider (Deepgram) failed, so the agent couldn't hear the caller. Check the Deepgram key/health.",
@@ -170,6 +306,11 @@ _RULES: list[tuple[str, IssueAdvice]] = [
         "Another campaign of this account just placed a call; campaigns take turns so only one call originates at a time — no action needed.",
         "info", "pacing",
     )),
+    ("destination_busy", IssueAdvice(
+        "Number already on a call",
+        "This number is on another call from this account (another campaign or attempt). It dials automatically as soon as that call ends — no action needed.",
+        "info", "pacing",
+    )),
     ("call_guard_queued", IssueAdvice(
         "Waiting for a free slot",
         "The call is queued behind the account's rate limiter and will dial automatically when a slot frees up.",
@@ -213,11 +354,55 @@ _RULES: list[tuple[str, IssueAdvice]] = [
     )),
 ]
 
+# One-word dialer outcomes. Matched only as the WHOLE leading token of the
+# reason (``failed``, ``rejected (403)``, ``http_503``) — as substrings they
+# would hijack longer reasons that have a provider rule or a failure category
+# (``..._handshake_failed: ElevenLabs 401``).
+_GENERIC_RULES: dict[str, IssueAdvice] = {
+    "rejected": IssueAdvice(
+        "Call rejected",
+        "The phone system refused the call straight away, before it rang. Check that the number is valid and dialable, and that the campaign's phone line is registered in Settings → Telephony.",
+        "warning", "carrier",
+    ),
+    "failed": IssueAdvice(
+        "Call failed",
+        "The call failed before it connected. Check the number and the campaign's phone line and voice settings; if it keeps happening, contact support.",
+        "warning", "other",
+    ),
+    "internal_error": _SERVER_ERROR,
+}
+_HTTP_5XX = re.compile(r"http_5\d\d")
+
+
+def _generic_advice(low: str) -> IssueAdvice | None:
+    token = re.split(r"[\s:(\[]", low, maxsplit=1)[0]
+    if token in _GENERIC_RULES:
+        return _GENERIC_RULES[token]
+    if _HTTP_5XX.fullmatch(token):
+        return _SERVER_ERROR
+    return None
+
+
 _FALLBACK = IssueAdvice(
     "Call could not be placed",
     "The call was held back for the reason shown. If it doesn't clear on its own, check the campaign's settings (caller ID, voice provider, calling hours) or contact support.",
     "warning", "other",
 )
+
+
+# Short dialer codes that are also substrings of unrelated codes (for example
+# ``line_not_ready`` inside ``voice_pipeline_not_ready``): match them only as a
+# whole token, bounded by start/end or a non-word separator such as ``:``.
+_TOKEN_NEEDLES = frozenset({
+    "line_not_ready", "telephony_unavailable", "campaign_paused",
+    "job_not_active", "lead_not_dialable",
+})
+
+
+def _token_match(needle: str, low: str) -> bool:
+    import re
+
+    return re.search(rf"(?:^|[^a-z0-9_]){re.escape(needle)}(?:$|[^a-z0-9_])", low) is not None
 
 
 def advise(reason_code: str | None, *, category: str | None = None) -> IssueAdvice:
@@ -229,8 +414,14 @@ def advise(reason_code: str | None, *, category: str | None = None) -> IssueAdvi
     low = (reason_code or "").strip().lower()
     if low:
         for needle, advice in _RULES:
-            if needle in low:
+            if needle in _TOKEN_NEEDLES:
+                if _token_match(needle, low):
+                    return advice
+            elif needle in low:
                 return advice
+        generic = _generic_advice(low)
+        if generic is not None:
+            return generic
     # Fall back on the coarse category when the specific reason is unknown.
     cat = (category or "").strip().lower()
     if cat in {"tts", "stt", "llm", "prewarm"}:

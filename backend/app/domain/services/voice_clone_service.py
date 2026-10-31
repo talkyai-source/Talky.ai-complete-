@@ -21,6 +21,8 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Optional
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
 
 # Per-tenant clone ceiling. Protects the single shared ElevenLabs account's
@@ -42,7 +44,7 @@ def _row_to_dict(row: Any) -> dict:
 
 
 async def count_for_tenant(pool, tenant_id: str) -> int:
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(pool, str(tenant_id)) as conn:
         val = await conn.fetchval(
             "SELECT COUNT(*) FROM cloned_voices WHERE tenant_id = $1", tenant_id,
         )
@@ -50,7 +52,7 @@ async def count_for_tenant(pool, tenant_id: str) -> int:
 
 
 async def list_for_tenant(pool, tenant_id: str) -> list[dict]:
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(pool, str(tenant_id)) as conn:
         rows = await conn.fetch(
             "SELECT id, voice_id, name, provider, created_by, consent_at, status, created_at "
             "FROM cloned_voices WHERE tenant_id = $1 ORDER BY created_at DESC",
@@ -70,7 +72,7 @@ async def record_clone(
 ) -> dict:
     """Insert the ownership row for a freshly created clone."""
     consent = consent_at or datetime.now(timezone.utc)
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(pool, str(tenant_id)) as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO cloned_voices (tenant_id, voice_id, name, created_by, consent_at)
@@ -84,7 +86,7 @@ async def record_clone(
 
 async def get_owned(pool, tenant_id: str, clone_id: str) -> Optional[dict]:
     """Fetch one clone, scoped to the tenant (returns None if not theirs)."""
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(pool, str(tenant_id)) as conn:
         row = await conn.fetchrow(
             "SELECT id, voice_id, name, provider, created_by, consent_at, status, created_at "
             "FROM cloned_voices WHERE tenant_id = $1 AND id = $2",
@@ -95,7 +97,7 @@ async def get_owned(pool, tenant_id: str, clone_id: str) -> Optional[dict]:
 
 async def delete_owned(pool, tenant_id: str, clone_id: str) -> bool:
     """Delete a tenant's clone row. Returns True if a row was removed."""
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(pool, str(tenant_id)) as conn:
         result = await conn.execute(
             "DELETE FROM cloned_voices WHERE tenant_id = $1 AND id = $2",
             tenant_id, clone_id,
@@ -105,7 +107,7 @@ async def delete_owned(pool, tenant_id: str, clone_id: str) -> bool:
 
 async def owned_voice_ids(pool, tenant_id: str) -> set[str]:
     """EL voice_ids of clones owned by this tenant (kept in their catalog)."""
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(pool, str(tenant_id)) as conn:
         rows = await conn.fetch(
             "SELECT voice_id FROM cloned_voices WHERE tenant_id = $1", tenant_id,
         )
@@ -117,6 +119,6 @@ async def all_platform_voice_ids(pool) -> set[str]:
     drops any of these the current tenant doesn't own, so tenant A never sees
     tenant B's clone. Library/premade EL voices aren't in this set, so they
     stay visible to everyone."""
-    async with pool.acquire() as conn:
+    async with acquire_with_tenant(pool, None) as conn:
         rows = await conn.fetch("SELECT voice_id FROM cloned_voices")
     return {r["voice_id"] for r in rows}

@@ -4,7 +4,7 @@ Emergency Access Module - Break-glass dual-control access
 import hashlib
 import json
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any, Optional
 from uuid import UUID, uuid4
@@ -132,11 +132,11 @@ class EmergencyAccess:
         approvers_required = self.APPROVER_REQUIREMENTS.get(scenario, 2)
 
         # Calculate expiration (approvals must happen within 1 hour)
-        expires_at = datetime.utcnow() + timedelta(hours=1)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
 
         request = EmergencyAccessRequest(
             request_id=request_id,
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             requestor_id=requestor_uuid,
             scenario=scenario,
             justification=justification,
@@ -223,7 +223,7 @@ class EmergencyAccess:
             if row["status"] not in [EmergencyStatus.PENDING.value, EmergencyStatus.APPROVED.value]:
                 raise ValueError(f"Request cannot be approved (status: {row['status']})")
 
-            if row["expires_at"] < datetime.utcnow():
+            if row["expires_at"] < datetime.now(timezone.utc):
                 await conn.execute(
                     "UPDATE emergency_access_requests SET status = $1 WHERE request_id = $2",
                     EmergencyStatus.EXPIRED.value, request_uuid
@@ -249,7 +249,7 @@ class EmergencyAccess:
             # Add approval
             approval = {
                 "approver_id": str(approver_uuid),
-                "approved_at": datetime.utcnow().isoformat(),
+                "approved_at": datetime.now(timezone.utc).isoformat(),
                 "method": method,
                 "verification_code": verification_code,
             }
@@ -263,7 +263,7 @@ class EmergencyAccess:
                 # Calculate session expiration
                 scenario = EmergencyScenario(row["scenario"])
                 session_ttl_hours = self.SESSION_TTL.get(scenario, 4)
-                new_expires_at = datetime.utcnow() + timedelta(hours=session_ttl_hours)
+                new_expires_at = datetime.now(timezone.utc) + timedelta(hours=session_ttl_hours)
 
                 await conn.execute(
                     """
@@ -272,7 +272,7 @@ class EmergencyAccess:
                     WHERE request_id = $5
                     """,
                     approvals, EmergencyStatus.APPROVED.value,
-                    datetime.utcnow(), new_expires_at, request_uuid
+                    datetime.now(timezone.utc), new_expires_at, request_uuid
                 )
             else:
                 await conn.execute(
@@ -317,7 +317,7 @@ class EmergencyAccess:
                 SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4
                 WHERE request_id = $5
                 """,
-                EmergencyStatus.DENIED.value, denier_uuid, datetime.utcnow(),
+                EmergencyStatus.DENIED.value, denier_uuid, datetime.now(timezone.utc),
                 reason, request_uuid
             )
 
@@ -350,7 +350,7 @@ class EmergencyAccess:
             if row["status"] != EmergencyStatus.APPROVED.value:
                 raise ValueError("Request not approved")
 
-            if row["expires_at"] < datetime.utcnow():
+            if row["expires_at"] < datetime.now(timezone.utc):
                 raise ValueError("Approval has expired")
 
             if row["session_created_at"]:
@@ -367,7 +367,7 @@ class EmergencyAccess:
                 SET session_created_at = $1, session_token_hash = $2, status = $3
                 WHERE request_id = $4
                 """,
-                datetime.utcnow(), token_hash, EmergencyStatus.USED.value,
+                datetime.now(timezone.utc), token_hash, EmergencyStatus.USED.value,
                 request_uuid
             )
 
@@ -388,7 +388,7 @@ class EmergencyAccess:
             session_token=session_token,
             request_id=request_uuid,
             requestor_id=row["requestor_id"],
-            created_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
             expires_at=row["expires_at"],
             permissions=row["requested_access"],
         )
@@ -441,11 +441,11 @@ class EmergencyAccess:
                 SET session_terminated_at = $1, actions_taken = actions_taken || $2::jsonb
                 WHERE request_id = $3
                 """,
-                datetime.utcnow(),
+                datetime.now(timezone.utc),
                 [{
                     "action": "terminated",
                     "by": str(terminator_uuid) if terminator_uuid else "system",
-                    "at": datetime.utcnow().isoformat(),
+                    "at": datetime.now(timezone.utc).isoformat(),
                     "reason": reason
                 }],
                 request_uuid
@@ -465,7 +465,7 @@ class EmergencyAccess:
         action_entry = {
             "action": action,
             "details": details,
-            "at": datetime.utcnow().isoformat(),
+            "at": datetime.now(timezone.utc).isoformat(),
         }
 
         async with self.db_pool.acquire() as conn:
@@ -497,7 +497,7 @@ class EmergencyAccess:
                 SET reviewed_at = $1, reviewed_by = $2, review_notes = $3
                 WHERE request_id = $4
                 """,
-                datetime.utcnow(), reviewer_uuid, notes, request_uuid
+                datetime.now(timezone.utc), reviewer_uuid, notes, request_uuid
             )
 
         return True

@@ -1,0 +1,14 @@
+FF                                                                       [100%]
+================================== FAILURES ===================================
+_ test_question_projects_actual_shared_source_evidence_not_generated_phrasing[0.1] _
+tests\unit\test_campaign_knowledge_staged_http.py:51: in test_question_projects_actual_shared_source_evidence_not_generated_phrasing
+    assert result["evidence"] == expected
+E   KeyError: 'evidence'
+_ test_question_projects_actual_shared_source_evidence_not_generated_phrasing[1.0] _
+tests\unit\test_campaign_knowledge_staged_http.py:51: in test_question_projects_actual_shared_source_evidence_not_generated_phrasing
+    assert result["evidence"] == expected
+E   KeyError: 'evidence'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_campaign_knowledge_staged_http.py::test_question_projects_actual_shared_source_evidence_not_generated_phrasing[0.1]
+FAILED tests/unit/test_campaign_knowledge_staged_http.py::test_question_projects_actual_shared_source_evidence_not_generated_phrasing[1.0]
+2 failed, 4 deselected in 3.90s

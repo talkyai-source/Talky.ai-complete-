@@ -22,6 +22,7 @@ import { isWithinFreshLoginGrace } from "@/lib/http-client";
 // produced "Cannot read properties of undefined (reading 'call')".
 import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 import { QualifiedLeadAlerts } from "@/components/notifications/qualified-lead-alerts";
+import { SupportLauncher } from "@/components/support/support-launcher";
 
 interface DashboardLayoutProps {
     children: React.ReactNode;
@@ -35,7 +36,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
     const router = useRouter();
     const { user, isLoading: authLoading } = useAuth();
     const { state: suspensionState } = useSuspensionState();
-    const { collapsed, mobileOpen } = useSidebarState();
+    const { collapsed } = useSidebarState();
     const { setMobileOpen } = useSidebarActions();
     const [isDesktop, setIsDesktop] = useState(false);
     const mainContentRef = useRef<HTMLDivElement | null>(null);
@@ -45,6 +46,10 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
     // not on every background re-auth (the "refresh-from-fresh" fix).
     const [hasAuthedOnce, setHasAuthedOnce] = useState(false);
     useEffect(() => {
+        // This is a one-way latch across renders (once true, stays true for
+        // the life of the component) — it can't be computed from the
+        // current render's inputs alone, it depends on auth history.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- one-way latch remembering past auth state, not derivable from current render
         if (user) setHasAuthedOnce(true);
     }, [user]);
 
@@ -68,7 +73,10 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
         try {
             router.replace(`/auth/login?next=${encodeURIComponent(next)}`);
         } catch {
-            window.location.href = `/auth/login?next=${encodeURIComponent(next)}`;
+            // router.replace threw (e.g. router not ready yet) — fall back
+            // to a hard navigation. Making the destination explicitly
+            // absolute satisfies next/next/no-location-assign-relative-destination.
+            window.location.href = new URL(`/auth/login?next=${encodeURIComponent(next)}`, window.location.origin).toString();
         }
     }, [authLoading, pathname, requireAuth, router, user]);
 
@@ -127,22 +135,6 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
             <div className="shape-1"></div>
             <div className="shape-2"></div>
 
-            {!isDesktop && !mobileOpen ? (
-                <div
-                    role="button"
-                    tabIndex={0}
-                    aria-label="Open sidebar"
-                    title="Open sidebar"
-                    className="fixed left-0 top-0 z-[60] h-full w-3 bg-transparent lg:hidden"
-                    onClick={() => setMobileOpen(true)}
-                    onKeyDown={(e) => {
-                        if (e.key !== "Enter" && e.key !== " ") return;
-                        e.preventDefault();
-                        setMobileOpen(true);
-                    }}
-                />
-            ) : null}
-
             <Sidebar />
 
             <div
@@ -155,7 +147,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
             >
                 {/* Header */}
                 <header className="bg-background/80 backdrop-blur-sm border-b border-border/60 px-4 md:px-8 py-4 md:py-6 transition-colors duration-300">
-                    <div className="grid grid-cols-1 items-start gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
                         <div className="flex items-start gap-3">
                             {!isDesktop && (
                                 <Button
@@ -187,7 +179,10 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
                 {/* Main Content */}
                 <main className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300">
-                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
+                    {/* pb-16: keeps every page's last content clear of the fixed
+                        bottom-right chat launcher (its top edge sits 72px above
+                        the viewport bottom; main's own padding is only 16-32px). */}
+                    <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-16">
                         <SuspensionBanner />
                         <div className="relative">
                             {suspensionState.suspended ? (
@@ -212,6 +207,11 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
             {/* Real-time qualified-lead toasts (reuses the Event Stream poll). */}
             <QualifiedLeadAlerts />
+
+            {/* Support: Help button above the assistant launcher, the drawer and
+                unread notifications. Renders nothing until GET /support/config
+                says support is on for this account. */}
+            <SupportLauncher />
         </div>
     );
 }

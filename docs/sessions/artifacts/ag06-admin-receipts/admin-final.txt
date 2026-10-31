@@ -1,0 +1,42 @@
+✔ table preserves unknown and offers its actual filter (39.6629ms)
+✔ table preserves scheduled and offers its actual filter (6.6339ms)
+✔ drawer shows sanitized unconfirmed receipt without raw result or current-account substitution (11.8531ms)
+✔ late A detail cannot replace selected B receipt (6.3483ms)
+✔ receipt missing retains the actual proof boundary (4.0206ms)
+✔ receipt mismatched retains the actual proof boundary (3.7698ms)
+✔ receipt explicit-proof retains the actual proof boundary (5.3798ms)
+✔ late A cancellation refresh cannot replace B or refresh the old action (10.1202ms)
+✔ a foreign detail response cannot populate the current selection (2.1075ms)
+✔ cancel rejection remains an error, without a success refresh (3.4752ms)
+✔ a cancellation confirmation belongs only to its selected action (8.323ms)
+✔ formats an authoritative ISO currency without assuming dollars (2.7475ms)
+✔ labels a ledger amount whose currency was not recorded (0.3844ms)
+✔ renders a reversed monetary state as zero in its ledger currency (0.2848ms)
+✔ does not render absent or non-finite costs (0.2592ms)
+✔ formats aggregate USD estimates without a hardcoded dollar symbol (0.4461ms)
+✔ requested is pending even when a status-looking field says ended (3.2313ms)
+✔ confirmed requires the provider-confirmed contract (0.4395ms)
+✔ already-terminal is safe to remove from the live list (0.3524ms)
+✔ failed provider response preserves the useful error for retry (0.3856ms)
+✔ a requested response produces a pending-only live-row patch (5.6757ms)
+✔ poll reconciliation preserves a raced pending marker (0.5973ms)
+✔ poll reconciliation accepts failed and missing terminal rows (0.5613ms)
+✔ a confirmed live-row marker is terminal, never actionable pending (0.3609ms)
+✔ late old-period success cannot replace the current rows (10.4193ms)
+✔ late old-period success cannot replace the current failure (1.8051ms)
+✔ late old-period failure cannot replace the current rows (1.4374ms)
+✔ actual endpoint example renders recorded usage, unavailable attribution and explicit estimate coverage (46.3268ms)
+✔ failed usage read renders an error and unavailable counts, never invented zero (1.1073ms)
+✔ loading usage is not a zero observation (0.9888ms)
+✔ an actually recorded zero count is displayed while supplier cost stays unavailable (0.7336ms)
+✔ known legacy zero is distinct from missing and invalid money (0.371ms)
+✔ unknown legacy cost does not become USD zero in the actual summary view (2.0593ms)
+✔ recorded totals do not turn a missing row measurement into zero (0.2345ms)
+ℹ tests 34
+ℹ suites 0
+ℹ pass 34
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 512.2402

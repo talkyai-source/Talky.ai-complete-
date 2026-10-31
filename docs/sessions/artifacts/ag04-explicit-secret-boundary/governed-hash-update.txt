@@ -1,0 +1,118 @@
+FFF.......................                                               [100%]
+================================== FAILURES ===================================
+___ test_the_registered_version_still_describes_the_actual_prompt[lead_gen] ___
+
+persona = 'lead_gen'
+
+    @pytest.mark.parametrize("persona", known_personas())
+    def test_the_registered_version_still_describes_the_actual_prompt(persona):
+        """THE LOAD-BEARING TEST. See the module docstring before "fixing" this."""
+        version = version_for(persona)
+        actual = hash_prompt(compose(persona))
+        expected = _EXPECTED_HASHES.get(version)
+    
+        assert expected and expected != "__FILL_ME__", (
+            f"{persona}: version {version} has no pinned hash. Add one: {actual!r}"
+        )
+>       assert actual == expected, (
+            f"\n\n  The {persona} prompt text CHANGED but its version did not.\n"
+            f"    registered version : {version}\n"
+            f"    pinned hash        : {expected}\n"
+            f"    actual hash now    : {actual}\n\n"
+            f"  Add a NEW version to versions.py (do not edit {version} � it is\n"
+            f"  already in call logs) and pin {actual!r} to it.\n"
+        )
+E       AssertionError: 
+E         
+E           The lead_gen prompt text CHANGED but its version did not.
+E             registered version : lead_gen@13
+E             pinned hash        : 780bbd7d205e033d
+E             actual hash now    : 2d6b540419dab373
+E         
+E           Add a NEW version to versions.py (do not edit lead_gen@13 � it is
+E           already in call logs) and pin '2d6b540419dab373' to it.
+E         
+E       assert '2d6b540419dab373' == '780bbd7d205e033d'
+E         - 780bbd7d205e033d
+E         + 2d6b540419dab373
+
+tests\unit\test_prompt_versions.py:144: AssertionError
+_ test_the_registered_version_still_describes_the_actual_prompt[customer_support] _
+
+persona = 'customer_support'
+
+    @pytest.mark.parametrize("persona", known_personas())
+    def test_the_registered_version_still_describes_the_actual_prompt(persona):
+        """THE LOAD-BEARING TEST. See the module docstring before "fixing" this."""
+        version = version_for(persona)
+        actual = hash_prompt(compose(persona))
+        expected = _EXPECTED_HASHES.get(version)
+    
+        assert expected and expected != "__FILL_ME__", (
+            f"{persona}: version {version} has no pinned hash. Add one: {actual!r}"
+        )
+>       assert actual == expected, (
+            f"\n\n  The {persona} prompt text CHANGED but its version did not.\n"
+            f"    registered version : {version}\n"
+            f"    pinned hash        : {expected}\n"
+            f"    actual hash now    : {actual}\n\n"
+            f"  Add a NEW version to versions.py (do not edit {version} � it is\n"
+            f"  already in call logs) and pin {actual!r} to it.\n"
+        )
+E       AssertionError: 
+E         
+E           The customer_support prompt text CHANGED but its version did not.
+E             registered version : customer_support@11
+E             pinned hash        : 87c8151146eaefe8
+E             actual hash now    : 968fb986d3653107
+E         
+E           Add a NEW version to versions.py (do not edit customer_support@11 � it is
+E           already in call logs) and pin '968fb986d3653107' to it.
+E         
+E       assert '968fb986d3653107' == '87c8151146eaefe8'
+E         - 87c8151146eaefe8
+E         + 968fb986d3653107
+
+tests\unit\test_prompt_versions.py:144: AssertionError
+_ test_the_registered_version_still_describes_the_actual_prompt[receptionist] _
+
+persona = 'receptionist'
+
+    @pytest.mark.parametrize("persona", known_personas())
+    def test_the_registered_version_still_describes_the_actual_prompt(persona):
+        """THE LOAD-BEARING TEST. See the module docstring before "fixing" this."""
+        version = version_for(persona)
+        actual = hash_prompt(compose(persona))
+        expected = _EXPECTED_HASHES.get(version)
+    
+        assert expected and expected != "__FILL_ME__", (
+            f"{persona}: version {version} has no pinned hash. Add one: {actual!r}"
+        )
+>       assert actual == expected, (
+            f"\n\n  The {persona} prompt text CHANGED but its version did not.\n"
+            f"    registered version : {version}\n"
+            f"    pinned hash        : {expected}\n"
+            f"    actual hash now    : {actual}\n\n"
+            f"  Add a NEW version to versions.py (do not edit {version} � it is\n"
+            f"  already in call logs) and pin {actual!r} to it.\n"
+        )
+E       AssertionError: 
+E         
+E           The receptionist prompt text CHANGED but its version did not.
+E             registered version : receptionist@11
+E             pinned hash        : 2815ae3bffbb04eb
+E             actual hash now    : 4691260c5a7819c5
+E         
+E           Add a NEW version to versions.py (do not edit receptionist@11 � it is
+E           already in call logs) and pin '4691260c5a7819c5' to it.
+E         
+E       assert '4691260c5a7819c5' == '2815ae3bffbb04eb'
+E         - 2815ae3bffbb04eb
+E         + 4691260c5a7819c5
+
+tests\unit\test_prompt_versions.py:144: AssertionError
+=========================== short test summary info ===========================
+FAILED tests/unit/test_prompt_versions.py::test_the_registered_version_still_describes_the_actual_prompt[lead_gen]
+FAILED tests/unit/test_prompt_versions.py::test_the_registered_version_still_describes_the_actual_prompt[customer_support]
+FAILED tests/unit/test_prompt_versions.py::test_the_registered_version_still_describes_the_actual_prompt[receptionist]
+3 failed, 23 passed in 1.13s

@@ -5,25 +5,12 @@ call origination path to decide whether a pre-answer announcement must
 play. Keeps the compliance decision in one place so the audio pipeline
 stays simple.
 
-The DB row lives in `tenant_recording_policy`. If no row exists for a
-tenant, we fall back to a SAFE default (two-party consent, announcement
-required) — never silently record.
+The DB row lives in `tenant_recording_policy`. Recording is enabled only by
+an explicit readable tenant policy. A missing row or a policy-store failure
+defaults recording OFF; legal intent must never be inferred from absence.
 
-2026-07-28 — SPOKEN-DISCLOSURE LEDGER
--------------------------------------
-`announcement_required` used to be advisory and nothing ever acted on
-it: the only consumer was `RecordingService.save_and_link()`, which runs
-AFTER the call has ended and only gates the upload. The disclosure was
-therefore never spoken, while two-party-consent tenants (the SAFE
-DEFAULT for every tenant with no policy row) were still recorded — i.e.
-unlawful recording in the UK/EU and in two-party-consent US states.
-
-The fix has two halves:
-
-* the greeting path speaks the disclosure BEFORE any other audio, and
-* it reports what actually happened into the ledger below, which
-  `save_and_link` consults so audio captured without the promised
-  notice is never retained.
+The disclosure ledger records supported transport delivery evidence for the
+configured notice. It does not certify human hearing or legal consent.
 
 The ledger is deliberately process-local and in-memory: it records a
 fact about a live call that only this process observed, and it must
@@ -37,6 +24,8 @@ import re
 from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any, Optional
+
+from app.core.db_utils import acquire_with_tenant
 
 logger = logging.getLogger(__name__)
 
@@ -64,18 +53,25 @@ class RecordingDecision:
     reason: str  # machine-readable; logged for audit
 
 
-# Safe default when the tenant has no row yet — opt-in, two-party,
-# announce. Better to over-protect than under-protect on a first boot.
-_SAFE_DEFAULT = RecordingDecision(
-    should_record=True,
-    announcement_required=True,
-    announcement_text=(
-        "This call may be recorded for quality and training purposes. "
-        "Press 9 at any time to opt out of recording."
-    ),
-    opt_out_dtmf_digit="9",
+# No policy is not consent. These two decisions are separate so operators can
+# distinguish an unconfigured tenant from a dependency incident, while both
+# fail closed on audio retention.
+_ABSENT_POLICY_DEFAULT = RecordingDecision(
+    should_record=False,
+    announcement_required=False,
+    announcement_text=None,
+    opt_out_dtmf_digit=None,
     retention_days=90,
-    reason="tenant_default_two_party",
+    reason="tenant_policy_absent_recording_off",
+)
+
+_POLICY_LOOKUP_FAILURE_DEFAULT = RecordingDecision(
+    should_record=False,
+    announcement_required=False,
+    announcement_text=None,
+    opt_out_dtmf_digit=None,
+    retention_days=0,
+    reason="recording_policy_lookup_failed_recording_off",
 )
 
 
@@ -98,14 +94,27 @@ class RecordingPolicyService:
         two-party list for US states. Pass None if you don't know — we
         default to two-party in that case.
         """
-        row = await self._load_row(tenant_id)
+        try:
+            row = await self._load_row(tenant_id)
+        except Exception as exc:
+            logger.error(
+                "recording_policy_lookup_failed tenant=%s err=%s — recording disabled",
+                tenant_id,
+                exc,
+            )
+            return _POLICY_LOOKUP_FAILURE_DEFAULT
         if row is None:
-            logger.info(
-                "recording_policy_default_applied tenant=%s — no explicit "
-                "policy row, using safe two-party default",
+            # Zero rows is ambiguous: the tenant may never have configured a
+            # policy, or a row may exist that this connection could not read.
+            # Either way recording is turned OFF (never inferred from
+            # absence), and that is a compliance decision, so it is logged at
+            # WARNING rather than left as a silent default.
+            logger.warning(
+                "recording_policy_absent tenant=%s — no readable policy row; "
+                "recording disabled until an explicit policy is configured",
                 tenant_id,
             )
-            return _SAFE_DEFAULT
+            return _ABSENT_POLICY_DEFAULT
 
         mode = row["default_consent_mode"]
         retention_days = int(row["retention_days"])
@@ -157,18 +166,15 @@ class RecordingPolicyService:
     # ──────────────────────────────────────────────────────────────────
 
     async def _load_row(self, tenant_id: str) -> Optional[dict]:
-        try:
-            async with self._db_pool.acquire() as conn:
-                row = await conn.fetchrow(
-                    "SELECT * FROM tenant_recording_policy WHERE tenant_id = $1",
-                    tenant_id,
-                )
-        except Exception as exc:
-            logger.error(
-                "recording_policy_lookup_failed tenant=%s err=%s — applying safe default",
-                tenant_id, exc,
+        # `tenant_recording_policy` is RLS-protected and FORCEd (migration
+        # 0013). A bare acquire() carries no tenant GUC, so the policy row
+        # reads back as absent and a configured tenant is silently demoted
+        # to the no-policy default. Scope the read to this tenant.
+        async with acquire_with_tenant(self._db_pool, tenant_id) as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM tenant_recording_policy WHERE tenant_id = $1",
+                tenant_id,
             )
-            return None
         return dict(row) if row else None
 
 
@@ -176,7 +182,8 @@ class RecordingPolicyService:
 # Spoken-disclosure ledger
 # ──────────────────────────────────────────────────────────────────────
 
-DISCLOSURE_SPOKEN = "spoken"          # notice was played to the callee
+DISCLOSURE_SPOKEN = "spoken"          # correlated transport_played receipt
+DISCLOSURE_TRANSMITTED = "transmitted"  # correlated Asterisk transmission receipt
 DISCLOSURE_NOT_REQUIRED = "not_required"  # policy says none is needed
 DISCLOSURE_FAILED = "failed"          # required but NOT delivered
 
@@ -227,26 +234,23 @@ def clear_disclosure_state(*call_ids: Optional[str]) -> None:
             _DISCLOSURE_LEDGER.pop(str(call_id), None)
 
 
+def disclosure_delivered(*call_ids: Optional[str]) -> bool:
+    """Supported completed transport evidence, never a human-hearing claim."""
+    return get_disclosure_state(*call_ids) in {
+        DISCLOSURE_SPOKEN, DISCLOSURE_TRANSMITTED,
+    }
+
+
 def consent_satisfied(decision: Any, *call_ids: Optional[str]) -> bool:
-    """True when this call's audio may lawfully be retained.
+    """Technical configured-policy/disclosure gate, not legal certification.
 
-    Two ways to satisfy it:
-      1. the policy does not require an announcement at all, or
-      2. the announcement was actually SPOKEN on this call.
-
-    Anything else — required-but-failed, or an unknown call — is False.
-    We deliberately fail CLOSED: audio captured while the callee was
-    never told is unlawful to keep, whereas dropping a recording only
-    costs the tenant a QA artefact.
-
-    `announcement_required` is read via getattr so a duck-typed decision
-    (existing tests hand `save_and_link` a stub carrying only
-    `should_record`) is treated as "no announcement required" and keeps
-    its current behaviour instead of raising.
+    A required announcement needs a completed correlated playback or supported
+    transmission receipt. Unknown, failed and partial delivery do not qualify.
+    The policy owner remains responsible for the configured recording rules.
     """
     if not getattr(decision, "announcement_required", False):
         return True
-    return get_disclosure_state(*call_ids) == DISCLOSURE_SPOKEN
+    return disclosure_delivered(*call_ids)
 
 
 def disclosure_known_failed(*call_ids: Optional[str]) -> bool:
@@ -280,6 +284,16 @@ MINIMUM_DISCLOSURE_TEXT = (
 _OPT_OUT_SENTENCE = re.compile(
     r"(?i)(?:\bopt[\s-]?out\b|\b(?:press|dial|key)\b\s+(?:the\s+)?[0-9*#])"
 )
+
+
+def contains_unsupported_dtmf_opt_out(text: Optional[str]) -> bool:
+    """Whether text promises a recording opt-out the runtime cannot honour."""
+
+    return bool(
+        not DTMF_OPT_OUT_SUPPORTED
+        and isinstance(text, str)
+        and _OPT_OUT_SENTENCE.search(text)
+    )
 
 
 def spoken_disclosure_text(decision: Any) -> Optional[str]:
@@ -334,9 +348,15 @@ def _country_matches_any(cc: Optional[str], codes: set[str]) -> bool:
     if cc in codes:
         return True
     # If we got a subdivision like "US-CA", also match the plain "US"
-    # entry. If we got a country like "US" and the list has a more
-    # specific "US-CA", we conservatively return False (won't announce);
-    # the caller will typically pass the subdivision when it matters.
+    # entry.
     if "-" in cc and cc.split("-", 1)[0] in codes:
+        return True
+    # Reverse case: we only know the COUNTRY ("US") and the list is keyed to
+    # a subdivision ("US-CA"). We cannot prove the callee is outside that
+    # subdivision, so fail CLOSED and announce rather than silently recording
+    # a two-party-consent call with no notice.
+    if "-" not in cc and any(
+        "-" in code and code.split("-", 1)[0] == cc for code in codes
+    ):
         return True
     return False

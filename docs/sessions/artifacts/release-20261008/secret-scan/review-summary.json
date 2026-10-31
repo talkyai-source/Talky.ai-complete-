@@ -1,0 +1,39 @@
+{
+  "ci_run": 37679822522,
+  "ci_job": 112992639844,
+  "classification": "114 source/artifact SHA-256 checksums; no credential or placeholder exemptions",
+  "findings": 114,
+  "artifact_files": 16,
+  "by_commit": {
+    "b8c429c1037341ba4315ca82d3006db511465371": 30,
+    "59718df898f765a20ef99aaf51428028222db5d5": 71,
+    "d8ecd6d0d183e304e21453857619f36330f836bd": 11,
+    "8b0c77866fe9539ad557a811ee4a3280d03835c3": 2
+  },
+  "normalization": {
+    "raw_git_blob": 91,
+    "LF": 1,
+    "CRLF": 22
+  },
+  "changed_files": [
+    ".gitleaksignore"
+  ],
+  "new_exact_exceptions": 114,
+  "prior_active_exceptions_preserved": 81,
+  "historical_credential_comments_unchanged": true,
+  "staged": false,
+  "committed": false,
+  "scanner": {
+    "range": "--no-merges --first-parent e551a9487d7b79db541655bd14cb3e987311ee45^..84ab5bfbc6f58595487b09ba44fd574f18012ebd",
+    "scanner_version": "8.24.3",
+    "exit_code": 0
+  },
+  "remaining_findings_in_same_ci_range": 0,
+  "scope_limit": "Same historical CI range locally rescanned; future pushed-head CI not yet run.",
+  "safe_evidence_sha256": {
+    "safe-verification.json": "2fdd6e3cfe175407c7736f06acf2506e43427f013456f9b402a1c232d69b85aa",
+    "verify_checksums.py": "322ac66fda79be3348fca503e21deeccbca67c1500fe74a0f2ca11d64fd72af2",
+    "local-rescan-summary.json": "ce503361cb4cd9a6e8b6e00064249ffbdf3b60602cc5a53b6ad898d62d818df8"
+  },
+  "gitleaksignore_sha256": "e7e3fbba1b0245985461eaa93ff881b4a8d16bbdee697639358e836c5b0dd82b"
+}

@@ -1,0 +1,18 @@
+.............................F.......................................... [ 53%]
+...............................................................          [100%]
+================================== FAILURES ===================================
+______ test_confirmed_contact_can_be_explicitly_withdrawn_by_field_name _______
+tests\unit\test_contact_capture_state_machine.py:148: in test_confirmed_contact_can_be_explicitly_withdrawn_by_field_name
+    assert withdrawn.status is CaptureStatus.CANCELLED
+E   AssertionError: assert <CaptureStatus.CONFIRMED: 'confirmed'> is <CaptureStatus.CANCELLED: 'cancelled'>
+E    +  where <CaptureStatus.CONFIRMED: 'confirmed'> = ContactCaptureState(kind='email', status=<CaptureStatus.CONFIRMED: 'confirmed'>, raw_value='bob at acme dot com', norm...e, confirmation_evidence='readback_and_caller_affirmation', value_source=None, confirmation_source=None, readback=None).status
+E    +  and   <CaptureStatus.CANCELLED: 'cancelled'> = CaptureStatus.CANCELLED
+============================== warnings summary ===============================
+tests/unit/test_ag05_native_contact_revision.py: 33 warnings
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\app\domain\services\transcript_service.py:350: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    timestamp=datetime.utcnow().isoformat(),
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+=========================== short test summary info ===========================
+FAILED tests/unit/test_contact_capture_state_machine.py::test_confirmed_contact_can_be_explicitly_withdrawn_by_field_name
+1 failed, 134 passed, 33 warnings in 17.45s

@@ -18,15 +18,37 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import time
+import uuid
 from typing import Optional
 
 from fastapi import WebSocket
 
 from app.domain.models.session import CallSession
+from app.domain.services.voice_pipeline.spoken_pronunciations import apply_pronunciations
 from app.infrastructure.telephony.browser_media_gateway import SessionGoneError
 
+# TtsDeliveryError is imported lazily inside synthesize_and_send, not here at
+# module scope: asterisk_adapter.py imports back from
+# app.domain.services.telephony.config, which is on the import chain that
+# already leads to this module (telephony.config -> telephony_session_config
+# -> voice_orchestrator -> voice_pipeline_service -> tts_playback) — a
+# top-level import here completes the cycle and breaks app startup.
+
 logger = logging.getLogger(__name__)
+
+# Same knob voice_orchestrator.send_greeting's post-TTS unmute tail uses
+# (STT_UNMUTE_TAIL_S) — duplicated rather than imported to avoid a cycle
+# (voice_orchestrator -> voice_pipeline_service -> tts_playback).
+_STT_UNMUTE_TAIL_S = float(os.getenv("STT_UNMUTE_TAIL_S", "0.25"))
+_TTS_INTER_CHUNK_TIMEOUT_S = 3.0
+
+
+class _SynthesisFailure(RuntimeError):
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
 
 
 class TtsPlayback:
@@ -62,6 +84,80 @@ class TtsPlayback:
         except Exception:  # metrics must never break playback
             pass
 
+    async def _try_emergency_voice_clip(
+        self,
+        session: CallSession,
+        websocket: Optional[WebSocket],
+        barge_in_event: Optional[asyncio.Event],
+    ) -> bool:
+        """Bypass a failed TTS provider; end the call on a second occurrence."""
+
+        play = getattr(self._p.media_gateway, "play_pcmu_clip", None)
+        if not callable(play):
+            return False
+
+        from app.domain.services.voice_pipeline.emergency_audio import (
+            VOICE_HOLD,
+            VOICE_TERMINAL,
+            play_emergency_clip,
+        )
+
+        failure_count = int(getattr(session, "_tts_failure_clip_count", 0) or 0) + 1
+        session._tts_failure_clip_count = failure_count
+        terminal = failure_count >= 2
+        clip_name = VOICE_TERMINAL if terminal else VOICE_HOLD
+        logger.critical(
+            "tts_provider_emergency_fallback call=%s occurrence=%d clip=%s terminal=%s",
+            session.call_id[:12],
+            failure_count,
+            clip_name,
+            terminal,
+        )
+        played = await play_emergency_clip(
+            self._p.media_gateway,
+            session.call_id,
+            clip_name,
+            barge_in_event=barge_in_event,
+        )
+        if websocket:
+            try:
+                await websocket.send_json(
+                    {
+                        "type": "tts_provider_failure",
+                        "occurrence": failure_count,
+                        "terminal": terminal,
+                        "fallback_played": played,
+                    }
+                )
+            except Exception:
+                pass
+
+        if terminal:
+            hangup = getattr(self._p.media_gateway, "hangup_call", None)
+            hangup_requested = False
+            if callable(hangup):
+                try:
+                    hangup_requested = bool(
+                        await hangup(session.call_id, "tts_provider_failure")
+                    )
+                except Exception as exc:
+                    logger.critical(
+                        "tts_provider_emergency_hangup_failed call=%s err=%s",
+                        session.call_id[:12],
+                        exc,
+                        exc_info=True,
+                    )
+            if not hangup_requested:
+                logger.critical(
+                    "tts_provider_emergency_hangup_unconfirmed call=%s",
+                    session.call_id[:12],
+                )
+            session._tts_terminal_failure_hangup = hangup_requested
+            # Terminal handling is complete even if the final clip or hangup
+            # failed: retrying the broken provider creates more billed silence.
+            return True
+        return played
+
     async def synthesize_and_send(
         self,
         session: CallSession,
@@ -73,9 +169,25 @@ class TtsPlayback:
     ) -> bool:
         """
         Synthesize TTS audio and stream it to the media gateway.
-        Returns True if TTS was interrupted by barge-in, False on normal completion.
+        Return True when the sentence cannot be treated as fully submitted.
+
+        Caller interruption and failed delivery both stop the turn. The existing
+        session._tts_delivery_failed flag distinguishes failure from barge-in;
+        submission alone never certifies that the caller heard the audio.
         """
         call_id = session.call_id
+        # The voice gets the campaign's spoken forms; everything else (logs,
+        # recognition context, transcript) keeps the real spelling.
+        spoken_text = apply_pronunciations(text, getattr(session, "tts_pronunciations", None))
+        session._tts_playout_completed = False
+        session._tts_playback_receipt = None
+        session._tts_playback_utterance_id = None
+        session._tts_delivery_status = "pending"
+        _matched_receipt = None
+        # Lazy import — see the module-level comment near the other imports
+        # for why this can't be a top-level import (circular with
+        # asterisk_adapter.py -> telephony.config -> ... -> tts_playback).
+        from app.infrastructure.telephony.asterisk_adapter import TtsDeliveryError
         # Is THIS invocation the recovery attempt rather than the turn itself?
         # Both fallback paths set the flag before recursing, and the nested
         # call's finally clears it, so reading it at entry is the one place the
@@ -102,6 +214,17 @@ class TtsPlayback:
         silent_reason: Optional[str] = None
         first_chunk = True
         first_chunk_sent = False  # track whether any audio reached the gateway
+        _stt_muted = False  # test-agent-mute-only-on-greeting (2026-09-23)
+        # Set once the gateway has CONFIRMED the browser actually finished
+        # playing this utterance (see the wait block below) — as opposed to
+        # a guessed fixed tail. Review of 91b61694 (2026-09-24): the fixed
+        # tail unmuted well before the browser-paced playback really ended.
+        _waited_for_browser_playback = False
+        _context_playback_allowed = True
+        _tts_iter = None
+        _playback_uid = None
+        stopped_by_caller_at_end = None
+        session._tts_delivery_status = "pending"
         try:
             # If user spoke during the LLM call, the barge-in event is already set.
             # Don't start TTS — send the stop signal immediately and return.
@@ -131,6 +254,53 @@ class TtsPlayback:
                 # AI to start speaking again right after being interrupted.
                 return interrupted
 
+            # BUG (4a9dd845, 7dbf415f, 2026-09-23): voice_orchestrator's
+            # send_greeting mutes STT during its own playback, but that only
+            # ever covers the opener — every later reply and every
+            # SilenceMonitor re-greet nudge goes through THIS method, which
+            # never muted, so a Browser Test-agent session with
+            # allow_barge_in=false still heard its own voice on the mic and
+            # transcribed it as the caller. `_mute_during_tts` is a private
+            # CallSession attribute campaign_test_ws.py sets from the
+            # resolved session config; real telephony calls never set it, so
+            # this defaults False there — telephony keeps mute_during_tts
+            # False by design (barge-in matters more than carrier echo).
+            if (
+                bool(getattr(session, "_mute_during_tts", False))
+                and self._p.stt_provider
+                and hasattr(self._p.stt_provider, "mute")
+            ):
+                try:
+                    await self._p.stt_provider.mute(call_id)
+                    _stt_muted = True
+                except Exception as _mute_exc:
+                    logger.debug(
+                        "tts_playback_mute_failed call_id=%s: %s", call_id[:8], _mute_exc
+                    )
+                # BUG (4a9dd845, 7dbf415f, review of 91b61694 on 2026-09-24):
+                # muting only covered the seconds THIS LOOP spends PUSHING
+                # audio to the gateway, not the seconds the BROWSER spends
+                # actually PLAYING it — the Test-agent client queues chunks
+                # and paces playback itself (test-agent-button.tsx's
+                # nextPlayTimeRef), so a fixed post-send tail unmuted STT
+                # while a reply was still audibly playing through a live
+                # mic. send_greeting never had this bug: it waits on the
+                # gateway's own playback-complete signal
+                # (voice_orchestrator.py:1029-1036). Do the same here,
+                # keyed on the browser gateway actually supporting it.
+                if _stt_muted and not asyncio.iscoroutinefunction(getattr(self._p.media_gateway, "begin_playback", None)) and hasattr(
+                    self._p.media_gateway, "start_playback_tracking"
+                ):
+                    self._p.media_gateway.start_playback_tracking(call_id)
+
+            # Use the same correlated transport contract as Realtime. A legacy
+            # unlabelled browser event, or RTP submission, cannot certify that
+            # this particular sentence finished playing.
+            if all(asyncio.iscoroutinefunction(getattr(self._p.media_gateway, name, None))
+                   for name in ("begin_playback", "finish_playback")):
+                _playback_uid = uuid.uuid4().hex
+                await self._p.media_gateway.begin_playback(call_id, _playback_uid)
+
             # TTS hard inter-chunk timeout — protects against silent WS hangs
             # mid-sentence. Pattern adapted from Pipecat
             # (https://github.com/pipecat-ai/pipecat) — same shape they use for
@@ -138,13 +308,16 @@ class TtsPlayback:
             # `__anext__()` with a per-step deadline so a stuck provider socket
             # ends the turn cleanly instead of freezing the call.
             #
-            # 5s is intentionally larger than typical first-chunk latency
-            # (~250ms for Cartesia/Chirp/ElevenLabs streaming) so it never
-            # fires on healthy traffic. It only catches the rare case where
-            # the upstream WS dies without notifying the SDK.
-            _TTS_INTER_CHUNK_TIMEOUT_S = 5.0
+            # Three seconds is intentionally much larger than typical
+            # first-chunk latency (~250ms for streaming providers). Two
+            # attempts therefore preserve recovery while bounding unexplained
+            # pre-fallback silence to about six seconds.
+            # Two pre-first-audio attempts must reach the independent fallback
+            # by about six seconds. Healthy providers normally answer in well
+            # under one second; three seconds per attempt preserves a retry
+            # without leaving a caller in ten seconds of unexplained silence.
             _tts_iter = self._p.tts_provider.stream_synthesize(
-                text,
+                spoken_text,
                 voice_id=session.voice_id,
                 sample_rate=self._p.tts_sample_rate,
                 call_id=call_id,
@@ -162,8 +335,10 @@ class TtsPlayback:
             # One retry if the provider yields NO audio within the inter-chunk
             # timeout (a brief stall before the sentence starts). Safe — nothing
             # has played yet, so no duplicate audio.
-            stall_retried = False
-            empty_retried = False
+            # The resilience wrapper spends the same two-attempt budget on
+            # primary + secondary. Never repeat that whole sequence here.
+            handles_recovery = getattr(self._p.tts_provider, "handles_startup_recovery", False) is True
+            startup_retried = handles_recovery
             # Captured at the moment the stream ends empty, NOT re-read in the
             # finally. The fallback below is a nested synthesize_and_send, and
             # its own finally clears session.tts_active — so a finally that
@@ -176,7 +351,11 @@ class TtsPlayback:
                 try:
                     audio_chunk = await asyncio.wait_for(
                         _tts_iter.__anext__(),
-                        timeout=_TTS_INTER_CHUNK_TIMEOUT_S,
+                        timeout=(
+                            self._p.tts_provider.startup_timeout_seconds + .1
+                            if handles_recovery and first_chunk
+                            else _TTS_INTER_CHUNK_TIMEOUT_S
+                        ),
                     )
                 except StopAsyncIteration:
                     # A PROVIDER THAT RETURNS NOTHING, AND DOES SO CLEANLY.
@@ -214,8 +393,8 @@ class TtsPlayback:
                     )
                     if not first_chunk_sent:
                         stopped_by_caller_at_end = _stopped_by_caller
-                    if not first_chunk_sent and not empty_retried and not _stopped_by_caller:
-                        empty_retried = True
+                    if not first_chunk_sent and not startup_retried and not _stopped_by_caller:
+                        startup_retried = True
                         logger.warning(
                             "tts_empty_stream call=%s text=%r — provider ended "
                             "with zero audio chunks; retrying synthesis once "
@@ -227,7 +406,7 @@ class TtsPlayback:
                         except Exception:
                             pass
                         _tts_iter = self._p.tts_provider.stream_synthesize(
-                            text,
+                            spoken_text,
                             voice_id=session.voice_id,
                             sample_rate=self._p.tts_sample_rate,
                             call_id=call_id,
@@ -242,8 +421,8 @@ class TtsPlayback:
                     # happen). Retry the whole synthesis ONCE: safe because no
                     # audio was emitted (no duplication), and a fresh
                     # stream_synthesize reopens the Cartesia WS if it had dropped.
-                    if not first_chunk_sent and not stall_retried:
-                        stall_retried = True
+                    if not first_chunk_sent and not startup_retried:
+                        startup_retried = True
                         logger.warning(
                             "tts pre-first-chunk stall %.1fs call=%s — retrying synthesis once",
                             _TTS_INTER_CHUNK_TIMEOUT_S, call_id[:12],
@@ -253,7 +432,7 @@ class TtsPlayback:
                         except Exception:
                             pass
                         _tts_iter = self._p.tts_provider.stream_synthesize(
-                            text,
+                            spoken_text,
                             voice_id=session.voice_id,
                             sample_rate=self._p.tts_sample_rate,
                             call_id=call_id,
@@ -272,7 +451,7 @@ class TtsPlayback:
                         await _tts_iter.aclose()
                     except Exception:
                         pass
-                    break
+                    raise _SynthesisFailure("tts_timeout")
                 if barge_in_event and barge_in_event.is_set():
                     logger.info(f"Barge-in interrupted TTS for call {call_id}")
                     interrupted = True
@@ -291,6 +470,13 @@ class TtsPlayback:
                             await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
                         except Exception as _exc:
                             logger.debug("tts_interrupted WS send failed: %s", _exc)
+                    # Release the voice provider's stream and concurrency slot,
+                    # as the stall and retry exits above already do (stability
+                    # audit 2026-10-02) -- after the caller is already silenced.
+                    try:
+                        await _tts_iter.aclose()
+                    except Exception:  # noqa: BLE001
+                        pass
                     break
                 if first_chunk:
                     if track_latency:
@@ -327,6 +513,33 @@ class TtsPlayback:
                         )
                     except Exception:
                         pass
+                # Pause-then-decide (barge_in_pause): hold unsent audio while the
+                # caller's first words are still unclear. A resume continues with
+                # this very chunk; a confirmed interruption skips it below.
+                if getattr(session, "_tts_paused_at", None) is not None:
+                    from app.domain.services.voice_pipeline.barge_in_pause import (
+                        wait_while_paused,
+                    )
+                    await wait_while_paused(session, websocket, barge_in_event=barge_in_event)
+                    if barge_in_event and barge_in_event.is_set():
+                        logger.info(f"Barge-in during hold interrupted TTS for call {call_id}")
+                        interrupted = True
+                        barge_in_event.clear()
+                        try:
+                            await self._p.media_gateway.clear_output_buffer(call_id)
+                        except Exception as _exc:
+                            logger.debug("clear_output_buffer after hold failed: %s", _exc)
+                        self._record_barge_in_stop(session)
+                        if websocket:
+                            try:
+                                await websocket.send_json({"type": "tts_interrupted", "reason": "barge_in"})
+                            except Exception as _exc:
+                                logger.debug("tts_interrupted after-hold WS send failed: %s", _exc)
+                        try:
+                            await _tts_iter.aclose()
+                        except Exception:  # noqa: BLE001
+                            pass
+                        break
                 await self._p.media_gateway.send_audio(call_id, raw)
                 first_chunk_sent = True  # at least one chunk reached the gateway
                 # WHEN DID AUDIO LAST LEAVE FOR THE CALLER?
@@ -364,44 +577,13 @@ class TtsPlayback:
                         except Exception as _exc:
                             logger.debug("tts_interrupted post-send WS send failed: %s", _exc)
                     break
-            if (
-                provider_exhausted
-                and not interrupted
-                and not first_chunk_sent
-                and not getattr(session, "_tts_fallback_attempted", False)
-                # Same guard as the retry, for the same reason: a caller who
-                # just interrupted must not be answered with "could you say
-                # that again?".
-                and getattr(session, "tts_active", True)
-                and not (barge_in_event is not None and barge_in_event.is_set())
-            ):
-                # Both attempts produced no audio. The turn is otherwise about
-                # to end in total silence, which on a phone call is the worst
-                # available outcome — the caller hears nothing and cannot tell
-                # whether the line dropped. Say something short instead.
-                #
-                # Deliberately NOT the original text: it has now failed to
-                # synthesise twice, so a third attempt at the same string is
-                # the least likely thing to work. A brief line is both more
-                # likely to come back and more honest about what happened.
-                # Guarded by the same _tts_fallback_attempted flag the
-                # exception path uses, so a failing fallback cannot recurse.
-                session._tts_fallback_attempted = True
-                logger.error(
-                    "tts_empty_stream_after_retry call=%s text=%r — speaking a "
-                    "short fallback so the turn is not silent",
-                    call_id[:12], text[:60],
-                )
-                try:
-                    await self.synthesize_and_send(
-                        session,
-                        "Sorry — could you say that again?",
-                        websocket,
-                        barge_in_event=barge_in_event,
-                        track_latency=False,
-                    )
-                except Exception:
-                    pass
+            if provider_exhausted and not interrupted and not first_chunk_sent:
+                if stopped_by_caller_at_end:
+                    interrupted = True
+                    if not _is_recovery_attempt:
+                        self._p._record_silent_turn(call_id, "interrupted_before_audio")
+                else:
+                    raise _SynthesisFailure("provider_empty_stream")
 
             if provider_exhausted and not interrupted:
                 # Normal completion (not interrupted by barge-in) — flush any
@@ -413,34 +595,128 @@ class TtsPlayback:
                 if flush:
                     try:
                         await flush(call_id)
-                    except Exception as _exc:
-                        logger.debug("flush buffer failed: %s", _exc)
+                    except Exception as exc:
+                        raise TtsDeliveryError("Audio output buffer could not be flushed") from exc
                 completed = True
-        except SessionGoneError:
-            # Browser WebSocket was torn down while TTS was streaming.
-            # Exit the loop silently — this is normal teardown, not an error.
-            silent_reason = "session_gone"
-            logger.debug("TTS loop stopped: browser session %s already gone", call_id)
-        except Exception as e:
-            silent_reason = "tts_exception"
-            logger.error(f"TTS synthesis error for call {call_id}: {e}", exc_info=True)
-            # FIX 4 — If no audio reached the gateway yet, play a one-shot fallback
-            # so the caller gets an explicit signal instead of silence.  The
-            # _tts_fallback_attempted flag prevents infinite recursion when the
-            # fallback itself fails (e.g. TTS provider is fully down).
-            if not first_chunk_sent and not getattr(session, "_tts_fallback_attempted", False):
-                session._tts_fallback_attempted = True
+                session._tts_delivery_status = "submitted"
+                if first_chunk_sent:
+                    # Audio reached the caller: only consecutive TTS failures
+                    # are terminal, not two hiccups minutes apart.
+                    session._tts_failure_clip_count = 0
+
+                # Wait for the browser's OWN playback-complete confirmation
+                # before the finally block below unmutes — same pattern as
+                # voice_orchestrator.send_greeting's post-flush wait. Gated on
+                # `_stt_muted` (only the Test-agent allow_barge_in=false path
+                # mutes here) and on the gateway actually supporting playback
+                # tracking (telephony gateways don't, so this is a no-op
+                # there — see test_telephony_style_gateway_without_playback_
+                # tracking_is_unaffected).
+                if _playback_uid and first_chunk_sent:
+                    receipt = await self._p.media_gateway.finish_playback(call_id, _playback_uid)
+                    if isinstance(receipt, dict):
+                        if receipt.get("utterance_id") == _playback_uid:
+                            _matched_receipt = {
+                                "utterance_id": _playback_uid,
+                                "status": receipt.get("status"),
+                                "evidence": receipt.get("evidence"),
+                            }
+                        session._tts_playout_completed = bool(
+                            receipt.get("utterance_id") == _playback_uid
+                            and receipt.get("status") == "completed"
+                            and receipt.get("evidence") == "transport_played"
+                        )
+                        _waited_for_browser_playback = session._tts_playout_completed
+                        if receipt.get("status") == "interrupted":
+                            interrupted = True
+                            session._tts_delivery_status = "partial"
+                        elif receipt.get("status") == "failed":
+                            raise TtsDeliveryError("Transport reported failed playback")
+                elif (
+                    _stt_muted
+                    and first_chunk_sent
+                    and websocket
+                    and hasattr(self._p.media_gateway, "wait_for_playback_complete")
+                ):
+                    try:
+                        await websocket.send_json({"type": "tts_audio_complete"})
+                        playback_result = await self._p.media_gateway.wait_for_playback_complete(call_id)
+                        _waited_for_browser_playback = bool(playback_result)
+                        _context_playback_allowed = playback_result is not False
+                    except Exception as _wait_exc:
+                        _context_playback_allowed = False
+                        logger.debug(
+                            "tts_playback_wait_for_playback_failed call_id=%s: %s",
+                            call_id[:8], _wait_exc,
+                        )
+            if (
+                completed and not interrupted and first_chunk_sent and _context_playback_allowed
+                and session.tts_active
+                and not (barge_in_event and barge_in_event.is_set())
+            ):
+                from app.domain.services.stt_context import update_stt_agent_context
+
+                await update_stt_agent_context(getattr(self._p, "stt_provider", None), call_id, text)
+        except asyncio.CancelledError:
+            session._tts_playout_completed = False
+            raise
+        except Exception as exc:
+            if isinstance(exc, SessionGoneError):
+                silent_reason = "session_gone"
+            elif isinstance(exc, TtsDeliveryError):
+                silent_reason = "tts_delivery_error"
+            elif isinstance(exc, _SynthesisFailure):
+                silent_reason = exc.reason
+            else:
+                silent_reason = "tts_provider_error"
+            # One contract for all incomplete output. A provider returning an
+            # error after audio is no more complete than a failed gateway send.
+            interrupted = True
+            completed = False
+            session._tts_delivery_failed = True
+            session._tts_failure_reason = silent_reason
+            session._tts_delivery_status = "partial" if first_chunk_sent else "failed"
+            logger.error("tts_delivery_failed call_id=%s reason=%s submitted_audio=%s", call_id, silent_reason, first_chunk_sent)
+            if not first_chunk_sent and not _is_recovery_attempt:
+                self._p._record_silent_turn(call_id, silent_reason)
+            if websocket:
                 try:
-                    await self.synthesize_and_send(
-                        session,
-                        "I'm sorry, I couldn't respond. Please say that again.",
-                        websocket,
-                        barge_in_event=barge_in_event,
-                        track_latency=False,
-                    )
+                    await websocket.send_json({"type": "tts_delivery_failed", "reason": silent_reason,
+                                               "partial": first_chunk_sent})
                 except Exception:
                     pass
+            # Never repeat the original sentence after partial submission. A
+            # no-audio failure uses a provider-independent recovery clip once.
+            if not first_chunk_sent and not _is_recovery_attempt and silent_reason != "session_gone":
+                session._tts_recovery_submitted = await self._try_emergency_voice_clip(
+                    session, websocket, barge_in_event,
+                )
         finally:
+            if interrupted or not completed:
+                session._tts_playout_completed = False
+            if _tts_iter is not None:
+                close = getattr(_tts_iter, "aclose", None)
+                if callable(close):
+                    try:
+                        await close()
+                    except Exception as exc:
+                        logger.debug("tts_iterator_close_failed call_id=%s: %s", call_id, exc)
+            if _stt_muted and hasattr(self._p.stt_provider, "unmute"):
+                # Same asymmetric tail voice_orchestrator.send_greeting uses:
+                # 0.05s once the browser has actually CONFIRMED playback is
+                # done (the remaining risk is just AEC/network echo decay),
+                # else the full STT_UNMUTE_TAIL_S guess for a gateway that
+                # cannot confirm real playback (network jitter / echo-tail
+                # decay with no better signal available).
+                await asyncio.sleep(
+                    0.05 if _waited_for_browser_playback else _STT_UNMUTE_TAIL_S
+                )
+                try:
+                    await self._p.stt_provider.unmute(call_id)
+                except Exception as _unmute_exc:
+                    logger.debug(
+                        "tts_playback_unmute_failed call_id=%s: %s", call_id[:8], _unmute_exc
+                    )
             if not interrupted and first_chunk:
                 if silent_reason is None and completed:
                     # DISTINGUISH THE TWO REASONS A TURN CAN END WITH NO AUDIO.
@@ -473,8 +749,20 @@ class TtsPlayback:
             if track_latency:
                 self._p.latency_tracker.mark_tts_end(call_id)
                 if interrupted:
-                    self._p.latency_tracker.mark_interrupted(call_id, reason="barge_in")
+                    self._p.latency_tracker.mark_interrupted(
+                        call_id,
+                        reason=(
+                            silent_reason if getattr(session, "_tts_delivery_failed", False)
+                            else "barge_in"
+                        ),
+                    )
                 elif completed:
                     self._p.latency_tracker.mark_completed(call_id)
             session.tts_active = False
+        # Publish only this invocation's correlated receipt, after cleanup.
+        # A recovery clip, old receipt, or transmission alone is not playback.
+        session._tts_playback_utterance_id = _playback_uid
+        session._tts_playback_receipt = (
+            _matched_receipt if completed and not interrupted else None
+        )
         return interrupted

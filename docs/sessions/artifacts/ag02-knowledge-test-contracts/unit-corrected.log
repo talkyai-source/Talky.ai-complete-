@@ -1,0 +1,29 @@
+........................................................................ [ 77%]
+......F...........FF.                                                    [100%]
+================================== FAILURES ===================================
+_ test_tool_state_distinguishes_navigation_read_and_failure[operation2-unavailable-False] _
+tests\unit\test_knowledge_tool_evidence_lifecycle.py:89: in test_tool_state_distinguishes_navigation_read_and_failure
+    assert state.last_tool_name == "knowledge_lookup"
+E   AssertionError: assert None == 'knowledge_lookup'
+E    +  where None = LiveConversationState(identity_introduced=False, decision_maker=<DecisionMakerStatus.UNKNOWN: 'unknown'>, current_prov...stomer_relationship=<CustomerRelationship.UNKNOWN: 'unknown'>, relationship_turn_id=None, relationship_turn_order=None).last_tool_name
+___ test_logged_prompt_hash_and_evidence_describe_actual_model_turn[False] ____
+tests\unit\test_knowledge_uncertainty_contract.py:128: in test_logged_prompt_hash_and_evidence_describe_actual_model_turn
+    assert profiles[-1]["knowledge_status"] == ("available" if read_source else "unavailable")
+E   AssertionError: assert 'not_retrieved_this_turn' == 'unavailable'
+E     - unavailable
+E     + not_retrieved_this_turn
+------------------------------ Captured log call ------------------------------
+INFO     app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:279 voice_turn_profile {"instructions_sha256": "0314daa91ad4cb6178357a8c15b9790e91a7ee2dbfbeefa8de6319ffab7e93f7", "knowledge_block_sha256": null, "knowledge_mode": "retrieve", "knowledge_passage_count": 0, "knowledge_snapshot_checksum": null, "knowledge_status": "not_retrieved_this_turn", "knowledge_version_status": "unversioned", "knowledge_versions_sha256": null}
+____ test_logged_prompt_hash_and_evidence_describe_actual_model_turn[True] ____
+tests\unit\test_knowledge_uncertainty_contract.py:128: in test_logged_prompt_hash_and_evidence_describe_actual_model_turn
+    assert profiles[-1]["knowledge_status"] == ("available" if read_source else "unavailable")
+E   AssertionError: assert 'not_retrieved_this_turn' == 'available'
+E     - available
+E     + not_retrieved_this_turn
+------------------------------ Captured log call ------------------------------
+INFO     app.domain.services.voice_pipeline.turn_streamer:turn_streamer.py:279 voice_turn_profile {"instructions_sha256": "0314daa91ad4cb6178357a8c15b9790e91a7ee2dbfbeefa8de6319ffab7e93f7", "knowledge_block_sha256": null, "knowledge_mode": "retrieve", "knowledge_passage_count": 0, "knowledge_snapshot_checksum": null, "knowledge_status": "not_retrieved_this_turn", "knowledge_version_status": "unversioned", "knowledge_versions_sha256": null}
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_tool_evidence_lifecycle.py::test_tool_state_distinguishes_navigation_read_and_failure[operation2-unavailable-False]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_logged_prompt_hash_and_evidence_describe_actual_model_turn[False]
+FAILED tests/unit/test_knowledge_uncertainty_contract.py::test_logged_prompt_hash_and_evidence_describe_actual_model_turn[True]
+3 failed, 90 passed, 52 warnings in 3.98s

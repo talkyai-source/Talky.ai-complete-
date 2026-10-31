@@ -21,7 +21,9 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import require_platform_admin
+from app.api.v1.dependencies import CurrentUser, get_audit_logger, require_platform_admin
+from app.core.db_utils import acquire_with_tenant
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 # PLATFORM-WIDE router — platform_admin only. This completes the follow-up the
 # previous fix flagged: router-level auth closed the fully-unauthenticated hole,
@@ -153,7 +155,7 @@ async def list_abuse_events(
     query = """
         SELECT
             e.*,
-            t.name as tenant_name
+            t.business_name AS tenant_name
         FROM abuse_events e
         JOIN tenants t ON t.id = e.tenant_id
         WHERE e.created_at > NOW() - INTERVAL '%s hours'
@@ -183,7 +185,10 @@ async def list_abuse_events(
     params.append(limit)
     query += f" LIMIT ${len(params)}"
 
-    async with db_pool.acquire() as conn:
+    # A missing filter is an intentional platform-admin cross-tenant scan.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         rows = await conn.fetch(query, *params)
 
     return [
@@ -222,12 +227,13 @@ async def get_abuse_event(
     db_pool=Depends(get_db_pool),
 ):
     """Get details of a specific abuse event."""
-    async with db_pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         row = await conn.fetchrow(
             """
             SELECT
                 e.*,
-                t.name as tenant_name
+                t.business_name AS tenant_name
             FROM abuse_events e
             JOIN tenants t ON t.id = e.tenant_id
             WHERE e.id = $1
@@ -269,11 +275,16 @@ async def get_abuse_event(
 async def resolve_abuse_event(
     event_id: UUID,
     request: ResolveEventRequest,
-    resolved_by: UUID,  # In production, get from auth context
+    current_user: CurrentUser = Depends(require_platform_admin),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
     db_pool=Depends(get_db_pool),
 ):
-    """Resolve an abuse event."""
-    async with db_pool.acquire() as conn:
+    """Resolve an abuse event, attributed to the authenticated admin."""
+    # The resolver is the caller, never a client-supplied id: a platform admin
+    # must not be able to dismiss a fraud event under another admin's name.
+    resolved_by = UUID(str(current_user.id))
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         # Update the event
         result = await conn.execute(
             """
@@ -301,13 +312,33 @@ async def resolve_abuse_event(
             """
             SELECT
                 e.*,
-                t.name as tenant_name
+                t.business_name AS tenant_name
             FROM abuse_events e
             JOIN tenants t ON t.id = e.tenant_id
             WHERE e.id = $1
             """,
             event_id,
         )
+
+    # Dismissing a fraud event is a compliance-relevant admin action.
+    await audit_logger.log(
+        event_type=AuditEvent.SUSPICIOUS_ACTIVITY,
+        action=(
+            "abuse_event_marked_false_positive"
+            if request.false_positive
+            else "abuse_event_resolved"
+        ),
+        actor_id=current_user.id,
+        tenant_id=row["tenant_id"],
+        resource_type="abuse_event",
+        resource_id=event_id,
+        metadata={
+            "event_type": row["event_type"],
+            "severity": row["severity"],
+            "false_positive": request.false_positive,
+            "resolution_notes": request.notes,
+        },
+    )
 
     return AbuseEventResponse(
         id=row["id"],
@@ -347,7 +378,10 @@ async def get_abuse_statistics(
     db_pool=Depends(get_db_pool),
 ):
     """Get abuse detection statistics."""
-    async with db_pool.acquire() as conn:
+    # A missing filter is an intentional platform-admin cross-tenant aggregate.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         # Base query conditions
         tenant_filter = "AND tenant_id = $1" if tenant_id else ""
         params = [tenant_id] if tenant_id else []
@@ -461,7 +495,10 @@ async def list_abuse_rules(
 
     query += " ORDER BY priority ASC, created_at DESC"
 
-    async with db_pool.acquire() as conn:
+    # Global rules have tenant_id=NULL and therefore need the platform scope.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         rows = await conn.fetch(query, *params)
 
     return [
@@ -519,7 +556,10 @@ async def create_abuse_rule(
             detail=f"Invalid action_on_trigger. Must be one of: {valid_actions}"
         )
 
-    async with db_pool.acquire() as conn:
+    # Creating a global rule (tenant_id=NULL) is a platform-internal write.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO abuse_detection_rules (
@@ -582,7 +622,8 @@ async def update_abuse_rule(
 ):
     """Update an abuse detection rule."""
 
-    async with db_pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         row = await conn.fetchrow(
             """
             UPDATE abuse_detection_rules
@@ -643,7 +684,8 @@ async def delete_abuse_rule(
     db_pool=Depends(get_db_pool),
 ):
     """Delete an abuse detection rule."""
-    async with db_pool.acquire() as conn:
+    # The platform-admin route resolves an ID before its tenant is known.
+    async with acquire_with_tenant(db_pool, None) as conn:
         result = await conn.execute(
             "DELETE FROM abuse_detection_rules WHERE id = $1",
             rule_id,
@@ -675,7 +717,7 @@ async def get_abuse_alerts(
     query = """
         SELECT
             e.*,
-            t.name as tenant_name
+            t.business_name AS tenant_name
         FROM abuse_events e
         JOIN tenants t ON t.id = e.tenant_id
         WHERE e.resolved_at IS NULL
@@ -696,7 +738,10 @@ async def get_abuse_alerts(
     params.append(limit)
     query += f" LIMIT ${len(params)}"
 
-    async with db_pool.acquire() as conn:
+    # A missing filter is an intentional platform-admin cross-tenant scan.
+    async with acquire_with_tenant(
+        db_pool, str(tenant_id) if tenant_id is not None else None
+    ) as conn:
         rows = await conn.fetch(query, *params)
 
     return [

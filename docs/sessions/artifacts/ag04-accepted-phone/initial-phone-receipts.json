@@ -1,0 +1,2620 @@
+{
+  "scope": "actual parser+bridge; synthetic gateway receipts, no DB/provider effects",
+  "cases": [
+    {
+      "provider": "openai",
+      "variant": "completed",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": {
+              "provider_item_id": "new-confirmation",
+              "caller_turn_order": 5,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "new-confirmation",
+              "caller_turn_order": 5,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-2",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": true,
+        "capture_status": "confirmed",
+        "confirmation_evidence": "readback_and_caller_affirmation",
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": {
+          "provider_item_id": "new-confirmation",
+          "caller_turn_order": 5,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "status_source": {
+          "provider_item_id": "new-confirmation",
+          "caller_turn_order": 5,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "readback": {
+          "utterance_id": "rt-2",
+          "status": "completed",
+          "evidence": "transport_played"
+        }
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "rt-2",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "openai",
+      "variant": "stale",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "expired-utterance",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "openai",
+      "variant": "unknown",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "rt-2",
+          "status": "unknown",
+          "evidence": "unknown",
+          "played_ms": 0
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "openai",
+      "variant": "transmitted",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "rt-2",
+          "status": "completed",
+          "evidence": "transmitted",
+          "played_ms": 0
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "openai",
+      "variant": "interrupted",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?",
+            "wait": false
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "start",
+            "item": "new-confirmation"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "revision": true,
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        },
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-2-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "xai",
+      "variant": "completed",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": {
+              "provider_item_id": "new-confirmation",
+              "caller_turn_order": 5,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "new-confirmation",
+              "caller_turn_order": 5,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-2",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": true,
+        "capture_status": "confirmed",
+        "confirmation_evidence": "readback_and_caller_affirmation",
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": {
+          "provider_item_id": "new-confirmation",
+          "caller_turn_order": 5,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "status_source": {
+          "provider_item_id": "new-confirmation",
+          "caller_turn_order": 5,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "readback": {
+          "utterance_id": "rt-2",
+          "status": "completed",
+          "evidence": "transport_played"
+        }
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "rt-2",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "xai",
+      "variant": "stale",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "expired-utterance",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "xai",
+      "variant": "unknown",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "rt-2",
+          "status": "unknown",
+          "evidence": "unknown",
+          "played_ms": 0
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "xai",
+      "variant": "transmitted",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        },
+        {
+          "utterance_id": "rt-2",
+          "status": "completed",
+          "evidence": "transmitted",
+          "played_ms": 0
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    },
+    {
+      "provider": "xai",
+      "variant": "interrupted",
+      "states": [
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-source",
+            "text": "My phone number is +1 415 555 2671."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 2671, correct?"
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "value_source": {
+              "provider_item_id": "phone-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "status_source": {
+              "provider_item_id": "old-confirmation",
+              "caller_turn_order": 2,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            }
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "phone-correction",
+            "text": "Actually, the last four digits should be 1234."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "old-confirmation",
+            "revision": true,
+            "text": "Yes, that is correct."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "stale-yes",
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "response",
+            "text": "Your phone number is +1 415 555 1234, correct?",
+            "wait": false
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "start",
+            "item": "new-confirmation"
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        },
+        {
+          "step": {
+            "kind": "caller",
+            "item": "new-confirmation",
+            "revision": true,
+            "text": "Yes."
+          },
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "confirmation_evidence": null,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "status_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "readback": null
+          }
+        }
+      ],
+      "final": {
+        "value": "+14155551234",
+        "confirmed": false,
+        "capture_status": "awaiting_confirmation",
+        "confirmation_evidence": null,
+        "value_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "confirmation_source": null,
+        "status_source": {
+          "provider_item_id": "phone-correction",
+          "caller_turn_order": 3,
+          "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+        },
+        "readback": null
+      },
+      "receipts": [
+        {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played",
+          "played_ms": 40
+        }
+      ],
+      "truncate": [
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-1-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        },
+        {
+          "type": "conversation.item.truncate",
+          "item_id": "response-2-item",
+          "content_index": 0,
+          "audio_end_ms": 0
+        }
+      ]
+    }
+  ],
+  "network_attempts": []
+}

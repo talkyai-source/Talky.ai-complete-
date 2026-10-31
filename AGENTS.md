@@ -185,3 +185,12 @@ Tests in `backend/tests/` with pytest. Uses `pytest-asyncio` with auto mode. Thi
 - `backend/docs/diagrams/` - Message flow and data structure diagrams
 - `Admin/*.md` - Admin panel specs, API integration, security guides
 - `white_label.md` - White-label customization guide
+
+## Production readiness feature freeze
+
+The user has frozen unrelated feature work until the existing assessed product is ready for paid use. Follow [production ready](<docs/production ready.md>) and its [execution tracker](docs/production-readiness/execution-tracker.json) for the fixed scope, work packages and completion evidence.
+
+- Work within the recorded remediation, validation, documentation and release scope. Preserve unrelated user changes and existing verified behavior.
+- Do not add new providers, offerings or unrelated capabilities, or perform a broad rewrite, while this freeze is active.
+- Temporary containment, hidden controls, green unit tests and a narrow pilot do not by themselves complete a feature or lift the freeze.
+- Record evidence-backed closure against the plan. Keep blocked inputs and unfinished features explicit. The freeze remains until the plan is completed or the user explicitly revises it.

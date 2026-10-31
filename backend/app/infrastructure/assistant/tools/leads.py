@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 # Columns returned for a lead in list views.
 _LEAD_LIST_COLS = (
     "id, phone_number, first_name, last_name, email, status, priority, "
-    "call_attempts, last_call_result, is_lead, follow_up_note, qualified_at"
+    "call_attempts, last_call_result, is_lead, follow_up_note, qualified_at, "
+    "latest_analysis_note, latest_analysis_call_id, latest_analysis_at"
 )
 
 
@@ -49,7 +50,7 @@ async def get_leads(
     try:
         capped = max(1, min(int(limit or 25), 100))
         query = db_client.table("leads").select(
-            _LEAD_LIST_COLS, count="exact"
+            _LEAD_LIST_COLS + ", campaign_id", count="exact"
         ).eq("tenant_id", tenant_id).neq("status", "deleted")
 
         if campaign_id:
@@ -65,6 +66,7 @@ async def get_leads(
             "total_count": response.count,
             "returned_count": len(response.data),
             "leads": response.data,
+            "analysis_note": "Latest analysis is AI-generated guidance from its source call, not a caller-confirmed fact or completed action. Keep it distinct from follow_up_note.",
         }
     except Exception as e:
         logger.error(f"Error getting leads: {e}")
@@ -107,11 +109,14 @@ async def get_qualified_leads(
                 "follow_up_note": r.get("follow_up_note"),
                 "qualified_at": r.get("qualified_at"),
                 "last_call_result": r.get("last_call_result"),
+                "latest_analysis_note": r.get("latest_analysis_note"),
+                "latest_analysis_call_id": r.get("latest_analysis_call_id"),
+                "latest_analysis_at": r.get("latest_analysis_at"),
             })
         return {
             "count": len(leads),
             "qualified_leads": leads,
-            "note": "Present each by NAME and NUMBER with the follow-up. These are the leads to alert the client about.",
+            "note": "Present each by NAME and NUMBER. Qualification is a historical flag; newer AI analysis may change the next step. Keep latest analysis distinct from the operator's follow_up_note and from completed actions.",
         }
     except Exception as e:
         logger.error(f"Error getting qualified leads: {e}")
@@ -134,7 +139,7 @@ async def _resolve_leads_by_name(
         try:
             r = (
                 db_client.table("leads")
-                .select(_LEAD_LIST_COLS + ", qualified_call_id")
+                .select(_LEAD_LIST_COLS + ", campaign_id, qualified_call_id")
                 .eq("tenant_id", tenant_id)
                 .neq("status", "deleted")
                 .ilike(col, f"%{name}%")
@@ -164,7 +169,7 @@ async def get_lead_followup(
     so the assistant can ask which one.
     """
     try:
-        select_cols = _LEAD_LIST_COLS + ", qualified_call_id"
+        select_cols = _LEAD_LIST_COLS + ", campaign_id, qualified_call_id"
         if lead_id:
             resp = (
                 db_client.table("leads").select(select_cols)
@@ -193,6 +198,7 @@ async def get_lead_followup(
                         "id": r["id"],
                         "name": _full_name(r),
                         "phone_number": r.get("phone_number"),
+                        "campaign_id": r.get("campaign_id"),
                         "is_lead": r.get("is_lead", False),
                     }
                     for r in rows[:10]
@@ -211,10 +217,13 @@ async def get_lead_followup(
                 "follow_up_note": lead.get("follow_up_note"),
                 "qualified_at": lead.get("qualified_at"),
                 "last_call_result": lead.get("last_call_result"),
+                "latest_analysis_note": lead.get("latest_analysis_note"),
+                "latest_analysis_call_id": lead.get("latest_analysis_call_id"),
+                "latest_analysis_at": lead.get("latest_analysis_at"),
             }
         }
 
-        call_id = lead.get("qualified_call_id")
+        call_id = lead.get("latest_analysis_call_id") or lead.get("qualified_call_id")
         if call_id:
             try:
                 cresp = (
@@ -230,6 +239,8 @@ async def get_lead_followup(
                         sj = None
                 if isinstance(sj, dict):
                     result["call_summary"] = {
+                        "call_id": call_id,
+                        "source": "ai_analysis",
                         "headline": sj.get("headline"),
                         "outcome": sj.get("outcome"),
                         "what_happened": sj.get("what_happened"),
@@ -240,11 +251,11 @@ async def get_lead_followup(
             except Exception as ce:  # noqa: BLE001
                 logger.warning("get_lead_followup summary fetch failed: %s", ce)
 
-        if not lead.get("is_lead"):
-            result["note"] = (
-                "This contact is not flagged as a qualified lead yet, so there is "
-                "no AI follow-up note. Showing the latest known state."
-            )
+        result["note"] = (
+            "AI analysis is a reviewable recommendation, not caller confirmation or "
+            "proof an action completed. The qualification flag may be older than "
+            "this analysis. Preserve the operator's follow_up_note separately."
+        )
         return result
     except Exception as e:
         logger.error(f"get_lead_followup error: {e}")

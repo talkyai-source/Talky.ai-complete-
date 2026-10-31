@@ -1,0 +1,2550 @@
+{
+  "version": 1,
+  "status": "proposed_synthetic_controls_not_human_approved",
+  "providers": [
+    "openai",
+    "xai"
+  ],
+  "campaign_guidance": "The target list contains existing terminal customers. Discuss an upgrade. Caller corrections take priority.",
+  "scenarios": [
+    {
+      "id": "native.grounded_answer",
+      "semantic_ids": [
+        "ag04.supported_price"
+      ],
+      "steps": [
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "Basic plan price"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The Basic plan costs £20 per month."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "matched"
+        ],
+        "submissions": 1,
+        "repair_requests": 0
+      },
+      "source_facts": [
+        {
+          "id": "fixture-basic",
+          "version": 1,
+          "source_id": "fixture-approved",
+          "source_version": 1,
+          "heading": "Basic plan price",
+          "content": "The Basic plan costs £20 per month."
+        }
+      ]
+    },
+    {
+      "id": "native.customer_denial",
+      "semantic_ids": [
+        "ag04.new_prospect_no_product",
+        "ag04.explicit_customer_denial"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer and have no card machine or payment provider."
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.relationship_reversal",
+      "semantic_ids": [
+        "ag04.relationship_reversal"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        },
+        {
+          "kind": "caller",
+          "text": "Actually, I am your customer."
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "affirmed",
+        "submissions": 1,
+        "repair_requests": 0
+      }
+    },
+    {
+      "id": "native.long_relationship",
+      "semantic_ids": [
+        "ag04.long_relationship_memory"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        },
+        {
+          "kind": "ordinary_turns",
+          "count": 30
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.quoted_relationship",
+      "semantic_ids": [
+        "ag04.quoted_relationship"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        },
+        {
+          "kind": "caller",
+          "text": "You said \"I am your customer\", but that was wrong."
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.stale_caller_final",
+      "semantic_ids": [
+        "ag04.stale_caller_final"
+      ],
+      "steps": [
+        {
+          "kind": "start",
+          "item": "old",
+          "offset": 1000
+        },
+        {
+          "kind": "start",
+          "item": "new",
+          "offset": 2000
+        },
+        {
+          "kind": "caller",
+          "text": "I am not your customer.",
+          "item": "new"
+        },
+        {
+          "kind": "caller",
+          "text": "I am your customer.",
+          "item": "old"
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.current_revision",
+      "semantic_ids": [
+        "ag04.current_asr_revision"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "I am your customer.",
+          "item": "current"
+        },
+        {
+          "kind": "caller",
+          "text": "I am not your customer.",
+          "item": "current",
+          "revision": true
+        },
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer."
+        }
+      ],
+      "expect": {
+        "relationship": "denied",
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.decline_email",
+      "semantic_ids": [
+        "ag04.decline_email_topic"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "Would you like details by email?"
+        },
+        {
+          "kind": "caller",
+          "text": "No thanks."
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "No problem. What would you like to know?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ],
+        "submissions": 2
+      }
+    },
+    {
+      "id": "native.thanks",
+      "semantic_ids": [
+        "ag04.thanks_not_goodbye"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Thanks, that answers my question."
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "You are welcome."
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ],
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.explicit_goodbye",
+      "semantic_ids": [
+        "ag04.explicit_goodbye"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Goodbye. Please end this call."
+        },
+        {
+          "kind": "response",
+          "text": "Goodbye."
+        }
+      ],
+      "expect": {
+        "shutdowns": 1,
+        "end_requested": true,
+        "dnc": false,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.dnc_close",
+      "dnc_acknowledgement": true,
+      "semantic_ids": [
+        "ag04.explicit_dnc_close"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Please stop calling me."
+        },
+        {
+          "kind": "response",
+          "text": "Understood. Goodbye."
+        }
+      ],
+      "expect": {
+        "shutdowns": 1,
+        "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": true,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.dnc_question",
+      "dnc_acknowledgement": true,
+      "semantic_ids": [
+        "ag04.dnc_with_question"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Do not call me again, but first I need help with my account."
+        },
+        {
+          "kind": "response",
+          "text": "What help do you need with your account?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": true,
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.dnc_failed_receipt",
+      "semantic_ids": [
+        "ag04.explicit_dnc_close"
+      ],
+      "dnc_acknowledgement": false,
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Please stop calling me."
+        },
+        {
+          "kind": "response",
+          "text": "Your do-not-call request was saved. Goodbye."
+        }
+      ],
+      "expect": {
+        "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": false,
+        "submissions": 0,
+        "llm_controls": [],
+        "shutdowns": 0,
+        "repair_requests": 1
+      },
+      "coverage_note": "A failed synthetic persistence receipt withholds the original claim and requests a bounded repair; no repair response, database success or human hearing is simulated."
+    },
+    {
+      "id": "native.dnc_unknown_receipt",
+      "semantic_ids": [
+        "ag04.dnc_with_question"
+      ],
+      "dnc_acknowledgement": null,
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Do not call me again, but first I need help with my account."
+        },
+        {
+          "kind": "response",
+          "text": "You have been removed from our calling list. How can I help?"
+        }
+      ],
+      "expect": {
+        "dnc": true,
+        "dnc_attempts": 1,
+        "dnc_acknowledged": false,
+        "submissions": 0,
+        "llm_controls": [],
+        "end_requested": false,
+        "shutdowns": 0,
+        "repair_requests": 1
+      },
+      "coverage_note": "An unknown synthetic persistence receipt is not success. The continued-question caller stays live; no completed repair or durable write is claimed."
+    },
+    {
+      "id": "native.quoted_dnc",
+      "semantic_ids": [
+        "ag04.quoted_dnc",
+        "ag04.negated_dnc"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "The script says \"do not call me\", but I am not asking you to stop calling."
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "What would you like to know?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ]
+      }
+    },
+    {
+      "id": "native.unclear_email",
+      "semantic_ids": [
+        "ag04.unclear_email"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex, maybe alex two, at example dot com.",
+          "confidence": 0.2
+        },
+        {
+          "kind": "response",
+          "text": "Could you repeat just the email address?"
+        }
+      ],
+      "expect": {
+        "email_confirmed": false,
+        "shutdowns": 0
+      }
+    },
+    {
+      "id": "native.email_correction",
+      "semantic_ids": [
+        "ag04.email_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "caller",
+          "text": "Correction, my email is blair at example dot com."
+        }
+      ],
+      "expect": {
+        "email": "blair@example.com",
+        "email_confirmed": false,
+        "shutdowns": 0
+      }
+    },
+    {
+      "id": "native.interrupted_opening",
+      "semantic_ids": [
+        "ag04.interrupted_opening"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "Hello, I am Ava from Northwind Systems.",
+          "audio_bytes": 640,
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "interrupt",
+          "offset": 1000
+        },
+        {
+          "kind": "caller",
+          "text": "I have a question.",
+          "item": "interrupt"
+        },
+        {
+          "kind": "response",
+          "text": "What would you like to know?"
+        }
+      ],
+      "expect": {
+        "opening_interrupted": true,
+        "identity_introduced": null,
+        "submissions": 2,
+        "shutdowns": 0,
+        "opening_state_on_wire": true
+      },
+      "opening": true,
+      "gateway": {
+        "block": "send"
+      }
+    },
+    {
+      "id": "native.continued_goodbye",
+      "semantic_ids": [
+        "ag04.continuation_during_goodbye"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Goodbye."
+        },
+        {
+          "kind": "response",
+          "text": "Goodbye.",
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "continue",
+          "offset": 2000
+        },
+        {
+          "kind": "caller",
+          "text": "Wait, do not hang up. I need help.",
+          "item": "continue"
+        },
+        {
+          "kind": "response",
+          "text": "What help do you need?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "submissions": 2
+      },
+      "gateway": {
+        "block": "finish"
+      }
+    },
+    {
+      "id": "native.late_asr_before_playout",
+      "semantic_ids": [
+        "ag04.late_asr_before_playout"
+      ],
+      "steps": [
+        {
+          "kind": "batch",
+          "events": [
+            {
+              "kind": "response",
+              "text": "Our records show you are an existing customer."
+            },
+            {
+              "kind": "caller",
+              "text": "I am not your customer."
+            }
+          ]
+        }
+      ],
+      "expect": {
+        "submissions": 0,
+        "repair_requests": 0,
+        "normal_continuations": 1,
+        "relationship": "denied"
+      }
+    },
+    {
+      "id": "native.late_asr_during_playout",
+      "semantic_ids": [
+        "ag04.late_asr_during_playout"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "Our records show you are an existing customer.",
+          "audio_bytes": 640,
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "caller",
+          "text": "I am not your customer."
+        }
+      ],
+      "expect": {
+        "submissions": 1,
+        "clears": 1,
+        "repair_requests": 0,
+        "normal_continuations": 1,
+        "relationship": "denied",
+        "delivered_text": ""
+      },
+      "gateway": {
+        "block": "send",
+        "swallow_cancel": true
+      }
+    },
+    {
+      "id": "native.stale_receipt",
+      "semantic_ids": [
+        "ag04.stale_playback_receipt"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "I have alex@example.com. Is that correct?"
+        },
+        {
+          "kind": "caller",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email_confirmed": false,
+        "delivered_text": ""
+      },
+      "gateway": {
+        "receipt": "stale"
+      }
+    },
+    {
+      "id": "native.unknown_receipt",
+      "semantic_ids": [
+        "ag04.unknown_playback_receipt"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "I have alex@example.com. Is that correct?"
+        },
+        {
+          "kind": "caller",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email_confirmed": false,
+        "delivered_text": ""
+      },
+      "gateway": {
+        "receipt": "unknown"
+      }
+    },
+    {
+      "id": "native.missing_knowledge",
+      "semantic_ids": [
+        "ag04.missing_knowledge",
+        "ag04.unsupported_price"
+      ],
+      "steps": [
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "Basic plan price"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The Basic plan costs £20 per month."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "no_match"
+        ],
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.unavailable_action",
+      "semantic_ids": [
+        "ag04.unavailable_action"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Please email me the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "I have sent the email."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "unavailable"
+        ],
+        "last_tool_success": false,
+        "submissions": 0,
+        "repair_requests": 1
+      }
+    },
+    {
+      "id": "native.incomplete_generation",
+      "semantic_ids": [
+        "ag04.provider_partial_length"
+      ],
+      "steps": [
+        {
+          "kind": "response",
+          "text": "First unfinished thought",
+          "status": "incomplete"
+        },
+        {
+          "kind": "response",
+          "text": "Second unfinished thought",
+          "status": "incomplete"
+        }
+      ],
+      "expect": {
+        "failure": true,
+        "submissions": 0,
+        "repair_requests": 1
+      },
+      "coverage_note": "Native adapter buffers incomplete generation; no partial speech is claimed by this case."
+    },
+    {
+      "id": "native.disconnect",
+      "semantic_ids": [
+        "ag04.transport_disconnect"
+      ],
+      "steps": [
+        {
+          "kind": "disconnect"
+        }
+      ],
+      "expect": {
+        "connection_lost": true,
+        "submissions": 0,
+        "shutdowns": 0
+      }
+    },
+    {
+      "id": "native.contact_confirmation_completed",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "completed"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": true,
+        "email_capture_status": "confirmed",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": {
+          "provider_item_id": "contact-confirmation",
+          "caller_turn_order": 2,
+          "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+        },
+        "email_readback": {
+          "utterance_id": "rt-1",
+          "status": "completed",
+          "evidence": "transport_played"
+        },
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_stale",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "stale"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_unknown",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "unknown"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_transmitted",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "receipt": "transmitted"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.contact_confirmation_interrupted",
+      "semantic_ids": [
+        "ag04.exact_contact_confirmation"
+      ],
+      "gateway": {
+        "block": "send"
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "contact-source",
+          "text": "My email is alex at example dot com."
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?",
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "contact-confirmation"
+        },
+        {
+          "kind": "caller",
+          "item": "contact-confirmation",
+          "text": "Yes."
+        },
+        {
+          "kind": "release"
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": false,
+        "email_capture_status": "awaiting_confirmation",
+        "email_value_source": {
+          "provider_item_id": "contact-source",
+          "caller_turn_order": 1,
+          "revision_sha256": "b92727742b9e9a5c477d5d802770316b82d6a3205cdc5c8d3dc8f8688e03b5e1"
+        },
+        "email_confirmation_source": null,
+        "email_readback": null,
+        "submissions": 1,
+        "shutdowns": 0,
+        "dnc": false,
+        "dnc_attempts": 0
+      },
+      "coverage_note": "Actual parser/bridge capture state with synthetic ASR and transport receipts; neither human hearing nor durable Lead persistence is evaluated."
+    },
+    {
+      "id": "native.historical_dnc_recollection",
+      "semantic_ids": [
+        "ag04.historical_dnc_recollection"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "Last year I told another company to stop calling me. What are your opening hours?"
+        },
+        {
+          "kind": "tool",
+          "name": "end_call",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "What would you like to know about our opening hours?"
+        }
+      ],
+      "expect": {
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false,
+        "dnc_attempts": 0,
+        "tool_statuses": [
+          "caller_intent_unconfirmed"
+        ],
+        "submissions": 1
+      }
+    },
+    {
+      "id": "native.accepted_not_delivered",
+      "semantic_ids": [
+        "ag04.accepted_not_delivered"
+      ],
+      "synthetic_action_results": {
+        "send_email": {
+          "success": true,
+          "status": "provider_accepted",
+          "confirmation_allowed": true,
+          "message": "The provider accepted the email for sending. Recipient delivery is unconfirmed.",
+          "provider": "synthetic-email",
+          "message_id": "synthetic-remote-accepted-1"
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "email-request",
+          "text": "Please send the email to me."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was delivered to your inbox."
+        },
+        {
+          "kind": "response",
+          "text": "The provider accepted the email for sending, but I can't confirm delivery."
+        }
+      ],
+      "expect": {
+        "submissions": 1,
+        "repair_requests": 1,
+        "shutdowns": 0,
+        "effect_attempts": 1,
+        "accepted_actions": 1,
+        "tool_statuses": [
+          "provider_accepted"
+        ],
+        "llm_controls": [
+          "The provider accepted the email for sending, but I can't confirm delivery."
+        ],
+        "action_message_ids": {
+          "send_email": "synthetic-remote-accepted-1"
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_completed",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "completed"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": true,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_stale",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "stale"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_unknown",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "unknown"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_transmitted",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "receipt": "transmitted"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.phone_digit_correction_interrupted",
+      "semantic_ids": [
+        "ag04.phone_digit_correction"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "phone-source",
+          "text": "My phone number is +1 415 555 2671."
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "text": "Yes.",
+          "checkpoint": "old-confirmed"
+        },
+        {
+          "kind": "caller",
+          "item": "phone-correction",
+          "text": "Actually, the last four digits should be 1234.",
+          "checkpoint": "corrected"
+        },
+        {
+          "kind": "caller",
+          "item": "old-confirmation",
+          "revision": true,
+          "text": "Yes, that is correct.",
+          "checkpoint": "old-final-ignored"
+        },
+        {
+          "kind": "caller",
+          "item": "stale-yes",
+          "text": "Yes.",
+          "checkpoint": "bare-yes-without-new-readback"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 1234, correct?",
+          "block": "send",
+          "wait": false
+        },
+        {
+          "kind": "wait_gateway"
+        },
+        {
+          "kind": "start",
+          "item": "new-confirmation"
+        },
+        {
+          "kind": "release"
+        },
+        {
+          "kind": "caller",
+          "item": "new-confirmation",
+          "revision": true,
+          "text": "Yes.",
+          "checkpoint": "final"
+        }
+      ],
+      "expect": {
+        "phone": "+14155551234",
+        "phone_confirmed": false,
+        "shutdowns": 0,
+        "effect_attempts": 0,
+        "accepted_actions": 0
+      },
+      "contact_checkpoint_expectations": {
+        "old-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true
+          }
+        },
+        "corrected": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "old-final-ignored": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        },
+        "bare-yes-without-new-readback": {
+          "phone": {
+            "value": "+14155551234",
+            "confirmed": false,
+            "value_source": {
+              "provider_item_id": "phone-correction",
+              "caller_turn_order": 3,
+              "revision_sha256": "0739ae588a95585063e093ed21ea0bde21c56405aef9a2fbfaa28f0d965340ff"
+            },
+            "confirmation_source": null,
+            "readback": null
+          }
+        }
+      }
+    },
+    {
+      "id": "native.failed_action",
+      "semantic_ids": [
+        "ag04.failed_action"
+      ],
+      "synthetic_action_results": {
+        "send_email": {
+          "version": 1,
+          "action": "send_email",
+          "success": false,
+          "status": "failed",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-failed-request-1",
+          "message_id": null,
+          "message": "Synthetic provider rejected the send request."
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "request",
+          "text": "Please email the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was sent to you."
+        },
+        {
+          "kind": "response",
+          "text": "The email could not be sent."
+        }
+      ],
+      "expect": {
+        "submissions": 1,
+        "repair_requests": 1,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "failed",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-failed-request-1",
+            "message_id": null,
+            "message": "Synthetic provider rejected the send request."
+          }
+        },
+        "llm_controls": [
+          "The email could not be sent."
+        ],
+        "delivered_text": "The email could not be sent.",
+        "tool_statuses": [
+          "failed"
+        ],
+        "last_tool_success": false,
+        "failure": false,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      }
+    },
+    {
+      "id": "native.third_party_email_literal",
+      "semantic_ids": [
+        "ag04.third_party_email"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "My colleague's email is other@example.com.",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My email is alex@example.com.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "bare-yes": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "own-pending": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            }
+          }
+        },
+        "own-confirmed": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "native.third_party_email_reported",
+      "semantic_ids": [
+        "ag04.third_party_email"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "He said \"My email is other@example.com\".",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My email is alex@example.com.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your email is alex@example.com, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "email": "alex@example.com",
+        "email_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your email is alex@example.com, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "bare-yes": {
+          "email": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": null,
+            "value_source": null,
+            "status_source": null
+          }
+        },
+        "own-pending": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            }
+          }
+        },
+        "own-confirmed": {
+          "email": {
+            "value": "alex@example.com",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "7e7314f04d6187468de5e58b9e30c9a8dbef7949ede37d652957c3201395ed27"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "native.unclear_phone_invalid",
+      "semantic_ids": [
+        "ag04.unclear_phone"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "My phone number is +123",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My phone number is +1 415 555 2671.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            }
+          }
+        },
+        "bare-yes": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "74ae480213fb92c9fe34d29ef9ae63a0e347faa093469e2159de629bf835eac4"
+            }
+          }
+        },
+        "own-pending": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            }
+          }
+        },
+        "own-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "native.unclear_phone_incomplete",
+      "semantic_ids": [
+        "ag04.unclear_phone"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "unusable-source",
+          "text": "My number ends in seven three, I cannot remember the rest.",
+          "checkpoint": "unusable"
+        },
+        {
+          "kind": "caller",
+          "item": "bare-confirmation",
+          "text": "Yes.",
+          "checkpoint": "bare-yes"
+        },
+        {
+          "kind": "caller",
+          "item": "own-source",
+          "text": "My phone number is +1 415 555 2671.",
+          "checkpoint": "own-pending"
+        },
+        {
+          "kind": "response",
+          "text": "Your phone number is +1 415 555 2671, correct?"
+        },
+        {
+          "kind": "caller",
+          "item": "own-confirmation",
+          "text": "Yes.",
+          "checkpoint": "own-confirmed"
+        }
+      ],
+      "expect": {
+        "phone": "+14155552671",
+        "phone_confirmed": true,
+        "submissions": 1,
+        "llm_controls": [
+          "Your phone number is +1 415 555 2671, correct?"
+        ],
+        "effect_attempts": 0,
+        "accepted_actions": 0,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "contact_checkpoint_expectations": {
+        "unusable": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            }
+          }
+        },
+        "bare-yes": {
+          "phone": {
+            "value": null,
+            "confirmed": false,
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "capture_status": "needs_clarification",
+            "value_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            },
+            "status_source": {
+              "provider_item_id": "unusable-source",
+              "caller_turn_order": 1,
+              "revision_sha256": "3e5e4220e2b3c78555c811dabe114b66491fae3a0f243be3202fb8d8aae4d35d"
+            }
+          }
+        },
+        "own-pending": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": false,
+            "capture_status": "awaiting_confirmation",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": null,
+            "confirmation_evidence": null,
+            "readback": null,
+            "status_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            }
+          }
+        },
+        "own-confirmed": {
+          "phone": {
+            "value": "+14155552671",
+            "confirmed": true,
+            "capture_status": "confirmed",
+            "value_source": {
+              "provider_item_id": "own-source",
+              "caller_turn_order": 3,
+              "revision_sha256": "052d151da998b4ad50e3111e262049bfb9a2c68b55f1c460f250ec114ff7be45"
+            },
+            "confirmation_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            },
+            "confirmation_evidence": "readback_and_caller_affirmation",
+            "readback": {
+              "utterance_id": "rt-1",
+              "status": "completed",
+              "evidence": "transport_played"
+            },
+            "status_source": {
+              "provider_item_id": "own-confirmation",
+              "caller_turn_order": 4,
+              "revision_sha256": "5f9a2b795615ba6a3d5455fd5624d773fbca5bcd16249c421fd37411dc9837da"
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "native.action_unknown",
+      "semantic_ids": [
+        "ag04.action_unknown_outcome"
+      ],
+      "expect": {
+        "submissions": 3,
+        "repair_requests": 3,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "unknown",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-unknown-request-1",
+            "message_id": null,
+            "message": "The result is unresolved; check the original request before retrying."
+          }
+        },
+        "llm_controls": [
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        ],
+        "delivered_text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+        "tool_statuses": [
+          "unknown"
+        ],
+        "last_tool_success": false,
+        "failure": false,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "synthetic_action_results": {
+        "send_email": {
+          "success": false,
+          "status": "unknown",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-unknown-request-1",
+          "message_id": null,
+          "message": "The result is unresolved; check the original request before retrying."
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "caller-0",
+          "text": "Please email the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was sent to you."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-1",
+          "text": "What happened to the email?"
+        },
+        {
+          "kind": "response",
+          "text": "The email could not be sent."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-2",
+          "text": "What should happen with the email request?"
+        },
+        {
+          "kind": "response",
+          "text": "Please send the email again."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        }
+      ]
+    },
+    {
+      "id": "native.action_in_progress",
+      "semantic_ids": [
+        "ag04.action_unknown_outcome"
+      ],
+      "expect": {
+        "submissions": 3,
+        "repair_requests": 3,
+        "effect_attempts": 1,
+        "accepted_actions": 0,
+        "action_results": {
+          "send_email": {
+            "version": 1,
+            "action": "send_email",
+            "success": false,
+            "status": "in_progress",
+            "confirmation_allowed": false,
+            "provider": "synthetic-email",
+            "request_id": "synthetic-in_progress-request-1",
+            "message_id": null,
+            "message": "The result is unresolved; check the original request before retrying."
+          }
+        },
+        "llm_controls": [
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+          "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        ],
+        "delivered_text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again.",
+        "tool_statuses": [
+          "in_progress"
+        ],
+        "last_tool_success": false,
+        "failure": false,
+        "shutdowns": 0,
+        "end_requested": false,
+        "dnc": false
+      },
+      "synthetic_action_results": {
+        "send_email": {
+          "success": false,
+          "status": "in_progress",
+          "confirmation_allowed": false,
+          "provider": "synthetic-email",
+          "request_id": "synthetic-in_progress-request-1",
+          "message_id": null,
+          "message": "The result is unresolved; check the original request before retrying."
+        }
+      },
+      "steps": [
+        {
+          "kind": "caller",
+          "item": "caller-0",
+          "text": "Please email the details."
+        },
+        {
+          "kind": "tool",
+          "name": "send_email",
+          "arguments": {}
+        },
+        {
+          "kind": "response",
+          "text": "The email was sent to you."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-1",
+          "text": "What happened to the email?"
+        },
+        {
+          "kind": "response",
+          "text": "The email could not be sent."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        },
+        {
+          "kind": "caller",
+          "item": "caller-2",
+          "text": "What should happen with the email request?"
+        },
+        {
+          "kind": "response",
+          "text": "Please send the email again."
+        },
+        {
+          "kind": "response",
+          "text": "I couldn't confirm the outcome of that request. It needs to be checked before trying again."
+        }
+      ]
+    },
+    {
+      "id": "native.nonprice_supported",
+      "semantic_ids": [
+        "ag04.grounded_answer"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "What does the terminal require for contactless payments?"
+        },
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "What does the terminal require for contactless payments?"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "source_facts": [
+        {
+          "id": "fixture-contactless",
+          "version": 7,
+          "source_id": "fixture-terminal-policy",
+          "source_version": 3,
+          "heading": "Contactless payments and internet connection",
+          "content": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "matched"
+        ],
+        "submissions": 1,
+        "repair_requests": 0,
+        "shutdowns": 0,
+        "effect_attempts": 0
+      },
+      "knowledge_expectations": [
+        {
+          "status": "matched",
+          "source_policy": "admission_snapshot",
+          "sources": [
+            {
+              "version": 7,
+              "source_id": "fixture-terminal-policy",
+              "source_version": 3,
+              "node_id": "fixture-contactless"
+            }
+          ],
+          "source_text": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expected_submitted_speech": [
+        "The terminal requires a compatible internet connection to accept contactless payments."
+      ]
+    },
+    {
+      "id": "native.nonprice_absent_link",
+      "semantic_ids": [
+        "ag04.grounded_answer"
+      ],
+      "steps": [
+        {
+          "kind": "caller",
+          "text": "What does the terminal require for contactless payments?"
+        },
+        {
+          "kind": "tool",
+          "name": "knowledge_lookup",
+          "arguments": {
+            "query": "What does the terminal require for contactless payments?"
+          }
+        },
+        {
+          "kind": "response",
+          "text": "The terminal requires a compatible internet connection to accept contactless payments. I can provide a download link for the setup guide."
+        }
+      ],
+      "source_facts": [
+        {
+          "id": "fixture-contactless",
+          "version": 7,
+          "source_id": "fixture-terminal-policy",
+          "source_version": 3,
+          "heading": "Contactless payments and internet connection",
+          "content": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expect": {
+        "tool_statuses": [
+          "matched"
+        ],
+        "submissions": 0,
+        "repair_requests": 1,
+        "shutdowns": 0,
+        "effect_attempts": 0
+      },
+      "knowledge_expectations": [
+        {
+          "status": "matched",
+          "source_policy": "admission_snapshot",
+          "sources": [
+            {
+              "version": 7,
+              "source_id": "fixture-terminal-policy",
+              "source_version": 3,
+              "node_id": "fixture-contactless"
+            }
+          ],
+          "source_text": "The terminal requires a compatible internet connection to accept contactless payments."
+        }
+      ],
+      "expected_submitted_speech": []
+    }
+  ],
+  "profiles": {
+    "openai": {
+      "model": "gpt-realtime-2",
+      "voice": "ash",
+      "settings": {
+        "reasoning_effort": "low"
+      }
+    },
+    "xai": {
+      "model": "grok-voice-think-fast-1.0",
+      "voice": "eve",
+      "settings": {
+        "reasoning_effort": "high",
+        "turn_detection": {
+          "type": "server_vad",
+          "threshold": 0.85
+        }
+      }
+    }
+  }
+}

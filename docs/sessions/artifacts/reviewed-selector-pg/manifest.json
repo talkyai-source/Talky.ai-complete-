@@ -1,0 +1,92 @@
+{
+  "date": "2026-10-06",
+  "source_commit": "5bdec4f32eaca4ba443a653746b9b8edd55a8253",
+  "source_baseline": "4c91e11214fa225eef6ff49eed4357ff8c836f82",
+  "hash_algorithm": "Source SHA-256 uses read_bytes().replace(b'\\r\\n',b'\\n'); artifact raw and LF hashes are labelled separately.",
+  "source_hashes": {
+    "backend/app/services/connector_resolver.py": "54a1ffc131a84388283ceee3df59e2fcf7d88ba5d8bb06712cc2cecbb809567a",
+    "backend/app/core/postgres_adapter.py": "012685e51c160e0f1ee13ea0f5c391e7ee1c0e6e27f9e3ec5dda0a2dbc93e074",
+    "backend/app/core/db.py": "70be6b21f95376ab8cc39b2a41e1332d76a605aa89414bca616b87cc87e9209e",
+    "backend/tests/unit/test_reviewed_selector_identity_types.py": "c1aea1efe6929be29cd0cfc1fe6cfd3fe6c571cd08d7d0fd28cc20369eb9e7a6"
+  },
+  "source_matches_committed_git_bytes": true,
+  "actual_pg_final_source_matches_commit": true,
+  "pytest": {
+    "passed": 168,
+    "failed": 0,
+    "skipped": 0,
+    "new_typed_controls": 16
+  },
+  "actual_pg": {
+    "passed": 12,
+    "public_unchanged": true,
+    "source_unchanged": true,
+    "schema_removed": true,
+    "role_removed": true,
+    "unexpected_network_attempts": 0,
+    "allowed_windows_loop_selfpipes": 61
+  },
+  "initial_harness_failure_preserved": true,
+  "baseline_uuid_defect_preserved": true,
+  "metadata_discovery_validated": false,
+  "source_review": "Root reviewed exact UUID helper diff and16 typed controls before frozen final SQL execution; no subsequent app/test edits.",
+  "production_gate_promoted": false,
+  "artifacts": {
+    "baseline-result.json": {
+      "sha256_raw": "9e6f0f80947b5bbc5a4ca7eff3f3e78a22607ba845b4d06e343173b009035741",
+      "sha256_lf": "bf8c010b056d36682090ebb918c7cac18aacd0a79a61afa14e73812093cc5f09"
+    },
+    "baseline-uuid-probe.py": {
+      "sha256_raw": "767f469355a3fc8c3516eed0f1ec1c86275af1cdbfa6f5a25e5f291ab69e7a02",
+      "sha256_lf": "767f469355a3fc8c3516eed0f1ec1c86275af1cdbfa6f5a25e5f291ab69e7a02"
+    },
+    "baseline-uuid-result.json": {
+      "sha256_raw": "3d17c5d9945c1e7a12e0fabaff4d6b0f6671005330d69d068445e03c3488867a",
+      "sha256_lf": "56d13c2798f86229ce561f94e7ad91c0a5867950cdd5885569ebe700cc1740f4"
+    },
+    "baseline-uuid.txt": {
+      "sha256_raw": "febc7dfd7d5da0b18f66585625e2c2308a5e0b045caae4c4b613d3ef0ebc5eb4",
+      "sha256_lf": "6618948dac5ee76e93fef07efc003a834464bdfbad81ebe40a58b97240569371"
+    },
+    "baseline.txt": {
+      "sha256_raw": "72dc69e686364f4b1e978c878d2a18d71793f3040ac2ae1eb12649c8924cc638",
+      "sha256_lf": "2198f52e056eccbf3a92e027ef6b99b1ed79b7a6f776881804ee7556cf87fda6"
+    },
+    "commands.json": {
+      "sha256_raw": "9b064e4f8d186c91deaef8b4e0650057352b904cb03782c14dfbc3ec8820534b",
+      "sha256_lf": "9b064e4f8d186c91deaef8b4e0650057352b904cb03782c14dfbc3ec8820534b"
+    },
+    "final-result.json": {
+      "sha256_raw": "f5e9d4bb1d95edccb27b72ced1b69fa97691ba694b373dc04aa2ba503b50c8b9",
+      "sha256_lf": "8efd4bb15a2f34a4cbe5b3316b468378ef2652aa8f71f4607a83b42a4ee72737"
+    },
+    "final.txt": {
+      "sha256_raw": "e125c4add2b18a565c7b610af2cb1c521c964ea23a7249e9dea092a7810e291c",
+      "sha256_lf": "fd7dfba6cd58197e12fe0a7ba81d405793daaa422ed1a17f3ecf0514129dca04"
+    },
+    "focused-final.txt": {
+      "sha256_raw": "93c36eaf8b40a7dc9e33120607d12daef431fec4ad87b5a68e076a3d32049b11",
+      "sha256_lf": "9b60aeab8a010187a8b25946cfd3d1eaf0645f54b78f60d7ccf4a49ebdfa58d8"
+    },
+    "identity-red.txt": {
+      "sha256_raw": "694f0ccf2df4767ee61022bdb7d5d7ff46cca50ac318a928915a08b696a67517",
+      "sha256_lf": "d1cdf4a7b90bd2e37db09946c102da8a60c1a6663df6265ce3d0e58975f517bd"
+    },
+    "initial-probe.py": {
+      "sha256_raw": "43d21e930ac68df9dd3a074bbe6721a5539629d6c380555a7461e5eef31ec882",
+      "sha256_lf": "43d21e930ac68df9dd3a074bbe6721a5539629d6c380555a7461e5eef31ec882"
+    },
+    "lint.txt": {
+      "sha256_raw": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "sha256_lf": "82b3e6a6c090a57601d22943bd23fca9218d1031dbe5a7b754092f9a156b4f18"
+    },
+    "probe.py": {
+      "sha256_raw": "4373635739790d77495bac104d857bbc14fac8081374705fdf0a8310a0012725",
+      "sha256_lf": "4373635739790d77495bac104d857bbc14fac8081374705fdf0a8310a0012725"
+    },
+    "verification.md": {
+      "sha256_raw": "1ae682546d4d3019a841d931b94f4791ea821c47fce53e88c94921d3df39f579",
+      "sha256_lf": "1ae682546d4d3019a841d931b94f4791ea821c47fce53e88c94921d3df39f579"
+    }
+  }
+}

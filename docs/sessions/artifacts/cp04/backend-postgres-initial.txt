@@ -1,0 +1,11 @@
+........................................................................ [ 50%]
+...........F..........................................................   [100%]
+================================== FAILURES ===================================
+__________ test_actual_alembic_downgrade_refuses_to_destroy_receipts __________
+tests\integration\test_billing_webhook_migration.py:192: in test_actual_alembic_downgrade_refuses_to_destroy_receipts
+    assert process.returncode != 0 and b"identities must be retained" in output
+E   assert (1 != 0 and b'identities must be retained' in b'INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\r\nINFO  [alembic.runtime.migration] Will assume tran...viewed forward migration")\r\nRuntimeError: Refund observations must be retained; use a reviewed forward migration\r\n')
+E    +  where 1 = <Process 21144>.returncode
+=========================== short test summary info ===========================
+FAILED tests/integration/test_billing_webhook_migration.py::test_actual_alembic_downgrade_refuses_to_destroy_receipts
+1 failed, 141 passed in 98.04s (0:01:38)

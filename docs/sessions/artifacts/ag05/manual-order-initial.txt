@@ -1,0 +1,45 @@
+F                                                                        [100%]
+================================== FAILURES ===================================
+____ test_contact_projection_prefers_latest_manual_edit_even_on_older_call ____
+
+lead_db = namespace(admin=<asyncpg.connection.Connection object at 0x0000025E5851C410>, pool=<asyncpg.pool.Pool object at 0x0000....lead_capture_service.LeadCaptureService object at 0x0000025E584161E0>, migration_head='0056_billing_refund_snapshots')
+
+    async def test_contact_projection_prefers_latest_manual_edit_even_on_older_call(lead_db):
+        newer_call = uuid4()
+        lead_db.calls.append(newer_call)
+        await lead_db.admin.execute("UPDATE calls SET created_at=NOW()-INTERVAL '1 day' WHERE id=$1", lead_db.calls[0])
+        await lead_db.admin.execute(
+            """INSERT INTO calls(id,tenant_id,campaign_id,lead_id,phone_number,status)
+            VALUES($1,$2,$3,$4,'+15550001001','answered')""",
+            newer_call, lead_db.tenants[0], lead_db.campaigns[0], lead_db.leads[0],
+        )
+        user = SimpleNamespace(tenant_id=str(lead_db.tenants[0]))
+>       await api.correct_lead_detail(str(newer_call), "identified_need",
+            api.ManualEdit(value="Earlier operator review", field_type="notes"), user)
+
+tests\integration\test_ag05_lead_evidence.py:742:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+app\api\v1\endpoints\lead_details.py:382: in correct_lead_detail
+    written = await _service().capture(
+app\domain\services\lead_capture_service.py:286: in capture
+    row = await conn.fetchrow(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:749: in fetchrow
+    data = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1925: in _do_execute
+    stmt = await self._get_statement(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:433: in _get_statement
+    statement = await self._protocol.prepare(
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.AmbiguousParameterError: inconsistent types deduced for parameter $5
+E   DETAIL:  text versus character varying
+
+asyncpg\protocol\protocol.pyx:166: AmbiguousParameterError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_ag05_lead_evidence.py::test_contact_projection_prefers_latest_manual_edit_even_on_older_call
+1 failed, 25 deselected in 6.11s

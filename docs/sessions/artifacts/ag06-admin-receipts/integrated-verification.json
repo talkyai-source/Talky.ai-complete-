@@ -1,0 +1,40 @@
+{
+  "candidate": "b0cb768997495b9b80026d3dbeb40958d6a76a3d",
+  "source_sha256_lf": {
+    "Admin/frontend/src/components/ActionDetailDrawer.tsx": "6ebc0c919b3ce073e3ec25bf3b84517bfd60559cffdfd388f511adc9435f9d7f",
+    "Admin/frontend/src/components/ActionReceiptPanel.tsx": "4d259cfe94dfbecd1ad05d0a115f1ef368f4b4851fdd1f23b9285d6a7e70606d",
+    "Admin/frontend/src/components/ActionStatusBadge.tsx": "19bd3c13d9af0220d1c5b9e52ce6ca14306a5bced670b95fa86fda97c0434252",
+    "Admin/frontend/src/components/ActionsTable.tsx": "c5eb122f868079ceacf58d643839c8cc97790e10d5c4b3ea791b70397dbbc23a",
+    "Admin/frontend/src/index.css": "88816565faf17ee9f18c031f7af98ae6b5167a8cd14353367970b0b1c68e7417",
+    "Admin/frontend/src/lib/api.ts": "3a2b329550ca4c86f56849701f5ec5fbc42a7d3888843b3221113d1854dab331",
+    "Admin/frontend/src/pages/ActionsPage.tsx": "ac0080e7782bcb458b8008cd470b7cffa71e82e613fa3ff98462bdb989284731",
+    "Admin/frontend/tests/action-receipts.test.mjs": "b588302bc209c074cf4c77c825b647efd74544d772240463b7f9380270226acb",
+    "backend/app/api/v1/endpoints/admin/actions.py": "98622b862b4e430326b8ae01c66809e49726664b1df3d00a9af804053e430c67",
+    "backend/tests/unit/test_ag06_admin_receipt_projection.py": "f6beb39caea10da4e08dd1b737e8a3c5fb10d243fdacf5b09d837d450f18119d"
+  },
+  "source_matches_owner": true,
+  "tracked_diff_after_runs": [],
+  "checks": [
+    {
+      "command": "python docs/sessions/artifacts/ag06-admin-receipts/run_backend.py",
+      "cwd": "repository root",
+      "exit_code": 0,
+      "passed": 75,
+      "skipped": 0,
+      "warnings": 22,
+      "seconds": 7.45,
+      "output": "integrated-backend.txt",
+      "environment": "Same exact dependency overlay and network-disabled owner launcher."
+    },
+    {
+      "command": "npm test",
+      "cwd": "Admin/frontend",
+      "exit_code": 0,
+      "passed": 34,
+      "skipped": 0,
+      "seconds": 1.9675124,
+      "output": "integrated-admin.txt"
+    }
+  ],
+  "limits": "Synthetic component/effect and ASGI integration, no real provider, PostgreSQL, browser or operator-resolution acceptance."
+}

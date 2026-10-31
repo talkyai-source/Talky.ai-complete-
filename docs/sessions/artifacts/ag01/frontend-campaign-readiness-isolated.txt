@@ -1,0 +1,390 @@
+✔ start is disabled until the server proves readiness, including cloud routes (189.3894ms)
+✔ a failed refresh disables previously ready start and offers a successful retry (77.9298ms)
+✔ bulk resume waits for every selected route and shows the server reason (37.7006ms)
+✔ a closed or nonlaunch surface performs no readiness request (5.5259ms)
+✖ table row resume is disabled but viewing details stays available (280.1791ms)
+✔ command-bar keyboard execution cannot bypass unavailable resume routes (85.6774ms)
+ℹ tests 6
+ℹ suites 0
+ℹ pass 5
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 13279.9418
+
+✖ failing tests:
+
+test at src\components\campaigns\campaign-readiness.test.tsx:2:5988
+✖ table row resume is disabled but viewing details stays available (280.1791ms)
+  Error [TestingLibraryElementError]: Unable to find an accessible element with the role "button" and name "Row actions"
+  
+  Here are the accessible roles:
+  
+    textbox:
+  
+    Name "":
+    [36m<input[39m
+      [33mclass[39m=[32m"flex h-10 w-full rounded-md border-input dark:border-foreground/20 dark:bg-accent/20 px-3 py-2 text-sm ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground focus-visible:outline-none focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 mt-1 border-0 bg-background/50 text-foreground placeholder:text-muted-foreground hover:bg-background focus-visible:ring-0 focus-visible:ring-offset-0"[39m
+      [33mplaceholder[39m=[32m"Search campaigns…"[39m
+      [33mvalue[39m=[32m""[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    button:
+  
+    Name "All statuses":
+    [36m<button[39m
+      [33maria-expanded[39m=[32m"false"[39m
+      [33maria-haspopup[39m=[32m"listbox"[39m
+      [33mclass[39m=[32m"mt-1 flex h-10 w-full items-center justify-between rounded-md border border-input bg-background/50 px-3 text-sm text-foreground hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Export":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border px-4 py-2 h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "New Campaign":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border px-4 py-2 h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "First":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Prev":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Next":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Last":
+    [36m<button[39m
+      [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border border-input bg-background shadow-sm hover:bg-accent hover:text-accent-foreground h-8 rounded-md px-3 text-xs"[39m
+      [33mdisabled[39m=[32m""[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Sort by Campaign":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Campaign"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Sort by Status":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Status"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-start"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Sort by Completion":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Completion"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Sort by Success Rate":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Success Rate"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Sort by Leads":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Leads"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Sort by Completed":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Completed"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Sort by Failed":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Sort by Failed"[39m
+      [33mclass[39m=[32m"flex items-center gap-2 rounded-md px-2 py-1 text-left transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring justify-end"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Expand row details":
+    [36m<button[39m
+      [33maria-label[39m=[32m"Expand row details"[39m
+      [33mclass[39m=[32m"rounded-md p-1 text-muted-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    Name "Example campaign —":
+    [36m<button[39m
+      [33mclass[39m=[32m"min-w-0 flex-1 rounded-md text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+      [33mtype[39m=[32m"button"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    spinbutton:
+  
+    Name "Minimum success rate":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Minimum success rate"[39m
+      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+      [33mmax[39m=[32m"100"[39m
+      [33mmin[39m=[32m"0"[39m
+      [33mtype[39m=[32m"number"[39m
+      [33mvalue[39m=[32m"0"[39m
+    [36m/>[39m
+  
+    Name "Maximum success rate":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Maximum success rate"[39m
+      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+      [33mmax[39m=[32m"100"[39m
+      [33mmin[39m=[32m"0"[39m
+      [33mtype[39m=[32m"number"[39m
+      [33mvalue[39m=[32m"100"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    link:
+  
+    Name "New Campaign":
+    [36m<a[39m
+      [33mclass[39m=[32m"shrink-0"[39m
+      [33mhref[39m=[32m"/campaigns/new"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    combobox:
+  
+    Name "Rows per page":
+    [36m<select[39m
+      [33maria-label[39m=[32m"Rows per page"[39m
+      [33mclass[39m=[32m"h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    option:
+  
+    Name "10":
+    [36m<option[39m
+      [33mvalue[39m=[32m"10"[39m
+    [36m/>[39m
+  
+    Name "25":
+    [36m<option[39m
+      [33mvalue[39m=[32m"25"[39m
+    [36m/>[39m
+  
+    Name "50":
+    [36m<option[39m
+      [33mvalue[39m=[32m"50"[39m
+    [36m/>[39m
+  
+    Name "100":
+    [36m<option[39m
+      [33mvalue[39m=[32m"100"[39m
+    [36m/>[39m
+  
+    Name "All":
+    [36m<option[39m
+      [33mvalue[39m=[32m"All"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    rowgroup:
+  
+    Name "":
+    [36m<div[39m
+      [33mclass[39m=[32m"scrollbar-gutter-stable relative max-h-[520px] overflow-y-auto overflow-x-auto overscroll-contain"[39m
+      [33mdata-testid[39m=[32m"campaigns-performance-table"[39m
+      [33mrole[39m=[32m"rowgroup"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    row:
+  
+    Name "Select all visible campaigns Campaign ↕ Status ↕ Completion ↕ Success Rate ↕ Leads ↕ Completed ↕ Failed ↕":
+    [36m<div[39m
+      [33mclass[39m=[32m"sticky top-0 z-20 grid gap-2 border-b border-border bg-background px-3 py-2 text-xs font-semibold text-muted-foreground grid-cols-[36px_minmax(10rem,1.6fr)_110px_170px_120px_90px_90px_90px] min-w-[59.125rem]"[39m
+      [33mrole[39m=[32m"row"[39m
+    [36m/>[39m
+  
+    Name "Select Example campaign Example campaign — Paused 0.0% 0.0% 1 0 0":
+    [36m<div[39m
+      [33mclass[39m=[32m"grid items-center gap-2 px-3 py-2 text-sm text-foreground grid-cols-[36px_minmax(10rem,1.6fr)_110px_170px_120px_90px_90px_90px]"[39m
+      [33mrole[39m=[32m"row"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+    checkbox:
+  
+    Name "Select all visible campaigns":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Select all visible campaigns"[39m
+      [33mclass[39m=[32m"h-4 w-4 rounded border-input bg-background accent-primary"[39m
+      [33mtype[39m=[32m"checkbox"[39m
+    [36m/>[39m
+  
+    Name "Select Example campaign":
+    [36m<input[39m
+      [33maria-label[39m=[32m"Select Example campaign"[39m
+      [33mclass[39m=[32m"h-4 w-4 rounded border-input bg-background accent-primary"[39m
+      [33mtype[39m=[32m"checkbox"[39m
+    [36m/>[39m
+  
+    --------------------------------------------------
+  
+  Ignored nodes: comments, script, style
+  [36m<body>[39m
+    [36m<div>[39m
+      [36m<div[39m
+        [33mclass[39m=[32m"space-y-4"[39m
+      [36m>[39m
+        [36m<div[39m
+          [33mclass[39m=[32m"content-card relative"[39m
+        [36m>[39m
+          [36m<div[39m
+            [33mclass[39m=[32m"grid grid-cols-1 gap-4 md:grid-cols-[1fr_auto] md:items-start"[39m
+          [36m>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"min-w-0"[39m
+            [36m>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"text-sm font-semibold text-foreground"[39m
+              [36m>[39m
+                [0mFilters[0m
+              [36m</div>[39m
+              [36m<div[39m
+                [33mclass[39m=[32m"mt-3 grid grid-cols-1 gap-4 md:grid-cols-3 md:items-start"[39m
+              [36m>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"relative flex min-w-0 flex-col"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"text-xs font-semibold text-muted-foreground"[39m
+                  [36m>[39m
+                    [0mCampaign name[0m
+                  [36m</label>[39m
+                  [36m<input[39m
+                    [33mclass[39m=[32m"flex h-10 w-full rounded-md border-input dark:border-foreground/20 dark:bg-accent/20 px-3 py-2 text-sm ring-offset-background transition-[background-color,border-color,box-shadow] duration-150 ease-out dark:hover:bg-accent/30 hover:border-foreground/20 file:border-0 file:bg-transparent file:text-sm file:font-medium file:text-foreground focus-visible:outline-none focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50 mt-1 border-0 bg-background/50 text-foreground placeholder:text-muted-foreground hover:bg-background focus-visible:ring-0 focus-visible:ring-offset-0"[39m
+                    [33mplaceholder[39m=[32m"Search campaigns…"[39m
+                    [33mvalue[39m=[32m""[39m
+                  [36m/>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"relative flex min-w-0 flex-col"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"text-xs font-semibold text-muted-foreground"[39m
+                  [36m>[39m
+                    [0mStatus[0m
+                  [36m</label>[39m
+                  [36m<button[39m
+                    [33maria-expanded[39m=[32m"false"[39m
+                    [33maria-haspopup[39m=[32m"listbox"[39m
+                    [33mclass[39m=[32m"mt-1 flex h-10 w-full items-center justify-between rounded-md border border-input bg-background/50 px-3 text-sm text-foreground hover:bg-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"[39m
+                    [33mtype[39m=[32m"button"[39m
+                  [36m>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"truncate"[39m
+                    [36m>[39m
+                      [0mAll statuses[0m
+                    [36m</span>[39m
+                    [36m<svg[39m
+                      [33maria-hidden[39m=[32m"true"[39m
+                      [33mclass[39m=[32m"lucide lucide-chevron-down h-4 w-4 text-muted-foreground"[39m
+                      [33mfill[39m=[32m"none"[39m
+                      [33mheight[39m=[32m"24"[39m
+                      [33mstroke[39m=[32m"currentColor"[39m
+                      [33mstroke-linecap[39m=[32m"round"[39m
+                      [33mstroke-linejoin[39m=[32m"round"[39m
+                      [33mstroke-width[39m=[32m"2"[39m
+                      [33mviewBox[39m=[32m"0 0 24 24"[39m
+                      [33mwidth[39m=[32m"24"[39m
+                      [33mxmlns[39m=[32m"http://www.w3.org/2000/svg"[39m
+                    [36m>[39m
+                      [36m<path[39m
+                        [33md[39m=[32m"m6 9 6 6 6-6"[39m
+                      [36m/>[39m
+                    [36m</svg>[39m
+                  [36m</button>[39m
+                [36m</div>[39m
+                [36m<div[39m
+                  [33mclass[39m=[32m"flex min-w-0 flex-col"[39m
+                [36m>[39m
+                  [36m<label[39m
+                    [33mclass[39m=[32m"text-xs font-semibold text-muted-foreground"[39m
+                  [36m>[39m
+                    [0mSuccess rate[0m
+                  [36m</label>[39m
+                  [36m<div[39m
+                    [33mclass[39m=[32m"mt-1 flex h-10 items-center gap-2 rounded-md border-0 bg-background/50 px-2"[39m
+                  [36m>[39m
+                    [36m<input[39m
+                      [33maria-label[39m=[32m"Minimum success rate"[39m
+                      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"0"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"0"[39m
+                    [36m/>[39m
+                    [36m<span[39m
+                      [33mclass[39m=[32m"text-sm text-muted-foreground"[39m
+                    [36m>[39m
+                      [0mto[0m
+                    [36m</span>[39m
+                    [36m<input[39m
+                      [33maria-label[39m=[32m"Maximum success rate"[39m
+                      [33mclass[39m=[32m"h-8 flex-1 min-w-0 rounded-md border-0 bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-0"[39m
+                      [33mmax[39m=[32m"100"[39m
+                      [33mmin[39m=[32m"0"[39m
+                      [33mtype[39m=[32m"number"[39m
+                      [33mvalue[39m=[32m"100"[39m
+                    [36m/>[39m
+                  [36m</div>[39m
+                [36m</div>[39m
+              [36m</div>[39m
+            [36m</div>[39m
+            [36m<div[39m
+              [33mclass[39m=[32m"flex items-center justify-end gap-2 md:flex-col md:items-end md:justify-between md:self-stretch"[39m
+            [36m>[39m
+              [36m<button[39m
+                [33mclass[39m=[32m"inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-lg text-sm font-medium transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-out motion-reduce:transition-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 hover:scale-[1.01] active:scale-[0.99] [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 border px-4 py-2 h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"[39m
+                [33mtype[39m=[32m"button"[39m
+              [36m>[39m
+                [0mExport[0m
+              [36m</button>[39m
+              [36m<a[39m
+                [33mclass[39m=[32m"shrink-0"[...
+      at Object.getElementError (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\config.js:37:19)
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:76:38
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:52:17
+      at C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\node_modules\@testing-library\dom\dist\query-helpers.js:95:19
+      at TestContext.<anonymous> (C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\Talk-Leee\src\components\campaigns\campaign-readiness.test.tsx:87:28)
+      at Test.runInAsyncScope (node:async_hooks:226:14)
+      at Test.run (node:internal/test_runner/test:1201:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:831:18)
+      at Test.postRun (node:internal/test_runner/test:1330:19)
+      at Test.run (node:internal/test_runner/test:1258:12)

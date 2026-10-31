@@ -1,0 +1,33 @@
+FFFF                                                                     [100%]
+================================== FAILURES ===================================
+__ test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts ___
+tests\integration\test_bootstrap_contract_repair.py:747: in test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts
+    assert (
+E   AssertionError: assert 525 == 3
+E    +  where 525 = <bound method Result.scalar_one of <sqlalchemy.engine.cursor.CursorResult object at 0x00000193A490F460>>()
+E    +    where <bound method Result.scalar_one of <sqlalchemy.engine.cursor.CursorResult object at 0x00000193A490F460>> = <sqlalchemy.engine.cursor.CursorResult object at 0x00000193A490F460>.scalar_one
+E    +      where <sqlalchemy.engine.cursor.CursorResult object at 0x00000193A490F460> = <bound method Connection.execute of <sqlalchemy.engine.base.Connection object at 0x00000193A4911190>>(<sqlalchemy.sql.elements.TextClause object at 0x00000193A48D4410>)
+E    +        where <bound method Connection.execute of <sqlalchemy.engine.base.Connection object at 0x00000193A4911190>> = <sqlalchemy.engine.base.Connection object at 0x00000193A4911190>.execute
+E    +        and   <sqlalchemy.sql.elements.TextClause object at 0x00000193A48D4410> = text('SELECT count(*) FROM billing_ledger')
+_ test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity _
+tests\integration\test_bootstrap_contract_repair.py:873: in test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity
+    assert "Refusing to downgrade 0048" in result.stderr
+E   assert 'Refusing to downgrade 0048' in 'INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\nINFO  [alembic.runtime.migration] Will assume transac...t evidence during rollback")\nRuntimeError: Refusing to discard original CRM contact effect evidence during rollback\n'
+E    +  where 'INFO  [alembic.runtime.migration] Context impl PostgresqlImpl.\nINFO  [alembic.runtime.migration] Will assume transac...t evidence during rollback")\nRuntimeError: Refusing to discard original CRM contact effect evidence during rollback\n' = CompletedProcess(args=['C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe', '-... evidence during rollback")\nRuntimeError: Refusing to discard original CRM contact effect evidence during rollback\n').stderr
+__________ test_actual_alembic_downgrade_refuses_to_destroy_receipts __________
+tests\integration\test_billing_webhook_migration.py:195: in test_actual_alembic_downgrade_refuses_to_destroy_receipts
+    assert process.returncode != 0 and any(message in output for message in (
+E   assert (1 != 0 and False)
+E    +  where 1 = <Process 6588>.returncode
+E    +  and   False = any(<generator object test_actual_alembic_downgrade_refuses_to_destroy_receipts.<locals>.<genexpr> at 0x00000193A48BD700>)
+_________ test_committed_concurrent_claim_and_lost_response_recovery __________
+tests\integration\test_ag06_dashboard_receipts.py:68: in test_committed_concurrent_claim_and_lost_response_recovery
+    assert db.migration_head in {"0058_crm_contact_effect", "0059_auth_identity_contract"}
+E   AssertionError: assert '0061_dnc_runtime_contract' in {'0058_crm_contact_effect', '0059_auth_identity_contract'}
+E    +  where '0061_dnc_runtime_contract' = namespace(admin=<asyncpg.connection.Connection object at 0x00000193A4B8DF40>, pool=<asyncpg.pool.Pool object at 0x0000...UUID('409ecccf-f2b4-4a6d-8845-68d4187cb0f2')], client=namespace(pool=<asyncpg.pool.Pool object at 0x00000193A4C23270>)).migration_head
+=========================== short test summary info ===========================
+FAILED tests/integration/test_bootstrap_contract_repair.py::test_billing_ledger_is_append_only_for_tenant_service_and_owner_contexts
+FAILED tests/integration/test_bootstrap_contract_repair.py::test_crm_receipt_cli_downgrade_refuses_without_moving_marker_or_losing_identity
+FAILED tests/integration/test_billing_webhook_migration.py::test_actual_alembic_downgrade_refuses_to_destroy_receipts
+FAILED tests/integration/test_ag06_dashboard_receipts.py::test_committed_concurrent_claim_and_lost_response_recovery
+4 failed in 61.00s (0:01:00)

@@ -1,0 +1,77 @@
+{
+  "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-native-query-intent-20261007\\backend",
+  "interpreter": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+  "environment": {
+    "PYTHONUTF8": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONPATH": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-native-query-intent-20261007\\backend",
+    "ENVIRONMENT": "test",
+    "DATABASE_URL": "postgresql://test:test@127.0.0.1:1/unavailable_test"
+  },
+  "executed": [
+    {
+      "argv": [
+        "-B",
+        "../docs/sessions/artifacts/ag02-native-query-intent/runner.py",
+        "baseline"
+      ],
+      "output": "baseline.txt",
+      "runner_exit_code": 1,
+      "shell_wrapper_exit_code": 0,
+      "note": "Log printed after command; final Get-Content set wrapper success. Runner and pytest failure retained."
+    },
+    {
+      "argv": [
+        "-B",
+        "../docs/sessions/artifacts/ag02-native-query-intent/runner.py",
+        "final"
+      ],
+      "output": "final.txt",
+      "runner_exit_code": 0,
+      "shell_wrapper_exit_code": 0
+    },
+    {
+      "argv": [
+        "-m",
+        "ruff",
+        "check",
+        "--select",
+        "F",
+        "--extend-ignore",
+        "F401,F841",
+        "app/realtime/prompts.py",
+        "app/realtime/openai.py",
+        "tests/unit/test_realtime_quality_pass.py",
+        "tests/unit/test_realtime_profile_contract.py",
+        "tests/unit/test_explicit_secret_boundary.py",
+        "tests/unit/test_true_inbound_prompt_separation.py",
+        "../docs/sessions/artifacts/ag02-native-query-intent/runner.py"
+      ],
+      "output": "lint.txt",
+      "exit_code": 0
+    },
+    {
+      "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-native-query-intent-20261007",
+      "program": "git",
+      "argv": [
+        "diff",
+        "--check"
+      ],
+      "exit_code": 0,
+      "output": "No errors; original tool output retained in session."
+    },
+    {
+      "cwd": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\tmp\\ag02-native-query-intent-20261007",
+      "program": "git",
+      "argv": [
+        "show",
+        "--format=",
+        "--check",
+        "d389c60c"
+      ],
+      "exit_code": 0,
+      "output": "diff-check.txt"
+    }
+  ],
+  "qualification": "Offline instructions/serialization only; existing venv, no exact dependency claim."
+}

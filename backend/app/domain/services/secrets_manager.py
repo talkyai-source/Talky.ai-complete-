@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import secrets
 import string
 from base64 import b64decode, b64encode
@@ -20,7 +21,32 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from cryptography.hazmat.primitives.keywrap import aes_key_unwrap, aes_key_wrap
 from pydantic import BaseModel
 
+from app.core.db_utils import acquire_with_tenant
+
 logger = logging.getLogger(__name__)
+
+# validate_api_key candidate lookups (migration 0068). Module-level so tests can
+# EXPLAIN the exact statements. Both keep the row filters of the original full
+# scan and differ only in how candidates are picked: by lookup_hash (indexed), or
+# - for keys issued before the column existed - by lookup_hash IS NULL. The legacy
+# pass is ordered so concurrent backfills lock rows in one order and cannot
+# deadlock.
+_VALIDATE_ROWS_SQL = """
+    SELECT secret_id, tenant_id, encrypted_value, encrypted_dek, iv, permissions
+    FROM tenant_secrets
+    WHERE secret_type = 'TENANT_API_KEY'
+    AND is_active = TRUE
+    AND (expires_at IS NULL OR expires_at > NOW())
+"""
+_VALIDATE_BY_HASH_SQL = _VALIDATE_ROWS_SQL + "    AND lookup_hash = $1\n"
+_VALIDATE_LEGACY_SQL = _VALIDATE_ROWS_SQL + "    AND lookup_hash IS NULL\n    ORDER BY secret_id\n"
+# The backfill repeats the row's own tenant_id (NULL for platform-owned keys) even
+# though secret_id alone identifies it: no UPDATE here relies on RLS or the id alone.
+_BACKFILL_LOOKUP_HASH_SQL = """
+    UPDATE tenant_secrets SET lookup_hash = $1
+    WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3 AND lookup_hash IS NULL
+"""
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 def _coerce_tenant_uuid(tenant_id: "UUID | str | None") -> Optional[UUID]:
@@ -35,6 +61,14 @@ def _coerce_tenant_uuid(tenant_id: "UUID | str | None") -> Optional[UUID]:
     if tenant_id is None:
         return None
     return UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
+
+
+class SecretValueRequired(ValueError):
+    """rotate() was asked to rotate a non-API-key secret without a new value.
+
+    Distinct from the plain ``ValueError("Secret not found")`` so the route can
+    answer 400 instead of 404.
+    """
 
 
 class SecretType(str, Enum):
@@ -179,7 +213,14 @@ class SecretsManager:
         return f"{prefix}{random_part}"
 
     def _hash_api_key(self, api_key: str) -> str:
-        """Hash API key for storage (only store hash, not actual key)"""
+        """Hash API key for storage (only store hash, not actual key).
+
+        Also the value of ``tenant_secrets.lookup_hash``. Keys from
+        ``_generate_api_key`` are 48 random characters from a 62-symbol alphabet
+        (~285 bits), so an unsalted fast hash can be neither reversed nor
+        precomputed and is a safe lookup key. It is not a password hash: do not
+        use it for low-entropy secrets.
+        """
         return hashlib.sha256(api_key.encode()).hexdigest()
 
     def _verify_api_key(self, api_key: str, stored_hash: str) -> bool:
@@ -245,14 +286,16 @@ class SecretsManager:
         # Determine tenant_id from owner
         tenant_id = owner_uuid if owner_type == "tenant" else None
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             await conn.execute(
                 """
                 INSERT INTO tenant_secrets (
                     secret_id, tenant_id, created_by, secret_type, secret_name,
                     description, encrypted_value, encrypted_dek, iv, algorithm,
-                    permissions, version, expires_at, is_active
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    permissions, version, expires_at, is_active, lookup_hash
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                 """,
                 secret_id, tenant_id, creator_uuid, secret_type.value,
                 secret_name or f"{secret_type.value}_{secret_id}",
@@ -262,7 +305,10 @@ class SecretsManager:
                 # already-serialized string here would be double-encoded
                 # into a JSON string scalar instead of a JSON object.
                 permissions or {},
-                1, expires_at, True
+                1, expires_at, True,
+                # SHA-256 of the issued key (None for other secret types): how
+                # validate_api_key finds this row without decrypting the others.
+                api_key_hash,
             )
 
             # Log access
@@ -309,7 +355,9 @@ class SecretsManager:
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         accessor_uuid = UUID(accessed_by) if isinstance(accessed_by, str) else accessed_by
 
-        async with self.db_pool.acquire() as conn:
+        # Secret IDs are opaque platform identifiers; this legacy method has no
+        # tenant input, so its platform caller must cross the strict RLS boundary.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
             row = await conn.fetchrow(
                 "SELECT * FROM tenant_secrets WHERE secret_id = $1",
                 secret_uuid
@@ -394,7 +442,9 @@ class SecretsManager:
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT secret_id, tenant_id, secret_type, secret_name, description,
@@ -449,7 +499,7 @@ class SecretsManager:
         grace_period_hours: int = 24,
         new_value: Optional[dict] = None,
         tenant_id: Optional[UUID | str] = None,
-    ) -> UUID:
+    ) -> tuple[UUID, Optional[str]]:
         """
         Rotate a secret to a new value.
 
@@ -457,7 +507,9 @@ class SecretsManager:
             secret_id: Secret to rotate
             rotated_by: User performing rotation
             grace_period_hours: Hours old secret remains valid
-            new_value: New secret value (if None, generates new)
+            new_value: New secret value. Required for every type except
+                TENANT_API_KEY, whose key is always generated here; raises
+                ``SecretValueRequired`` rather than storing an empty secret.
             tenant_id: When provided, the secret MUST belong to this tenant or
                 the rotation is refused (object-level authz). ``tenant_secrets``
                 has no RLS policy, so without this predicate any authenticated
@@ -466,13 +518,17 @@ class SecretsManager:
                 operate across tenants (already gated by ``platform:admin``).
 
         Returns:
-            new_secret_id: UUID of new secret version
+            (new_secret_id, api_key): ``api_key`` is the plaintext of the newly
+            generated TENANT_API_KEY (shown once, never stored or logged) and
+            ``None`` for every other secret type.
         """
         secret_uuid = UUID(secret_id) if isinstance(secret_id, str) else secret_id
         admin_uuid = UUID(rotated_by) if isinstance(rotated_by, str) else rotated_by
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             # Get current secret — scoped to the caller's tenant when supplied
             # so a cross-tenant secret is indistinguishable from a missing one.
             row = await conn.fetchrow(
@@ -486,33 +542,67 @@ class SecretsManager:
 
             # Create new version
             new_secret_id = uuid4()
+            api_key: Optional[str] = None
+            new_lookup_hash: Optional[str] = None
 
-            if new_value is None and row["secret_type"] == SecretType.TENANT_API_KEY.value:
-                # Generate new API key
-                new_value = {"permissions": row["permissions"]}
-                api_key = self._generate_api_key()
+            if row["secret_type"] == SecretType.TENANT_API_KEY.value:
+                # Keep the old key's environment (tk_test_ stays tk_test_).
+                is_test = False
+                try:
+                    old_dek = self._decrypt_dek(row["encrypted_dek"])
+                    old_value = self._decrypt_value(
+                        row["encrypted_value"], row["iv"], old_dek
+                    )
+                    is_test = str(old_value.get("prefix", "")).startswith(
+                        self.API_KEY_PREFIX_TEST
+                    )
+                except Exception:
+                    logger.warning(
+                        "secret_rotate_old_value_unreadable secret_id=%s "
+                        "- defaulting to a live-prefix key",
+                        secret_uuid,
+                    )
+                new_value = dict(new_value) if new_value else {"permissions": row["permissions"]}
+                api_key = self._generate_api_key(test=is_test)
                 new_value["api_key_hash"] = self._hash_api_key(api_key)
                 new_value["prefix"] = api_key[:16]
+                new_lookup_hash = new_value["api_key_hash"]
+            elif new_value is None:
+                raise SecretValueRequired(
+                    "A new value is required to rotate this secret type"
+                )
+
+            # Keep the original rotation period (90 days when unknown); a
+            # secret created without an expiry stays without one.
+            if row["expires_at"] is None:
+                new_expires_at = None
+            else:
+                period = row["expires_at"] - row["created_at"]
+                if period <= timedelta(0):
+                    period = timedelta(days=90)
+                new_expires_at = datetime.utcnow() + period
 
             # Encrypt new value
             dek = self._generate_dek()
             encrypted_dek = self._encrypt_dek(dek)
-            ciphertext, iv = self._encrypt_value(new_value or {}, dek)
+            ciphertext, iv = self._encrypt_value(new_value, dek)
 
             await conn.execute(
                 """
                 INSERT INTO tenant_secrets (
                     secret_id, tenant_id, created_by, secret_type, secret_name,
                     description, encrypted_value, encrypted_dek, iv, algorithm,
-                    permissions, version, rotated_from, expires_at, is_active
-                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+                    permissions, version, rotated_from, expires_at, is_active,
+                    lookup_hash
+                ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                 """,
                 new_secret_id, row["tenant_id"], admin_uuid, row["secret_type"],
                 row["secret_name"], row["description"], ciphertext, encrypted_dek, iv,
                 "AES-256-GCM", row["permissions"], row["version"] + 1,
                 secret_uuid,
-                datetime.utcnow() + timedelta(days=90),
-                True
+                new_expires_at,
+                True,
+                new_lookup_hash,
             )
 
             # Link old to new
@@ -544,7 +634,7 @@ class SecretsManager:
                 f"Rotated to new secret: {new_secret_id}", True
             )
 
-        return new_secret_id
+        return new_secret_id, api_key
 
     async def revoke(
         self,
@@ -572,7 +662,9 @@ class SecretsManager:
         admin_uuid = UUID(revoked_by) if isinstance(revoked_by, str) else revoked_by
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 "SELECT tenant_id FROM tenant_secrets "
                 "WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
@@ -634,7 +726,9 @@ class SecretsManager:
         reporter_uuid = UUID(reported_by) if isinstance(reported_by, str) else reported_by
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             row = await conn.fetchrow(
                 "SELECT tenant_id FROM tenant_secrets "
                 "WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
@@ -686,6 +780,10 @@ class SecretsManager:
         """
         Validate an API key and return associated metadata.
 
+        The key is hashed and its row found through ``tenant_secrets.lookup_hash``;
+        only that row is decrypted and its stored hash compared in constant time.
+        Rows without a lookup_hash (issued before migration 0068) are the fallback.
+
         Args:
             api_key: API key to validate
             required_permission: Optional permission to check
@@ -697,77 +795,122 @@ class SecretsManager:
             return None
 
         api_key_hash = self._hash_api_key(api_key)
-        prefix = api_key[:16]
 
-        async with self.db_pool.acquire() as conn:
-            # Find matching secrets by prefix
-            rows = await conn.fetch(
-                """
-                SELECT secret_id, tenant_id, encrypted_value, encrypted_dek, iv, permissions
-                FROM tenant_secrets
-                WHERE secret_type = 'TENANT_API_KEY'
-                AND is_active = TRUE
-                AND (expires_at IS NULL OR expires_at > NOW())
-                """
+        # Public API-key validation must search the platform key set before it
+        # can know which tenant owns the presented key.
+        async with acquire_with_tenant(self.db_pool, None) as conn:
+            # Candidates are the row(s) indexed under this key's hash, so a
+            # request unwraps one DEK instead of one per active key on the
+            # platform (this route is unauthenticated). Migration 0068.
+            row = await self._match_api_key_row(
+                conn, await conn.fetch(_VALIDATE_BY_HASH_SQL, api_key_hash), api_key_hash
             )
+            if row is None:
+                # Keys issued before lookup_hash existed: only those rows are
+                # decrypted, and every one read is indexed on the spot, so an
+                # unknown key stops costing CPU after a single pass.
+                row = await self._match_api_key_row(
+                    conn,
+                    await conn.fetch(_VALIDATE_LEGACY_SQL),
+                    api_key_hash,
+                    index_legacy_rows=True,
+                )
 
-            for row in rows:
-                # Decrypt and check hash
+            if row is not None:
+                # Valid key found
+                permissions = row["permissions"] or {}
+
+                # Check required permission
+                if required_permission:
+                    allowed = permissions.get("permissions", [])
+                    if required_permission not in allowed and "*" not in allowed:
+                        # Log failed permission check
+                        await conn.execute(
+                            """
+                            INSERT INTO secret_access_log (
+                                secret_id, tenant_id, access_type, presented_permission,
+                                success, failure_reason
+                            ) VALUES ($1, $2, $3, $4, $5, $6)
+                            """,
+                            row["secret_id"], row["tenant_id"], SecretAccessType.VALIDATE.value,
+                            required_permission, False, "Permission denied"
+                        )
+                        return None
+
+                # Log successful validation
+                await conn.execute(
+                    """
+                    INSERT INTO secret_access_log (
+                        secret_id, tenant_id, access_type, presented_permission, success
+                    ) VALUES ($1, $2, $3, $4, $5)
+                    """,
+                    row["secret_id"], row["tenant_id"], SecretAccessType.VALIDATE.value,
+                    required_permission, True
+                )
+
+                # Update access tracking
+                await conn.execute(
+                    """
+                    UPDATE tenant_secrets
+                    SET last_accessed_at = NOW(), access_count = access_count + 1
+                    WHERE secret_id = $1
+                    """,
+                    row["secret_id"]
+                )
+
+                return {
+                    "secret_id": row["secret_id"],
+                    "tenant_id": row["tenant_id"],
+                    "permissions": permissions.get("permissions", []),
+                    "is_test": api_key.startswith(self.API_KEY_PREFIX_TEST)
+                }
+
+        # No key material in the log: the presented key's environment prefix only.
+        logger.warning(
+            "api_key_validation_failed key_env=%s",
+            "test" if api_key.startswith(self.API_KEY_PREFIX_TEST) else "live",
+        )
+        return None
+
+    async def _match_api_key_row(
+        self,
+        conn: asyncpg.Connection,
+        rows: list,
+        api_key_hash: str,
+        *,
+        index_legacy_rows: bool = False,
+    ) -> Optional[asyncpg.Record]:
+        """The row among ``rows`` whose stored hash is ``api_key_hash``, else None.
+
+        One unreadable row (bad DEK or ciphertext) must not stop every other
+        tenant's key from validating, so it is logged (DEK) and skipped. With
+        ``index_legacy_rows`` (the ``lookup_hash IS NULL`` pass) every row that
+        decrypts is given the lookup_hash its own value carries - match or not -
+        which is the hash ``create``/``rotate`` would have stored.
+        """
+        for row in rows:
+            try:
                 dek = self._decrypt_dek(row["encrypted_dek"])
-                try:
-                    value = self._decrypt_value(row["encrypted_value"], row["iv"], dek)
-                except Exception:
-                    continue
+            except Exception:
+                logger.error(
+                    "api_key_validation_dek_unwrap_failed secret_id=%s",
+                    row["secret_id"],
+                )
+                continue
+            try:
+                value = self._decrypt_value(row["encrypted_value"], row["iv"], dek)
+            except Exception:
+                continue
 
-                if value.get("api_key_hash") == api_key_hash:
-                    # Valid key found
-                    permissions = row["permissions"] or {}
-
-                    # Check required permission
-                    if required_permission:
-                        allowed = permissions.get("permissions", [])
-                        if required_permission not in allowed and "*" not in allowed:
-                            # Log failed permission check
-                            await conn.execute(
-                                """
-                                INSERT INTO secret_access_log (
-                                    secret_id, tenant_id, access_type, presented_permission,
-                                    success, failure_reason
-                                ) VALUES ($1, $2, $3, $4, $5, $6)
-                                """,
-                                row["secret_id"], row["tenant_id"], SecretAccessType.VALIDATE.value,
-                                required_permission, False, "Permission denied"
-                            )
-                            return None
-
-                    # Log successful validation
-                    await conn.execute(
-                        """
-                        INSERT INTO secret_access_log (
-                            secret_id, tenant_id, access_type, presented_permission, success
-                        ) VALUES ($1, $2, $3, $4, $5)
-                        """,
-                        row["secret_id"], row["tenant_id"], SecretAccessType.VALIDATE.value,
-                        required_permission, True
-                    )
-
-                    # Update access tracking
-                    await conn.execute(
-                        """
-                        UPDATE tenant_secrets
-                        SET last_accessed_at = NOW(), access_count = access_count + 1
-                        WHERE secret_id = $1
-                        """,
-                        row["secret_id"]
-                    )
-
-                    return {
-                        "secret_id": row["secret_id"],
-                        "tenant_id": row["tenant_id"],
-                        "permissions": permissions.get("permissions", []),
-                        "is_test": api_key.startswith(self.API_KEY_PREFIX_TEST)
-                    }
-
+            stored_hash = value.get("api_key_hash")
+            if not isinstance(stored_hash, str):
+                continue
+            if index_legacy_rows and _SHA256_HEX.fullmatch(stored_hash):
+                await conn.execute(
+                    _BACKFILL_LOOKUP_HASH_SQL, stored_hash, row["secret_id"], row["tenant_id"]
+                )
+            if hmac.compare_digest(stored_hash.encode(), api_key_hash.encode()):
+                return row
         return None
 
     async def list_secrets(
@@ -811,7 +954,10 @@ class SecretsManager:
             ORDER BY created_at DESC
         """
 
-        async with self.db_pool.acquire() as conn:
+        # A missing tenant is reserved for an explicit platform-admin listing.
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_id) if tenant_id is not None else None
+        ) as conn:
             rows = await conn.fetch(query, *params)
 
         return [self._row_to_metadata(row) for row in rows]
@@ -865,7 +1011,9 @@ class SecretsManager:
         cutoff = datetime.utcnow() + timedelta(days=days)
         tenant_uuid = _coerce_tenant_uuid(tenant_id)
 
-        async with self.db_pool.acquire() as conn:
+        async with acquire_with_tenant(
+            self.db_pool, str(tenant_uuid) if tenant_uuid is not None else None
+        ) as conn:
             rows = await conn.fetch(
                 """
                 SELECT secret_id, tenant_id, secret_type, secret_name, description,

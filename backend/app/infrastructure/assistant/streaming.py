@@ -33,6 +33,7 @@ from typing import Any, AsyncIterator, Dict, List, Optional
 from fastapi.encoders import jsonable_encoder
 from groq import APIError
 
+from app.core.security.assistant_runtime import owned_stream
 from app.infrastructure.assistant.llm_client import get_assistant_client
 
 from app.infrastructure.assistant.agent import SYSTEM_PROMPT
@@ -367,6 +368,7 @@ async def stream_assistant_reply(
                 db_client,
                 conversation_id,
                 forced_email_args,
+                actor_user_id=user_id,
             )
             # Only explicitly classified inbox errors are safe to show here.
             # dispatch_tool turns unexpected exceptions into raw strings for
@@ -437,31 +439,32 @@ async def stream_assistant_reply(
                     completion_args["tool_choice"] = "auto"
                 stream = await llm.chat.completions.create(**adapt(completion_args))
 
-                async for chunk in stream:
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
+                async with owned_stream(stream):
+                    async for chunk in stream:
+                        if not chunk.choices:
+                            continue
+                        delta = chunk.choices[0].delta
 
-                    tool_deltas = getattr(delta, "tool_calls", None)
-                    if tool_deltas:
-                        for tcd in tool_deltas:
-                            idx = tcd.index if tcd.index is not None else 0
-                            acc = tool_calls_acc.setdefault(
-                                idx, {"id": "", "name": "", "arguments": ""}
-                            )
-                            if tcd.id:
-                                acc["id"] = tcd.id
-                            fn = getattr(tcd, "function", None)
-                            if fn is not None:
-                                if getattr(fn, "name", None):
-                                    acc["name"] = fn.name
-                                if getattr(fn, "arguments", None):
-                                    acc["arguments"] += fn.arguments
+                        tool_deltas = getattr(delta, "tool_calls", None)
+                        if tool_deltas:
+                            for tcd in tool_deltas:
+                                idx = tcd.index if tcd.index is not None else 0
+                                acc = tool_calls_acc.setdefault(
+                                    idx, {"id": "", "name": "", "arguments": ""}
+                                )
+                                if tcd.id:
+                                    acc["id"] = tcd.id
+                                fn = getattr(tcd, "function", None)
+                                if fn is not None:
+                                    if getattr(fn, "name", None):
+                                        acc["name"] = fn.name
+                                    if getattr(fn, "arguments", None):
+                                        acc["arguments"] += fn.arguments
 
-                    content = getattr(delta, "content", None)
-                    if content:
-                        content_parts.append(content)
-                        yield {"type": "token", "delta": content}
+                        content = getattr(delta, "content", None)
+                        if content:
+                            content_parts.append(content)
+                            yield {"type": "token", "delta": content}
 
             except APIError as api_exc:
                 # The model emitted a syntactically broken tool call — nothing
@@ -508,7 +511,12 @@ async def stream_assistant_reply(
                         args = {}
                     yield {"type": "tool_start", "name": name}
                     result = await dispatch_tool(
-                        name, tenant_id, db_client, conversation_id, args
+                        name,
+                        tenant_id,
+                        db_client,
+                        conversation_id,
+                        args,
+                        actor_user_id=user_id,
                     )
                     # An edit tool's preview becomes a first-class proposal: end
                     # the turn here and let the UI's Apply/Reject drive the

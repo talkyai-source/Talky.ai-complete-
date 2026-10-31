@@ -1,0 +1,79 @@
+FFFFF.FFFF...FF                                                          [100%]
+================================== FAILURES ===================================
+__ test_failed_or_unknown_dnc_never_submits_original_audio_or_control[False] __
+tests\unit\test_op07_native_dnc_speech.py:50: in test_failed_or_unknown_dnc_never_submits_original_audio_or_control
+    s.gateway.send_audio.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+__ test_failed_or_unknown_dnc_never_submits_original_audio_or_control[None] ___
+tests\unit\test_op07_native_dnc_speech.py:50: in test_failed_or_unknown_dnc_never_submits_original_audio_or_control
+    s.gateway.send_audio.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+_ test_only_exact_safe_repair_plays_and_current_caller_owns_close[Do not call me again, but first I need help with my account.-I cannot confirm that your do-not-call request was saved.-False] _
+tests\unit\test_op07_native_dnc_speech.py:70: in test_only_exact_safe_repair_plays_and_current_caller_owns_close
+    assert s.gateway.send_audio.await_count == 0
+E   assert 1 == 0
+E    +  where 1 = <AsyncMock id='1774703990096'>.await_count
+E    +    where <AsyncMock id='1774703990096'> = namespace(send_audio=<AsyncMock id='1774703990096'>, begin_playback=<AsyncMock id='1774465176816'>, clear_output_buffe...id='1774701083104'>, finish_playback=<AsyncMock id='1774704427520'>, send_control_event=<AsyncMock id='1774704702096'>).send_audio
+E    +      where namespace(send_audio=<AsyncMock id='1774703990096'>, begin_playback=<AsyncMock id='1774465176816'>, clear_output_buffe...id='1774701083104'>, finish_playback=<AsyncMock id='1774704427520'>, send_control_event=<AsyncMock id='1774704702096'>) = namespace(bridge=<app.realtime.bridge.RealtimeBridge object at 0x0000019D34A4A180>, provider=namespace(close=<AsyncMoc...delivered_text="I've removed your number from our calling list. Goodbye."), persistence=<AsyncMock id='1774704431552'>).gateway
+_ test_only_exact_safe_repair_plays_and_current_caller_owns_close[Do not call me again. Goodbye.-Understood \u2014 I've noted that and won't keep you. Goodbye.-True] _
+tests\unit\test_op07_native_dnc_speech.py:70: in test_only_exact_safe_repair_plays_and_current_caller_owns_close
+    assert s.gateway.send_audio.await_count == 0
+E   assert 1 == 0
+E    +  where 1 = <AsyncMock id='1774704563872'>.await_count
+E    +    where <AsyncMock id='1774704563872'> = namespace(send_audio=<AsyncMock id='1774704563872'>, begin_playback=<AsyncMock id='1774704573952'>, clear_output_buffe...id='1774704786032'>, finish_playback=<AsyncMock id='1774703929168'>, send_control_event=<AsyncMock id='1774703934544'>).send_audio
+E    +      where namespace(send_audio=<AsyncMock id='1774704563872'>, begin_playback=<AsyncMock id='1774704573952'>, clear_output_buffe...id='1774704786032'>, finish_playback=<AsyncMock id='1774703929168'>, send_control_event=<AsyncMock id='1774703934544'>) = namespace(bridge=<app.realtime.bridge.RealtimeBridge object at 0x0000019D34A5D700>, provider=namespace(close=<AsyncMoc...delivered_text="I've removed your number from our calling list. Goodbye."), persistence=<AsyncMock id='1774703923456'>).gateway
+_________ test_wrong_second_candidate_is_withheld_without_repair_loop _________
+tests\unit\test_op07_native_dnc_speech.py:90: in test_wrong_second_candidate_is_withheld_without_repair_loop
+    s.gateway.send_audio.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 2 times.
+_ test_new_accepted_turn_retries_failed_write_once_then_restores_normal_speech _
+tests\unit\test_op07_native_dnc_speech.py:121: in test_new_accepted_turn_retries_failed_write_once_then_restores_normal_speech
+    assert s.persistence.await_count == 2
+E   AssertionError: assert 1 == 2
+E    +  where 1 = <AsyncMock id='1774704488912'>.await_count
+E    +    where <AsyncMock id='1774704488912'> = namespace(bridge=<app.realtime.bridge.RealtimeBridge object at 0x0000019D34968920>, provider=namespace(close=<AsyncMoc...r_turn=2, _voice_action_delivered_text='Yes. What do you need help with?'), persistence=<AsyncMock id='1774704488912'>).persistence
+________ test_held_dnc_does_not_block_pump_or_allow_stale_ack_to_play _________
+tests\unit\test_op07_native_dnc_speech.py:151: in test_held_dnc_does_not_block_pump_or_allow_stale_ack_to_play
+    s.gateway.send_audio.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+_______ test_interrupted_unresolved_repair_cannot_become_new_turn_audio _______
+tests\unit\test_op07_native_dnc_speech.py:176: in test_interrupted_unresolved_repair_cannot_become_new_turn_audio
+    s.gateway.send_audio.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+____________ test_cancelled_dnc_task_does_not_authorize_candidate _____________
+tests\unit\test_op07_native_dnc_speech.py:199: in test_cancelled_dnc_task_does_not_authorize_candidate
+    s.gateway.send_audio.assert_not_awaited()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2429: in assert_not_awaited
+    raise AssertionError(msg)
+E   AssertionError: Expected mock to not have been awaited. Awaited 1 times.
+_ test_exact_repair_uses_existing_response_instructions_without_session_or_wire_extension[OpenAIRealtimeSession] _
+tests\unit\test_op07_native_dnc_speech.py:224: in test_exact_repair_uses_existing_response_instructions_without_session_or_wire_extension
+    await provider.repair_unspoken_response(
+E   TypeError: OpenAIRealtimeSession.repair_unspoken_response() got an unexpected keyword argument 'required_text'
+_ test_exact_repair_uses_existing_response_instructions_without_session_or_wire_extension[XAIRealtimeSession] _
+tests\unit\test_op07_native_dnc_speech.py:224: in test_exact_repair_uses_existing_response_instructions_without_session_or_wire_extension
+    await provider.repair_unspoken_response(
+E   TypeError: OpenAIRealtimeSession.repair_unspoken_response() got an unexpected keyword argument 'required_text'
+=========================== short test summary info ===========================
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_failed_or_unknown_dnc_never_submits_original_audio_or_control[False]
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_failed_or_unknown_dnc_never_submits_original_audio_or_control[None]
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_only_exact_safe_repair_plays_and_current_caller_owns_close[Do not call me again, but first I need help with my account.-I cannot confirm that your do-not-call request was saved.-False]
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_only_exact_safe_repair_plays_and_current_caller_owns_close[Do not call me again. Goodbye.-Understood \u2014 I've noted that and won't keep you. Goodbye.-True]
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_wrong_second_candidate_is_withheld_without_repair_loop
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_new_accepted_turn_retries_failed_write_once_then_restores_normal_speech
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_held_dnc_does_not_block_pump_or_allow_stale_ack_to_play
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_interrupted_unresolved_repair_cannot_become_new_turn_audio
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_cancelled_dnc_task_does_not_authorize_candidate
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_exact_repair_uses_existing_response_instructions_without_session_or_wire_extension[OpenAIRealtimeSession]
+FAILED tests/unit/test_op07_native_dnc_speech.py::test_exact_repair_uses_existing_response_instructions_without_session_or_wire_extension[XAIRealtimeSession]
+11 failed, 4 passed in 2.66s

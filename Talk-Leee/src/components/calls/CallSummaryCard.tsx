@@ -1,7 +1,8 @@
 "use client";
 
-import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus } from "lucide-react";
+import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Sparkles, ShieldAlert, RefreshCw } from "lucide-react";
 import type { CallSummaryObj, CallSummaryEnvelope } from "@/lib/dashboard-api";
+import { InfoTip } from "@/components/ui/info-tip";
 
 // ---------------------------------------------------------------------------
 // Outcome chip
@@ -9,10 +10,12 @@ import type { CallSummaryObj, CallSummaryEnvelope } from "@/lib/dashboard-api";
 
 function outcomeColor(outcome: string) {
     const o = outcome.toLowerCase();
+    // Check negative qualification labels first: "disqualified" and
+    // "unqualified" both contain the substring "qualified".
+    if (o.includes("negative") || o.includes("disqualified") || o.includes("unqualified") || o.includes("not_achieved") || o.includes("no_interest") || o.includes("fail"))
+        return "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300";
     if (o.includes("positive") || o.includes("qualified") || o.includes("achieved") || o.includes("success"))
         return "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300";
-    if (o.includes("negative") || o.includes("disqualified") || o.includes("not_achieved") || o.includes("fail"))
-        return "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300";
     return "border-muted-foreground/30 bg-muted text-muted-foreground";
 }
 
@@ -50,6 +53,38 @@ function BulletList({ items }: { items: string[] }) {
     );
 }
 
+function knownSummaryValue(value?: string): value is string {
+    const normalized = value?.trim().toLowerCase();
+    return Boolean(normalized && normalized !== "unknown" && normalized !== "none");
+}
+
+/**
+ * Show a review signal when the model has produced a classification that could
+ * cause a human or CRM workflow to act. The API does not return calibrated
+ * confidence, so the UI must not invent a percentage.
+ */
+export function summaryNeedsReview(summary: CallSummaryObj): boolean {
+    const verdicts = [summary.outcome, summary.qualification_status]
+        .filter((value): value is string => Boolean(value?.trim()))
+        .map((value) => value.trim().toLowerCase().replace(/[\s-]+/g, "_"));
+    const actionable = verdicts.some((value) => (
+        value.includes("qualified")
+        || value.includes("interested")
+        || value.includes("callback")
+        || value.includes("nurture")
+        || value.includes("achieved")
+        || value.includes("positive")
+        || value.includes("success")
+    ));
+    const hasQualificationEvidence = [
+        summary.identified_need,
+        summary.decision_maker_status,
+        summary.timeline,
+        summary.budget_information,
+    ].some(knownSummaryValue);
+    return actionable || hasQualificationEvidence;
+}
+
 // ---------------------------------------------------------------------------
 // Main card
 // ---------------------------------------------------------------------------
@@ -62,20 +97,85 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
     const hasNextStep = Boolean(summary.next_step?.trim());
     const hasFollowUpTips = (summary.follow_up_tips?.length ?? 0) > 0;
     const hasNotableQuotes = summary.notable_quotes.length > 0;
+    const qualificationStatus = knownSummaryValue(summary.qualification_status)
+        ? summary.qualification_status
+        : null;
+    const qualificationDetails = [
+        { label: "Identified need", value: summary.identified_need },
+        { label: "Decision role", value: summary.decision_maker_status },
+        { label: "Timeline", value: summary.timeline },
+        { label: "Budget", value: summary.budget_information },
+    ].filter(
+        (item): item is { label: string; value: string } => knownSummaryValue(item.value),
+    );
+    const hasQualification = Boolean(qualificationStatus || qualificationDetails.length > 0);
+    const needsReview = summaryNeedsReview(summary);
 
     return (
         <div className="space-y-4">
+            {/* PROVENANCE, STATED ONCE AND IN THE PAGE (goals.md §8)
+                §8 asks the summary to distinguish transcript facts from AI
+                conclusions, and NOT to hide anything essential inside a
+                tooltip. "This was written by a model and can be wrong" is
+                essential, so it is a visible line — the tooltips below only
+                explain the individual terms. */}
+            <p className="flex items-start gap-1.5 rounded-lg border border-amber-500/25 bg-amber-500/5 px-2.5 py-2 text-xs text-muted-foreground">
+                <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+                <span>
+                    Written by a model from this call&apos;s transcript. Quotes are
+                    taken from what was said; everything else — outcome, sentiment,
+                    qualification — is the model&apos;s <strong>interpretation</strong> and
+                    should be checked against the recording before it is acted on.
+                </span>
+            </p>
+
             {/* Header row: outcome chip + sentiment */}
             <div className="flex flex-wrap items-center gap-2">
+                {needsReview && (
+                    <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-xs font-semibold text-amber-700 dark:text-amber-300">
+                            <ShieldAlert className="h-3.5 w-3.5" aria-hidden />
+                            Needs review
+                        </span>
+                        <InfoTip label="Why this summary needs review">
+                            This summary contains an actionable AI classification or qualification
+                            detail. The API does not provide calibrated confidence, so Talk-Lee
+                            shows an honest review warning instead of inventing a percentage.
+                            Confirm it against the transcript or recording before follow-up or CRM
+                            synchronization.
+                        </InfoTip>
+                    </span>
+                )}
                 {summary.outcome && (
-                    <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(summary.outcome)}`}>
-                        {summary.outcome.replace(/_/g, " ")}
+                    <span className="inline-flex items-center gap-1">
+                        <span className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(summary.outcome)}`}>
+                            {summary.outcome.replace(/_/g, " ")}
+                        </span>
+                        <InfoTip label="About the call outcome">
+                            <strong>Outcome</strong> — the model&apos;s verdict on how the call ended.
+                            <br />
+                            <strong>Qualified</strong>: the person matches what the campaign is
+                            looking for. <strong>Interested</strong>: willing to hear more, not yet
+                            qualified. <strong>Callback</strong>: asked to be reached at another
+                            time. <strong>Unsuccessful</strong>: no answer, wrong person, or a clear
+                            no.
+                            <br />
+                            An inference, not a fact from the transcript — confirm before treating
+                            it as a lead.
+                        </InfoTip>
                     </span>
                 )}
                 {summary.sentiment && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/20 bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-                        <SentimentIcon sentiment={summary.sentiment} />
-                        {summary.sentiment}
+                    <span className="inline-flex items-center gap-1">
+                        <span className="inline-flex items-center gap-1 rounded-full border border-muted-foreground/20 bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
+                            <SentimentIcon sentiment={summary.sentiment} />
+                            {summary.sentiment}
+                        </span>
+                        <InfoTip label="About sentiment">
+                            How the caller sounded overall, judged from their words rather than
+                            their tone of voice — so sarcasm and irritation are easy to miss.
+                            Treat it as a hint about which calls to listen to, not a measurement.
+                        </InfoTip>
                     </span>
                 )}
             </div>
@@ -83,6 +183,46 @@ function SummaryBody({ summary }: { summary: CallSummaryObj }) {
             {/* What happened */}
             {summary.what_happened?.trim() && (
                 <p className="text-sm text-foreground leading-relaxed">{summary.what_happened}</p>
+            )}
+
+            {/* Structured qualification — absent on historical summaries. */}
+            {hasQualification && (
+                <div className="rounded-lg border border-border bg-muted/20 px-3 py-2.5">
+                    <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-1.5">
+                            <SectionHeading>Qualification</SectionHeading>
+                            <InfoTip label="About qualification">
+                                Need, decision role, timeline and budget, as the model understood
+                                them from the conversation.
+                                <br />
+                                A blank field means it was <strong>not established on the call</strong> —
+                                not that the answer is no. Anything here is worth confirming
+                                against the recording before it reaches a CRM.
+                            </InfoTip>
+                        </span>
+                        {qualificationStatus && (
+                            <span
+                                className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${outcomeColor(qualificationStatus)}`}
+                            >
+                                {qualificationStatus.replace(/_/g, " ")}
+                            </span>
+                        )}
+                    </div>
+                    {qualificationDetails.length > 0 && (
+                        <dl className="grid grid-cols-1 gap-x-4 gap-y-2 sm:grid-cols-2">
+                            {qualificationDetails.map((item) => (
+                                <div key={item.label}>
+                                    <dt className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                        {item.label}
+                                    </dt>
+                                    <dd className="text-sm text-foreground leading-relaxed">
+                                        {item.value}
+                                    </dd>
+                                </div>
+                            ))}
+                        </dl>
+                    )}
+                </div>
             )}
 
             {/* Key points */}
@@ -196,9 +336,26 @@ type CallSummaryCardProps = {
     isError: boolean;
     error?: unknown;
     data?: CallSummaryEnvelope;
+    /**
+     * Re-runs the summary request. Optional: callers that cannot retry omit
+     * it and no control is offered, rather than showing a dead button.
+     */
+    onRetry?: () => void;
 };
 
-export function CallSummaryCard({ isLoading, isError, error, data }: CallSummaryCardProps) {
+export function summarySourceMessage(data?: CallSummaryEnvelope): string | null {
+    if (!data) return null;
+    if (!data.available || !data.summary || data.source_evidence?.summary_current === false) {
+        return "No current summary is available from the saved evidence. Review the call history or reload.";
+    }
+    const state = data.source_evidence?.transcript_save_state;
+    if (state === "partial") return "This summary uses a partial transcript. Unsaved words could not be recovered; review the call history before using it.";
+    if (state === "failed") return "The final transcript save failed. This summary uses earlier saved text and may be incomplete.";
+    if (state !== "complete") return "Transcript completeness has not been verified. This summary describes only the saved evidence.";
+    return null;
+}
+
+export function CallSummaryCard({ isLoading, isError, error, data, onRetry }: CallSummaryCardProps) {
     if (isLoading) {
         return (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -210,22 +367,37 @@ export function CallSummaryCard({ isLoading, isError, error, data }: CallSummary
 
     if (isError) {
         return (
-            <div className="flex items-center gap-2 text-sm text-destructive">
+            <div className="flex flex-wrap items-center gap-2 text-sm text-destructive" role="alert">
                 <AlertCircle className="h-4 w-4 shrink-0" />
                 {error instanceof Error ? error.message : "Failed to load summary."}
+                {onRetry ? (
+                    <button
+                        type="button"
+                        onClick={onRetry}
+                        className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2 py-0.5 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/10"
+                    >
+                        <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                        Retry
+                    </button>
+                ) : null}
             </div>
         );
     }
 
     if (!data) return null;
 
-    if (!data.available || !data.summary) {
+    const sourceMessage = summarySourceMessage(data);
+    if (!data.available || !data.summary || data.source_evidence?.summary_current === false) {
         return (
-            <p className="text-sm text-muted-foreground">
-                No summary — this call had no conversation to summarize.
-            </p>
+            <div className="space-y-2 text-sm text-muted-foreground">
+                <p role="status">{sourceMessage}</p>
+                {onRetry ? <button type="button" onClick={onRetry} className="underline">Reload summary</button> : null}
+            </div>
         );
     }
 
-    return <SummaryBody summary={data.summary} />;
+    return <div className="space-y-3">
+        {sourceMessage ? <p role="status" className="text-sm text-muted-foreground">{sourceMessage}</p> : null}
+        <SummaryBody summary={data.summary} />
+    </div>;
 }

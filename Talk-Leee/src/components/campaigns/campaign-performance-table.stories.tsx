@@ -72,7 +72,6 @@ const meta: Meta<typeof CampaignPerformanceTable> = {
         onResume: async () => { },
         onDelete: async () => { },
         onDuplicate: async () => { },
-        onUpdate: async () => { },
     },
 };
 

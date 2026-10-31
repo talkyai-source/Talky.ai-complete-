@@ -20,6 +20,7 @@ Privacy Note:
 from __future__ import annotations
 
 import hashlib
+import ipaddress
 import logging
 import re
 from typing import Optional
@@ -67,6 +68,9 @@ _OS_PATTERNS = [
 ]
 
 
+FINGERPRINT_VERSION_PREFIX = "v2:"
+
+
 def generate_device_fingerprint(
     request: Request,
     user_agent: Optional[str] = None,
@@ -103,31 +107,33 @@ def generate_device_fingerprint(
     ua = user_agent or request.headers.get("User-Agent", "")
     signals.append(ua)
 
-    # Secondary signals - header-based content negotiation
-    # These are stable per browser installation
-    signals.append(request.headers.get("Accept", ""))
+    # Locale preference — constant for a browser profile.
     signals.append(request.headers.get("Accept-Language", ""))
-    signals.append(request.headers.get("Accept-Encoding", ""))
 
-    # Client hints (Chromium-based browsers)
-    # Provides structured browser/OS info
+    # Client hints (Chromium-based browsers) — structured browser/OS identity.
     signals.append(request.headers.get("Sec-Ch-Ua", ""))
     signals.append(request.headers.get("Sec-Ch-Ua-Mobile", ""))
     signals.append(request.headers.get("Sec-Ch-Ua-Platform", ""))
-    signals.append(request.headers.get("Sec-Ch-Ua-Platform-Version", ""))
 
-    # Network/client hints
-    signals.append(request.headers.get("DNT", ""))  # Do Not Track
-    signals.append(request.headers.get("Sec-Fetch-Dest", ""))
-    signals.append(request.headers.get("Sec-Fetch-Mode", ""))
-
-    # Combine with delimiter and hash
-    # Using | as delimiter since it's unlikely to appear in headers
+    # DELIBERATELY EXCLUDED (2026-09-07): Accept, Accept-Encoding, DNT,
+    # Sec-Fetch-Dest, Sec-Fetch-Mode, Sec-Ch-Ua-Platform-Version. Those
+    # change between a page navigation, a fetch(), an <audio> element and an
+    # EventSource from the SAME browser tab, so one production session
+    # produced 1,082 "fingerprint_mismatch" warnings in a week. A fingerprint
+    # that flaps per request cannot detect hijacking, and with
+    # SESSION_STRICT_BINDING it would have logged every user out on their
+    # first audio play. The signals kept identify the browser install, not
+    # the request type.
     fingerprint_data = "|".join(signals)
 
-    # SHA-256 hash, truncated to 64 chars (256 bits in hex)
-    # Full hash provides collision resistance
-    return hashlib.sha256(fingerprint_data.encode("utf-8")).hexdigest()
+    # Versioned so the session validator can tell a legacy (v1) value apart
+    # and re-bind it once instead of flagging it on every request.
+    return FINGERPRINT_VERSION_PREFIX + hashlib.sha256(fingerprint_data.encode("utf-8")).hexdigest()
+
+
+def is_legacy_fingerprint(stored: Optional[str]) -> bool:
+    """True for fingerprints computed before the versioned, stable scheme."""
+    return bool(stored) and not str(stored).startswith(FINGERPRINT_VERSION_PREFIX)
 
 
 def parse_user_agent(user_agent: Optional[str]) -> dict:
@@ -235,41 +241,48 @@ def _generate_device_name(browser: str, os_name: str, device_type: str) -> str:
     return f"{browser_display} on {os_display}"
 
 
+def _parse_ip(ip_address: Optional[str]):
+    """Parse with ``ipaddress`` (IPv4-mapped IPv6 becomes IPv4, scope id dropped).
+
+    Returns an IPv4Address/IPv6Address, or None for blank/"unknown"/invalid input.
+    """
+    if not ip_address or ip_address == "unknown":
+        return None
+    try:
+        addr = ipaddress.ip_address(ip_address.strip())
+    except ValueError:
+        return None
+    if addr.version == 6:
+        if addr.ipv4_mapped is not None:
+            return addr.ipv4_mapped
+        return ipaddress.IPv6Address(int(addr))  # drops any %scope id
+    return addr
+
+
 def generate_ip_subnet(ip_address: str, subnet_bits: int = 24) -> Optional[str]:
     """
     Generate a subnet identifier from an IP address.
 
     Used for IP binding tolerance - mobile users may change IPs within the
-    same /24 subnet (carrier-grade NAT, WiFi handoffs).
+    same /24 subnet (carrier-grade NAT, WiFi handoffs). IPv6 addresses are
+    grouped by /64 regardless of ``subnet_bits``: a host rotates its privacy
+    addresses inside one /64, so that is the unit that identifies "same place".
 
     Args:
         ip_address: IPv4 or IPv6 address string
-        subnet_bits: Number of bits for subnet (default /24 for IPv4)
+        subnet_bits: Number of bits for an IPv4 subnet (default /24)
 
     Returns:
-        Subnet string (e.g., "192.168.1.0/24") or None if invalid IP
+        Subnet string (e.g., "192.168.1.0/24", "2001:db8:abcd:12::/64") or
+        None if invalid IP
     """
-    if not ip_address or ip_address == "unknown":
+    addr = _parse_ip(ip_address)
+    if addr is None:
         return None
-
+    bits = 64 if addr.version == 6 else subnet_bits
     try:
-        # Handle IPv4
-        if "." in ip_address and ":" not in ip_address:
-            octets = ip_address.split(".")
-            if len(octets) != 4:
-                return None
-
-            # Calculate subnet mask
-            mask_octets = subnet_bits // 8
-            subnet_octets = octets[:mask_octets]
-            subnet_octets.extend(["0"] * (4 - mask_octets))
-
-            return ".".join(subnet_octets) + f"/{subnet_bits}"
-
-        # IPv6 handling would go here (simplified)
-        return None
-
-    except (ValueError, IndexError):
+        return str(ipaddress.ip_network(f"{addr}/{bits}", strict=False))
+    except ValueError:
         return None
 
 
@@ -330,7 +343,8 @@ def is_ip_change_significant(
     Args:
         original_ip: IP address at session creation
         current_ip: Current IP address
-        strict_mode: If True, any change is significant; if False, /24 subnet allowed
+        strict_mode: If True, any change is significant; if False, the same
+            /24 (IPv4) or /64 (IPv6) subnet is allowed
 
     Returns:
         Dictionary with:
@@ -355,7 +369,16 @@ def is_ip_change_significant(
             "reason": "strict_mode_ip_change",
         }
 
-    # Check /24 subnet match
+    # A dual-stack client alternating between its IPv4 and IPv6 address is not
+    # evidence of a different network location on its own.
+    original_addr, current_addr = _parse_ip(original_ip), _parse_ip(current_ip)
+    if original_addr and current_addr and original_addr.version != current_addr.version:
+        return {
+            "significant": False,
+            "reason": "address_family_change",
+        }
+
+    # Check /24 (IPv4) or /64 (IPv6) subnet match
     original_subnet = generate_ip_subnet(original_ip, 24)
     current_subnet = generate_ip_subnet(current_ip, 24)
 

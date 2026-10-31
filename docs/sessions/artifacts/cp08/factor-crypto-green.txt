@@ -1,0 +1,8 @@
+....................................                                     [100%]
+============================== warnings summary ===============================
+tests/security/test_totp.py::TestReplayAttack::test_naive_datetime_treated_as_utc
+  C:\Users\AL AZIZ TECH\Desktop\Talky.ai-complete-\tmp\production-ready-20261004\backend\tests\security\test_totp.py:166: DeprecationWarning: datetime.datetime.utcnow() is deprecated and scheduled for removal in a future version. Use timezone-aware objects to represent datetimes in UTC: datetime.datetime.now(datetime.UTC).
+    now_naive = datetime.utcnow()
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+36 passed, 1 warning in 3.32s

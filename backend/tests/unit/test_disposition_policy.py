@@ -84,13 +84,29 @@ def test_terminal_no_retry_outcomes():
     for oc in (
         CallOutcome.GOAL_NOT_ACHIEVED,
         CallOutcome.SPAM,
-        CallOutcome.INVALID,
         CallOutcome.DISCONNECTED,
         CallOutcome.UNAVAILABLE,
     ):
         d = decide(oc, 1)
         assert d.should_retry is False
         assert d.is_success is False
+    # INVALID is terminal once confirmed by a second dial (see below).
+    d = decide(CallOutcome.INVALID, 2)
+    assert d.should_retry is False and d.is_success is False
+
+
+def test_first_carrier_invalid_is_confirmed_by_one_dial_a_day_later():
+    # Q.850 1/22/28 is also exactly what a line with the wrong dial format
+    # returns for EVERY number, so one misconfigured line must not finish a
+    # whole list in one pass (review 2026-10-20). The first INVALID gets one
+    # confirming dial the next day; a second INVALID is final.
+    first = decide(CallOutcome.INVALID, 1)
+    assert first.should_retry is True
+    assert first.delay_seconds == 24 * 3600
+    assert first.is_success is False
+    second = decide(CallOutcome.INVALID, 2)
+    assert second.should_retry is False
+    assert decide(CallOutcome.INVALID, 0).should_retry is False  # unknown count fails closed
 
 
 def test_unavailable_never_redialled():

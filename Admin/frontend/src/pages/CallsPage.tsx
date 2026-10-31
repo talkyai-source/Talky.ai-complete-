@@ -4,9 +4,18 @@ import { Header } from '../components/Header';
 import { LiveCallsTable } from '../components/LiveCallsTable';
 import { CallHistoryTable } from '../components/CallHistoryTable';
 import { CallDetailDrawer } from '../components/CallDetailDrawer';
-import { Phone, Radio, History } from 'lucide-react';
+import { RecordingsTable } from '../components/RecordingsTable';
+import { FeedbackTable } from '../components/FeedbackTable';
+import { Phone, Radio, History, AudioLines, Mic2 } from 'lucide-react';
 
-type TabType = 'live' | 'history';
+type TabType = 'live' | 'history' | 'recordings' | 'feedback';
+
+const tabTitles: Record<TabType, string> = {
+    live: 'Active Calls',
+    history: 'Call History',
+    recordings: 'Call Recordings',
+    feedback: 'Reviewer Feedback',
+};
 
 export function CallsPage() {
     const [activeTab, setActiveTab] = useState<TabType>('live');
@@ -40,16 +49,18 @@ export function CallsPage() {
                         <div>
                             <h1 className="page-title">Calls</h1>
                             <p className="page-description">
-                                Monitor live calls and browse call history
+                                Monitor calls, review recordings, and manage voice feedback
                             </p>
                         </div>
                     </div>
 
                     {/* Tab Navigation */}
-                    <div className="page-tabs">
+                    <div className="page-tabs" role="tablist" aria-label="Call administration sections">
                         <button
                             className={`page-tab ${activeTab === 'live' ? 'active' : ''}`}
                             onClick={() => setActiveTab('live')}
+                            role="tab"
+                            aria-selected={activeTab === 'live'}
                         >
                             <Radio size={16} />
                             Live Calls
@@ -57,9 +68,29 @@ export function CallsPage() {
                         <button
                             className={`page-tab ${activeTab === 'history' ? 'active' : ''}`}
                             onClick={() => setActiveTab('history')}
+                            role="tab"
+                            aria-selected={activeTab === 'history'}
                         >
                             <History size={16} />
                             History
+                        </button>
+                        <button
+                            className={`page-tab ${activeTab === 'recordings' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('recordings')}
+                            role="tab"
+                            aria-selected={activeTab === 'recordings'}
+                        >
+                            <AudioLines size={16} />
+                            Recordings
+                        </button>
+                        <button
+                            className={`page-tab ${activeTab === 'feedback' ? 'active' : ''}`}
+                            onClick={() => setActiveTab('feedback')}
+                            role="tab"
+                            aria-selected={activeTab === 'feedback'}
+                        >
+                            <Mic2 size={16} />
+                            Feedback
                         </button>
                     </div>
 
@@ -67,20 +98,27 @@ export function CallsPage() {
                     <div className="card">
                         <div className="card-header">
                             <h3 className="card-title">
-                                {activeTab === 'live' ? 'Active Calls' : 'Call History'}
+                                {tabTitles[activeTab]}
                             </h3>
                         </div>
                         <div className="card-body">
-                            {activeTab === 'live' ? (
+                            {activeTab === 'live' && (
                                 <LiveCallsTable
-                                    key={`live-${refreshKey}`}
                                     onRefresh={handleRefresh}
+                                    onCallSelect={handleCallSelect}
                                 />
-                            ) : (
+                            )}
+                            {activeTab === 'history' && (
                                 <CallHistoryTable
                                     key={`history-${refreshKey}`}
                                     onCallSelect={handleCallSelect}
                                 />
+                            )}
+                            {activeTab === 'recordings' && (
+                                <RecordingsTable onCallSelect={handleCallSelect} />
+                            )}
+                            {activeTab === 'feedback' && (
+                                <FeedbackTable onCallSelect={handleCallSelect} />
                             )}
                         </div>
                     </div>

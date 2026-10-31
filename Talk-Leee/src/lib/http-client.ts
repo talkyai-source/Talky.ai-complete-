@@ -1,3 +1,6 @@
+import { getBrowserAuthToken, setBrowserAuthToken } from "@/lib/auth-token";
+import { SessionCoordinationError, withBrowserSessionLock } from "@/lib/browser-session";
+
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export type UnifiedApiError = {
@@ -17,8 +20,10 @@ export class ApiClientError extends Error {
     readonly requestId?: string;
     readonly url: string;
     readonly method: HttpMethod;
+    // Set only by local acquisition failures, never by an HTTP error envelope.
+    readonly sessionRequestNotSent?: true;
 
-    constructor(init: UnifiedApiError & { url: string; method: HttpMethod }) {
+    constructor(init: UnifiedApiError & { url: string; method: HttpMethod; sessionRequestNotSent?: true }) {
         super(init.message);
         this.name = "ApiClientError";
         this.status = init.status;
@@ -28,6 +33,7 @@ export class ApiClientError extends Error {
         this.requestId = init.requestId;
         this.url = init.url;
         this.method = init.method;
+        this.sessionRequestNotSent = init.sessionRequestNotSent;
     }
 }
 
@@ -46,6 +52,7 @@ export type HttpRequestOptions<TBody = unknown> = {
     body?: TBody;
     timeoutMs?: number;
     signal?: AbortSignal;
+    ownsOperation?: () => boolean;
     // When true, a 401 on this request does NOT clear the stored token or fire
     // the global session-expired redirect — it just throws so the caller can
     // handle it locally. Use for AUTH PROBES (/auth/me bootstrap) and OPTIONAL
@@ -54,6 +61,9 @@ export type HttpRequestOptions<TBody = unknown> = {
     // must not tear down a live session. Real authed calls omit this so genuine
     // expiry still redirects.
     suppressAuthRedirect?: boolean;
+    // Verify an explicitly supplied credential without substituting the
+    // browser's current refresh-cookie identity if that credential is rejected.
+    skipAuthRefresh?: boolean;
 };
 
 type TokenStorage = {
@@ -97,7 +107,9 @@ function readRetryAfterMs(res: Response) {
 
 async function readBody(res: Response) {
     const ct = res.headers.get("content-type") ?? "";
-    if (ct.includes("application/json")) {
+    // Also RFC 9457 `application/problem+json`: read as text, every refusal from
+    // those endpoints surfaced as "Request failed" instead of its own detail.
+    if (/\bapplication\/(?:[\w.-]+\+)?json\b/i.test(ct)) {
         try {
             return await res.json();
         } catch {
@@ -165,9 +177,65 @@ let _freshLoginUntil = 0;
 // the SSR + first-paint paths are unchanged.
 // ──────────────────────────────────────────────────────────────────────────
 let _externalTokenProvider: (() => string | null) | null = null;
+let _externalTokenWriter: ((token: string | null) => void) | null = null;
+export type RequestIdentity = { userId: string; tenantId?: string };
+let _requestIdentity: RequestIdentity | null = null;
+let _identityEpoch = 0;
+// Read-only ownership boundary for consequential dialogs. It contains no token.
+export function getRequestIdentityGeneration() { return _identityEpoch; }
+const identityListeners = new Set<() => void>();
+export function subscribeRequestIdentityGeneration(listener: () => void) {
+    identityListeners.add(listener);
+    return () => { identityListeners.delete(listener); };
+}
+function advanceIdentityGeneration() {
+    _identityEpoch += 1;
+    for (const listener of [...identityListeners]) listener();
+}
+const COOKIE_SESSION_PATHS = new Set([
+    "/auth/login", "/auth/mfa/verify", "/auth/logout", "/auth/logout-all",
+    "/auth/refresh", "/auth/passkeys/login/complete", "/auth/signup/complete",
+]);
+function changesSessionCookies(path: string, method: HttpMethod) {
+    return method === "POST" && COOKIE_SESSION_PATHS.has(path.split(/[?#]/)[0].replace(/\/+$/, ""));
+}
+async function sessionRequest<T>(baseUrl: string, url: string, run: () => Promise<T>, signal?: AbortSignal) {
+    try { return await withBrowserSessionLock(baseUrl, run, signal); }
+    catch (error) {
+        if (error instanceof SessionCoordinationError) throw new ApiClientError({
+            code: error.code, message: error.message, url, method: "POST", sessionRequestNotSent: true,
+        });
+        throw error;
+    }
+}
+const PUBLIC_AUTH_PATHS = new Set([
+    "/auth/login", "/auth/verify-otp", "/auth/signup/start", "/auth/signup/verify-code",
+    "/auth/signup/complete", "/auth/register", "/auth/forgot-password", "/auth/reset-password",
+    "/auth/passkey-check", "/auth/passkeys/login/begin", "/auth/passkeys/login/complete", "/auth/mfa/verify",
+]);
+function managesSession(path: string) {
+    return PUBLIC_AUTH_PATHS.has(path) || COOKIE_SESSION_PATHS.has(path);
+}
 
-export function setTokenProvider(fn: (() => string | null) | null) {
+export function setRequestIdentity(identity: RequestIdentity | null) {
+    // Only replacing or clearing a verified identity is an account change. The
+    // first verification after a page load is not: requests a page sent before
+    // /auth/me answered used that same session, and failing them showed "Your
+    // sign-in changed" on every refresh. Logout and cross-tab changes still
+    // invalidate pending work through invalidateRequestIdentity().
+    if (_requestIdentity !== null && JSON.stringify(identity) !== JSON.stringify(_requestIdentity)) advanceIdentityGeneration();
+    _requestIdentity = identity ? { ...identity } : null;
+}
+
+export function invalidateRequestIdentity() {
+    advanceIdentityGeneration();
+    _requestIdentity = null;
+}
+
+export function setTokenProvider(fn: (() => string | null) | null, writer?: (token: string | null) => void) {
     _externalTokenProvider = fn;
+    _externalTokenWriter = fn ? writer ?? null : null;
+    if (!fn) invalidateRequestIdentity();
 }
 
 
@@ -250,44 +318,27 @@ function fireSessionExpired() {
 
 function defaultTokenStorage(): TokenStorage {
     let mem: string | null = null;
-    const key = "talklee.auth.token";
     return {
         get: () => {
-            // Phase 2 universal-auth-state: AuthContext installs itself as
-            // the provider so token rotations are reactive. BUT if the
-            // provider returns null we MUST fall through to localStorage —
-            // otherwise a legacy api.setToken() write (which goes through
-            // localStorage but not the React state) is invisible to the
-            // HTTP client and every request goes out without a Bearer
-            // header. That's exactly what caused the post-Phase-3 login
-            // bounce regression: the provider returned its stale null
-            // while localStorage already had the freshly-minted token from
-            // /auth/login. The "if (v) return v" form treats null as
-            // "provider doesn't have an answer", falls through to the
-            // localStorage read, and keeps reactivity for real values.
+            // AuthContext owns the current identity, including an explicit
+            // absence. Never revive a stale stored token after local logout.
             if (_externalTokenProvider) {
                 try {
-                    const v = _externalTokenProvider();
-                    if (v) return v;
+                    return _externalTokenProvider();
                 } catch {
-                    // Provider threw — fall through to localStorage.
+                    return null;
                 }
             }
             if (typeof window === "undefined") return mem;
-            try {
-                return window.localStorage.getItem(key);
-            } catch {
-                return mem;
-            }
+            return getBrowserAuthToken();
         },
         set: (token) => {
-            mem = token;
-            if (typeof window === "undefined") return;
-            try {
-                if (token) window.localStorage.setItem(key, token);
-                else window.localStorage.removeItem(key);
-            } catch {
+            if (_externalTokenWriter) {
+                _externalTokenWriter(token);
+                return;
             }
+            mem = token;
+            setBrowserAuthToken(token);
         },
     };
 }
@@ -298,29 +349,75 @@ function defaultTokenStorage(): TokenStorage {
 // HTTP client retries any first-time 401 once, after a successful
 // refresh. Concurrent 401s share a single in-flight refresh promise so
 // a thundering herd doesn't trigger N rotations.
-let _refreshInFlight: Promise<boolean> | null = null;
+type RefreshResult = { ok: boolean; status?: number; accessToken?: string; userId?: string; tenantId?: string };
+const _refreshInFlight = new Map<string, Promise<RefreshResult>>();
+const REFRESH_TIMEOUT_MS = 10_000;
+let _refreshTimeoutMs = REFRESH_TIMEOUT_MS;
 
-async function tryRefresh(refreshUrl: string): Promise<boolean> {
-    if (_refreshInFlight) return _refreshInFlight;
-    _refreshInFlight = (async () => {
+// Access tokens this client rotated, as "epoch + from" -> to. A request that
+// started before a rotation by a sibling request (same identity epoch, same
+// verified user/tenant) is still the same sign-in, not an account switch.
+const _rotations = new Map<string, string>();
+const MAX_TRACKED_ROTATIONS = 64;
+const MAX_ROTATION_HOPS = 16;
+const rotationKey = (epoch: number, token: string) => JSON.stringify([epoch, token]);
+function recordRotation(epoch: number, from: string | null, to: string) {
+    if (!from || from === to) return;
+    _rotations.set(rotationKey(epoch, from), to);
+    if (_rotations.size > MAX_TRACKED_ROTATIONS) _rotations.delete(_rotations.keys().next().value!);
+}
+/** The newest token this client rotated `from` into, or `from` itself. */
+function rotatedSuccessor(epoch: number, from: string | null): string | null {
+    let cur = from;
+    for (let hop = 0; cur && hop < MAX_ROTATION_HOPS; hop++) {
+        const next = _rotations.get(rotationKey(epoch, cur));
+        if (!next) break;
+        cur = next;
+    }
+    return cur;
+}
+
+/** Test-only: shorten (or, with null, restore) the refresh timeout. */
+export function __setRefreshTimeoutMsForTests(ms: number | null) {
+    _refreshTimeoutMs = ms ?? REFRESH_TIMEOUT_MS;
+}
+
+async function tryRefresh(baseUrl: string, refreshUrl: string, key: string, headers: Record<string, string>, assertOwner: () => void): Promise<RefreshResult> {
+    const existing = _refreshInFlight.get(key);
+    if (existing) return existing;
+    const promise = sessionRequest(baseUrl, refreshUrl, async () => {
+        assertOwner();
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), _refreshTimeoutMs);
         try {
+            // Every request waiting on this shared promise inherits its fate, and the
+            // per-request timeoutMs does not cover it: bound the refresh itself.
             const res = await fetch(refreshUrl, {
                 method: "POST",
                 credentials: "include",
+                headers,
+                signal: controller.signal,
             });
-            return res.ok;
+            const body = res.ok && res.headers.get("content-type")?.includes("application/json")
+                ? await res.json() as Record<string, unknown> : undefined;
+            return { ok: res.ok, status: res.status,
+                accessToken: typeof body?.access_token === "string" ? body.access_token : undefined,
+                userId: typeof body?.user_id === "string" ? body.user_id : undefined,
+                tenantId: typeof body?.tenant_id === "string" ? body.tenant_id : undefined };
         } catch {
-            return false;
+            return { ok: false };
         } finally {
-            setTimeout(() => { _refreshInFlight = null; }, 0);
+            clearTimeout(timeoutId);
         }
-    })();
-    return _refreshInFlight;
+    }).finally(() => { setTimeout(() => { if (_refreshInFlight.get(key) === promise) _refreshInFlight.delete(key); }, 0); });
+    _refreshInFlight.set(key, promise);
+    return promise;
 }
 
 /** Test-only: reset module-level refresh state between tests. */
 export function __resetRefreshStateForTests() {
-    _refreshInFlight = null;
+    _refreshInFlight.clear();
+    _rotations.clear();
 }
 
 export function createHttpClient(config: HttpClientConfig) {
@@ -338,17 +435,109 @@ export function createHttpClient(config: HttpClientConfig) {
     // routed through the Next.js proxy).
     const refreshUrl = `${baseUrl}/auth/refresh`;
 
-    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>) {
+    function captureScope() {
+        return { token: getToken(), epoch: _identityEpoch, identity: _requestIdentity ? { ..._requestIdentity } : null };
+    }
+    type RequestScope = ReturnType<typeof captureScope>;
+    // The current token is the scope's own, or one this client rotated it into.
+    function tokenStillOurs(scope: RequestScope) {
+        const current = getToken();
+        return current === scope.token || (current !== null && current === rotatedSuccessor(scope.epoch, scope.token));
+    }
+    function assertScope(scope: RequestScope, opts: HttpRequestOptions) {
+        if (_identityEpoch !== scope.epoch || !tokenStillOurs(scope)) {
+            throw new ApiClientError({ code: "identity_changed",
+                message: "Your sign-in changed while this request was pending. Check saved results before submitting it again.",
+                url: buildUrl(baseUrl, opts.path, opts.query ?? opts.params), method: opts.method ?? "GET" });
+        }
+        if (opts.signal?.aborted || (opts.ownsOperation && !opts.ownsOperation())) {
+            throw new ApiClientError({ code: "operation_cancelled", message: "This request no longer belongs to the active sign-in attempt.",
+                url: buildUrl(baseUrl, opts.path, opts.query ?? opts.params), method: opts.method ?? "GET" });
+        }
+    }
+    function identityHeaders(scope: RequestScope) {
+        const headers: Record<string, string> = {};
+        if (scope.identity) {
+            headers["X-Talky-Expected-User"] = scope.identity.userId;
+            headers["X-Talky-Expected-Tenant"] = scope.identity.tenantId ?? "";
+        }
+        return headers;
+    }
+    async function refreshForScope(scope: RequestScope, opts: HttpRequestOptions) {
+        assertScope(scope, opts);
+        // A sibling request already rotated the token this one was sent with:
+        // adopt it and retry rather than spending the refresh cookie again.
+        const rotated = rotatedSuccessor(scope.epoch, scope.token);
+        if (rotated && rotated !== scope.token && getToken() === rotated) {
+            scope.token = rotated;
+            return true;
+        }
+        const key = JSON.stringify([refreshUrl, scope.epoch, scope.identity, scope.token]);
+        const result = await tryRefresh(baseUrl, refreshUrl, key, identityHeaders(scope), () => assertScope(scope, opts));
+        // A concurrent request in this same scope can adopt the same refresh.
+        if (result.accessToken && getToken() === result.accessToken && _identityEpoch === scope.epoch) scope.token = result.accessToken;
+        assertScope(scope, opts);
+        if (result.status === 409) {
+            throw new ApiClientError({ code: "identity_changed", message: "Your sign-in changed. Refresh the page before continuing.",
+                url: refreshUrl, method: "POST" });
+        }
+        if (result.ok && result.accessToken) {
+            if (scope.identity && (result.userId !== scope.identity.userId
+                || (result.tenantId ?? "") !== (scope.identity.tenantId ?? ""))) {
+                throw new ApiClientError({ code: "identity_changed", message: "Your sign-in changed. Refresh the page before continuing.",
+                    url: refreshUrl, method: "POST" });
+            }
+            if (scope.identity) recordRotation(scope.epoch, scope.token, result.accessToken);
+            setToken(result.accessToken);
+            scope.token = result.accessToken;
+        }
+        if (!result.ok && result.status !== 401 && result.status !== 403) {
+            // Only a refresh the server REJECTED means the session is gone. A
+            // restart, a 5xx or a dropped/timed-out connection says nothing
+            // about the refresh token, so keep the session and let the caller retry.
+            throw new ApiClientError({ status: result.status, code: result.status ? "server_error" : "network_error",
+                message: result.status ? "The server could not renew your session. Please try again."
+                    : "Could not reach the server to renew your session. Please try again.",
+                url: refreshUrl, method: "POST" });
+        }
+        return result.ok;
+    }
+
+    function guardResponseBody(res: Response, scope: RequestScope, opts: HttpRequestOptions): Response {
+        // Existing binary/import callers read the body after requestRaw resolves.
+        // Their identity must still match when that asynchronous read finishes.
+        const guarded = <T>(read: () => Promise<T>) => async () => {
+            assertScope(scope, opts);
+            const value = await read();
+            assertScope(scope, opts);
+            return value;
+        };
+        res.blob = guarded(res.blob.bind(res));
+        res.json = guarded(res.json.bind(res));
+        res.text = guarded(res.text.bind(res));
+        res.arrayBuffer = guarded(res.arrayBuffer.bind(res));
+        res.formData = guarded(res.formData.bind(res));
+        const clone = res.clone.bind(res);
+        res.clone = () => { assertScope(scope, opts); return guardResponseBody(clone(), scope, opts); };
+        return res;
+    }
+
+    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>, scope = captureScope()) {
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
+        const bootstrap = method === "GET" && (opts.path === "/auth/me" || opts.path === "/me" || opts.path === "/health");
+        if (_externalTokenProvider && !scope.identity && !managesSession(opts.path) && !bootstrap) {
+            throw new ApiClientError({ code: "identity_unverified", message: "Please wait while your sign-in is checked, then try again.", url, method });
+        }
         const headers: Record<string, string> = {};
         for (const [k, v] of Object.entries(opts.headers ?? {})) {
             if (v === undefined) continue;
             headers[k] = v;
         }
 
-        const token = getToken();
+        Object.assign(headers, identityHeaders(scope));
+        const token = scope.token;
         if (token && !headers.Authorization && !headers.authorization) {
             headers.Authorization = `Bearer ${token}`;
         }
@@ -374,74 +563,86 @@ export function createHttpClient(config: HttpClientConfig) {
             headers["Content-Type"] = "application/json";
         }
 
-        const controller = new AbortController();
-        const externalSignal = opts.signal;
-        const onAbort = () => controller.abort(externalSignal?.reason);
-        if (externalSignal) {
-            if (externalSignal.aborted) onAbort();
-            else externalSignal.addEventListener("abort", onAbort, { once: true });
-        }
+        // Freeze request data before queuing, but begin its transport deadline
+        // only after admission. Never hold this lock around a 401 retry loop.
+        const execute = async () => {
+            assertScope(scope, opts);
+            const controller = new AbortController();
+            const externalSignal = opts.signal;
+            const onAbort = () => controller.abort(externalSignal?.reason);
+            if (externalSignal) {
+                if (externalSignal.aborted) onAbort();
+                else externalSignal.addEventListener("abort", onAbort, { once: true });
+            }
 
-        const timeoutMs = opts.timeoutMs;
-        const timeoutId =
-            typeof timeoutMs === "number" && timeoutMs > 0
-                ? setTimeout(() => controller.abort(new Error("Timeout")), timeoutMs)
-                : undefined;
+            const timeoutMs = opts.timeoutMs;
+            const timeoutId =
+                typeof timeoutMs === "number" && timeoutMs > 0
+                    ? setTimeout(() => controller.abort(new Error("Timeout")), timeoutMs)
+                    : undefined;
 
-        const start = typeof performance !== "undefined" ? performance.now() : Date.now();
-        const initBase: RequestInit = {
-            method,
-            headers,
-            body,
-            credentials: "include",
-            signal: controller.signal,
+            const start = typeof performance !== "undefined" ? performance.now() : Date.now();
+            const initBase: RequestInit = {
+                method,
+                headers,
+                body,
+                credentials: "include",
+                signal: controller.signal,
+            };
+
+            try {
+                let cur = { url, init: initBase };
+                for (const interceptor of requestInterceptors) {
+                    cur = await interceptor(cur);
+                }
+                assertScope(scope, opts);
+                let res = await fetch(cur.url, cur.init);
+                for (const interceptor of responseInterceptors) {
+                    assertScope(scope, opts);
+                    res = await interceptor(res);
+                }
+                assertScope(scope, opts);
+
+                if (process.env.NODE_ENV === "development") {
+                    const end = typeof performance !== "undefined" ? performance.now() : Date.now();
+                    const ms = Math.round(end - start);
+                    const safeHeaders = { ...headers };
+                    if (safeHeaders.Authorization) safeHeaders.Authorization = "Bearer <redacted>";
+                    console.debug(`[api] ${method} ${url} -> ${res.status} (${ms}ms)`, safeHeaders);
+                }
+
+                return res;
+            } finally {
+                if (timeoutId !== undefined) clearTimeout(timeoutId);
+                if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
+            }
         };
-
-        let cur = { url, init: initBase };
-        for (const interceptor of requestInterceptors) {
-            cur = await interceptor(cur);
-        }
-
-        try {
-            let res = await fetch(cur.url, cur.init);
-            for (const interceptor of responseInterceptors) {
-                res = await interceptor(res);
-            }
-
-            if (process.env.NODE_ENV === "development") {
-                const end = typeof performance !== "undefined" ? performance.now() : Date.now();
-                const ms = Math.round(end - start);
-                const safeHeaders = { ...headers };
-                if (safeHeaders.Authorization) safeHeaders.Authorization = "Bearer <redacted>";
-                console.debug(`[api] ${method} ${url} -> ${res.status} (${ms}ms)`, safeHeaders);
-            }
-
-            return res;
-        } finally {
-            if (timeoutId !== undefined) clearTimeout(timeoutId);
-            if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
-        }
+        assertScope(scope, opts);
+        return changesSessionCookies(opts.path, method)
+            ? sessionRequest(baseUrl, url, execute, opts.signal) : execute();
     }
 
     async function request<TResponse = unknown, TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<TResponse> {
+        const scope = captureScope();
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
 
         // Don't try to refresh the refresh endpoint itself — that would
         // recurse forever on a genuinely expired refresh token.
-        const isRefreshCall = opts.path === "/auth/refresh" || opts.path.endsWith("/auth/refresh");
+        const isRefreshCall = managesSession(opts.path);
 
         let res: Response;
         try {
-            res = await raw(opts);
-            if (res.status === 401 && !isRefreshCall) {
-                const refreshed = await tryRefresh(refreshUrl);
+            res = await raw(opts, scope);
+            if (res.status === 401 && !isRefreshCall && !opts.skipAuthRefresh) {
+                const refreshed = await refreshForScope(scope, opts);
                 if (refreshed) {
-                    res = await raw(opts);
+                    res = await raw(opts, scope);
                 }
             }
         } catch (err) {
+            if (err instanceof ApiClientError) throw err;
             if (err instanceof DOMException && err.name === "AbortError") {
                 throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method });
             }
@@ -461,6 +662,7 @@ export function createHttpClient(config: HttpClientConfig) {
             const retryAfterMs = res.status === 429 ? readRetryAfterMs(res) : undefined;
             const requestId = res.headers.get("x-request-id") ?? res.headers.get("x-correlation-id") ?? undefined;
             const body = await readBody(res);
+            assertScope(scope, opts);
 
             // Canonical envelope from backend: { error: { code, message, details, request_id } }.
             // Falls back to the legacy { detail: string|dict } shape (FastAPI default)
@@ -478,6 +680,16 @@ export function createHttpClient(config: HttpClientConfig) {
                     ? (body as { detail?: unknown }).detail
                     : undefined;
             const legacyMessage = typeof legacyDetail === "string" ? legacyDetail : undefined;
+            const legacyRecord =
+                legacyDetail && typeof legacyDetail === "object"
+                    ? legacyDetail as Record<string, unknown>
+                    : undefined;
+            const legacyCodeValue = legacyRecord?.code ?? legacyRecord?.error;
+            const legacyCode = typeof legacyCodeValue === "string" ? legacyCodeValue : undefined;
+            const legacyObjectMessage = typeof legacyRecord?.message === "string" ? legacyRecord.message : undefined;
+            const legacyObjectDetails = legacyRecord && "details" in legacyRecord
+                ? legacyRecord.details
+                : legacyDetail;
 
             const defaultCode =
                 res.status === 401
@@ -490,9 +702,9 @@ export function createHttpClient(config: HttpClientConfig) {
                           ? "server_error"
                           : "http_error";
 
-            const code = envelopeCode ?? defaultCode;
-            const message = envelopeMessage ?? legacyMessage ?? defaultMessageForStatus(res.status);
-            const detailsForError = envelopeDetails ?? legacyDetail ?? body;
+            const code = envelopeCode ?? legacyCode ?? defaultCode;
+            const message = envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status);
+            const detailsForError = envelopeDetails ?? legacyObjectDetails ?? body;
 
             // Single source of truth for token expiry — clear the
             // stored token, then fire the global session-expired
@@ -501,7 +713,7 @@ export function createHttpClient(config: HttpClientConfig) {
             // redirect-to-login behaviour. The handler is
             // idempotent — parallel requests racing on 401 trigger
             // exactly one redirect.
-            if (res.status === 401 && !opts.suppressAuthRedirect) {
+            if (res.status === 401 && !opts.suppressAuthRedirect && !managesSession(opts.path)) {
                 // Inside the fresh-login grace window, keep the bearer
                 // token in storage — wiping it would force the next
                 // call to use cookie-only auth even though localStorage
@@ -530,9 +742,13 @@ export function createHttpClient(config: HttpClientConfig) {
 
         const ct = res.headers.get("content-type") ?? "";
         if (ct.includes("application/json")) {
-            return (await res.json()) as TResponse;
+            const result = await res.json();
+            assertScope(scope, opts);
+            return result as TResponse;
         }
-        return (await res.text()) as unknown as TResponse;
+        const result = await res.text();
+        assertScope(scope, opts);
+        return result as unknown as TResponse;
     }
 
     /**
@@ -551,20 +767,22 @@ export function createHttpClient(config: HttpClientConfig) {
      * Throws {@link ApiClientError} on a non-OK response.
      */
     async function requestRaw<TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<Response> {
+        const scope = captureScope();
         const method = opts.method ?? "GET";
         const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
-        const isRefreshCall = opts.path === "/auth/refresh" || opts.path.endsWith("/auth/refresh");
+        const isRefreshCall = managesSession(opts.path);
 
         let res: Response;
         try {
-            res = await raw(opts);
-            if (res.status === 401 && !isRefreshCall) {
-                const refreshed = await tryRefresh(refreshUrl);
+            res = await raw(opts, scope);
+            if (res.status === 401 && !isRefreshCall && !opts.skipAuthRefresh) {
+                const refreshed = await refreshForScope(scope, opts);
                 if (refreshed) {
-                    res = await raw(opts);
+                    res = await raw(opts, scope);
                 }
             }
         } catch (err) {
+            if (err instanceof ApiClientError) throw err;
             if (err instanceof DOMException && err.name === "AbortError") {
                 throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method });
             }
@@ -580,23 +798,9 @@ export function createHttpClient(config: HttpClientConfig) {
             });
         }
 
-        // Same session-expiry handling as `request`: a genuine 401 (refresh
-        // also failed) clears the stale token and fires the global
-        // session-expired redirect so the user lands back on login.
-        if (res.status === 401 && !opts.suppressAuthRedirect) {
-            if (!isWithinFreshLoginGrace()) {
-                try {
-                    setToken(null);
-                } catch {
-                    // ignore — clearing storage must not derail the throw
-                }
-            }
-            fireSessionExpired();
-        }
-
         if (!res.ok) {
             const requestId = res.headers.get("x-request-id") ?? res.headers.get("x-correlation-id") ?? undefined;
-            const code =
+            const defaultCode =
                 res.status === 401
                     ? "unauthorized"
                     : res.status === 403
@@ -610,28 +814,47 @@ export function createHttpClient(config: HttpClientConfig) {
             // caller won't read it as binary. Surface the backend's detail
             // (e.g. CSV validation errors) instead of a generic status line.
             const body = await readBody(res);
+            assertScope(scope, opts);
+            if (res.status === 401 && !opts.suppressAuthRedirect && !managesSession(opts.path)) {
+                if (!isWithinFreshLoginGrace()) {
+                    try { setToken(null); } catch { /* Preserve the original failure. */ }
+                }
+                fireSessionExpired();
+            }
             const envelope =
                 body && typeof body === "object" && "error" in (body as Record<string, unknown>)
-                    ? ((body as { error?: unknown }).error as { message?: unknown } | undefined)
+                    ? ((body as { error?: unknown }).error as { code?: unknown; message?: unknown; details?: unknown } | undefined)
                     : undefined;
+            const envelopeCode = typeof envelope?.code === "string" ? envelope.code : undefined;
             const envelopeMessage = typeof envelope?.message === "string" ? envelope.message : undefined;
+            const envelopeDetails = envelope?.details;
             const legacyDetail =
                 body && typeof body === "object" && "detail" in (body as Record<string, unknown>)
                     ? (body as { detail?: unknown }).detail
                     : undefined;
             const legacyMessage = typeof legacyDetail === "string" ? legacyDetail : undefined;
+            const legacyRecord =
+                legacyDetail && typeof legacyDetail === "object"
+                    ? legacyDetail as Record<string, unknown>
+                    : undefined;
+            const legacyCodeValue = legacyRecord?.code ?? legacyRecord?.error;
+            const legacyCode = typeof legacyCodeValue === "string" ? legacyCodeValue : undefined;
+            const legacyObjectMessage = typeof legacyRecord?.message === "string" ? legacyRecord.message : undefined;
+            const legacyObjectDetails = legacyRecord && "details" in legacyRecord
+                ? legacyRecord.details
+                : legacyDetail;
             throw new ApiClientError({
                 status: res.status,
-                code,
-                message: envelopeMessage ?? legacyMessage ?? defaultMessageForStatus(res.status),
-                details: legacyDetail ?? body,
+                code: envelopeCode ?? legacyCode ?? defaultCode,
+                message: envelopeMessage ?? legacyObjectMessage ?? legacyMessage ?? defaultMessageForStatus(res.status),
+                details: envelopeDetails ?? legacyObjectDetails ?? body,
                 url,
                 method,
                 requestId,
             });
         }
 
-        return res;
+        return guardResponseBody(res, scope, opts);
     }
 
     return {

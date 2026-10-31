@@ -1,0 +1,378 @@
+FFFFFF.FF..FFFFFFFFFFFFF.FF..FFFFFFFFFFFFF......                         [100%]
+================================== FAILURES ===================================
+_ test_off_request_response_cannot_overwrite_accepted_node_and_grant_unrelated_evidence[False] _
+tests\unit\test_knowledge_enrichment_routing.py:69: in test_off_request_response_cannot_overwrite_accepted_node_and_grant_unrelated_evidence
+    assert evidence["status"] != "matched", evidence
+E   AssertionError: {'passages': [{'coverage': 1.0, 'node_id': '0', 'source_id': None, 'source_version': None, ...}], 'status': 'matched', 'text': '- Support: Support is available during ordinary business hours each weekday.'}
+E   assert 'matched' != 'matched'
+_ test_off_request_response_cannot_overwrite_accepted_node_and_grant_unrelated_evidence[True] _
+tests\unit\test_knowledge_enrichment_routing.py:69: in test_off_request_response_cannot_overwrite_accepted_node_and_grant_unrelated_evidence
+    assert evidence["status"] != "matched", evidence
+E   AssertionError: {'passages': [{'coverage': 1.0, 'node_id': '0', 'source_id': None, 'source_version': None, ...}], 'status': 'matched', 'text': '- Support: Support is available during ordinary business hours each weekday.'}
+E   assert 'matched' != 'matched'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [1:2] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed0] _
+app\services\scripts\knowledge\enricher.py:166: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'list' object has no attribute 'get'
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'list' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed ('list' object has no attribute 'get') — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-None] _
+app\services\scripts\knowledge\enricher.py:166: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'NoneType' object has no attribute 'get'
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'NoneType' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed ('NoneType' object has no attribute 'get') — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-"not an object"] _
+app\services\scripts\knowledge\enricher.py:166: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'str' object has no attribute 'get'
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'str' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed ('str' object has no attribute 'get') — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed3] _
+app\services\scripts\knowledge\enricher.py:166: in enrich_nodes
+    for item in data.get("nodes", []):
+E   TypeError: 'NoneType' object is not iterable
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   TypeError: 'NoneType' object is not iterable
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed ('NoneType' object is not iterable) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed5] _
+app\services\scripts\knowledge\enricher.py:167: in enrich_nodes
+    i = item.get("i")
+E   AttributeError: 'NoneType' object has no attribute 'get'
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:206: in enrich_nodes
+    i = item.get("i")
+E   AttributeError: 'NoneType' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed ('NoneType' object has no attribute 'get') — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed6] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed9] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed10] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Conflicting', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed11] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='7', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed12] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed13] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['o', 'r', 'b', 'i', 't', 'a', 'l', ' ', 'g', 'u', 'i', 'd'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed14] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['orbital'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed15] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['1'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed16] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...', 't', ' '])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=['W', 'h', 'a', 't', ' ']) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed17] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...ns=['False'])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=['False']) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed0] _
+app\services\scripts\knowledge\enricher.py:165: in enrich_nodes
+    data = json.loads(resp.choices[0].message.content or "{}")
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:356: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'list' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-None] _
+app\services\scripts\knowledge\enricher.py:165: in enrich_nodes
+    data = json.loads(resp.choices[0].message.content or "{}")
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:356: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'NoneType' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-"not an object"] _
+app\services\scripts\knowledge\enricher.py:165: in enrich_nodes
+    data = json.loads(resp.choices[0].message.content or "{}")
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:356: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   AttributeError: 'str' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed3] _
+app\services\scripts\knowledge\enricher.py:165: in enrich_nodes
+    data = json.loads(resp.choices[0].message.content or "{}")
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:356: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:205: in enrich_nodes
+    for item in data.get("nodes", []):
+E   TypeError: 'NoneType' object is not iterable
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed5] _
+app\services\scripts\knowledge\enricher.py:165: in enrich_nodes
+    data = json.loads(resp.choices[0].message.content or "{}")
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\__init__.py:346: in loads
+    return _default_decoder.decode(s)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:338: in decode
+    obj, end = self.raw_decode(s, idx=_w(s, 0).end())
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\json\decoder.py:356: in raw_decode
+    raise JSONDecodeError("Expecting value", s, err.value) from None
+E   json.decoder.JSONDecodeError: Expecting value: line 1 column 1 (char 0)
+
+During handling of the above exception, another exception occurred:
+tests\unit\test_knowledge_enrichment_routing.py:95: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    output = await enricher.enrich_nodes(nodes)
+app\services\scripts\knowledge\enricher.py:206: in enrich_nodes
+    i = item.get("i")
+E   AttributeError: 'NoneType' object has no attribute 'get'
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed6] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed9] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed10] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Conflicting', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed11] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='7', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed12] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed13] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['o', 'r', 'b', 'i', 't', 'a', 'l', ' ', 'g', 'u', 'i', 'd'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed14] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['orbital'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed15] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['1'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed16] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...', 't', ' '])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=['W', 'h', 'a', 't', ' ']) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_ test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed17] _
+tests\unit\test_knowledge_enrichment_routing.py:96: in test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping
+    assert output == [enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...ns=['False'])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=['False']) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:1] failed (Expecting value: line 1 column 1 (char 0)) — retrying one node at a time so a single bad response does not lose the batch
+_________ test_batch_decode_is_atomic_before_any_metadata_assignment __________
+tests\unit\test_knowledge_enrichment_routing.py:109: in test_batch_decode_is_atomic_before_any_metadata_assignment
+    assert output == [enricher.NodeEnrichment(), enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['orbital', 'guidance'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+------------------------------ Captured log call ------------------------------
+WARNING  app.services.scripts.knowledge.enricher:enricher.py:177 knowledge enrich batch [0:2] failed ('NoneType' object has no attribute 'get') — retrying one node at a time so a single bad response does not lose the batch
+____ test_response_cannot_enrich_an_unrequested_short_or_empty_section[0] _____
+tests\unit\test_knowledge_enrichment_routing.py:119: in test_response_cannot_enrich_an_unrequested_short_or_empty_section
+    assert output == [enricher.NodeEnrichment(), enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 0 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+____ test_response_cannot_enrich_an_unrequested_short_or_empty_section[1] _____
+tests\unit\test_knowledge_enrichment_routing.py:119: in test_response_cannot_enrich_an_unrequested_short_or_empty_section
+    assert output == [enricher.NodeEnrichment(), enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 1 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+_____________________ test_true_index_is_not_integer_one ______________________
+tests\unit\test_knowledge_enrichment_routing.py:125: in test_true_index_is_not_integer_one
+    assert await enricher.enrich_nodes([node(), node()]) == [enricher.NodeEnrichment(), enricher.NodeEnrichment()]
+E   AssertionError: assert [NodeEnrichme...questions=[])] == [NodeEnrichme...questions=[])]
+E     At index 1 diff: NodeEnrichment(summary='Original summary', voice_answer='Original phrasing', keywords=['ordinary'], example_questions=[]) != NodeEnrichment(summary='', voice_answer='', keywords=[], example_questions=[])
+E     Use -v to get more diff
+=========================== short test summary info ===========================
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_off_request_response_cannot_overwrite_accepted_node_and_grant_unrelated_evidence[False]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_off_request_response_cannot_overwrite_accepted_node_and_grant_unrelated_evidence[True]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed0]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-None]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-"not an object"]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed3]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed5]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed6]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed9]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed10]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed11]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed12]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed13]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed14]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed15]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed16]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[False-malformed17]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed0]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-None]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-"not an object"]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed3]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed5]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed6]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed9]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed10]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed11]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed12]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed13]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed14]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed15]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed16]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_invalid_metadata_falls_back_to_unchanged_raw_source_without_escaping[True-malformed17]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_batch_decode_is_atomic_before_any_metadata_assignment
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_response_cannot_enrich_an_unrequested_short_or_empty_section[0]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_response_cannot_enrich_an_unrequested_short_or_empty_section[1]
+FAILED tests/unit/test_knowledge_enrichment_routing.py::test_true_index_is_not_integer_one
+36 failed, 12 passed in 2.58s

@@ -75,6 +75,10 @@ export function ConfirmDialog({
     showReasonInput,
     reasonValue,
     onReasonChange,
+    reasonLabel = "Reason (optional)",
+    reasonPlaceholder = "e.g., Account compromised, policy violation",
+    reasonMaxLength = 200,
+    reasonDisabled = false,
 }: {
     open: boolean;
     onOpenChange: (next: boolean) => void;
@@ -93,6 +97,10 @@ export function ConfirmDialog({
     showReasonInput?: boolean;
     reasonValue?: string;
     onReasonChange?: (value: string) => void;
+    reasonLabel?: string;
+    reasonPlaceholder?: string;
+    reasonMaxLength?: number;
+    reasonDisabled?: boolean;
 }) {
     const [pending, setPending] = useState(false);
     const [inlineError, setInlineError] = useState<string | undefined>(undefined);
@@ -105,17 +113,34 @@ export function ConfirmDialog({
     const resolvedConfirmLabel = confirmLabel ?? defaults.confirmLabel;
     const resolvedPendingLabel = pendingLabel ?? `${resolvedConfirmLabel}...`;
 
+    // `handleOpenChange` resets the transient state whenever the dialog closes
+    // through this component. A parent can also close it by simply flipping the
+    // `open` prop (a mutation succeeded elsewhere, a route change, a bulk
+    // action), which never reaches that handler — and the dialog would then
+    // reopen still spinning, or still showing the previous attempt's error.
+    // This is the fallback for exactly that path.
     useEffect(() => {
-        if (!open) {
+        if (open) return;
+        // Resetting transient state when a controlled prop closes the dialog:
+        // there is no event to hang it off, and it must not run during render.
+        // The dialog renders nothing while closed, so no cascade is visible.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- reset on controlled close; no event to hang it off
+        setPending(false);
+        setInlineError(undefined);
+    }, [open]);
+
+    const handleOpenChange = (next: boolean) => {
+        if (!next) {
             setPending(false);
             setInlineError(undefined);
         }
-    }, [open]);
+        onOpenChange(next);
+    };
 
     return (
         <Modal
             open={open}
-            onOpenChange={onOpenChange}
+            onOpenChange={handleOpenChange}
             title={resolvedTitle}
             description={resolvedDescription}
             ariaLabel={resolvedTitle}
@@ -130,7 +155,7 @@ export function ConfirmDialog({
                         onClick={() => {
                             setInlineError(undefined);
                             onCancel?.();
-                            onOpenChange(false);
+                            handleOpenChange(false);
                         }}
                         disabled={pending}
                     >
@@ -150,7 +175,7 @@ export function ConfirmDialog({
                                 p = Promise.reject(err);
                             }
                             p
-                                .then(() => onOpenChange(false))
+                                .then(() => handleOpenChange(false))
                                 .catch((err) => {
                                     const msg = err instanceof Error ? err.message : "Action failed. Please try again.";
                                     setInlineError(msg);
@@ -178,18 +203,18 @@ export function ConfirmDialog({
                     {showReasonInput ? (
                         <div className="mt-4 space-y-2">
                             <Label htmlFor="confirm-reason" className="text-xs">
-                                Reason (optional)
+                                {reasonLabel}
                             </Label>
                             <Input
                                 id="confirm-reason"
                                 type="text"
                                 value={reasonValue ?? ""}
                                 onChange={(e) => onReasonChange?.(e.target.value)}
-                                placeholder="e.g., Account compromised, policy violation"
-                                maxLength={200}
-                                disabled={open ? false : true}
+                                placeholder={reasonPlaceholder}
+                                maxLength={reasonMaxLength}
+                                disabled={reasonDisabled || !open}
                             />
-                            <div className="text-xs text-muted-foreground">{(reasonValue ?? "").length}/200</div>
+                            <div className="text-xs text-muted-foreground">{(reasonValue ?? "").length}/{reasonMaxLength}</div>
                         </div>
                     ) : null}
                     <div className="mt-3 text-xs text-muted-foreground">Review the details, then confirm to proceed.</div>

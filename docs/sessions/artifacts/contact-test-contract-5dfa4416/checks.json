@@ -1,0 +1,41 @@
+{
+  "source_commit": "f3b603b7374155187213873b9c081b8375706df4",
+  "source_sha256": {
+    "backend/tests/unit/test_call_5dfa4416_regressions.py": "56beebe87c893e278b22dd68206d2c446d7eb4d945d706f8b5fc7e6523df81c4"
+  },
+  "python": {
+    "executable": "C:\\Users\\AL AZIZ TECH\\Desktop\\Talky.ai-complete-\\backend\\.venv\\Scripts\\python.exe",
+    "version": "3.12.12",
+    "provenance": "Existing backend/.venv"
+  },
+  "environment": {
+    "ENVIRONMENT": "test",
+    "PYTHONPATH": "<worktree>/backend",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "PYTHONUTF8": "1"
+  },
+  "commands": {
+    "before": "python -B -m pytest tests/unit/test_call_5dfa4416_regressions.py --collect-only -q -o addopts=",
+    "final": "python -B -m pytest tests/unit/test_call_5dfa4416_regressions.py -q -o addopts=",
+    "lint": "python -B -m ruff check --select F backend/tests/unit/test_call_5dfa4416_regressions.py",
+    "diff": "git -c core.safecrlf=false diff --check"
+  },
+  "results": {
+    "before": "no tests collected,1ImportError (_spelled_by_caller removed)",
+    "first": "2fail7pass4.37s; fixture incorrectly used set value=None and unowned pending display state as save evidence",
+    "final": "9pass1.09s",
+    "lint": "pass",
+    "diff": "pass"
+  },
+  "artifacts": {
+    "collection-before.txt": "4af98998ce7dff0bd7b8d5bc710a0c19f0fa90b82ee5adce9173ff5efcbb458b",
+    "final.txt": "a9c777bedc0088a5c5b1bfb17875eebda587e1643ea2ae7fb56feb4a9f54379d",
+    "first.txt": "bd555d40c54070f338b4ab0c844a9b3cd557fc3c0b0434b17f3f94198e4dff7e",
+    "retired-assertions.json": "b9f4d7bc637a70ddeff16a382cde350939c8dc2f5023f7e9c7532f89536d931c"
+  },
+  "limits": [
+    "One module only; no whole unit collection or suite pass claim.",
+    "Synthetic model arguments and SQL fixture; no provider/audio/DB/browser execution.",
+    "Retained pure legacy detector controls are diagnostics, not live enforcement."
+  ]
+}

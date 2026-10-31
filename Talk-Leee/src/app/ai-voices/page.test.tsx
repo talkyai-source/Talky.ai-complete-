@@ -2,16 +2,55 @@ import { test, afterEach, beforeEach, describe } from "node:test";
 import assert from "node:assert/strict";
 import { cleanup, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import React from "react";
+import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
+import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import AiVoicesPage from "./page";
 import { ThemeProvider } from "@/components/providers/theme-provider";
+import { AuthProvider } from "@/lib/auth-context";
 
 // Mock global fetch
 const originalFetch = global.fetch;
 
+/**
+ * The page renders <Navbar>, which calls usePathname(), useRouter() and
+ * useAuth(). Outside a Next app the first two throw "invariant expected app
+ * router to be mounted" and the third throws "useAuth must be used within an
+ * AuthProvider", so every test here died before it reached a voice.
+ *
+ * That is why these three tests failed the first time anyone ran them: they
+ * never had. `npm test` used to leave file discovery to `node --test`, whose
+ * default patterns cover js/mjs/cjs/ts/mts/cts and NOT tsx, so this file was
+ * silently skipped from the day it was written. package.json now lists the
+ * patterns explicitly, which is what surfaced this.
+ *
+ * Supplying the two contexts is the smallest honest fix: the assertions below
+ * are untouched, and nothing about the page under test is stubbed out.
+ */
+function renderPage() {
+  const router = {
+    push: () => {},
+    replace: () => {},
+    refresh: () => {},
+    back: () => {},
+    forward: () => {},
+    prefetch: async () => {},
+  } as unknown as React.ContextType<typeof AppRouterContext>;
+
+  return render(
+    <AppRouterContext.Provider value={router}>
+      <PathnameContext.Provider value="/ai-voices">
+        <AuthProvider>
+          <ThemeProvider>
+            <AiVoicesPage />
+          </ThemeProvider>
+        </AuthProvider>
+      </PathnameContext.Provider>
+    </AppRouterContext.Provider>,
+  );
+}
+
 describe("AiVoicesPage", () => {
-  // We need to handle the fact that Navbar uses Next.js Link which might fail outside Next.js
-  // But let's try.
-  
+
   beforeEach(() => {
     // Reset fetch mock
     global.fetch = async () => ({
@@ -52,11 +91,7 @@ describe("AiVoicesPage", () => {
       json: async () => mockVoices,
     }) as unknown as Promise<Response>;
 
-    render(
-      <ThemeProvider>
-        <AiVoicesPage />
-      </ThemeProvider>
-    );
+    renderPage();
 
     // Wait for "Sarah" to appear
     await waitFor(() => {
@@ -73,11 +108,7 @@ describe("AiVoicesPage", () => {
        throw new Error("API Error");
     };
 
-    render(
-      <ThemeProvider>
-        <AiVoicesPage />
-      </ThemeProvider>
-    );
+    renderPage();
 
     await waitFor(() => {
       assert.ok(screen.getByText("Error: API Error"));
@@ -104,11 +135,7 @@ describe("AiVoicesPage", () => {
       json: async () => mockVoices,
     }) as unknown as Promise<Response>;
 
-    render(
-      <ThemeProvider>
-        <AiVoicesPage />
-      </ThemeProvider>
-    );
+    renderPage();
 
     await waitFor(() => {
       assert.ok(screen.getByText("Sarah"));

@@ -1,0 +1,112 @@
+FFF..                                                                    [100%]
+================================== FAILURES ===================================
+_ test_live_opt_out_survives_final_settlement_without_changing_call_history[answered] _
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x000002C99C778E60>, pool=<asyncpg.pool.Pool obj...cfb-414a-4562-8034-28bcbf25e700'), service=<app.domain.services.call_service.CallService object at 0x000002C9AB447F20>)
+outcome = <CallOutcome.ANSWERED: 'answered'>
+
+    @pytest.mark.parametrize("outcome", [CallOutcome.ANSWERED, CallOutcome.GOAL_ACHIEVED, CallOutcome.FAILED])
+    async def test_live_opt_out_survives_final_settlement_without_changing_call_history(settlement, outcome):
+        f, db = settlement, settlement.db
+        result = await purge_lead_on_opt_out(db_pool=db.pool, db_client=None,
+            tenant_id=str(db.tenants[0]), lead_id=str(db.leads[0]), phone_number=PHONE)
+        assert result["purge_complete"]
+>       execution = await settle(f, outcome)
+
+tests\integration\test_dnc_settlement_truth.py:59:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\integration\test_dnc_settlement_truth.py:47: in settle
+    return await fixture.service._handle_call_status_pooled(
+app\domain\services\call_service.py:640: in _handle_call_status_pooled
+    terminal_row = await self._update_call_row_pooled(
+app\domain\services\call_service.py:871: in _update_call_row_pooled
+    return await conn.fetchrow(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:749: in fetchrow
+    data = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table crm_deliveries
+
+asyncpg\protocol\protocol.pyx:207: InsufficientPrivilegeError
+_ test_live_opt_out_survives_final_settlement_without_changing_call_history[goal_achieved] _
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x000002C9AB411B80>, pool=<asyncpg.pool.Pool obj...f4a-5ab0-4119-8633-a243ad2d64af'), service=<app.domain.services.call_service.CallService object at 0x000002C9AC4F9130>)
+outcome = <CallOutcome.GOAL_ACHIEVED: 'goal_achieved'>
+
+    @pytest.mark.parametrize("outcome", [CallOutcome.ANSWERED, CallOutcome.GOAL_ACHIEVED, CallOutcome.FAILED])
+    async def test_live_opt_out_survives_final_settlement_without_changing_call_history(settlement, outcome):
+        f, db = settlement, settlement.db
+        result = await purge_lead_on_opt_out(db_pool=db.pool, db_client=None,
+            tenant_id=str(db.tenants[0]), lead_id=str(db.leads[0]), phone_number=PHONE)
+        assert result["purge_complete"]
+>       execution = await settle(f, outcome)
+
+tests\integration\test_dnc_settlement_truth.py:59:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\integration\test_dnc_settlement_truth.py:47: in settle
+    return await fixture.service._handle_call_status_pooled(
+app\domain\services\call_service.py:640: in _handle_call_status_pooled
+    terminal_row = await self._update_call_row_pooled(
+app\domain\services\call_service.py:871: in _update_call_row_pooled
+    return await conn.fetchrow(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:749: in fetchrow
+    data = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table crm_deliveries
+
+asyncpg\protocol\protocol.pyx:207: InsufficientPrivilegeError
+_ test_live_opt_out_survives_final_settlement_without_changing_call_history[failed] _
+
+settlement = namespace(db=namespace(admin=<asyncpg.connection.Connection object at 0x000002C9AB4125D0>, pool=<asyncpg.pool.Pool obj...df3-0aa0-4844-8d1f-3f20db09d689'), service=<app.domain.services.call_service.CallService object at 0x000002C9AC516360>)
+outcome = <CallOutcome.FAILED: 'failed'>
+
+    @pytest.mark.parametrize("outcome", [CallOutcome.ANSWERED, CallOutcome.GOAL_ACHIEVED, CallOutcome.FAILED])
+    async def test_live_opt_out_survives_final_settlement_without_changing_call_history(settlement, outcome):
+        f, db = settlement, settlement.db
+        result = await purge_lead_on_opt_out(db_pool=db.pool, db_client=None,
+            tenant_id=str(db.tenants[0]), lead_id=str(db.leads[0]), phone_number=PHONE)
+        assert result["purge_complete"]
+>       execution = await settle(f, outcome)
+
+tests\integration\test_dnc_settlement_truth.py:59:
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+tests\integration\test_dnc_settlement_truth.py:47: in settle
+    return await fixture.service._handle_call_status_pooled(
+app\domain\services\call_service.py:640: in _handle_call_status_pooled
+    terminal_row = await self._update_call_row_pooled(
+app\domain\services\call_service.py:871: in _update_call_row_pooled
+    return await conn.fetchrow(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:749: in fetchrow
+    data = await self._execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1794: in _execute
+    result, _ = await self.__execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1892: in __execute
+    result, stmt = await self._do_execute(
+..\..\..\backend\.venv\Lib\site-packages\asyncpg\connection.py:1945: in _do_execute
+    result = await executor(stmt, None)
+_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _
+
+>   ???
+E   asyncpg.exceptions.InsufficientPrivilegeError: permission denied for table crm_deliveries
+
+asyncpg\protocol\protocol.pyx:207: InsufficientPrivilegeError
+=========================== short test summary info ===========================
+FAILED tests/integration/test_dnc_settlement_truth.py::test_live_opt_out_survives_final_settlement_without_changing_call_history[answered]
+FAILED tests/integration/test_dnc_settlement_truth.py::test_live_opt_out_survives_final_settlement_without_changing_call_history[goal_achieved]
+FAILED tests/integration/test_dnc_settlement_truth.py::test_live_opt_out_survives_final_settlement_without_changing_call_history[failed]
+3 failed, 2 passed, 13 deselected in 11.12s

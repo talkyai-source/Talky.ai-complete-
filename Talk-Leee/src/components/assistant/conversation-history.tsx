@@ -65,6 +65,10 @@ export function ConversationHistory({
     }, []);
 
     useEffect(() => {
+        // Fetches the conversation list on mount (and whenever `load`
+        // changes identity); it sets rows/error state as the request
+        // resolves — the standard fetch-on-mount pattern.
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- fetches conversation list on mount, load() sets state once the request resolves
         void load();
     }, [load]);
 
@@ -167,7 +171,7 @@ export function ConversationHistory({
                         disabled={busyId === r.id}
                         aria-label="Delete conversation"
                         title="Delete conversation"
-                        className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-red-500 group-hover:opacity-100"
+                        className="rounded-md p-1.5 -m-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-red-500 group-hover:opacity-100"
                     >
                         <Trash2 className="h-3.5 w-3.5" />
                     </button>

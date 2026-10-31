@@ -1,0 +1,1 @@
+Evidence transcription: the final 16-file ESLint command in frontend-lint-complete-command.json completed with exit code 0 and no diagnostics. PowerShell Tee-Object did not create an output file for the empty stream. This note records the observed tool result; it is not verbatim CLI output.

@@ -1,0 +1,28 @@
+FF.F
+================================== FAILURES ===================================
+_ test_generated_routing_aliases_do_not_authorize_unrelated_source[keywords] __
+tests\integration\test_knowledge_retrieval_boundaries.py:388: in test_generated_routing_aliases_do_not_authorize_unrelated_source
+    assert evidence["status"] == "weak_match", evidence
+E   AssertionError: {'passages': [{'coverage': 1.0, 'node_id': 'ca5bfac4-03e8-4cd8-8ba0-cc10d752e526', 'source_id': '975a8704-ffdf-4b72-89...2d', 'source_version': 1, ...}], 'status': 'matched', 'text': '- Support: Support is available during business hours.'}
+E   assert 'matched' == 'weak_match'
+E     - weak_match
+E     + matched
+_ test_generated_routing_aliases_do_not_authorize_unrelated_source[example_questions] _
+tests\integration\test_knowledge_retrieval_boundaries.py:388: in test_generated_routing_aliases_do_not_authorize_unrelated_source
+    assert evidence["status"] == "weak_match", evidence
+E   AssertionError: {'passages': [{'coverage': 1.0, 'node_id': '95cdb5a0-6e47-4f62-a333-78b2b2108c17', 'source_id': '5e9a35e9-fa1b-405c-90...bd', 'source_version': 1, ...}], 'status': 'matched', 'text': '- Support: Support is available during business hours.'}
+E   assert 'matched' == 'weak_match'
+E     - weak_match
+E     + matched
+_ test_other_nodes_generated_alias_frequency_cannot_change_source_confidence __
+tests\integration\test_knowledge_retrieval_boundaries.py:429: in test_other_nodes_generated_alias_frequency_cannot_change_source_confidence
+    assert after == pytest.approx(before)
+E   assert 0.2082559308114424 == 0.5 ± 5.0e-07
+E     comparison failed
+E     Obtained: 0.2082559308114424
+E     Expected: 0.5 ± 5.0e-07
+=========================== short test summary info ===========================
+FAILED tests/integration/test_knowledge_retrieval_boundaries.py::test_generated_routing_aliases_do_not_authorize_unrelated_source[keywords]
+FAILED tests/integration/test_knowledge_retrieval_boundaries.py::test_generated_routing_aliases_do_not_authorize_unrelated_source[example_questions]
+FAILED tests/integration/test_knowledge_retrieval_boundaries.py::test_other_nodes_generated_alias_frequency_cannot_change_source_confidence
+3 failed, 1 passed, 9 deselected in 12.11s

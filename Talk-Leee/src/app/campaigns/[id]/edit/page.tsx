@@ -19,6 +19,8 @@ import {
 } from "@/components/campaigns/campaign-form";
 import { CampaignBasicsEditor } from "@/components/campaigns/campaign-basics-editor";
 import { dashboardApi, type PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
+import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
+import { inboundApi } from "@/lib/inbound-api";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -69,6 +71,7 @@ export default function EditCampaignPage() {
     const [knowledgeDriven, setKnowledgeDriven] = useState(false);
     const [ttsProvider, setTtsProvider] = useState<string | null>(null);
     const [callingSchedule, setCallingSchedule] = useState<CampaignCallingSchedule | null>(null);
+    const [backHref, setBackHref] = useState(`/campaigns/${campaignId}`);
 
     useEffect(() => {
         let cancelled = false;
@@ -77,6 +80,12 @@ export default function EditCampaignPage() {
                 setLoading(true);
                 const { campaign } = await dashboardApi.getCampaign(campaignId);
                 if (cancelled) return;
+                if (!isOutboundCampaign(campaign)) {
+                    // 2026-09-09: inbound campaigns are edited with this SAME form
+                    // (identical options); only the way back differs.
+                    const inboundCampaigns = await inboundApi.list({ includeArchived: true });
+                    if (!cancelled) setBackHref(inboundCampaignHrefForBase(campaignId, inboundCampaigns));
+                }
 
                 const scriptConfig = campaign.script_config ?? {};
                 const slots: Record<string, string> = {};
@@ -85,6 +94,7 @@ export default function EditCampaignPage() {
                 }
 
                 setInitial({
+                    voiceSelection: { pipeline_mode: scriptConfig.pipeline_mode, realtime_model: scriptConfig.realtime_model, realtime_voice: scriptConfig.realtime_voice, realtime_settings: scriptConfig.realtime_settings, realtime_prompt: scriptConfig.realtime_prompt },
                     name: campaign.name ?? "",
                     description: campaign.description ?? "",
                     // The persisted "additional instructions" can live in either
@@ -99,6 +109,7 @@ export default function EditCampaignPage() {
                     agent_names: scriptConfig.agent_names ?? [],
                     agent_name_genders: scriptConfig.agent_name_genders ?? {},
                     slots,
+                    campaign_brief: scriptConfig.campaign_brief,
                 });
                 setKnowledgeDriven(
                     Boolean((scriptConfig as Record<string, unknown>).knowledge_driven),
@@ -118,7 +129,7 @@ export default function EditCampaignPage() {
         return () => {
             cancelled = true;
         };
-    }, [campaignId]);
+    }, [campaignId, router]);
 
     return (
         <DashboardLayout
@@ -131,7 +142,7 @@ export default function EditCampaignPage() {
                 className="mb-6"
             >
                 <button
-                    onClick={() => router.push(`/campaigns/${campaignId}`)}
+                    onClick={() => router.push(backHref)}
                     className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4" />
@@ -151,21 +162,25 @@ export default function EditCampaignPage() {
                 </div>
             ) : initial ? (
                 knowledgeDriven ? (
-                    <CampaignBasicsEditor
-                        campaignId={campaignId}
-                        initial={{
-                            name: initial.name,
-                            description: initial.description,
-                            companyName: initial.company_name,
-                            personaType: initial.persona_type,
-                            agentNames: initial.agent_names,
-                            agentNameGenders: initial.agent_name_genders,
-                            voiceId: initial.voice_id,
-                            ttsProvider,
-                            goal: initial.goal,
-                            callingSchedule,
-                        }}
-                    />
+                    <div className="space-y-6">
+                        <CampaignBasicsEditor
+                            campaignId={campaignId}
+                            initial={{
+                                voiceSelection: initial.voiceSelection,
+                                name: initial.name,
+                                description: initial.description,
+                                companyName: initial.company_name,
+                                personaType: initial.persona_type,
+                                agentNames: initial.agent_names,
+                                agentNameGenders: initial.agent_name_genders,
+                                voiceId: initial.voice_id,
+                                ttsProvider,
+                                goal: initial.goal,
+                                callingSchedule,
+                                campaignBrief: initial.campaign_brief,
+                            }}
+                        />
+                    </div>
                 ) : (
                     <CampaignForm mode="edit" campaignId={campaignId} initialData={initial} />
                 )

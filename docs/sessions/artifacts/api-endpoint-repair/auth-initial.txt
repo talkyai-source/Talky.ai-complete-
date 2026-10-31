@@ -1,0 +1,780 @@
+FFFFFFFFFFFF.......F.                                                    [100%]
+================================== FAILURES ===================================
+_______ test_missing_or_invalid_credentials_reject_before_storage[None] _______
+tests\unit\test_auth_dependency_availability.py:54: in test_missing_or_invalid_credentials_reject_before_storage
+    response = await request(auth_boundary, headers={"Authorization": header} if header else None)
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+__ test_missing_or_invalid_credentials_reject_before_storage[InvalidFormat] ___
+tests\unit\test_auth_dependency_availability.py:54: in test_missing_or_invalid_credentials_reject_before_storage
+    response = await request(auth_boundary, headers={"Authorization": header} if header else None)
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+______ test_missing_or_invalid_credentials_reject_before_storage[Bearer] ______
+tests\unit\test_auth_dependency_availability.py:54: in test_missing_or_invalid_credentials_reject_before_storage
+    response = await request(auth_boundary, headers={"Authorization": header} if header else None)
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+__ test_missing_or_invalid_credentials_reject_before_storage[Basic invalid] ___
+tests\unit\test_auth_dependency_availability.py:54: in test_missing_or_invalid_credentials_reject_before_storage
+    response = await request(auth_boundary, headers={"Authorization": header} if header else None)
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+_ test_missing_or_invalid_credentials_reject_before_storage[Bearer too many pieces] _
+tests\unit\test_auth_dependency_availability.py:54: in test_missing_or_invalid_credentials_reject_before_storage
+    response = await request(auth_boundary, headers={"Authorization": header} if header else None)
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+__ test_missing_or_invalid_credentials_reject_before_storage[Bearer bad.jwt] __
+tests\unit\test_auth_dependency_availability.py:54: in test_missing_or_invalid_credentials_reject_before_storage
+    response = await request(auth_boundary, headers={"Authorization": header} if header else None)
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+_ test_valid_credentials_with_unavailable_verification_fail_closed[client-bearer] _
+tests\unit\test_auth_dependency_availability.py:73: in test_valid_credentials_with_unavailable_verification_fail_closed
+    response = await request(auth_boundary,
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+_ test_valid_credentials_with_unavailable_verification_fail_closed[client-access_cookie] _
+tests\unit\test_auth_dependency_availability.py:73: in test_valid_credentials_with_unavailable_verification_fail_closed
+    response = await request(auth_boundary,
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+_ test_valid_credentials_with_unavailable_verification_fail_closed[client-legacy_cookie] _
+tests\unit\test_auth_dependency_availability.py:73: in test_valid_credentials_with_unavailable_verification_fail_closed
+    response = await request(auth_boundary,
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:206: in get_current_user
+    client = get_db_client()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1139: in __call__
+    return self._mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1143: in _mock_call
+    return self._execute_mock_call(*args, **kwargs)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:1198: in _execute_mock_call
+    raise effect
+E   RuntimeError: synthetic container unavailable
+_ test_valid_credentials_with_unavailable_verification_fail_closed[session-bearer] _
+tests\unit\test_auth_dependency_availability.py:73: in test_valid_credentials_with_unavailable_verification_fail_closed
+    response = await request(auth_boundary,
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:230: in get_current_user
+    session = await get_session_by_id(conn, session_id, user_id=user_id)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic session database failure
+_ test_valid_credentials_with_unavailable_verification_fail_closed[session-access_cookie] _
+tests\unit\test_auth_dependency_availability.py:73: in test_valid_credentials_with_unavailable_verification_fail_closed
+    response = await request(auth_boundary,
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:230: in get_current_user
+    session = await get_session_by_id(conn, session_id, user_id=user_id)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic session database failure
+_ test_valid_credentials_with_unavailable_verification_fail_closed[session-legacy_cookie] _
+tests\unit\test_auth_dependency_availability.py:73: in test_valid_credentials_with_unavailable_verification_fail_closed
+    response = await request(auth_boundary,
+tests\unit\test_auth_dependency_availability.py:47: in request
+    return await client.get("/me", headers=headers)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1768: in get
+    return await self.request(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1540: in request
+    return await self.send(request, auth=auth, follow_redirects=follow_redirects)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1629: in send
+    response = await self._send_handling_auth(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1657: in _send_handling_auth
+    response = await self._send_handling_redirects(
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1694: in _send_handling_redirects
+    response = await self._send_single_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_client.py:1730: in _send_single_request
+    response = await transport.handle_async_request(request)
+..\..\..\backend\.venv\Lib\site-packages\httpx\_transports\asgi.py:170: in handle_async_request
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\applications.py:1163: in __call__
+    await super().__call__(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\applications.py:90: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:186: in __call__
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\errors.py:164: in __call__
+    await self.app(scope, receive, _send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\middleware\exceptions.py:63: in __call__
+    await wrap_app_handling_exceptions(self.app, conn)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\middleware\asyncexitstack.py:18: in __call__
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:660: in __call__
+    await self.middleware_stack(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:2683: in app
+    await route.handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:1266: in handle
+    await super().handle(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\routing.py:276: in handle
+    await self.app(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:150: in app
+    await wrap_app_handling_exceptions(app, request)(scope, receive, send)
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:53: in wrapped_app
+    raise exc
+..\..\..\backend\.venv\Lib\site-packages\starlette\_exception_handler.py:42: in wrapped_app
+    await app(scope, receive, sender)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:136: in app
+    response = await f(request)
+..\..\..\backend\.venv\Lib\site-packages\fastapi\routing.py:473: in app
+    solved_result = await solve_dependencies(
+..\..\..\backend\.venv\Lib\site-packages\fastapi\dependencies\utils.py:678: in solve_dependencies
+    solved = await call(**solved_result.values)
+app\api\v1\dependencies.py:239: in get_current_user
+    session = await _resolve_cookie_session(request, session_cookie, client)
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:2291: in _execute_mock_call
+    raise effect
+E   ConnectionError: synthetic session database failure
+___________ test_conflicting_access_identities_do_not_reach_storage ___________
+tests\unit\test_auth_dependency_availability.py:105: in test_conflicting_access_identities_do_not_reach_storage
+    auth_boundary.client.assert_not_called()
+..\..\..\..\..\AppData\Roaming\uv\python\cpython-3.12.12-windows-x86_64-none\Lib\unittest\mock.py:910: in assert_not_called
+    raise AssertionError(msg)
+E   AssertionError: Expected 'mock' to not have been called. Called 1 times.
+E   Calls: [call()].
+=========================== short test summary info ===========================
+FAILED tests/unit/test_auth_dependency_availability.py::test_missing_or_invalid_credentials_reject_before_storage[None]
+FAILED tests/unit/test_auth_dependency_availability.py::test_missing_or_invalid_credentials_reject_before_storage[InvalidFormat]
+FAILED tests/unit/test_auth_dependency_availability.py::test_missing_or_invalid_credentials_reject_before_storage[Bearer]
+FAILED tests/unit/test_auth_dependency_availability.py::test_missing_or_invalid_credentials_reject_before_storage[Basic invalid]
+FAILED tests/unit/test_auth_dependency_availability.py::test_missing_or_invalid_credentials_reject_before_storage[Bearer too many pieces]
+FAILED tests/unit/test_auth_dependency_availability.py::test_missing_or_invalid_credentials_reject_before_storage[Bearer bad.jwt]
+FAILED tests/unit/test_auth_dependency_availability.py::test_valid_credentials_with_unavailable_verification_fail_closed[client-bearer]
+FAILED tests/unit/test_auth_dependency_availability.py::test_valid_credentials_with_unavailable_verification_fail_closed[client-access_cookie]
+FAILED tests/unit/test_auth_dependency_availability.py::test_valid_credentials_with_unavailable_verification_fail_closed[client-legacy_cookie]
+FAILED tests/unit/test_auth_dependency_availability.py::test_valid_credentials_with_unavailable_verification_fail_closed[session-bearer]
+FAILED tests/unit/test_auth_dependency_availability.py::test_valid_credentials_with_unavailable_verification_fail_closed[session-access_cookie]
+FAILED tests/unit/test_auth_dependency_availability.py::test_valid_credentials_with_unavailable_verification_fail_closed[session-legacy_cookie]
+FAILED tests/unit/test_auth_dependency_availability.py::test_conflicting_access_identities_do_not_reach_storage
+13 failed, 8 passed in 8.13s
