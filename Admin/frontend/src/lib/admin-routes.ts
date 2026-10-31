@@ -11,6 +11,7 @@ export const ADMIN_ROUTES = [
     { id: 'usage-cost', label: 'Usage & Cost', path: '/usage-cost', platformOnly: true },
     { id: 'incidents', label: 'Incidents', path: '/incidents', platformOnly: true },
     { id: 'system-health', label: 'System Health', path: '/system-health', platformOnly: true },
+    { id: 'support', label: 'Support Tickets', path: '/support', platformOnly: true },
 ] as const;
 export function normalizedAdminRole(role: string | undefined): string {
     if (role === 'super_admin') return 'platform_admin';
@@ -18,7 +19,9 @@ export function normalizedAdminRole(role: string | undefined): string {
     return role ?? '';
 }
 export function canAccessAdminRoute(path: string, role: string | undefined): boolean {
-    const rule = ADMIN_ROUTES.find((item) => item.path === (path === '/command-center' ? '/' : path));
+    // Support ticket and article views are nested under /support and share its rule.
+    const normalized = path === '/command-center' ? '/' : path.startsWith('/support/') ? '/support' : path;
+    const rule = ADMIN_ROUTES.find((item) => item.path === normalized);
     const current = normalizedAdminRole(role);
     return Boolean(rule && (current === 'platform_admin' || (!rule.platformOnly && ['partner_admin', 'tenant_admin'].includes(current))));
 }

@@ -1,0 +1,259 @@
+/* Support console: queue, ticket view, articles, metrics card. */
+.support-note {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.support-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+
+.support-toolbar label,
+.support-field label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.support-toolbar .filter-select,
+.support-toolbar .search-input,
+.support-field input,
+.support-field select,
+.support-field textarea {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 8px 12px;
+  font-size: 14px;
+  background: var(--bg-card);
+  color: var(--text-primary);
+}
+
+.support-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 12px;
+}
+
+.support-field textarea {
+  min-height: 120px;
+  font-family: inherit;
+}
+
+.support-deadline.overdue {
+  color: var(--accent-red);
+  font-weight: 600;
+}
+
+.support-deadline.at-risk {
+  color: var(--accent-orange);
+  font-weight: 600;
+}
+
+.support-deadline.none {
+  color: var(--text-muted);
+}
+
+.support-pager {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.support-ticket-head {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.support-ticket-head dl {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.support-ticket-head dt {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.support-ticket-head dd {
+  margin: 0;
+  font-size: 14px;
+}
+
+.support-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.support-tabs [role="tablist"] {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 12px;
+}
+
+.support-tabs [role="tab"] {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.support-tabs [role="tab"][aria-selected="true"] {
+  color: var(--text-primary);
+  border-bottom-color: var(--accent-blue);
+  font-weight: 600;
+}
+
+.support-message {
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 12px;
+  margin-bottom: 8px;
+  background: var(--bg-card);
+}
+
+.support-message.internal {
+  border-left: 4px solid var(--accent-orange);
+  background: rgba(237, 137, 54, 0.08);
+}
+
+.support-message.staff {
+  border-left: 4px solid var(--accent-blue);
+}
+
+.support-message.system {
+  color: var(--text-secondary);
+  font-style: italic;
+}
+
+.support-message-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.support-message-body {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+
+.support-attachments {
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.support-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 12px;
+}
+
+.support-cards pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  margin: 0;
+}
+
+.support-timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.support-timeline li {
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-color);
+  font-size: 13px;
+}
+
+.support-composer {
+  margin-top: 16px;
+}
+
+.support-composer fieldset {
+  border: none;
+  padding: 0;
+  margin: 0 0 8px;
+  display: flex;
+  gap: 16px;
+}
+
+.support-files {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0;
+  font-size: 13px;
+}
+
+.support-files .failed {
+  color: var(--accent-red);
+}
+
+.support-files .done {
+  color: var(--accent-green);
+}
+
+.support-preview {
+  white-space: pre-wrap;
+  word-break: break-word;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius);
+  padding: 12px;
+  background: var(--bg-main);
+  font-family: inherit;
+  font-size: 14px;
+  min-height: 120px;
+}
+
+.support-metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.support-metrics dt {
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+
+.support-metrics dd {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.support-metrics-toggle {
+  display: flex;
+  gap: 8px;
+}
+
+.support-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}

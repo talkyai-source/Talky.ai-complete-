@@ -64,6 +64,11 @@ const bundle = await build({
             export { Sidebar } from './src/components/Sidebar';
             export { Header } from './src/components/Header';
             export { ADMIN_ROUTES, canAccessAdminRoute, adminLanding, safeAdminReturn } from './src/lib/admin-routes';
+            export { SupportTicketsPage } from './src/pages/SupportTicketsPage';
+            export { SupportTicketPage } from './src/pages/SupportTicketPage';
+            export { SupportArticlesPage } from './src/pages/SupportArticlesPage';
+            export { SupportMetricsCard } from './src/components/SupportMetricsCard';
+            export { Routes, Route } from 'react-router-dom';
         `,
         resolveDir: fileURLToPath(new URL('..', import.meta.url)),
         loader: 'ts',

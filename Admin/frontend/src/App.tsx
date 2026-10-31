@@ -14,6 +14,9 @@ import { IncidentsPage } from './pages/IncidentsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
 import { InboundControlPage } from './pages/InboundControlPage';
 import { ContactEnquiriesPage } from './pages/ContactEnquiriesPage';
+import { SupportTicketsPage } from './pages/SupportTicketsPage';
+import { SupportTicketPage } from './pages/SupportTicketPage';
+import { SupportArticlesPage } from './pages/SupportArticlesPage';
 import './index.css';
 
 const PLATFORM_ROLES = ['platform_admin', 'super_admin'];
@@ -124,6 +127,21 @@ function App() {
               </AdminRouteGuard>
             }
           />
+          <Route path="/support" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <SupportTicketsPage />
+            </AdminRouteGuard>
+          } />
+          <Route path="/support/articles" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <SupportArticlesPage />
+            </AdminRouteGuard>
+          } />
+          <Route path="/support/:id" element={
+            <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+              <SupportTicketPage />
+            </AdminRouteGuard>
+          } />
 
           {/* Catch all - redirect to dashboard */}
           <Route path="*" element={<Navigate to="/" replace />} />

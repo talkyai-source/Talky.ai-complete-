@@ -3,7 +3,7 @@
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname } from "next/navigation";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import {
     LayoutDashboard,
     Phone,
@@ -29,6 +29,7 @@ import {
     ChevronDown,
     Plug,
     MessageSquare,
+    LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ViewportDrawer } from "@/components/ui/viewport-drawer";
@@ -39,6 +40,7 @@ import { useWhiteLabelBranding } from "@/components/white-label/white-label-bran
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/hooks/useAuth";
 import { getAdminUiCapabilities, roleLabel } from "@/lib/admin-access";
+import { getServerSupportStatus, getSupportStatus, subscribeSupportStatus } from "@/lib/support-status-store";
 
 type NavChild = {
     name: string;
@@ -53,6 +55,10 @@ type NavItem = {
     icon: React.ComponentType<{ className?: string }>;
     adminOnly?: boolean;
     children?: NavChild[];
+    /** Shown only while GET /support/config says support is on for this account. */
+    supportOnly?: boolean;
+    /** A live count rendered after the label; "support" reads the unread ticket count. */
+    badge?: "support";
 };
 
 const navigation: NavItem[] = [
@@ -111,6 +117,7 @@ const navigation: NavItem[] = [
             { name: "Secrets", href: "/admin/secrets", icon: Lock },
         ],
     },
+    { name: "Support", href: "/support", icon: LifeBuoy, supportOnly: true, badge: "support" },
 ];
 
 const bottomNavigation = [
@@ -152,10 +159,13 @@ export function Sidebar({ className }: { className?: string }) {
     const desktopTextClass = collapsed ? "hidden" : "block";
     const capabilities = useMemo(() => getAdminUiCapabilities(user), [user]);
     const isAdmin = capabilities.canViewAuditLogs;
+    const support = useSyncExternalStore(subscribeSupportStatus, getSupportStatus, getServerSupportStatus);
+    const supportVisible = support.visible;
     const visibleNavigation = useMemo(
         () => {
             return navigation
                 .filter((item) => !item.adminOnly || isAdmin)
+                .filter((item) => !item.supportOnly || supportVisible)
                 .map((item) => {
                     if (!item.children) return item;
                     const visibleChildren = item.children.filter((child) => !child.adminOnly || isAdmin);
@@ -164,7 +174,7 @@ export function Sidebar({ className }: { className?: string }) {
                     return { ...item, children: visibleChildren };
                 });
         },
-        [isAdmin]
+        [isAdmin, supportVisible]
     );
 
     // Automatically expand dropdowns if a child is active
@@ -452,6 +462,7 @@ export function Sidebar({ className }: { className?: string }) {
                     }
 
                     // Regular link (or collapsed dropdown acting as direct link)
+                    const badgeCount = item.badge === "support" ? support.unreadCount : 0;
                     return (
                         <Link
                             key={item.name}
@@ -461,7 +472,7 @@ export function Sidebar({ className }: { className?: string }) {
                             onMouseMove={(e) => maybeShowTooltip(e, item.name)}
                             onMouseLeave={() => tooltip.hide()}
                             className={cn(
-                                "group flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
+                                "group relative flex min-w-0 items-center gap-2 rounded-xl font-semibold transition-colors border",
                                 rowSizeClass,
                                 desktopNavItemClass,
                                 isActive
@@ -472,6 +483,18 @@ export function Sidebar({ className }: { className?: string }) {
                             <item.icon className={cn("w-5 h-5", isActive ? "text-sidebar-accent-foreground" : "text-sidebar-foreground/60 group-hover:text-sidebar-foreground")} />
                             <span className={cn("min-w-0 whitespace-nowrap leading-tight", desktopTextClass)}>{item.name}</span>
                             {collapsed ? <span className="sr-only">{item.name}</span> : null}
+                            {badgeCount > 0 ? (
+                                <span
+                                    data-support-unread-badge
+                                    aria-label={`${badgeCount} unread`}
+                                    className={cn(
+                                        "min-w-5 rounded-full bg-red-500 px-1.5 py-0.5 text-center text-[11px] font-bold leading-none text-white",
+                                        collapsed ? "absolute -right-1 -top-1" : "ml-auto"
+                                    )}
+                                >
+                                    {badgeCount > 99 ? "99+" : badgeCount}
+                                </span>
+                            ) : null}
                         </Link>
                     );
                 })}

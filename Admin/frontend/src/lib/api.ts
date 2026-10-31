@@ -4,6 +4,10 @@
  */
 
 import type { HoldTarget, HoldRequest, HoldReceipt, FormalHoldStatus, HoldPropagation } from './formal-holds';
+import type {
+    ArticleCreateInput, ArticlePatchInput, StaffMessage, StaffMessageInput, StaffQueuePage, StaffTicketDetail,
+    StaffTicketPatch, SupportArticle, SupportMetrics, UploadReceipt,
+} from './support-contracts';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000/api/v1';
 
@@ -1765,6 +1769,90 @@ class ApiClient {
         if (sentGeneration !== this.authGeneration) throw new Error(sessionChangedError.message);
         return blob;
         } finally { clearTimeout(timer); }
+    }
+
+    /**
+     * Multipart upload. `request()` serialises every body as JSON, so a file
+     * takes this path: same identity headers and session checks, the browser
+     * sets the multipart boundary, and an upload is never replayed after a
+     * session renewal (the caller re-reads and decides).
+     */
+    private async requestForm<T>(endpoint: string, form: FormData, timeoutMs = 60000): Promise<ApiResponse<T>> {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        const headers: Record<string, string> = this.identityHeaders();
+        if (this.token) headers.Authorization = `Bearer ${this.token}`;
+        const sentGeneration = this.authGeneration;
+        const sentToken = this.token;
+        try {
+            const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                method: 'POST', headers, body: form, signal: controller.signal, credentials: 'include',
+            });
+            let data: unknown;
+            try { data = await response.json(); }
+            catch {
+                if (response.ok) return { error: { code: 'INVALID_RESPONSE', message: 'The server returned an invalid response. Refresh to check the current state.', status: response.status } };
+                data = { detail: `Upload failed (${response.status})` };
+            }
+            if (sentGeneration !== this.authGeneration) return { error: sessionChangedError };
+            if (!response.ok) {
+                const error = { ...normalizeAdminApiError(data), status: response.status };
+                if (response.status === 401) this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+                if (response.status === 409 && error.code === 'IDENTITY_CHANGED') this.handleSessionRejected(endpoint, sentGeneration, sentToken);
+                if (response.status === 403) await this.recheckForbiddenAuthority(endpoint, sentGeneration, sentToken);
+                return { error };
+            }
+            return { data: data as T };
+        } catch (error) {
+            return { error: { code: controller.signal.aborted ? 'REQUEST_TIMEOUT' : 'NETWORK_ERROR',
+                message: controller.signal.aborted ? 'The upload timed out. Refresh to check the current state before retrying.'
+                    : error instanceof Error ? error.message : 'Network error occurred' } };
+        } finally { clearTimeout(timer); }
+    }
+
+    // Support console (platform staff with support:manage)
+    /** `query` is the serialised QueueFilters string from support-queue-filters.ts. */
+    async getSupportTickets(query: string) {
+        return this.request<StaffQueuePage>(`/admin/support/tickets${query ? `?${query}` : ''}`, { timeoutMs: 15_000 });
+    }
+
+    async getSupportTicket(id: string) {
+        return this.request<StaffTicketDetail>(`/admin/support/tickets/${encodeURIComponent(id)}`, { timeoutMs: 15_000 });
+    }
+
+    async patchSupportTicket(id: string, body: StaffTicketPatch) {
+        return this.request<StaffTicketDetail>(`/admin/support/tickets/${encodeURIComponent(id)}`, { method: 'PATCH', body, timeoutMs: 15_000 });
+    }
+
+    async addSupportTicketMessage(id: string, body: StaffMessageInput) {
+        return this.request<StaffMessage>(`/admin/support/tickets/${encodeURIComponent(id)}/messages`, { method: 'POST', body, timeoutMs: 20_000 });
+    }
+
+    async getSupportArticles(filters: { q?: string; source?: string; published?: '' | 'true' | 'false' } = {}) {
+        const params = new URLSearchParams();
+        if (filters.q) params.set('q', filters.q);
+        if (filters.source) params.set('source', filters.source);
+        if (filters.published) params.set('published', filters.published);
+        const query = params.toString();
+        return this.request<{ items: SupportArticle[] }>(`/admin/support/articles${query ? `?${query}` : ''}`, { timeoutMs: 15_000 });
+    }
+
+    async createSupportArticle(body: ArticleCreateInput) {
+        return this.request<SupportArticle>('/admin/support/articles', { method: 'POST', body, timeoutMs: 15_000 });
+    }
+
+    async updateSupportArticle(id: string, body: ArticlePatchInput) {
+        return this.request<SupportArticle>(`/admin/support/articles/${encodeURIComponent(id)}`, { method: 'PATCH', body, timeoutMs: 15_000 });
+    }
+
+    async getSupportMetrics(days: 7 | 30) {
+        return this.request<SupportMetrics>(`/admin/support/metrics?days=${days}`, { timeoutMs: 15_000 });
+    }
+
+    async uploadSupportAttachment(file: File) {
+        const form = new FormData();
+        form.append('file', file, file.name);
+        return this.requestForm<UploadReceipt>('/support/attachments', form);
     }
 
     // Auth Endpoints

@@ -11,13 +11,15 @@ import {
     Activity,
     Users,
     Inbox,
+    LifeBuoy,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { ADMIN_ROUTES, canAccessAdminRoute } from '../lib/admin-routes';
 
 const icons = { 'command-center': <LayoutDashboard />, tenants: <Building2 />, enquiries: <Inbox />,
     users: <Users />, calls: <Phone />, inbound: <PhoneIncoming />, actions: <FileText />,
-    connectors: <Link2 />, 'usage-cost': <DollarSign />, incidents: <AlertTriangle />, 'system-health': <Activity /> };
+    connectors: <Link2 />, 'usage-cost': <DollarSign />, incidents: <AlertTriangle />, 'system-health': <Activity />,
+    support: <LifeBuoy /> };
 
 export function Sidebar() {
     const location = useLocation();

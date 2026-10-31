@@ -35,6 +35,7 @@ export const PUBLIC_ROUTES = [
   "/docs/partners",
   "/docs/workflows",
   "/docs/troubleshooting",
+  "/docs/support",
   "/docs/glossary",
   "/industries",
   "/industries/education",

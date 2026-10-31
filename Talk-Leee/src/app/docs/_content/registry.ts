@@ -96,6 +96,12 @@ export const docsPages: DocsPage[] = [
     file: "troubleshooting.md",
   },
   {
+    slug: "support",
+    title: "Getting Support",
+    description: "How the support assistant works, when it creates a ticket for a person, and how to follow up on a ticket.",
+    file: "support.md",
+  },
+  {
     slug: "glossary",
     title: "Glossary",
     description: "The terms used across Talk-Lee and what they mean.",
