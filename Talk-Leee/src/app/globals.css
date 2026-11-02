@@ -372,16 +372,16 @@
 }
 
 .light .home-navbar-page {
-  color: #0b2a6f;
-  background: rgba(236, 254, 255, 0.82);
-  border-color: rgba(0, 0, 0, 0.08);
+  color: var(--foreground);
+  background: #004d5e;
+  border-color: rgba(255, 255, 255, 0.14);
   box-shadow: 0 4px 24px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 
 .light .home-navbar-page a,
 .light .home-navbar-page button,
 .light .home-navbar-page summary {
-  color: #0b2a6f !important;
+  color: var(--foreground) !important;
 }
 
 .light .home-navbar-page a.bg-indigo-600 {
@@ -403,12 +403,6 @@
 
 .light .home-navbar-page svg {
   filter: none;
-}
-
-.light .home-navbar-page .home-nav-link:hover {
-  background-color: rgba(11, 42, 111, 0.06);
-  border-color: rgba(11, 42, 111, 0.1);
-  box-shadow: 0 2px 8px rgba(11, 42, 111, 0.08);
 }
 
 .home-navbar-offset {
@@ -448,7 +442,7 @@
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08), 0 0 0 1px rgba(255, 255, 255, 0.06);
 }
 
-/* Standalone pages (.home-navbar-page) keep their own navy hover tint, defined above;
+/* Standalone pages (.home-navbar-page) are excluded: their dark-teal navbar uses the shared white hover tint;
    this sky tint is for the light-mode homepage once it scrolls past the hero. */
 .light .home-navbar-scrolled:not(.home-navbar-page) .home-nav-link:hover {
   background-color: rgba(125, 211, 252, 0.08);

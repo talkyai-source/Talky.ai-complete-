@@ -308,13 +308,6 @@ export function Navbar() {
         data-theme={theme}
         style={{
           fontFamily: "var(--font-manrope)",
-          // Light mode keeps the bespoke dark panel this page has always had; in dark
-          // mode it must fall through to the shared translucent treatment.
-          ...(isAiVoices && theme === "light"
-            ? {
-                background: "rgba(0, 16, 34, 0.78)",
-              }
-            : null),
         }}
       >
         <div className="w-full">
@@ -332,7 +325,7 @@ export function Navbar() {
                 style={{
                   // Light mode restyles this via .home-navbar-page; dark mode shares the
                   // one slate tone so every page matches the /contact navbar.
-                  color: isAiVoices && theme === "light" ? "#7dd3fc" : "rgba(226, 232, 240, 0.95)",
+                  color: "rgba(226, 232, 240, 0.95)",
                 }}
                 aria-label="Open navigation menu"
                 aria-haspopup="menu"
