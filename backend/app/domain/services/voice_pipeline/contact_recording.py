@@ -334,7 +334,13 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
     quote_turn = _quote_turn(session, turn, quote, current_only=operation in ("confirm", "withdraw"),
                              phone=kind == "phone")
     if quote_turn is None:
-        return result("quote_not_found")
+        # Confirm/withdraw must quote the caller's latest turn. Name it, so the
+        # model can retry in this reply instead of asking again (test calls
+        # 2e232920, 7f3b8ac9, bea6bd59 on 2026-11-03 quoted other words).
+        latest = (f'Quote the caller\'s latest words exactly as transcribed: "{turn.text}". '
+                  "If those words do not agree, do not confirm."
+                  if operation in ("confirm", "withdraw") else None)
+        return result("quote_not_found", next_step=latest)
     quote_order = quote_turn.source.caller_turn_order
     if isinstance(expected, str) and expected.strip().lower() in ("", "null", "none"):
         # An empty or spelled-out null candidate is "absent", as the schema

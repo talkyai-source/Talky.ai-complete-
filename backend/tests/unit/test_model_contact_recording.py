@@ -524,3 +524,21 @@ async def test_confirmed_or_older_candidates_still_need_the_exact_current_value(
     await record_contact(s, args("07700900456", kind="phone", value="07700900456"), pool=pool)
     older = await record_contact(s, args("07700900123", kind="phone", value="07700900123", expected="07700900123"), pool=pool)
     assert older["status"] == "contact_changed" and s.captured_slots.phone == "07700900456"
+
+
+@pytest.mark.asyncio
+async def test_a_confirmation_quoting_other_words_is_told_the_callers_exact_words():
+    """Test calls 2e232920, 7f3b8ac9 and bea6bd59 (2026-11-03): each "is that
+    right?" confirmation was refused as quote_not_found, so the detail stayed
+    unconfirmed and the agent asked again. The refusal now hands the model the
+    caller's latest words, and a retry quoting them confirms."""
+    pool, s = SQLPort(), session()
+    caller(s, "Yeah, that's going to be Talha.", 9)
+    await record_contact(s, args("that's going to be Talha", kind="full_name", value="Talha"), pool=pool)
+    caller(s, "Yeah.", 10)
+    refused = await record_contact(s, args("Yes", kind="full_name", operation="confirm", value="Talha",
+                                           expected="Talha"), pool=pool)
+    assert refused["status"] == "quote_not_found" and '"Yeah."' in refused["next_step"]
+    retried = await record_contact(s, args("Yeah.", kind="full_name", operation="confirm", value="Talha",
+                                           expected="Talha"), pool=pool)
+    assert retried["validation_status"] == "confirmed"
