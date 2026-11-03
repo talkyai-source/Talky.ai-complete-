@@ -555,11 +555,22 @@ class AssemblyAISTTProvider(STTProvider):
             frame_bytes = self._sample_rate * bytes_per_sample * _CHUNK_MS // 1000
             silence_byte = b"\x00" if bytes_per_sample == 2 else b"\xff"
             epoch = self._mute_epoch.get(call_id, 0)
-            next_send_at = 0.0
+            started_at: float | None = None
+            sent_s = 0.0
 
             async def send_frame(data: bytes, frame_epoch: int) -> None:
-                nonlocal next_send_at
-                delay = next_send_at - time.monotonic()
+                nonlocal started_at, sent_s
+                # Wall-clock pacing, as AssemblyAI advises: each frame is due at
+                # its position in the stream, never ahead of real time, and a
+                # late frame lets the next one go sooner. Pacing from the
+                # previous send kept every late wake-up and network hiccup, so
+                # on 3 Nov AssemblyAI test calls fell ~20 ms further behind the
+                # caller each second until the browser's 2.4 s queue overflowed
+                # about 2 minutes in and dropped caller audio.
+                now = time.monotonic()
+                if started_at is None:
+                    started_at = now
+                delay = started_at + sent_s - now
                 if delay > 0:
                     await asyncio.sleep(delay)
                 if call_id and (
@@ -568,13 +579,7 @@ class AssemblyAISTTProvider(STTProvider):
                     # Mute may start and finish while a queued frame is waiting
                     # for its pacing deadline. Never replay that stale audio.
                     data = silence_byte * len(data)
-                # Count time spent writing toward this frame's period. Starting
-                # the next deadline after send() would add socket backpressure
-                # to every 50 ms frame and make queued caller audio fall behind.
-                # Reset to the actual start after a stall; never burst to catch up.
-                next_send_at = max(next_send_at, time.monotonic()) + len(data) / (
-                    self._sample_rate * bytes_per_sample
-                )
+                sent_s += len(data) / (self._sample_rate * bytes_per_sample)
                 await connection.send(data)
 
             async for chunk in audio_stream:

@@ -452,10 +452,12 @@ async def test_queued_audio_is_paced_not_sent_faster_than_realtime(monkeypatch):
     "send_delays, expected_starts",
     [
         ([0.03] * 4, [0.0, 0.05, 0.10, 0.15]),
-        ([0.08, 0.0, 0.0, 0.0], [0.0, 0.08, 0.13, 0.18]),
+        # A slow write delays only the next frame; the rest are due on the
+        # stream's own clock again, not 30 ms late for the rest of the call.
+        ([0.08, 0.0, 0.0, 0.0], [0.0, 0.08, 0.10, 0.15]),
     ],
 )
-async def test_write_latency_counts_toward_frame_period_without_catchup_bursts(
+async def test_write_latency_is_caught_up_without_sending_ahead_of_real_time(
     monkeypatch, send_delays, expected_starts
 ):
     provider, ws, _ = await setup_provider(monkeypatch)
@@ -485,7 +487,49 @@ async def test_write_latency_counts_toward_frame_period_without_catchup_bursts(
     ws.send = delayed_write
     _ = [item async for item in provider.stream_transcribe(audio(bytes(6400)))]
     assert starts == pytest.approx(expected_starts)
-    assert all(later - earlier >= 0.05 - 1e-9 for earlier, later in zip(starts, starts[1:]))
+    assert all(start >= k * 0.05 - 1e-9 for k, start in enumerate(starts))
+
+
+@pytest.mark.parametrize("late_s, hiccup", [(0.001, False), (0.0, True)])
+async def test_live_audio_never_falls_behind_the_caller(monkeypatch, late_s, hiccup):
+    # 3 Nov test calls on AssemblyAI: pacing from the previous send kept every
+    # late wake-up and every network hiccup, so the sender fell ~20 ms further
+    # behind the live caller each second until the browser's 2.4 s queue
+    # overflowed (~2 min in) and dropped caller audio.
+    provider, ws, _ = await setup_provider(monkeypatch)
+    clock = SimpleNamespace(now=0.0)
+    sends = []
+    original_send = ws.send
+
+    async def late_sleep(delay):
+        clock.now += delay + late_s
+
+    class PacedAsyncio:
+        sleep = staticmethod(late_sleep)
+
+        def __getattr__(self, name):
+            return getattr(asyncio, name)
+
+    async def record(payload):
+        if isinstance(payload, bytes):
+            sends.append(clock.now)
+        await original_send(payload)
+
+    async def live_caller(seconds=60, chunk_s=0.024):
+        for i in range(int(seconds / chunk_s)):
+            due = (i + 1) * chunk_s
+            if hiccup and 30.0 <= due < 30.25:
+                due = 30.25  # the network holds 250 ms and delivers it at once
+            clock.now = max(clock.now, due)
+            yield AudioChunk(data=bytes(int(32000 * chunk_s)), sample_rate=16000)
+
+    monkeypatch.setattr(adapter, "time", SimpleNamespace(monotonic=lambda: clock.now))
+    monkeypatch.setattr(adapter, "asyncio", PacedAsyncio())
+    ws.send = record
+    _ = [item async for item in provider.stream_transcribe(live_caller())]
+    behind = [sent - (k + 1) * 0.05 for k, sent in enumerate(sends)]
+    assert max(behind[-100:]) < 0.06  # the last 5 s still go out live
+    assert all(sent >= sends[0] + k * 0.05 - 1e-9 for k, sent in enumerate(sends))
 
 
 async def test_mulaw_uses_8khz_frames_and_correct_silence_padding(monkeypatch):
