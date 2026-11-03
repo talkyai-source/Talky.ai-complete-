@@ -5,16 +5,24 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useBillingPlan, useBillingPlans } from "@/lib/billing-api";
 import { formatPurchasedPrice, hasManagedSubscription, openBillingPortal, yearlySaving } from "@/lib/billing-purchase";
+import { useBillingRefusal } from "@/lib/billing-refusal";
 import { purchaseErrorText, useBillingPurchase } from "./use-billing-purchase";
 
 const navigate = (url: string) => window.location.assign(url);
 function PurchaseNotice({ purchase }: { purchase: ReturnType<typeof useBillingPurchase> }) {
-  const { saved, attempt, error, busy, storageAvailable, returned } = purchase;
+  const { saved, attempt, error, busy, storageAvailable, returned, pendingConfirmation } = purchase;
+  const refusal = useBillingRefusal("plan");
+  const cancelled = returned === "cancel" || returned === "cancelled";
+  // Only a server read that found the attempt open, expired or failed proves no payment was taken.
+  const cancelConfirmed = cancelled && (attempt?.state === "open" || attempt?.state === "expired" || attempt?.state === "failed");
   return <div className="space-y-3">
     {error && <p role="alert" className="rounded-xl border border-red-500/30 p-4 text-sm text-red-700 dark:text-red-400">{error}</p>}
+    {refusal && refusal.message !== error && <p role="alert" className="rounded-xl border border-red-500/30 p-4 text-sm text-red-700 dark:text-red-400">{refusal.message}</p>}
     {!storageAvailable && <p role="alert" className="text-sm">The browser could not read or update the saved purchase. Enable session storage and reload before starting another purchase.</p>}
-    {(returned === "cancel" || returned === "cancelled") && <p role="status" className="text-sm">You returned from checkout. This does not confirm whether payment completed. Check or resume the saved purchase below.</p>}
-    {returned === "success" && attempt?.state !== "activated" && <p role="status" className="text-sm">Payment confirmation is pending. Returning from checkout does not activate a subscription.</p>}
+    {cancelConfirmed && <p role="status" className="text-sm">Checkout was cancelled. No payment was taken for this attempt.</p>}
+    {cancelled && !cancelConfirmed && attempt?.state !== "activated" && <p role="status" className="text-sm">You returned from checkout. This does not confirm whether payment completed. Check or resume the saved purchase below.</p>}
+    {pendingConfirmation && <p role="status" className="text-sm font-medium">Confirming your purchase with Stripe…</p>}
+    {returned === "success" && !(attempt && ["activated", "expired", "failed"].includes(attempt.state)) && <p role="status" className="text-sm">Payment confirmation is pending. Returning from checkout does not activate a subscription.</p>}
     {attempt?.state === "activated" && <p role="status" className="rounded-xl border border-emerald-500/30 p-4">The server confirmed this purchase. Your current plan is shown from billing records.</p>}
     {(attempt?.state === "expired" || attempt?.state === "failed") && <p role="status" className="text-sm">The server confirmed the saved checkout {attempt.state === "expired" ? "expired" : "failed"}. You may choose an available offer again.</p>}
     {saved && <div className="space-y-3 rounded-xl border p-4">
@@ -33,6 +41,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
   const plansQuery = useBillingPlans(scope);
   const subscriptionQuery = useBillingPlan(scope);
   const purchase = useBillingPurchase(scope, onNavigate);
+  const refusal = useBillingRefusal("plan");
   const [interval, setInterval] = useState<"month" | "year">("month");
   const [portalError, setPortalError] = useState("");
   const [portalBusy, setPortalBusy] = useState(false);
@@ -48,7 +57,7 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
   const managed = hasManagedSubscription(subscription);
   const annualAvailable = plans.some(plan => ["live", "test"].includes(plan.billing_mode) && plan.price_options.some(price => price.interval === "year" && price.kind === "stripe" && price.active && price.checkout_available));
   const selectedInterval = annualAvailable ? interval : "month";
-  const blocked = !purchase.ready || purchase.busy || Boolean(purchase.saved) || !purchase.storageAvailable || purchase.attempt?.state === "activated" || managed;
+  const blocked = !purchase.ready || purchase.busy || Boolean(purchase.saved) || !purchase.storageAvailable || purchase.attempt?.state === "activated" || managed || Boolean(refusal);
   async function manage() {
     if (portalLock.current) return;
     portalLock.current = true; setPortalBusy(true); setPortalError("");

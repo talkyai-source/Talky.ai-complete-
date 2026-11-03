@@ -59,15 +59,19 @@ for (const [name, disable] of [
 
 test('real sign-in shows missing coordination and deliberately recovers when browser support returns', async () => {
     api.setToken(null); noLock();
-    state.route = request => request.path.endsWith('/auth/login') ? response(signed)
+    // Platform admins must complete 2FA, so the password login issues a challenge.
+    state.route = request => request.path.endsWith('/auth/login') ? response(challenge)
+        : request.path.endsWith('/auth/mfa/verify') ? response(signed)
         : request.authorization === 'Bearer capability-access' ? response(ME) : response({}, 401);
     await draw(); await signIn();
     assert.equal(principal(), 'signed out'); assert.equal(postRequests().length, 0);
     assert.match(text(), /request was not sent.*coordinate browser sessions/i);
     assert.match(text(), /HTTPS.*supported browser.*site storage/i);
     installSessionLocks(); await signIn(); await settle();
-    assert.equal(principal(), ME.id);
     assert.equal(postRequests().length, 1, 'only a deliberate recovered sign-in is dispatched');
+    await setInput(find('#factor'), '123456'); await click('Verify'); await settle();
+    assert.equal(principal(), ME.id);
+    assert.equal(postRequests().length, 2, 'the sign-in and its second factor');
 });
 
 test('MFA capability refusal preserves the reviewed challenge and recovery code is sent only after deliberate recovery', async () => {

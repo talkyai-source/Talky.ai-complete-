@@ -2,6 +2,8 @@
 
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,8 +23,11 @@ import {
   XCircle,
 } from "lucide-react";
 import { ErrorState } from "@/components/states/page-states";
+import { api } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
+import { useTopupBalance } from "@/lib/topup-api";
 import { formatPurchasedPrice, type BillingSubscription } from "@/lib/billing-purchase";
+import { useCheckoutConfirmationPending } from "@/components/billing/use-billing-purchase";
 import { formatMinorMoney, type BillingInvoice, type BillingUsage, type BillingLedgerEntry } from "@/lib/billing-read";
 import {
   useBillingPlan,
@@ -86,9 +91,22 @@ function formatDate(iso: string | null | undefined) {
 
 function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
   if (!start || !end) return "—";
-  const s = new Date(start).toLocaleDateString(undefined, { month: "long", day: "numeric" });
-  const e = new Date(end).toLocaleDateString(undefined, { month: "long", day: "numeric" });
-  return `${s} – ${e}`;
+  // Same format (with the year) as the "period ends" line below.
+  return `${formatDate(start)} – ${formatDate(end)}`;
+}
+
+const paygPlanSchema = z.object({ plan: z.object({ name: z.string() }) });
+
+// BACKEND GAP G6: a customer who only bought pay-as-you-go minutes still gets
+// status "inactive" / plan_name null from /billing/subscription, so the plan
+// name is read from the public /plans/payg catalogue until the backend fixes it.
+function usePaygPlanName(enabled: boolean) {
+  return useQuery({
+    queryKey: ["plans", "payg"],
+    queryFn: async () => paygPlanSchema.parse(await api.request({ path: "/plans/payg" })).plan.name,
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 /** The backend's own words where it gave any, never a cause we made up. */
@@ -116,6 +134,9 @@ function statusBadge(state: string) {
     canceled: { label: "Canceled", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" },
     cancelled: { label: "Canceled", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" },
     unpaid: { label: "Unpaid", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
+    suspended: { label: "Suspended", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
+    paused: { label: "Paused", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" },
+    incomplete: { label: "Incomplete", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" },
     incomplete_expired: { label: "Expired", className: "border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-400" },
     unknown: { label: "Unknown", className: "border-gray-500/30 bg-gray-500/10 text-gray-700 dark:text-gray-400" },
   };
@@ -261,6 +282,18 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
 }
 
 function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
+  const balanceQ = useTopupBalance();
+  // Paid top-up with no subscription row (see usePaygPlanName / GAP G6).
+  const prepaidOnly =
+    subscription !== null &&
+    (subscription.status || "").toLowerCase() === "inactive" &&
+    !subscription.plan_name &&
+    (balanceQ.data?.purchased_minutes ?? 0) > 0;
+  const paygQ = usePaygPlanName(prepaidOnly);
+  // A ?checkout=success return still being confirmed (use-billing-purchase
+  // polls the attempt); the old plan and status would be wrong meanwhile.
+  const confirming = useCheckoutConfirmationPending();
+
   if (!subscription) {
     return (
       <Card className="relative overflow-hidden border-primary/20 bg-gradient-to-br from-primary/[0.08] via-card to-card">
@@ -282,7 +315,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
   }
 
   const details = [
-    { label: "Plan", value: subscription.plan_name || "No plan selected", icon: Layers3, large: true },
+    { label: "Plan", value: confirming ? "Confirming your purchase with Stripe…" : (prepaidOnly && paygQ.data) || subscription.plan_name || "No plan selected", icon: Layers3, large: true },
     {
       label: "Billing cycle",
       value: formatDateRange(subscription.current_period_start, subscription.current_period_end),
@@ -314,7 +347,7 @@ function PlanDisplay({ subscription }: { subscription: Subscription | null }) {
               <CardDescription className="mt-1">Purchased offer, billing period, and included allowance.</CardDescription>
             </div>
           </div>
-          <div className="self-start">{statusBadge(subscription.status)}</div>
+          <div className="self-start">{prepaidOnly || confirming ? null : statusBadge(subscription.status)}</div>
         </div>
       </CardHeader>
       <CardContent className="relative">
@@ -550,7 +583,7 @@ function OverageAlertsCard({
   alerts.forEach((a) => {
     warnings.push({
       message: a.type === "minutes"
-         ? `You have exceeded your monthly minutes allowance by ${a.exceededBy.toLocaleString()} minutes. ${a.estimatedCharge === null ? "Additional usage pricing is unavailable; this is not a charge." : `Estimated charge: ${formatMinorMoney(a.estimatedCharge, a.currency, a.currency_exponent)}.`}`
+         ? `You have exceeded your monthly minutes allowance by ${a.exceededBy.toLocaleString()} minutes. ${a.estimatedCharge === null ? "Additional usage pricing is unavailable; this is not a charge." : `Estimated additional usage: ${formatMinorMoney(a.estimatedCharge, a.currency, a.currency_exponent)}. This is not a charge.`}`
         : `You have exceeded your concurrency limit by ${a.exceededBy}. Additional usage pricing is unavailable; this is not a charge.`,
       severity: a.severity,
     });

@@ -59,7 +59,7 @@ test('failed quota save keeps the modal open, shows the error and does not refre
     await draw([tenant()], () => { refreshed += 1; });
     await openMenu(); await click('Edit Quota');
     await setInput(find('#concurrent'), '9');
-    await click('Save Changes');
+    await click('Save Changes'); await click('Confirm');
     assert.equal(mutations().length, 1);
     assert.match(text(), /Edit Quota - Acme Ltd/, 'modal must stay open on failure');
     assert.match(find('[role="alert"]').textContent, /Quota backend unavailable/);
@@ -73,7 +73,7 @@ test('editing only concurrency sends only max_concurrent_calls (no stale minutes
     await draw([tenant()], () => {});
     await openMenu(); await click('Edit Quota');
     await setInput(find('#concurrent'), '9');
-    await click('Save Changes');
+    await click('Save Changes'); await click('Confirm');
     assert.deepEqual(mutations()[0].body, { expected_updated_at: '2026-10-21T00:00:00Z', max_concurrent_calls: 9 });
 });
 
@@ -82,7 +82,7 @@ test('editing only minutes sends only minutes_allocated', async () => {
     await draw([tenant()], () => {});
     await openMenu(); await click('Edit Quota');
     await setInput(find('#minutes'), '750');
-    await click('Save Changes');
+    await click('Save Changes'); await click('Confirm');
     assert.deepEqual(mutations()[0].body, { expected_updated_at: '2026-10-21T00:00:00Z', minutes_allocated: 750 });
 });
 

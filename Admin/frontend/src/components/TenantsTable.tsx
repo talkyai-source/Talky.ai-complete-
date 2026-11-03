@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useRef, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import {
     Building2,
     Search,
@@ -17,6 +17,7 @@ import { api } from '../lib/api';
 import { useAuthGeneration } from '../lib/use-auth-generation';
 import { useDialogFocus } from '../lib/use-dialog-focus';
 import { ConfirmationModal } from './ConfirmationModal';
+import { FLOATING_MENU_HIDDEN, placeFloatingMenu, type FloatingAnchor } from '../lib/floating-menu';
 
 interface TenantsTableProps {
     tenants: TenantListItem[];
@@ -61,6 +62,32 @@ function OwnedTenantsTable({
     const [sortField, setSortField] = useState<SortField>('business_name');
     const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
     const [activeMenu, setActiveMenu] = useState<string | null>(null);
+    // The open menu floats over the viewport (position: fixed) so .table-container's
+    // overflow clipping cannot cut it off; it is measured, then kept inside the window.
+    const [menuAnchor, setMenuAnchor] = useState<FloatingAnchor | null>(null);
+    const [menuStyle, setMenuStyle] = useState<CSSProperties>(FLOATING_MENU_HIDDEN);
+    const menuRef = useRef<HTMLDivElement>(null);
+    useLayoutEffect(() => {
+        if (!activeMenu || !menuAnchor || !menuRef.current) return;
+        const size = menuRef.current.getBoundingClientRect();
+        setMenuStyle(placeFloatingMenu(menuAnchor, { width: size.width, height: size.height },
+            { width: window.innerWidth, height: window.innerHeight }));
+    }, [activeMenu, menuAnchor]);
+    useEffect(() => {
+        if (!activeMenu) return;
+        // A fixed panel would drift from its row once anything scrolls or resizes.
+        const close = () => setActiveMenu(null);
+        window.addEventListener('resize', close);
+        document.addEventListener('scroll', close, true);
+        return () => { window.removeEventListener('resize', close); document.removeEventListener('scroll', close, true); };
+    }, [activeMenu]);
+    const openMenu = (tenantId: string, button: HTMLElement) => {
+        if (activeMenu === tenantId) { setActiveMenu(null); return; }
+        const rect = button.getBoundingClientRect();
+        setMenuAnchor({ top: rect.top, bottom: rect.bottom, left: rect.left, right: rect.right });
+        setMenuStyle(FLOATING_MENU_HIDDEN);
+        setActiveMenu(tenantId);
+    };
     const [quotaModal, setQuotaModal] = useState<{ open: boolean; tenant: TenantListItem | null }>({
         open: false,
         tenant: null
@@ -358,12 +385,12 @@ function OwnedTenantsTable({
                                                 className="action-menu-btn"
                                                 aria-label={`Actions for ${tenant.business_name}`}
                                                 aria-expanded={activeMenu === tenant.id}
-                                                onClick={() => setActiveMenu(activeMenu === tenant.id ? null : tenant.id)}
+                                                onClick={(event) => openMenu(tenant.id, event.currentTarget)}
                                             >
                                                 <MoreVertical size={16} />
                                             </button>
                                             {activeMenu === tenant.id && (
-                                                <div className="action-menu">
+                                                <div className="action-menu" ref={menuRef} style={menuStyle}>
                                                     {onFormalHolds && <button className="action-menu-item" onClick={(event) => {
                                                         event.currentTarget.closest('.actions-cell')?.querySelector<HTMLButtonElement>('.action-menu-btn')?.focus();
                                                         setActiveMenu(null); onFormalHolds(tenant);
@@ -486,10 +513,13 @@ function QuotaModal({ tenant, onClose, onSave, loading, error }: QuotaModalProps
     }
     const canSave = tenant.updated_at !== undefined && parsedMinutes !== null && parsedConcurrent !== null && Object.keys(changes).length > 1;
 
+    // "Save Changes" asks for confirmation first; the form stays open underneath.
+    // The confirmation renders inside this dialog so one focus trap owns it.
+    const [pendingSave, setPendingSave] = useState<QuotaUpdateRequest | null>(null);
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (!canSave || loading) return;
-        onSave(changes);
+        setPendingSave(changes);
     };
 
     return (
@@ -546,6 +576,15 @@ function QuotaModal({ tenant, onClose, onSave, loading, error }: QuotaModalProps
                         </button>
                     </div>
                 </form>
+                <ConfirmationModal
+                    isOpen={pendingSave !== null}
+                    title="Save Changes"
+                    message={`Save the quota changes for "${tenant.business_name}"?`}
+                    confirmLabel="Confirm"
+                    variant="warning"
+                    onConfirm={() => { const quota = pendingSave; setPendingSave(null); if (quota) onSave(quota); }}
+                    onCancel={() => setPendingSave(null)}
+                />
             </div>
         </div>
     );

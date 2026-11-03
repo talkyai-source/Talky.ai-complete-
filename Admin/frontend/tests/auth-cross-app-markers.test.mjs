@@ -30,8 +30,12 @@ function installChannels() {
     Object.defineProperty(window, 'BroadcastChannel', { configurable: true, value: Channel });
     return Channel;
 }
+// Platform admins must complete 2FA: a restored identity needs the local
+// proof-of-MFA marker for that user (auth-mfa-enforcement.test.mjs). A sibling
+// Admin tab that completed the second factor for B writes B's marker.
+const proveMfa = (user) => localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: user.id }));
 async function boot() {
-    api.setToken('old-admin-bearer');
+    api.setToken('old-admin-bearer'); proveMfa(A);
     state.route = () => response(A);
     await render(el(C.AuthProvider, null, el(Probe))); await settle();
     assert.equal(auth.user?.id, A.id); state.requests = [];
@@ -44,7 +48,7 @@ test.afterEach(() => {
 });
 
 test('foreign storage change removes old Admin bearer before canonical cookie verification', async () => {
-    await boot(); state.route = () => response(B);
+    await boot(); state.route = () => response(B); proveMfa(B);
     await act(async () => emitStorage(FOREIGN, marker())); await settle();
     assert.equal(auth.user?.id, B.id);
     assert.equal(state.requests.length, 1);
@@ -60,13 +64,17 @@ test('foreign channel-only change clears in-memory bearer with storage blocked',
     Object.defineProperty(window, 'localStorage', blocked); Object.defineProperty(globalThis, 'localStorage', blocked);
     const external = new window.BroadcastChannel(FOREIGN);
     await act(async () => external.postMessage(marker())); await settle(); external.close();
-    assert.equal(auth.user?.id, B.id); assert.equal(api.getToken(), null);
-    assert.equal(state.requests.length, 1); assert.equal(state.requests[0].authorization, undefined);
+    // With storage blocked no proof-of-MFA marker is readable, so B's cookie
+    // identity is verified once, then signed out rather than admitted.
+    assert.equal(auth.user, null); assert.equal(api.getToken(), null);
+    assert.equal(state.requests.length, 2); assert.equal(state.requests[0].authorization, undefined);
+    assert.ok(state.requests[0].path.endsWith('/auth/me')); assert.ok(state.requests[1].path.endsWith('/auth/logout'));
+    assert.equal(auth.error, C.MFA_REQUIRED_MESSAGE);
     assert.equal(sent.length, 1, 'only the originating channel message is published');
 });
 
 for (const order of ['marker-first', 'token-first']) test(`own changed marker preserves new sibling bearer (${order})`, async () => {
-    await boot(); state.route = () => response(B);
+    await boot(); state.route = () => response(B); proveMfa(B);
     localStorage.setItem('admin_token', 'new-admin-bearer');
     if (order === 'token-first') await act(async () => window.dispatchEvent(new dom.window.StorageEvent('storage', { key: 'admin_token', newValue: 'new-admin-bearer' })));
     await act(async () => emitStorage(OWN, marker())); await settle();
@@ -79,7 +87,7 @@ for (const order of ['marker-first', 'token-first']) test(`own changed marker pr
 });
 
 test('foreign storage plus channel duplicate verifies once and ignores subsequent matching token removal', async () => {
-    await boot(); const read = deferred(); state.route = () => read.promise;
+    await boot(); const read = deferred(); state.route = () => read.promise; proveMfa(B);
     const value = marker(), external = new window.BroadcastChannel(FOREIGN);
     await act(async () => { emitStorage(FOREIGN, value); external.postMessage(value); }); await settle();
     assert.equal(auth.user, null); assert.equal(state.requests.length, 1);

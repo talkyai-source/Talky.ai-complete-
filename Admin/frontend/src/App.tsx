@@ -10,6 +10,7 @@ import { ActionsPage } from './pages/ActionsPage';
 import { ConnectorsPage } from './pages/ConnectorsPage';
 import { UsersPage } from './pages/UsersPage';
 import { UsageCostPage } from './pages/UsageCostPage';
+import { PlansPage } from './pages/PlansPage';
 import { IncidentsPage } from './pages/IncidentsPage';
 import { SystemHealthPage } from './pages/SystemHealthPage';
 import { InboundControlPage } from './pages/InboundControlPage';
@@ -108,6 +109,14 @@ function App() {
             element={
               <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
                 <UsageCostPage />
+              </AdminRouteGuard>
+            }
+          />
+          <Route
+            path="/plans"
+            element={
+              <AdminRouteGuard allowedRoles={PLATFORM_ROLES}>
+                <PlansPage />
               </AdminRouteGuard>
             }
           />

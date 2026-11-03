@@ -103,6 +103,7 @@ function OwnedConnectorsTable({ onSelectConnector, onChanged, refreshVersion, ge
     const [pageSize] = useState(20);
     const [total, setTotal] = useState(0);
     const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
+    const [reconnectTarget, setReconnectTarget] = useState<string | null>(null);
     const [revokeLoading, setRevokeLoading] = useState(false);
     // The API client never throws; failures come back as { error }.
     const [listError, setListError] = useState<string | null>(null);
@@ -173,9 +174,17 @@ function OwnedConnectorsTable({ onSelectConnector, onChanged, refreshVersion, ge
         return () => { sequence.current += 1; };
     }, [fetchConnectors]);
 
-    const handleReconnect = async (e: React.MouseEvent, connectorId: string) => {
+    const handleReconnectClick = (e: React.MouseEvent, connectorId: string) => {
         e.stopPropagation();
         if (!owns() || mutation.current || loading || loadedQuery !== query) return;
+        setActionError(null);
+        setReconnectTarget(connectorId);
+    };
+
+    const handleReconnectConfirm = async () => {
+        const connectorId = reconnectTarget;
+        setReconnectTarget(null);
+        if (connectorId === null || !owns() || mutation.current || loading || loadedQuery !== query) return;
         mutation.current = true; setMutating(true);
         setActionError(null);
         setNotice(null);
@@ -389,7 +398,7 @@ function OwnedConnectorsTable({ onSelectConnector, onChanged, refreshVersion, ge
                                                     title="Refresh token"
                                                     aria-label={`Refresh token for ${connector.name || connector.provider}`}
                                                     disabled={mutating || connector.refresh_state !== 'idle'}
-                                                    onClick={(e) => handleReconnect(e, connector.id)}
+                                                    onClick={(e) => handleReconnectClick(e, connector.id)}
                                                 >
                                                     <Zap size={14} />
                                                 </button>
@@ -439,6 +448,17 @@ function OwnedConnectorsTable({ onSelectConnector, onChanged, refreshVersion, ge
                     </div>
                 </div>
             )}
+
+            <ConfirmationModal
+                isOpen={reconnectTarget !== null}
+                title="Refresh token"
+                message="Request a token refresh for this integration now? The outcome will be shown in the list."
+                confirmLabel="Confirm"
+                variant="warning"
+                onConfirm={() => void handleReconnectConfirm()}
+                onCancel={() => setReconnectTarget(null)}
+                returnFocusFallback={searchInput}
+            />
 
             {/* Revoke Confirmation Modal */}
             <ConfirmationModal

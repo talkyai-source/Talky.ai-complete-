@@ -167,7 +167,8 @@ test('without Web Locks no unordered credential request is dispatched', async ()
 test('canonical identity verification can refresh after login without reacquiring a held login lock', async () => {
     installLocks(); api.setToken(null); localStorage.setItem('talky.admin.logout.pending', 'unconfirmed');
     state.route = request => {
-        if (request.path.endsWith('/auth/login')) return response(signed(B, 'initial-B'));
+        if (request.path.endsWith('/auth/login')) return response(challenge);
+        if (request.path.endsWith('/auth/mfa/verify')) return response(signed(B, 'initial-B'));
         if (request.path.endsWith('/auth/refresh')) return response(signed(B, 'renewed-B'));
         if (request.path.endsWith('/auth/me')) return request.authorization === 'Bearer renewed-B' ? response(B) : response({}, 401);
         return response({}, 500);
@@ -211,9 +212,15 @@ const draw = async () => {
     await render(el(C.AuthProvider, null, el(C.MemoryRouter, null, el(Screen)))); await settle();
 };
 const principal = () => find('[data-principal]').textContent;
-const signInB = async () => {
+// Admitted roles must complete 2FA: a restored session needs the local
+// proof-of-MFA marker and a password login issues a challenge (auth-mfa-enforcement.test.mjs).
+const challenge = { access_token: '', mfa_required: true, mfa_challenge_token: 'one-use-challenge-B' };
+test.beforeEach(() => { localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: A.id })); });
+const submitB = async () => {
     await setInput(find('#email'), B.email); await setInput(find('#password'), 'synthetic-password'); await click('Sign In');
 };
+const completeB = async () => { await setInput(find('#factor'), '123456'); await click('Verify'); };
+const signInB = async () => { await submitB(); await completeB(); };
 
 test('a second tab login waits for an older successful logout response before receiving new cookies', async () => {
     const lockNames = installLocks(); const oldLogout = deferred(); let cookieOwner = A.id;
@@ -222,7 +229,8 @@ test('a second tab login waits for an older successful logout response before re
     firstTab.setToken('access-A', false); firstTab.expectIdentity({ userId: A.id, tenantId: null });
     state.route = async request => {
         if (request.path.endsWith('/auth/logout')) { await oldLogout.promise; cookieOwner = null; return response({ detail: 'Logged out' }); }
-        if (request.path.endsWith('/auth/login')) { cookieOwner = B.id; return response(signed(B, 'access-B')); }
+        if (request.path.endsWith('/auth/login')) return response(challenge);
+        if (request.path.endsWith('/auth/mfa/verify')) { cookieOwner = B.id; return response(signed(B, 'access-B')); }
         if (request.path.endsWith('/auth/me')) return response(request.authorization === 'Bearer access-B' ? B : A);
         return response({ detail: 'Unexpected request' }, 500);
     };
@@ -235,11 +243,12 @@ test('a second tab login waits for an older successful logout response before re
             newValue: JSON.stringify({ kind: 'logout', nonce: 'held-logout' }) }));
     });
     assert.equal(principal(), 'signed out');
-    await signInB();
+    await submitB();
     try {
         assert.equal(state.requests.filter(request => request.path.endsWith('/auth/login')).length, 0,
             'new login must not reach transport while old successful logout headers are undelivered');
     } finally { await act(async () => { oldLogout.resolve(); await logout; }); await settle(); }
+    await completeB(); await settle();
     assert.equal(principal(), B.id); assert.equal(cookieOwner, B.id);
     assert.equal(state.requests.filter(request => request.path.endsWith('/auth/login')).length, 1);
     assert.equal(new Set(lockNames).size, 1);

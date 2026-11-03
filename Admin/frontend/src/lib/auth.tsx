@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { api, type AdminUser, type LoginResponse } from './api';
+import { adminLanding, canAccessAdminRoute } from './admin-routes';
 
 const DUMMY_ADMIN_USER: AdminUser = { id: 'admin-001', email: 'admin@talky.ai', name: 'Admin User', role: 'super_admin' };
 const USE_DUMMY_AUTH = import.meta.env.DEV && String(import.meta.env.VITE_USE_DUMMY_AUTH ?? '').toLowerCase() === 'true';
@@ -7,6 +8,11 @@ const TOKEN_KEY = 'admin_token';
 const IDENTITY_KEY = 'talky.admin.identity.v1';
 const FOREIGN_IDENTITY_KEY = 'talklee.auth.identity.v1';
 const LOGOUT_PENDING_KEY = 'talky.admin.logout.pending';
+// Written only after POST /auth/mfa/verify succeeded for this user in this
+// browser. A session restored without it is signed out: the backend does not
+// yet force platform admins through a second factor (BACKEND GAP G2).
+export const MFA_MARKER_KEY = 'talky.admin.mfa.v1';
+export const MFA_REQUIRED_MESSAGE = 'Two-factor authentication must be enabled on this account before the Admin console can be used. Turn it on in the customer app under Settings → Security (the /security page).';
 const LOGOUT_UNCONFIRMED = 'Signed out of this Admin tab. Server sign-out could not be confirmed; your session may still be active elsewhere. Retrying signs out the account currently signed in in this browser.';
 
 interface AuthState {
@@ -31,6 +37,16 @@ function saved(key: string): string | null {
 }
 function save(key: string, value: string | null) {
     try { if (value === null) localStorage.removeItem(key); else localStorage.setItem(key, value); } catch { /* Cookie/in-memory authentication still works. */ }
+}
+/** Roles the route guard admits somewhere in the console must have completed 2FA. */
+function mfaRequiredFor(role: string | undefined): boolean {
+    return canAccessAdminRoute(adminLanding(role), role);
+}
+function mfaCompletedFor(userId: string): boolean {
+    try {
+        const marker = JSON.parse(saved(MFA_MARKER_KEY) ?? 'null') as { userId?: unknown } | null;
+        return Boolean(marker && typeof marker.userId === 'string' && marker.userId === userId);
+    } catch { return false; }
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -80,6 +96,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             const res = await api.verifyToken();
             if (!owner.current()) return;
             if (res.data?.valid && res.data.user) {
+                if (mfaRequiredFor(res.data.user.role) && !mfaCompletedFor(res.data.user.id)) {
+                    // Restored without proof of a completed second factor: end
+                    // the server session too, and require a fresh 2FA sign-in.
+                    const ended = api.logout(owner.current);
+                    owner.adoptToken(null); api.expectIdentity(null); save(MFA_MARKER_KEY, null);
+                    try { await ended; } catch { /* The local sign-out stands regardless. */ }
+                    if (owner.current()) setState(anonymous(MFA_REQUIRED_MESSAGE));
+                    return;
+                }
                 setState({ ...anonymous(), user: res.data.user, isAuthenticated: true }); return;
             }
             const status = res.error?.status;
@@ -132,6 +157,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 challengeRef.current = res.data.mfa_challenge_token;
                 setState({ ...anonymous(), mfaChallenge: res.data.mfa_challenge_token }); return false;
             }
+            if (mfaRequiredFor(res.data.role)) {
+                // A full session without a second factor is refused: end the
+                // server session it opened (Bearer, never persisted) and stay on /login.
+                api.setToken(res.data.access_token || null, false);
+                const refusal = beginOperation();
+                const ended = api.logout(refusal.current);
+                refusal.adoptToken(null); api.expectIdentity(null); save(MFA_MARKER_KEY, null);
+                try { await ended; } catch { /* The refusal stands regardless. */ }
+                if (refusal.current()) setState(anonymous(MFA_REQUIRED_MESSAGE));
+                return false;
+            }
             return await completeLogin(res.data, owner);
         } catch (caught) {
             if (owner.current()) setState(anonymous(caught instanceof Error ? caught.message : 'Sign-in could not be confirmed.'));
@@ -163,6 +199,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return false;
             }
             challengeRef.current = null;
+            // The second factor is complete for this user in this browser.
+            if (res.data.user_id) save(MFA_MARKER_KEY, JSON.stringify({ userId: res.data.user_id }));
             return await completeLogin(res.data, owner);
         } catch {
             if (owner.current()) {

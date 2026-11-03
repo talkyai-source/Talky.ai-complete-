@@ -1276,6 +1276,7 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .btn-pause,
@@ -1319,14 +1320,17 @@ body {
 /* Confirmation Dialog */
 .confirm-dialog {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 8px;
   font-size: 13px;
   color: var(--text-primary);
+  max-width: 100%;
 }
 
 .pause-reason-input {
   width: 190px;
+  max-width: 100%;
   padding: 6px 9px;
   border: 1px solid var(--border-color);
   border-radius: 5px;

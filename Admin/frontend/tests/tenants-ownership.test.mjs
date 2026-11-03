@@ -19,7 +19,7 @@ test('a planless zero-allowance tenant is displayed honestly and keeps explicit 
     assert.equal(mutations().length, 0);
     await menu(); await click('Edit Quota');
     assert.equal(find('#minutes').value, '0');
-    await setInput(find('#minutes'), '80'); await click('Save Changes');
+    await setInput(find('#minutes'), '80'); await click('Save Changes'); await click('Confirm');
     assert.equal(mutations().length, 1);
     assert.deepEqual(mutations()[0].body, { expected_updated_at: stamp, minutes_allocated: 80 });
     assert.match(find('[aria-label="Saved tenant change"]').textContent, /Minutes allocated: 80/);
@@ -40,7 +40,7 @@ test('an unversioned tenant cannot be mutated', async () => {
 
 test('quota conflict preserves the operator draft and original reviewed version', async () => {
     state.route = () => response({ detail: 'Tenant changed; refresh and review before saving' }, 409);
-    await draw(); await menu(); await click('Edit Quota'); await setInput(find('#concurrent'), '9'); await click('Save Changes');
+    await draw(); await menu(); await click('Edit Quota'); await setInput(find('#concurrent'), '9'); await click('Save Changes'); await click('Confirm');
     assert.equal(find('#concurrent').value, '9'); assert.match(text(), /Tenant changed/);
     assert.deepEqual(mutations()[0].body, { expected_updated_at: stamp, max_concurrent_calls: 9 });
     assert.equal(find('[role="dialog"]') !== null, true);
@@ -49,14 +49,14 @@ test('quota conflict preserves the operator draft and original reviewed version'
 test('a mismatching quota receipt does not close the draft or report success', async () => {
     let refreshed = 0; state.route = () => response({ detail: 'saved', max_concurrent_calls: 7 });
     await draw(tenant(), () => { refreshed += 1; }); await menu(); await click('Edit Quota');
-    await setInput(find('#concurrent'), '9'); await click('Save Changes');
+    await setInput(find('#concurrent'), '9'); await click('Save Changes'); await click('Confirm');
     assert.equal(refreshed, 0); assert.match(find('[role="alert"]').textContent, /could not be confirmed/);
     assert.equal(find('[aria-label="Saved tenant change"]'), null);
 });
 
 test('pending quota cannot be closed by backdrop or Escape', async () => {
     const pending = deferred(); state.route = () => pending.promise;
-    await draw(); await menu(); await click('Edit Quota'); await setInput(find('#minutes'), '600'); await click('Save Changes');
+    await draw(); await menu(); await click('Edit Quota'); await setInput(find('#minutes'), '600'); await click('Save Changes'); await click('Confirm');
     await act(async () => { find('.modal-overlay').click(); document.dispatchEvent(new dom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })); });
     assert.ok(find('[role="dialog"]'));
     await act(async () => pending.resolve(response(receipt({ detail: 'saved', minutes_allocated: 600 }))));
@@ -91,7 +91,7 @@ test('tenant list can page beyond the first fifty without claiming a global tota
 test('an existing tenant above 100 concurrent calls can edit minutes without reducing capacity', async () => {
     state.route = () => response(receipt({ detail: 'saved', minutes_allocated: 600, max_concurrent_calls: 500 }));
     await draw(tenant({ max_concurrent_calls: 500 })); await menu(); await click('Edit Quota');
-    await setInput(find('#minutes'), '600'); assert.equal(button('Save Changes').disabled, false); await click('Save Changes');
+    await setInput(find('#minutes'), '600'); assert.equal(button('Save Changes').disabled, false); await click('Save Changes'); await click('Confirm');
     assert.deepEqual(mutations()[0].body, { expected_updated_at: stamp, minutes_allocated: 600 });
 });
 
@@ -129,7 +129,7 @@ for (const operation of ['subscription', 'quota']) test(`confirmed ${operation} 
     await render(el(C.MemoryRouter, null, el(C.AuthProvider, null, el(C.TenantsPage)))); await settle();
     await menu();
     if (operation === 'subscription') { await click('Suspend subscription'); await click('Suspend'); }
-    else { await click('Edit Quota'); await setInput(find('#minutes'), '600'); await click('Save Changes'); }
+    else { await click('Edit Quota'); await setInput(find('#minutes'), '600'); await click('Save Changes'); await click('Confirm'); }
     await settle();
     assert.equal(Boolean(find('[role="dialog"]')), false);
     assert.match(text(), /Directory unavailable after commit/);

@@ -67,7 +67,11 @@ export function createAppQueryClient(onUnauthorized: () => void) {
             onMutate: (_variables, _mutation, context) => {
                 captureMutationNotificationOrigin(context);
             },
-            onError: (error, _variables, _result, _mutation, context) => {
+            onError: (error, _variables, _result, mutation, context) => {
+                // A mutation may declare (meta.inlineError) that it shows this
+                // exact failure in place, so no toast repeats it.
+                const inlineError = mutation.meta?.inlineError;
+                if (typeof inlineError === "function" && inlineError(error) === true) return;
                 onError(error, mutationNotificationOrigin(context));
             },
         }),

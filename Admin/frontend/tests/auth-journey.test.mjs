@@ -29,7 +29,13 @@ const publicRoute = (request) => {
     if (request.path.endsWith('/auth/refresh')) return denied();
     return response({}, 500);
 };
-test.beforeEach(() => { api.setToken(null); state.route = publicRoute; });
+// Platform admins must complete 2FA: a password login issues a challenge and a
+// restored session needs the local proof-of-MFA marker (auth-mfa-enforcement.test.mjs).
+const withMfa = (next) => (request) => request.path.endsWith('/auth/login') ? response(challenge)
+    : request.path.endsWith('/auth/mfa/verify') ? response(signedIn) : next(request);
+const completeMfa = async () => { await setInput(find('#factor'), '123456'); await click('Verify'); };
+const proveMfa = (userId = ME.id) => localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId }));
+test.beforeEach(() => { api.setToken(null); state.route = publicRoute; proveMfa(); });
 
 for (const variant of ['stored', 'cookie-only', 'rejected']) {
     test(`bootstrap verifies ${variant} authority using the canonical endpoint`, async () => {
@@ -86,9 +92,8 @@ test('lost MFA success is unconfirmed and does not automatically consume the fac
 });
 
 test('login uses the current server role rather than the optimistic credential response', async () => {
-    state.route = (request) => request.path.endsWith('/auth/login') ? response(signedIn)
-        : request.authorization === 'Bearer access-A' ? response({ ...ME, role: 'tenant_admin' }) : denied();
-    await draw('/login', '/users'); await signIn();
+    state.route = withMfa((request) => request.authorization === 'Bearer access-A' ? response({ ...ME, role: 'tenant_admin' }) : denied());
+    await draw('/login', '/users'); await signIn(); await completeMfa();
     assert.equal(principal(), ME.id); assert.equal(find('[data-location]').textContent, '/actions');
     assert.equal(find('a[href="/system-health"]'), null); assert.equal(find('a[href="/incidents"]'), null);
     assert.ok(find('a[href="/actions"]'));
@@ -96,9 +101,8 @@ test('login uses the current server role rather than the optimistic credential r
 
 test('login remains unverified on a canonical identity outage and a deliberate check recovers', async () => {
     let available = false;
-    state.route = (request) => request.path.endsWith('/auth/login') ? response(signedIn)
-        : request.authorization === 'Bearer access-A' ? available ? response(ME) : response({ detail: 'Identity service unavailable' }, 503) : denied();
-    await draw(); await signIn();
+    state.route = withMfa((request) => request.authorization === 'Bearer access-A' ? available ? response(ME) : response({ detail: 'Identity service unavailable' }, 503) : denied());
+    await draw(); await signIn(); await completeMfa();
     assert.equal(principal(), 'signed out'); assert.equal(api.getToken(), 'access-A');
     available = true; await click('Retry session check'); assert.equal(principal(), ME.id);
 });
@@ -125,7 +129,7 @@ test('cross-tab token change masks old identity until the new account is verifie
     state.route = (request) => request.authorization === 'Bearer access-B' ? pending.promise.then((value) => response(value)) : response(ME);
     await draw('/actions');
     await act(async () => {
-        localStorage.setItem('admin_token', 'access-B');
+        localStorage.setItem('admin_token', 'access-B'); proveMfa('admin-B');
         window.dispatchEvent(new dom.window.StorageEvent('storage', { key: 'admin_token', newValue: 'access-B' }));
     });
     assert.equal(principal(), 'signed out'); assert.equal(localStorage.getItem('admin_token'), 'access-B');
@@ -146,9 +150,8 @@ test('cookie-only identity marker retires the previous generation without cleari
 test('blocked storage still permits in-memory sign-in and verified cookie requests', async () => {
     const prototype = dom.window.Storage.prototype, originalGet = prototype.getItem, originalSet = prototype.setItem, originalRemove = prototype.removeItem;
     prototype.getItem = prototype.setItem = prototype.removeItem = () => { throw new Error('Storage blocked'); };
-    state.route = (request) => request.path.endsWith('/auth/login') ? response(signedIn)
-        : request.authorization === 'Bearer access-A' ? response(ME) : denied();
-    try { await draw(); await signIn(); assert.equal(principal(), ME.id); }
+    state.route = withMfa((request) => request.authorization === 'Bearer access-A' ? response(ME) : denied());
+    try { await draw(); await signIn(); await completeMfa(); assert.equal(principal(), ME.id); }
     finally { prototype.getItem = originalGet; prototype.setItem = originalSet; prototype.removeItem = originalRemove; }
 });
 
@@ -293,7 +296,7 @@ test('identity change during a factor attempt discards its late success and veri
         : request.authorization === 'Bearer access-B' ? response({ ...ME, id: 'admin-B', email: 'b@example.invalid' }) : publicRoute(request);
     await draw(); await signIn(); await setInput(find('#factor'), '123456'); await click('Verify');
     await act(async () => {
-        localStorage.setItem('admin_token', 'access-B');
+        localStorage.setItem('admin_token', 'access-B'); proveMfa('admin-B');
         window.dispatchEvent(new dom.window.StorageEvent('storage', { key: 'admin_token', newValue: 'access-B' }));
     });
     assert.equal(principal(), 'signed out'); assert.equal(find('#factor'), null);

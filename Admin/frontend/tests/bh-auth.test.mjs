@@ -14,11 +14,15 @@ function Probe() {
         el('button', { onClick: () => void api.getTenants() }, 'Call tenants'),
         el('button', { onClick: () => void api.getAdminRecordingAudio('rec-1').catch(() => {}) }, 'Fetch audio'),
         el('button', { onClick: () => void auth.login('admin@example.invalid', 'wrong-password') }, 'Log in'),
+        el('button', { onClick: () => void auth.verifyMfa('123456', false) }, 'Verify MFA'),
         el('button', { onClick: () => void auth.checkAuth() }, 'Retry session check'));
 }
 const principal = () => find('[data-testid="principal"]').textContent;
 const draw = async () => { await render(el(C.AuthProvider, null, el(Probe))); await settle(); };
 const stored = () => dom.window.localStorage.getItem(TOKEN_KEY);
+// Platform admins must complete 2FA: a restored session needs the local
+// proof-of-MFA marker and a password login issues a challenge (auth-mfa-enforcement.test.mjs).
+test.beforeEach(() => { dom.window.localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: ME.id })); });
 
 // admin-frontend-gateway-6 ---------------------------------------------------
 
@@ -111,6 +115,9 @@ test('a late 401 from a previous session cannot sign out a newer login', async (
         if (call.path.endsWith('/auth/me')) return response(call.authorization === 'Bearer new-token'
             ? { ...ME, id: 'admin-2', email: 'b@example.invalid' } : ME);
         if (call.path.endsWith('/auth/login')) {
+            return response({ access_token: '', mfa_required: true, mfa_challenge_token: 'one-use-challenge-2' });
+        }
+        if (call.path.endsWith('/auth/mfa/verify')) {
             return response({ access_token: 'new-token', user_id: 'admin-2', email: 'b@example.invalid', role: 'platform_admin' });
         }
         return slow.promise;
@@ -118,6 +125,7 @@ test('a late 401 from a previous session cannot sign out a newer login', async (
     await draw();
     await click('Call tenants');
     await click('Log in');
+    await click('Verify MFA');
     assert.equal(principal(), 'admin-2');
     await act(async () => slow.resolve(response({ detail: 'old session expired' }, 401)));
     assert.equal(principal(), 'admin-2');

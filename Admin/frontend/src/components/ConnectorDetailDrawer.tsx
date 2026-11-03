@@ -101,6 +101,7 @@ function OwnedConnectorDrawer({ connector, onClose, onRefresh, generation }: Con
     const [loading, setLoading] = useState(true);
     const [actionLoading, setActionLoading] = useState<string | null>(null);
     const [showRevokeConfirm, setShowRevokeConfirm] = useState(false);
+    const [showReconnectConfirm, setShowReconnectConfirm] = useState(false);
     // The API client never throws; a failed revoke/reconnect comes back as { error }.
     const [actionError, setActionError] = useState<string | null>(null);
     const [detailError, setDetailError] = useState<string | null>(null);
@@ -110,7 +111,7 @@ function OwnedConnectorDrawer({ connector, onClose, onRefresh, generation }: Con
     const mutation = useRef(false);
     const drawerRef = useRef<HTMLDivElement>(null);
     const owns = useCallback(() => mounted.current && generation === api.getAuthGeneration(), [generation]);
-    useDialogFocus(!showRevokeConfirm, drawerRef, onClose, actionLoading !== null);
+    useDialogFocus(!showRevokeConfirm && !showReconnectConfirm, drawerRef, onClose, actionLoading !== null);
     useEffect(() => {
         mounted.current = true;
         return () => { mounted.current = false; request.current += 1; };
@@ -206,7 +207,7 @@ function OwnedConnectorDrawer({ connector, onClose, onRefresh, generation }: Con
     const typeLabel = typeLabels[data.type] || data.type;
 
     return (
-        <div className="drawer-overlay" onClick={() => { if (!mutation.current && !showRevokeConfirm) onClose(); }}>
+        <div className="drawer-overlay" onClick={() => { if (!mutation.current && !showRevokeConfirm && !showReconnectConfirm) onClose(); }}>
             <div className="drawer drawer-right" ref={drawerRef} tabIndex={-1} role="dialog" aria-modal="true"
                 aria-labelledby="connector-drawer-title" onClick={(e) => e.stopPropagation()}>
                 <div className="drawer-header">
@@ -339,7 +340,7 @@ function OwnedConnectorDrawer({ connector, onClose, onRefresh, generation }: Con
                         <>
                             <button
                                 className="btn btn-secondary"
-                                onClick={handleReconnect}
+                                onClick={() => setShowReconnectConfirm(true)}
                                 disabled={actionLoading !== null || loading || !canRefreshToken || Boolean(detailError)}
                             >
                                 {actionLoading === 'reconnect' ? (
@@ -370,6 +371,16 @@ function OwnedConnectorDrawer({ connector, onClose, onRefresh, generation }: Con
                     </button>
                 </div>
             </div>
+
+            <ConfirmationModal
+                isOpen={showReconnectConfirm}
+                title="Refresh token"
+                message="Request a token refresh for this integration now? The outcome will be shown in this panel."
+                confirmLabel="Confirm"
+                variant="warning"
+                onConfirm={() => { setShowReconnectConfirm(false); void handleReconnect(); }}
+                onCancel={() => setShowReconnectConfirm(false)}
+            />
 
             {/* Revoke Confirmation Modal */}
             <ConfirmationModal

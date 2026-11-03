@@ -42,7 +42,7 @@ test('a real detail reload can enable refresh after pending authorization become
     await click('Reload details');
     assert.equal(button('Refresh token').disabled, false);
     assert.doesNotMatch(text(), /Authorization is pending/);
-    await click('Refresh token');
+    await click('Refresh token'); await click('Confirm');
     assert.equal(posts().length, 1);
     assert.match(text(), /Token refresh confirmed/);
 });
@@ -54,7 +54,7 @@ for (const status of ['active', 'expired', 'error']) {
             : response(connector({ status }));
         await mount(connector({ status }));
         assert.equal(button('Refresh token').disabled, false);
-        await click('Refresh token');
+        await click('Refresh token'); await click('Confirm');
         assert.equal(posts().length, 1);
         assert.match(text(), /Token refresh confirmed/);
     });

@@ -57,6 +57,27 @@ test("a failed mutation is never replayed (non-idempotent POSTs)", async () => {
     }
 });
 
+test("a mutation whose meta.inlineError owns the failure raises no toast; other failures still do", async () => {
+    const qc = createAppQueryClient(() => {});
+    const toasts = () => notificationsStore.getSnapshot().toasts.map((t) => `${t.title}: ${t.message}`);
+    const refusal = new ApiClientError({ code: "test_billing_team_only", message: "Payments are not open yet.", status: 403, url: "/billing/create-checkout-session", method: "POST" });
+    const other = new ApiClientError({ code: "http_error", message: "Package not found", status: 400, url: "/billing/topups/checkout", method: "POST" });
+    try {
+        for (const [error, expected] of [[refusal, []], [other, ["Request failed: Package not found"]]] as const) {
+            const mutation = qc.getMutationCache().build(qc, {
+                mutationFn: async () => { throw error; },
+                meta: { inlineError: (failure: unknown) => failure === refusal },
+            });
+            try {
+                await assert.rejects(() => mutation.execute(undefined));
+                assert.deepEqual(toasts(), expected);
+            } finally { mutation.destroy(); notificationsStore.clearAll(); }
+        }
+    } finally {
+        qc.clear();
+    }
+});
+
 test("queries keep their bounded retry", () => {
     const qc = createAppQueryClient(() => {});
     try {

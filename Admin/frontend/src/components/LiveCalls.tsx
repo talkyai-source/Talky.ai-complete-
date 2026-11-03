@@ -3,6 +3,7 @@ import { Loader2, Play, Pause } from 'lucide-react';
 import { api } from '../lib/api';
 import type { LiveCallItem } from '../lib/api';
 import { CallTerminationAction } from './CallTerminationAction';
+import { ConfirmationModal } from './ConfirmationModal';
 import { getTerminationPhase, mergePolledLiveCalls } from '../lib/call-termination';
 import { useAuthGeneration } from '../lib/use-auth-generation';
 import { useOperationOwner } from '../lib/use-operation-owner';
@@ -62,6 +63,7 @@ function OwnedLiveCalls({ generation }: { generation: number }) {
     const [isPaused, setIsPaused] = useState(false);
     const [pauseLoading, setPauseLoading] = useState(false);
     const [showConfirm, setShowConfirm] = useState(false);
+    const [confirmResume, setConfirmResume] = useState(false);
     const [pauseReason, setPauseReason] = useState('');
     const [pollError, setPollError] = useState<string | null>(null);
     // Set while the pause state could not be read (or a pause/resume failed).
@@ -275,7 +277,7 @@ function OwnedLiveCalls({ generation }: { generation: number }) {
                     ) : (
                         <button
                             className={`btn ${isPaused ? 'btn-resume' : 'btn-pause'}`}
-                            onClick={handlePauseToggle}
+                            onClick={isPaused ? () => setConfirmResume(true) : handlePauseToggle}
                             disabled={pauseLoading || !pauseStatusKnown}
                         >
                             {pauseLoading ? (
@@ -295,6 +297,16 @@ function OwnedLiveCalls({ generation }: { generation: number }) {
                     )}
                 </div>
             </div>
+
+            <ConfirmationModal
+                isOpen={confirmResume && isPaused}
+                title="Resume Calls"
+                message="Resume outbound calls across all workers? New outbound calls will start again."
+                confirmLabel="Confirm"
+                variant="warning"
+                onConfirm={() => { setConfirmResume(false); void handlePauseToggle(); }}
+                onCancel={() => setConfirmResume(false)}
+            />
 
             {actionError && (
                 <div className="error-banner inline" role="alert">

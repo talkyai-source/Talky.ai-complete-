@@ -22,14 +22,14 @@ const { createElement: el, StrictMode, act, useState } = await import('react');
 const { createRoot } = await import('react-dom/client');
 const bundle = await build({
     stdin: { contents: `export { ActionDetailDrawer } from './src/components/ActionDetailDrawer';
-        export { AuthProvider, useAuth } from './src/lib/auth'; export { api } from './src/lib/api';`,
+        export { AuthProvider, useAuth, MFA_MARKER_KEY } from './src/lib/auth'; export { api } from './src/lib/api';`,
         resolveDir: fileURLToPath(new URL('..', import.meta.url)) },
     bundle: true, write: false, platform: 'node', format: 'cjs', packages: 'external',
     define: { 'import.meta.env': '{}' }, jsx: 'automatic',
 });
 const loaded = { exports: {} };
 new Function('require', 'module', 'exports', bundle.outputFiles[0].text)(createRequire(import.meta.url), loaded, loaded.exports);
-const { ActionDetailDrawer, AuthProvider, useAuth, api } = loaded.exports;
+const { ActionDetailDrawer, AuthProvider, useAuth, api, MFA_MARKER_KEY } = loaded.exports;
 const originalFetch = globalThis.fetch, originalConnect = net.Socket.prototype.connect;
 net.Socket.prototype.connect = function () { throw new Error('Network is forbidden in React DOM unit controls'); };
 const A = '10000000-0000-4000-8000-000000000001';
@@ -58,12 +58,16 @@ const completed = (request, extra = {}) => {
     return action;
 };
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status });
+const challenge = { access_token: '', mfa_required: true, mfa_challenge_token: 'one-use-challenge' };
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 let root, host, requests, route;
 beforeEach(() => {
     installSessionLocks(dom.window.navigator);
     host = document.createElement('div'); document.body.append(host); root = createRoot(host);
     localStorage.removeItem('talky.admin.logout.pending');
+    // Platform admins must complete 2FA: the restored old-admin session carries
+    // its proof-of-MFA marker and a new login goes through the challenge.
+    localStorage.setItem(MFA_MARKER_KEY, JSON.stringify({ userId: 'old-admin' }));
     api.setToken(`synthetic-${crypto.randomUUID()}`);
     requests = [];
     route = () => { throw new Error('Unexpected synthetic API request'); };
@@ -376,7 +380,7 @@ function AuthScreen() {
     return el('div', null,
         el('p', { 'data-testid': 'principal' }, auth.user?.id ?? 'signed out'),
         el('button', { onClick: () => void auth.logout() }, 'Sign out test session'),
-        el('button', { onClick: () => void auth.login('admin@example.invalid', 'synthetic-password') }, 'Sign in new test session'),
+        el('button', { onClick: async () => { await auth.login('admin@example.invalid', 'synthetic-password'); await auth.verifyMfa('123456', false); } }, 'Sign in new test session'),
         el('button', { onClick: () => setVisible(!visible) }, 'Toggle drawer'),
         auth.isAuthenticated && visible ? el(ActionDetailDrawer, { actionId: A, onClose: () => setVisible(false) }) : null);
 }
@@ -387,7 +391,8 @@ test('actual AuthProvider logout and login retire a known recovery and its retai
         const nextOwner = call.authorization === 'Bearer new-synthetic-token';
         if (call.path.endsWith('/auth/me')) return response({ id: nextOwner ? 'new-admin' : 'old-admin', email: 'admin@example.invalid', role: 'platform_admin' });
         if (call.path.endsWith('/auth/logout')) return response({});
-        if (call.path.endsWith('/auth/login')) return response({ access_token: 'new-synthetic-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
+        if (call.path.endsWith('/auth/login')) return response(challenge);
+        if (call.path.endsWith('/auth/mfa/verify')) return response({ access_token: 'new-synthetic-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
         if (call.method === 'POST') { request = call.body; return response(record(request)); }
         return response(request && !nextOwner ? null : item());
     };
@@ -412,7 +417,8 @@ test('actual AuthProvider DOM logout/login discards old review and old in-flight
     route = (call) => {
         if (call.path.endsWith('/auth/me')) return response({ id: call.authorization === 'Bearer new-synthetic-token' ? 'new-admin' : 'old-admin', email: 'admin@example.invalid', role: 'platform_admin' });
         if (call.path.endsWith('/auth/logout')) return response({});
-        if (call.path.endsWith('/auth/login')) return response({ access_token: 'new-synthetic-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
+        if (call.path.endsWith('/auth/login')) return response(challenge);
+        if (call.path.endsWith('/auth/mfa/verify')) return response({ access_token: 'new-synthetic-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
         if (call.method === 'POST') return pending.promise;
         return response(item());
     };
@@ -452,7 +458,8 @@ test('old failed verification cannot clear a newer successful actual AuthProvide
         if (call.path.endsWith('/auth/me')) return call.authorization === 'Bearer new-login-token'
             ? response({ id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' })
             : verification.promise.then(() => response({ detail: 'Old session rejected' }, 401));
-        if (call.path.endsWith('/auth/login')) return response({ access_token: 'new-login-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
+        if (call.path.endsWith('/auth/login')) return response(challenge);
+        if (call.path.endsWith('/auth/mfa/verify')) return response({ access_token: 'new-login-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
         return response(item());
     };
     await act(async () => root.render(el(StrictMode, null, el(AuthProvider, null, el(AuthScreen)))));
@@ -468,7 +475,8 @@ test('actual AuthProvider admits the next login only after cookie-clearing logou
     route = (call) => {
         if (call.path.endsWith('/auth/me')) return response({ id: call.authorization === 'Bearer new-login-token' ? 'new-admin' : 'old-admin', email: 'admin@example.invalid', role: 'platform_admin' });
         if (call.path.endsWith('/auth/logout')) return logout.promise;
-        if (call.path.endsWith('/auth/login')) return response({ access_token: 'new-login-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
+        if (call.path.endsWith('/auth/login')) return response(challenge);
+        if (call.path.endsWith('/auth/mfa/verify')) return response({ access_token: 'new-login-token', user_id: 'new-admin', email: 'admin@example.invalid', role: 'platform_admin' });
         return response(item());
     };
     await act(async () => root.render(el(StrictMode, null, el(AuthProvider, null, el(AuthScreen)))));

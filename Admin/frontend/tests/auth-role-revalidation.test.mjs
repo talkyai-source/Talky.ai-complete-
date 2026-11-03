@@ -16,6 +16,9 @@ const draw = async () => {
             el(Route, { path: '/login', element: el(C.LoginPage) }))))); await settle();
 };
 const identityReads = () => state.requests.filter(request => request.path.endsWith('/auth/me'));
+// Roles the console admits must have completed 2FA: a restored session needs
+// the local proof-of-MFA marker (auth-mfa-enforcement.test.mjs).
+test.beforeEach(() => { localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: ME.id })); });
 
 test('a current protected403 discovers role removal and retires the previous header and route', async () => {
     let demoted = false;
@@ -94,6 +97,7 @@ for (const late of ['role', 'outage']) {
             ? request.authorization === 'Bearer replacement-token' ? response(replacement) : gate.promise
             : request.path.startsWith('/api/v1/admin/actions') ? list() : denied();
         let old; await act(async () => { old = api.getDashboardStats(); }); await settle();
+        localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: replacement.id }));
         await act(async () => { api.setToken('replacement-token'); await currentAuth.checkAuth(); }); await settle();
         await act(async () => { gate.resolve(late === 'role' ? response({ ...ME, role: 'readonly' }) : response({}, 503)); await old; }); await settle();
         assert.equal(api.getToken(), 'replacement-token'); assert.equal(currentAuth.user.id, replacement.id);

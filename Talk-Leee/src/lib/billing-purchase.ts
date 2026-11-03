@@ -103,6 +103,20 @@ export async function readBillingCheckout(saved: SavedPurchase, signal?: AbortSi
   requireBillingBackend();
   return validateAttempt(await api.request({ path: `/billing/checkout-attempts/${encodeURIComponent(saved.request_id)}`, method: "GET", timeoutMs: 12_000, signal }), saved);
 }
+/** The `request_id` Stripe's return URL carries (billing_checkout.py
+ * billing_return_urls), or null unless it is a UUID. */
+export function checkoutRequestIdFromUrl(search: string): string | null {
+  const parsed = uuid.safeParse(new URLSearchParams(search).get("request_id"));
+  return parsed.success ? parsed.data : null;
+}
+/** Read an attempt by the return-URL reference alone (no saved selection to
+ * compare against); the server scopes it to the signed-in tenant. */
+export async function readBillingCheckoutById(requestId: string, signal?: AbortSignal): Promise<CheckoutAttempt> {
+  requireBillingBackend();
+  const result = validateOutstandingAttempt(await api.request({ path: `/billing/checkout-attempts/${encodeURIComponent(requestId)}`, method: "GET", timeoutMs: 12_000, signal }));
+  if (result.request_id !== requestId) throw new Error("The returned purchase does not match the request reference in this page address. Contact support before starting another purchase.");
+  return result;
+}
 export async function openBillingPortal(signal?: AbortSignal): Promise<string> {
   requireBillingBackend();
   const result = z.object({ portal_url: z.string().url(), mock_mode: z.literal(false) }).safeParse(await api.request({ path: "/billing/portal", method: "POST", body: {}, timeoutMs: 12_000, signal }));

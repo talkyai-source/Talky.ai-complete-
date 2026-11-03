@@ -58,6 +58,48 @@ export interface MeResponse {
     minutes_remaining?: number;
 }
 
+// One topup_packages row as GET /admin/billing/packages returns it (id is withheld).
+export interface BillingPackage {
+    code: string;
+    name: string;
+    minutes: number;
+    price_cents: number;
+    currency: string;
+    audience: string;
+    is_active: boolean;
+    sort_order: number;
+}
+
+// One plan_price_options row as GET /billing/plans presents it.
+export interface BillingPlanPriceOption {
+    id: string;
+    kind: string;
+    interval: string;
+    interval_count: number;
+    amount_minor: number;
+    currency: string;
+    currency_exponent: number;
+    active: boolean;
+    checkout_available: boolean;
+    unavailable_reason: string | null;
+}
+
+// One plans row as GET /billing/plans returns it.
+export interface BillingPlan {
+    id: string;
+    name: string;
+    price: number | null;
+    description: string | null;
+    minutes: number | null;
+    agents: number | null;
+    concurrent_calls: number | null;
+    features: string[];
+    not_included: string[];
+    popular: boolean | null;
+    billing_mode: string;
+    price_options: BillingPlanPriceOption[];
+}
+
 export interface AuthResponse {
     access_token: string;
     token_type: string;
@@ -2150,6 +2192,17 @@ class ApiClient {
                 body: quota,
             }
         );
+    }
+
+    // Billing catalogue (read-only). Shapes mirror the backend exactly:
+    // GET /admin/billing/packages -> { items: topup_packages rows } and
+    // GET /billing/plans -> list_plan_catalog() plans with their price options.
+    async getBillingPackages() {
+        return this.request<{ items: BillingPackage[] }>('/admin/billing/packages', { timeoutMs: 15_000 });
+    }
+
+    async getBillingPlans() {
+        return this.request<BillingPlan[]>('/billing/plans', { timeoutMs: 15_000 });
     }
 
     // Calls Module (Day 4)

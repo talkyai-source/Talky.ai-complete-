@@ -57,7 +57,7 @@ test('drawer: a failed reconnect shows the error and does not report a refresh',
     state.route = drawerRoute('/reconnect', 502, 'Token endpoint rejected the refresh');
     let refreshed = 0;
     await render(el(C.ConnectorDetailDrawer, { connector: connector(), onClose() {}, onRefresh: () => { refreshed += 1; } }));
-    await click('Refresh token');
+    await click('Refresh token'); await click('Confirm');
     assert.equal(mutations().length, 1);
     assert.match(text(), /Token endpoint rejected the refresh/);
     assert.equal(refreshed, 0);
@@ -94,7 +94,7 @@ test('table: a failed reconnect is reported', async () => {
     };
     await render(el(C.ConnectorsTable, {}));
     await settle();
-    await iconButton('Refresh token');
+    await iconButton('Refresh token'); await click('Confirm');
     assert.equal(mutations().length, 1);
     assert.match(find('[role="alert"]').textContent, /Reconnect refused/);
 });

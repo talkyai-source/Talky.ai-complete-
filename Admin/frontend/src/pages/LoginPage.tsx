@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useAuth } from '../lib/auth';
+import { MFA_REQUIRED_MESSAGE, useAuth } from '../lib/auth';
 import { safeAdminReturn } from '../lib/admin-routes';
 import { Zap, Mail, Lock, AlertCircle, KeyRound } from 'lucide-react';
 
@@ -29,7 +29,7 @@ export function LoginPage() {
             <p>{mfaChallenge ? 'Complete the second factor for this account.' : 'Sign in to access the admin dashboard'}</p>
         </div>
         {error && <div className="login-error" role="alert"><AlertCircle size={16} /><span>{error}</span>
-            {!mfaChallenge && <button type="button" onClick={() => void (logoutRecoveryRequired ? logout() : checkAuth())} disabled={isLoading}>
+            {!mfaChallenge && error !== MFA_REQUIRED_MESSAGE && <button type="button" onClick={() => void (logoutRecoveryRequired ? logout() : checkAuth())} disabled={isLoading}>
                 {logoutRecoveryRequired ? 'Retry browser sign-out' : 'Retry session check'}
             </button>}
         </div>}

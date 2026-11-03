@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
+import { ConfirmationModal } from './ConfirmationModal';
 import { useOperationOwner } from '../lib/use-operation-owner';
 import { supplierPage, supplierStage, supplierStatement } from '../lib/supplier-evidence';
 import type { SupplierStatement } from '../lib/supplier-evidence';
@@ -153,6 +154,7 @@ function StatementReview({ statement, generation, importPending, onSaved, onCorr
     const [busy, setBusy] = useState(false), [unknown, setUnknown] = useState(false);
     const [note, setNote] = useState(''), [reference, setReference] = useState('');
     const [checked, setChecked] = useState(false), [difference, setDifference] = useState(false);
+    const [confirmSave, setConfirmSave] = useState(false);
     const [message, setMessage] = useState('');
     const pending = useRef<Record<string, unknown> | null>(null);
     const locked = busy || unknown || pending.current !== null;
@@ -218,9 +220,14 @@ function StatementReview({ statement, generation, importPending, onSaved, onCorr
                 <label><input type="checkbox" checked={checked} onChange={event => setChecked(event.target.checked)} />I checked this original source, project and period.</label>
                 {statement.stage === 'reviewed' && <label><input type="checkbox" checked={difference} onChange={event => setDifference(event.target.checked)} />I retain the full unallocated difference; this does not certify matched or net spending.</label>}
             </fieldset>
-            <button disabled={busy || unknown || importPending || !checked || note.trim().length < 10 || !reference.trim() || (statement.stage === 'reviewed' && !difference)} onClick={() => void save()}>
+            <button disabled={busy || unknown || importPending || !checked || note.trim().length < 10 || !reference.trim() || (statement.stage === 'reviewed' && !difference)} onClick={() => setConfirmSave(true)}>
                 {statement.stage === 'imported' ? 'Record source review' : 'Record reconciliation with difference'}</button>
         </>}
         {message && <p role="status">{message}</p>}
+        <ConfirmationModal isOpen={confirmSave}
+            title={statement.stage === 'imported' ? 'Record source review' : 'Record reconciliation with difference'}
+            message={`Record this decision for "${statement.reference}"? A recorded review is an operator attestation, not automatic supplier verification or finance approval.`}
+            confirmLabel="Confirm" variant="warning"
+            onConfirm={() => { setConfirmSave(false); void save(); }} onCancel={() => setConfirmSave(false)} />
     </section>;
 }

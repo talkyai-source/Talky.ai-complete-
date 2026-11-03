@@ -9,6 +9,7 @@ export const ADMIN_ROUTES = [
     { id: 'actions', label: 'Actions', path: '/actions', platformOnly: false },
     { id: 'connectors', label: 'Connectors', path: '/connectors', platformOnly: true },
     { id: 'usage-cost', label: 'Usage & Cost', path: '/usage-cost', platformOnly: true },
+    { id: 'plans', label: 'Plans', path: '/plans', platformOnly: true },
     { id: 'incidents', label: 'Incidents', path: '/incidents', platformOnly: true },
     { id: 'system-health', label: 'System Health', path: '/system-health', platformOnly: true },
     { id: 'support', label: 'Support Tickets', path: '/support', platformOnly: true },

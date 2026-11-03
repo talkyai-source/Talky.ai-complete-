@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { BillingSupport, ProviderRefundFacts } from "@/components/billing/invoice-view";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -16,16 +17,25 @@ import {
 } from "lucide-react";
 import { isApiClientError } from "@/lib/http-client";
 import { approvedCheckoutUrl } from "@/lib/billing-purchase";
+import { useAuth } from "@/lib/auth-context";
+import { queryKeys } from "@/lib/api-hooks";
+import { billingKeys } from "@/lib/billing-api";
+import { classifyBillingRefusal, recordBillingRefusal, useBillingRefusal } from "@/lib/billing-refusal";
 import {
   canTopUp,
   formatMoney,
   isLowBalance,
+  newestOrder,
   ORDER_STATUS_LABEL,
   ORDER_STATUS_TONE,
+  returnOutcome,
+  TOPUP_SETTLE_POLL_MS,
+  TOPUP_SETTLE_TIMEOUT_MS,
   useStartTopup,
   useTopupBalance,
   useTopupOrders,
   useTopupPackages,
+  type TopupOrder,
   type TopupPackage,
 } from "@/lib/topup-api";
 
@@ -44,16 +54,55 @@ function refusedBeforeOrder(err: unknown): string | null {
   return isApiClientError(err) && err.status !== undefined && [400, 403, 409].includes(err.status) ? err.message : null;
 }
 
-export function TopupCard() {
+export function TopupCard({
+  // Test seams only; production always settles on the exported timings.
+  settlePollMs = TOPUP_SETTLE_POLL_MS,
+  settleTimeoutMs = TOPUP_SETTLE_TIMEOUT_MS,
+}: { settlePollMs?: number; settleTimeoutMs?: number } = {}) {
   const params = useSearchParams();
+  const qc = useQueryClient();
+  const { refreshUser } = useAuth();
 
   const returned = params.get("topup"); // "success" | "cancelled" | null
   const returnedOrder = params.get("order_id");
 
+  // After ?topup=success the saved order and balance are read every few
+  // seconds until the provider's webhook has settled the newest order one way
+  // or the other, or the window closes. The intervals die with the observers
+  // on unmount; the manual refresh below stays either way.
+  const settling = returned === "success";
+  const [settleExpired, setSettleExpired] = useState(false);
+  useEffect(() => {
+    if (!settling) return;
+    const timer = setTimeout(() => setSettleExpired(true), settleTimeoutMs);
+    return () => clearTimeout(timer);
+  }, [settling, settleTimeoutMs]);
+  const settleActive = settling && !settleExpired;
+  const pollWhileUnconfirmed = (read: TopupOrder[] | undefined) =>
+    returnOutcome("success", read !== undefined, newestOrder(read ?? [])) === "unconfirmed" ? settlePollMs : false;
+
   const packagesQ = useTopupPackages();
-  const balanceQ = useTopupBalance();
-  const ordersQ = useTopupOrders();
+  const ordersQ = useTopupOrders(settleActive ? pollWhileUnconfirmed : undefined);
+  const newest = newestOrder(ordersQ.data ?? []);
+  const outcome = returnOutcome(returned, ordersQ.isSuccess, newest);
+  const balanceQ = useTopupBalance(settleActive && outcome === "unconfirmed" ? settlePollMs : undefined);
   const start = useStartTopup();
+  const refusal = useBillingRefusal("topup");
+
+  // A verified payment changes every minute figure in the app at once: the
+  // overview's included minutes (billing plan/usage), the dashboard summary
+  // and the settings "Minutes remaining" (user.minutes_remaining from
+  // /auth/me). Once per order; the card's own queries were just polled.
+  const creditedFor = useRef<string | null>(null);
+  const newestId = newest?.id ?? null;
+  useEffect(() => {
+    if (!settling || outcome !== "paid" || !newestId || creditedFor.current === newestId) return;
+    creditedFor.current = newestId;
+    for (const queryKey of [billingKeys.plan(), billingKeys.usage(), billingKeys.dailyUsage(), queryKeys.dashboardSummary()]) {
+      void qc.invalidateQueries({ queryKey });
+    }
+    void refreshUser({ silent: true });
+  }, [settling, outcome, newestId, qc, refreshUser]);
 
   const balance = balanceQ.data ?? null;
   const packages = packagesQ.data ?? [];
@@ -100,7 +149,14 @@ export function TopupCard() {
         // host is followed, as for plan checkout.
         window.location.assign(approvedCheckoutUrl(result.checkout_url));
       }
-    } catch {
+    } catch (err) {
+      // A refusal the backend can only make after the click (test-mode team
+      // list, tenant state, top-ups switched off) is remembered so the same
+      // purchase is not offered again this session.
+      if (isApiClientError(err)) {
+        const known = classifyBillingRefusal(err.status, err.code, err.message);
+        if (known) recordBillingRefusal(known);
+      }
       setChosen(null);
     }
   }
@@ -165,7 +221,19 @@ export function TopupCard() {
       <CardContent className="space-y-3 p-4 pt-0">
         {/* ── returning from the payment page ── */}
         {returned && <div role="status" className="space-y-2 rounded-lg border p-3 text-sm">
-          <p>Returned from checkout. This browser return does not confirm a payment, cancellation or minute credit. Check the saved order status below.</p>
+          {outcome === "paid" && newest ? (
+            <p className="font-semibold text-emerald-700 dark:text-emerald-400">
+              {ORDER_STATUS_LABEL.paid}: {newest.minutes.toLocaleString()} minutes. The saved order below confirms this payment.
+            </p>
+          ) : outcome === "failed" ? (
+            <p className="font-semibold text-red-700 dark:text-red-400">
+              {ORDER_STATUS_LABEL.failed}: the newest saved order was not paid. Check the saved order status below.
+            </p>
+          ) : outcome === "cancelled" ? (
+            <p>Checkout was cancelled. No payment was taken for this attempt.</p>
+          ) : (
+            <p>Returned from checkout. This browser return does not confirm a payment, cancellation or minute credit. Check the saved order status below.</p>
+          )}
           {returnedOrder && orders.some((order) => order.id === returnedOrder) && <p className="break-all">Order reference: {returnedOrder}</p>}
           <Button variant="outline" size="sm" onClick={() => { void ordersQ.refetch(); void balanceQ.refetch(); }}>Refresh saved status</Button>
         </div>}
@@ -180,7 +248,16 @@ export function TopupCard() {
           </div>
         ) : null}
 
-        {start.isError ? (
+        {refusal ? (
+          // The backend's own words, once, above the bundles it refused.
+          <div
+            role="alert"
+            className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+            <span>{refusal.message}</span>
+          </div>
+        ) : start.isError ? (
           <div
             role="alert"
             className="flex items-start gap-3 rounded-lg border border-red-500/30 bg-red-500/10 p-3 text-sm"
@@ -280,7 +357,7 @@ export function TopupCard() {
                     size="sm"
                     className="mt-2 w-full"
                     onClick={() => buy(pkg)}
-                    disabled={pending || pkg.currency === null || pkg.currency_exponent === null}
+                    disabled={pending || refusal !== null || pkg.currency === null || pkg.currency_exponent === null}
                     aria-label={`Buy ${pkg.minutes} minutes for ${formatMoney(pkg.price_cents, pkg.currency, pkg.currency_exponent)}`}
                   >
                     {busy ? (

@@ -114,7 +114,8 @@ test('acknowledgement dispatch is single and only a matching saved receipt repor
     const pending = deferred(); let saved = false;
     state.route = (r) => r.method === 'POST' ? pending.promise : r.path.endsWith('/admin/incidents/one') ? response(item('one', saved ? 'acknowledged' : 'open')) : normal(r);
     await draw(); await open();
-    await act(async () => { button('Acknowledge').click(); button('Acknowledge').click(); });
+    await click('Acknowledge');
+    await act(async () => { button('Confirm').click(); button('Confirm').click(); });
     assert.equal(state.requests.filter((r) => r.method === 'POST').length, 1);
     saved = true; await act(async () => pending.resolve(response({ success: true, incident_id: 'one', status: 'acknowledged', message: 'Incident acknowledged', acknowledged_at: stamp, acknowledged_by: receiptActor, resolved_at: null, resolved_by: null })));
     assert.match(find('[role="status"]').textContent, /server confirmed/);
@@ -125,7 +126,7 @@ test('unconfirmed action requires reading the record and does not erase the erro
     let saved = false;
     state.route = (r) => r.method === 'POST' ? response({ detail: 'Transition could not be confirmed' }, 503)
         : r.path.endsWith('/admin/incidents/one') ? response(item('one', saved ? 'resolved' : 'open')) : normal(r);
-    await draw(); await open(); await click('Acknowledge');
+    await draw(); await open(); await click('Acknowledge'); await click('Confirm');
     assert.equal(button('Acknowledge').disabled, true); assert.match(text(), /could not be confirmed/);
     await click('Refresh list'); assert.match(text(), /could not be confirmed/);
     saved = true; await click('Refresh record'); await settle();
@@ -143,7 +144,7 @@ test('resolution asks for deliberate confirmation before sending its request', a
 
 test('late mutation after session replacement cannot announce success or reopen details', async () => {
     const pending = deferred(); state.route = (r) => r.method === 'POST' ? pending.promise : normal(r);
-    await draw(); await open(); await click('Acknowledge');
+    await draw(); await open(); await click('Acknowledge'); await click('Confirm');
     await act(async () => api.setToken('new-incident-session')); await settle();
     await act(async () => pending.resolve(response({ success: true, incident_id: 'one', status: 'acknowledged', message: 'Incident acknowledged', acknowledged_at: stamp, acknowledged_by: receiptActor, resolved_at: null, resolved_by: null })));
     assert.equal(find('[role="dialog"]'), null); assert.doesNotMatch(text(), /server confirmed the saved state/);

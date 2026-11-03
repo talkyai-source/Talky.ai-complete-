@@ -74,7 +74,7 @@ test('lost review response requires a GET; saved original review is retained wit
         textarea.dispatchEvent(new Event('input', { bubbles: true }));
     });
     await act(async () => section.querySelector('input[type="checkbox"]').click());
-    await click('Record source review');
+    await click('Record source review'); await click('Confirm');
     assert.equal(posts, 1);
     assert.equal(button('Record source review').disabled, true);
     assert.equal(button('Refresh').disabled, true);

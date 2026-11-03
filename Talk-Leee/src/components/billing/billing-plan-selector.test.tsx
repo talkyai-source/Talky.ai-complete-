@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, test } from "node:test";
+import { afterEach, beforeEach, mock, test } from "node:test";
 import assert from "node:assert/strict";
 import React from "react";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
@@ -10,6 +10,8 @@ import { ApiClientError, type HttpRequestOptions } from "@/lib/http-client";
 import { renderWithQueryClient } from "@/test-utils/render";
 import { BillingPlanSelector, BillingCheckoutReturn } from "./billing-plan-selector";
 import { storeSavedPurchase, type SavedPurchase } from "@/lib/billing-purchase";
+import { resetBillingRefusal } from "@/lib/billing-refusal";
+import { billingKeys } from "@/lib/billing-api";
 
 const MONTH = "b1336f1f-6927-4680-8a6b-7b7c86a06e89";
 const YEAR = "bd8cb7f8-78ab-4ac8-bb15-24d9de9d34b0";
@@ -53,7 +55,15 @@ beforeEach(() => {
   }) as typeof api.request;
   window.history.replaceState({}, "", "/billing/plans");
 });
-afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); api.request = originalRequest; env.NEXT_PUBLIC_API_BASE_URL = oldBackend; window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); });
+afterEach(() => { cleanup(); clients.splice(0).forEach(client => client.clear()); api.request = originalRequest; env.NEXT_PUBLIC_API_BASE_URL = oldBackend; window.sessionStorage.clear(); window.history.replaceState({}, "", "/"); mock.timers.reset(); resetBillingRefusal(); });
+// Polling tests fake setTimeout/setInterval and mount the return notice alone
+// (no query observers), flushing React with act() instead of waitFor().
+const flush = () => act(async () => {});
+const tick = (ms: number) => act(async () => { mock.timers.tick(ms); });
+const TEAM_ONLY = "Payments are not open yet. Billing is in test mode for the Talk-Lee team.";
+function attemptRead(state: string, request_id = REQUEST) {
+  return { request_id, state, session_id: state === "open" ? "cs_synthetic" : null, checkout_url: state === "open" ? "https://checkout.stripe.com/c/pay/synthetic" : null, price_option: snapshot(), mock_mode: false };
+}
 
 test("yearly selection displays the server amount and submits that option only", async () => {
   mount(); fireEvent.click(await screen.findByRole("radio", { name: "Yearly" }));
@@ -267,3 +277,146 @@ test("missing backend configuration never submits or creates an uncertain reques
   await screen.findByText(/service connection is not configured/);
   assert.equal(writes.length, 0); assert.equal(screen.queryByText(/Saved purchase:/), null);
 });
+
+// ── Task 7: the plan right after a subscription purchase (?checkout=success) ──
+const CONFIRMING = "Confirming your purchase with Stripe…";
+const PENDING = /Payment confirmation is pending/;
+const absent = (text: string | RegExp) => screen.queryByText(text) === null;
+function countedReads(state: () => string) {
+  const paths: string[] = [];
+  handleRead = async opts => { paths.push(opts.path); return attemptRead(state(), opts.path.split("/").at(-1)); };
+  return paths;
+}
+
+test("checkout=success polls the saved attempt every 3 s until activated, then invalidates billing queries and stops", async () => {
+  let state = "pending"; const paths = countedReads(() => state);
+  storeSavedPurchase(scope, { request_id: REQUEST, price_option: snapshot() });
+  window.history.replaceState({}, "", "/billing?checkout=success");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const view = mount(scope, true); await flush();
+  view.qc.setQueryData(billingKeys.plan(), { seeded: true });
+  assert.equal(paths.length, 1); assert.ok(screen.getByText(CONFIRMING)); assert.ok(screen.getByText(PENDING));
+  await tick(2_999); assert.equal(paths.length, 1, "not before 3 s");
+  await tick(1); assert.equal(paths.length, 2, "one read at 3 s");
+  state = "activated";
+  await tick(3_000); assert.equal(paths.length, 3);
+  assert.ok(screen.getByText(/server confirmed this purchase/i)); assert.ok(absent(CONFIRMING)); assert.ok(absent(PENDING));
+  assert.equal(view.qc.getQueryState(billingKeys.plan())?.isInvalidated, true, "billing queries invalidated on the final state");
+  await tick(9_000); assert.equal(paths.length, 3, "polling stopped on the final state");
+  assert.equal(writes.length, 0);
+});
+
+test("checkout=success polling stops after 2 minutes and keeps the pending notice and Check status", async () => {
+  const paths = countedReads(() => "pending");
+  storeSavedPurchase(scope, { request_id: REQUEST, price_option: snapshot() });
+  window.history.replaceState({}, "", "/billing?checkout=success");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  mount(scope, true); await flush();
+  for (let i = 0; i < 40; i += 1) await tick(3_000);
+  assert.equal(paths.length, 41, "one initial read plus one every 3 s for 2 minutes");
+  await tick(30_000); assert.equal(paths.length, 41, "no reads after the deadline");
+  assert.ok(absent(CONFIRMING)); assert.ok(screen.getByText(PENDING));
+  assert.ok(screen.getByRole("button", { name: "Check status" })); assert.ok(screen.getByText(/Saved purchase:/));
+});
+
+test("checkout=success polling stops on unmount", async () => {
+  const paths = countedReads(() => "pending");
+  storeSavedPurchase(scope, { request_id: REQUEST, price_option: snapshot() });
+  window.history.replaceState({}, "", "/billing?checkout=success");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  const view = mount(scope, true); await flush(); await tick(3_000);
+  assert.equal(paths.length, 2);
+  view.unmount();
+  await tick(30_000); assert.equal(paths.length, 2, "no reads after unmount");
+});
+
+test("checkout=success with no saved attempt reads the request_id from the return URL and polls it", async () => {
+  let state = "pending"; const paths = countedReads(() => state);
+  window.history.replaceState({}, "", `/billing?checkout=success&request_id=${REQUEST}&session_id=cs_synthetic`);
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  mount(scope, true); await flush();
+  assert.deepEqual(paths, [`/billing/checkout-attempts/${REQUEST}`]);
+  assert.ok(screen.getByText(CONFIRMING)); assert.ok(screen.getByRole("button", { name: "Check status" }));
+  state = "activated"; await tick(3_000);
+  assert.equal(paths.length, 2); assert.ok(screen.getByText(/server confirmed this purchase/i)); assert.ok(absent(CONFIRMING));
+  assert.equal(writes.length, 0);
+});
+
+test("a return URL whose request_id is not a UUID is ignored: nothing is read or polled", async () => {
+  const paths = countedReads(() => "activated");
+  window.history.replaceState({}, "", "/billing?checkout=success&request_id=not-a-uuid");
+  mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+  mount(scope, true); await flush(); await tick(9_000);
+  assert.equal(paths.length, 0); assert.ok(absent(CONFIRMING)); assert.ok(screen.getByText(PENDING));
+  assert.ok(absent(/server confirmed this purchase/i));
+});
+
+// ── Task 10: a refusal the backend only makes after the click ──
+// The backend's 403 refusals carry request_not_started (billing.py:162,
+// billing_checkout.py:141), which releases the frozen request: only the
+// recorded refusal keeps the offers closed afterwards.
+for (const [status, code, details] of [
+  [403, "test_billing_team_only", { request_not_started: true }],
+  [403, "tenant_unavailable", { request_not_started: true }],
+  [503, "billing_unavailable", undefined],
+] as const) {
+  test(`${status} ${code} on Select disables every Select button and shows the backend's message once`, async () => {
+    catalogue = [plan, { ...plan, id: "pro", name: "Pro" }];
+    handleWrite = async () => { throw new ApiClientError({ status, code, message: TEAM_ONLY, details, url: "/billing/create-checkout-session", method: "POST" }); };
+    mount(); fireEvent.click(await screen.findByRole("button", { name: "Select Starter" }));
+    await screen.findByText(TEAM_ONLY);
+    assert.equal(screen.getAllByText(TEAM_ONLY).length, 1);
+    if (details) assert.ok(absent(/Saved purchase:/), "pre-insert proof released the request; the refusal alone closes the offers");
+    for (const name of ["Select Starter", "Select Pro"]) assert.equal((screen.getByRole("button", { name }) as HTMLButtonElement).disabled, true, name);
+    assert.equal(writes.length, 1);
+  });
+}
+
+test("a 403 with another code keeps today's behaviour: the other plan stays selectable", async () => {
+  catalogue = [plan, { ...plan, id: "pro", name: "Pro" }];
+  handleWrite = async () => { throw new ApiClientError({ status: 403, code: "forbidden", message: "Forbidden", url: "/billing/create-checkout-session", method: "POST" }); };
+  mount(); fireEvent.click(await screen.findByRole("button", { name: "Select Starter" }));
+  await screen.findByText("Forbidden");
+  // The uncertain request is frozen (existing rule), but no session-wide refusal is recorded.
+  assert.ok(screen.getByText(/Saved purchase:/));
+  assert.equal(screen.getAllByText("Forbidden").length, 1);
+});
+
+// ── Task 11: Stripe return texts ──
+const CANCELLED = "Checkout was cancelled. No payment was taken for this attempt.";
+const CAUTIOUS = /This does not confirm whether payment completed/;
+for (const state of ["open", "expired", "failed"]) {
+  test(`checkout=cancelled says no payment was taken once the read shows the attempt ${state}`, async () => {
+    storeSavedPurchase(scope, { request_id: REQUEST, price_option: snapshot() });
+    handleRead = async () => attemptRead(state);
+    window.history.replaceState({}, "", "/billing?checkout=cancelled"); mount(scope, true);
+    await screen.findByText(CANCELLED);
+    assert.ok(absent(CAUTIOUS));
+  });
+}
+
+test("checkout=cancelled keeps the cautious text when the attempt read fails", async () => {
+  storeSavedPurchase(scope, { request_id: REQUEST, price_option: snapshot() });
+  handleRead = async () => { throw new ApiClientError({ status: 500, code: "server_error", message: "Receipt unavailable", url: "/billing/checkout-attempts/x", method: "GET" }); };
+  window.history.replaceState({}, "", "/billing?checkout=cancelled"); mount(scope, true);
+  await screen.findByText("Receipt unavailable");
+  assert.ok(screen.getByText(CAUTIOUS)); assert.ok(absent(CANCELLED));
+});
+
+test("checkout=cancelled with the read showing the attempt activated never says no payment was taken", async () => {
+  storeSavedPurchase(scope, { request_id: REQUEST, price_option: snapshot() });
+  handleRead = async () => attemptRead("activated");
+  window.history.replaceState({}, "", "/billing?checkout=cancelled"); mount(scope, true);
+  await screen.findByText(/server confirmed this purchase/i);
+  assert.ok(absent(CANCELLED)); assert.ok(absent(CAUTIOUS));
+});
+
+for (const state of ["expired", "failed"]) {
+  test(`checkout=success with the attempt ${state} shows that state inside the notice without the pending text`, async () => {
+    storeSavedPurchase(scope, { request_id: REQUEST, price_option: snapshot() });
+    handleRead = async () => attemptRead(state);
+    window.history.replaceState({}, "", "/billing?checkout=success"); mount(scope, true);
+    await screen.findByText(new RegExp(`confirmed the saved checkout ${state}`));
+    assert.ok(absent(PENDING)); assert.ok(absent(CONFIRMING));
+  });
+}

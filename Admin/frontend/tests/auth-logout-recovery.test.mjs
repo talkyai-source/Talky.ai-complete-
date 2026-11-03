@@ -16,6 +16,9 @@ const draw = async (key = 'initial') => {
 const logoutRequests = () => state.requests.filter(request => request.path.endsWith('/auth/logout'));
 const identityReads = () => state.requests.filter(request => request.path.endsWith('/auth/me'));
 const principal = () => find('[data-principal]').textContent;
+// Platform admins must complete 2FA: a restored session needs the local
+// proof-of-MFA marker (auth-mfa-enforcement.test.mjs).
+test.beforeEach(() => { localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: ME.id })); });
 
 test('the actual recovery button retries cookie sign-out after reload without rediscovering the live session', async () => {
     api.setToken(null); localStorage.setItem(marker, 'unconfirmed');
@@ -68,6 +71,7 @@ test('a late failed retry response cannot erase newer frontend cross-tab identit
     await draw(); await click('Retry browser sign-out');
     await act(async () => {
         localStorage.removeItem(marker); localStorage.setItem('admin_token', 'replacement-token');
+        localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: newer.id }));
         window.dispatchEvent(new dom.window.StorageEvent('storage', { key: 'admin_token', oldValue: null, newValue: 'replacement-token' }));
     });
     await act(async () => retry.resolve(response({ detail: 'old sign-out response failed' }, 503))); await settle();

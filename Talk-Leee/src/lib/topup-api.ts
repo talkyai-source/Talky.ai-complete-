@@ -2,6 +2,8 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { isApiClientError } from "@/lib/http-client";
+import { classifyBillingRefusal } from "@/lib/billing-refusal";
 
 import { z } from "zod";
 import { currencyCode, currencyExponent, formatMinorMoney, ledgerListSchema, type BillingLedgerEntry } from "@/lib/billing-read";
@@ -58,7 +60,8 @@ export function useTopupBalance(pollMs?: number) {
   });
 }
 
-export function useTopupOrders() {
+/** `pollMs` may decide from the orders read so far (undefined until one succeeds). */
+export function useTopupOrders(pollMs?: number | ((orders: TopupOrder[] | undefined) => number | false)) {
   return useQuery({
     queryKey: topupKeys.orders(),
     queryFn: async () => {
@@ -67,7 +70,53 @@ export function useTopupOrders() {
       });
       return z.object({ orders: z.array(topupOrderSchema) }).parse(r).orders;
     },
+    refetchInterval: typeof pollMs === "function" ? (query) => pollMs(query.state.data) : pollMs,
   });
+}
+
+// ── settling a checkout return ──────────────────────────────────────────────
+//
+// The return URL carries no order id (BACKEND GAP G8), so the only saved fact
+// a browser return can be matched against is the newest order's status.
+
+/** Poll the saved order and balance this often after ?topup=success ... */
+export const TOPUP_SETTLE_POLL_MS = 3000;
+/** ... and give up (leaving the manual refresh) after this long. */
+export const TOPUP_SETTLE_TIMEOUT_MS = 120_000;
+
+/**
+ * The newest saved order. The server lists newest first
+ * (topup_service.py: ORDER BY created_at DESC); the latest created_at wins
+ * and an undated row never outranks a dated one.
+ */
+export function newestOrder(orders: TopupOrder[]): TopupOrder | null {
+  let newest: TopupOrder | null = null;
+  for (const order of orders) {
+    if (!newest) { newest = order; continue; }
+    if (order.created_at && (!newest.created_at || order.created_at > newest.created_at)) newest = order;
+  }
+  return newest;
+}
+
+export type ReturnOutcome = "unconfirmed" | "paid" | "failed" | "cancelled";
+
+/**
+ * What a checkout return may say, given what the orders read established.
+ * Anything short of a successful read with a newest order stays unconfirmed:
+ * a browser return never proves a payment, a cancellation or a credit.
+ */
+export function returnOutcome(returned: string | null, ordersLoaded: boolean, newest: TopupOrder | null): ReturnOutcome {
+  if (!ordersLoaded || !newest) return "unconfirmed";
+  if (returned === "success") {
+    if (newest.status === "paid") return "paid";
+    if (newest.status === "failed") return "failed";
+    return "unconfirmed";
+  }
+  if (returned === "cancelled") {
+    // Only a read that shows the newest order unpaid lets the card say so.
+    return newest.status === "pending" || newest.status === "cancelled" || newest.status === "failed" ? "cancelled" : "unconfirmed";
+  }
+  return "unconfirmed";
 }
 
 export function useTopupLedger() {
@@ -102,6 +151,9 @@ export function useStartTopup() {
         method: "POST",
         body: { package_code: packageCode },
       }),
+    // The four purchase refusals are shown once, inline above the bundles
+    // (billing-refusal.ts); every other failure keeps its toast.
+    meta: { inlineError: (error: unknown) => isApiClientError(error) && classifyBillingRefusal(error.status, error.code, error.message) !== null },
     onSuccess: () => {
       // Refresh the saved order. A pending row remains unconfirmed and does
       // not establish whether the provider collected a payment.

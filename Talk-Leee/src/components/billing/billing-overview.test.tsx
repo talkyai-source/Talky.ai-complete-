@@ -1,11 +1,12 @@
 import { test, afterEach, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, screen, waitFor, within } from "@testing-library/react";
 import { BillingOverview } from "@/components/billing/billing-overview";
 import { ensureDom } from "@/test-utils/dom";
 import { renderWithQueryClient } from "@/test-utils/render";
 import { formatMinorMoney, ledgerListSchema } from "@/lib/billing-read";
+import { setCheckoutConfirmationPending } from "@/components/billing/use-billing-purchase";
 
 ensureDom();
 
@@ -64,8 +65,19 @@ function routeFetch(routes: Record<string, () => Response>) {
     };
 }
 
+const EMPTY_BALANCE = {
+    allocated: 0,
+    used_minutes: 0,
+    remaining_minutes: 0,
+    unlimited: false,
+    exhausted: false,
+    purchased_minutes: 0,
+    topup_minutes_left: 0,
+};
+
 const ALL_EMPTY_OK: Record<string, () => Response> = {
     "/billing/subscription": () => json(EMPTY_SUBSCRIPTION),
+    "/billing/topups/balance": () => json(EMPTY_BALANCE),
     "/billing/usage": () => json(EMPTY_USAGE),
     "/billing/usage/daily": () => json([]),
     "/billing/invoices": () => json([]),
@@ -78,6 +90,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+    setCheckoutConfirmationPending(false);
     cleanup();
     globalThis.fetch = originalFetch;
 });
@@ -284,3 +297,95 @@ for (const minutes_state of ["known", undefined]) {
     assert.equal(within(row).queryByText("Unlimited"), null);
   });
 }
+
+// Compare a boolean, never a DOM node: a failing assert.equal(node, null)
+// deep-inspects the JSDOM node synchronously and never returns.
+const absent = (text: string | RegExp) => screen.queryByText(text) === null;
+
+for (const [status, label] of [["suspended", "Suspended"], ["paused", "Paused"], ["incomplete", "Incomplete"]]) {
+  test(`backend subscription status ${status} is labelled ${label}, not Unknown`, async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({ ...EMPTY_SUBSCRIPTION, status, plan_name: "Starter" }) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Starter");
+    assert.ok(screen.getByText(label));
+    assert.ok(absent("Unknown"));
+  });
+}
+
+test("a paid top-up with no subscription row shows the pay-as-you-go plan name and no Inactive badge", async () => {
+    globalThis.fetch = routeFetch({
+        ...ALL_EMPTY_OK,
+        "/billing/topups/balance": () => json({ ...EMPTY_BALANCE, purchased_minutes: 100, topup_minutes_left: 60 }),
+        "/plans/payg": () => json({ plan: { id: "payg", name: "Pay as you go" }, packages: [] }),
+    }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Pay as you go");
+    assert.ok(absent("No plan selected"));
+    assert.ok(absent("Inactive"));
+    assert.ok(absent("Prepaid"));
+});
+
+test("a paid top-up whose /plans/payg read fails keeps the existing plan text but still drops the Inactive badge", async () => {
+    globalThis.fetch = routeFetch({
+        ...ALL_EMPTY_OK,
+        "/billing/topups/balance": () => json({ ...EMPTY_BALANCE, purchased_minutes: 100 }),
+        "/plans/payg": () => json({ detail: "boom" }, 500),
+    }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("No plan selected");
+    await waitFor(() => {
+        assert.ok(absent("Inactive"));
+    });
+    assert.ok(absent("Pay as you go"));
+});
+
+test("purchased_minutes 0 leaves the plan tile and Inactive badge unchanged and never reads /plans/payg", async () => {
+    let paygReads = 0;
+    globalThis.fetch = routeFetch({
+        ...ALL_EMPTY_OK,
+        "/plans/payg": () => { paygReads += 1; return json({ plan: { id: "payg", name: "Pay as you go" }, packages: [] }); },
+    }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("No plan selected");
+    assert.ok(screen.getByText("Inactive"));
+    assert.ok(absent("Pay as you go"));
+    assert.equal(paygReads, 0);
+});
+
+test("billing cycle and period-end dates share one format that includes the year", async () => {
+    const start = "2026-10-01T00:00:00Z";
+    const end = "2026-11-01T00:00:00Z";
+    const fmt = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({
+        ...EMPTY_SUBSCRIPTION, status: "active", plan_id: "starter", plan_name: "Starter", current_period_start: start, current_period_end: end,
+    }) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Starter");
+    const cycle = screen.getByText("Billing cycle").parentElement!;
+    assert.equal(within(cycle).getByText(/–/).textContent, `${fmt(start)} – ${fmt(end)}`);
+    assert.ok(screen.getByText(`Current billing period ends: ${fmt(end)}`));
+    assert.ok(/\b2026\b/.test(fmt(end)), "format must include the year");
+});
+
+test("an overage alert with a rate reads as estimated additional usage, never as a charge", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/overage-alerts": () => json([{ type: "minutes", currentUsage: 110, limit: 100, exceededBy: 10, estimatedCharge: 1000, currency: "usd", currency_exponent: 2, severity: "critical" }]) }) as typeof fetch;
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText(/Estimated additional usage: \$10\.00\. This is not a charge\./);
+    assert.ok(absent(/Estimated charge:/));
+});
+
+test("while a checkout return is being confirmed the plan tile says so instead of the old plan or status", async () => {
+    globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({ ...EMPTY_SUBSCRIPTION, status: "active", plan_name: "Starter" }) }) as typeof fetch;
+    setCheckoutConfirmationPending(true);
+    renderWithQueryClient(<BillingOverview />);
+    await screen.findByText("Confirming your purchase with Stripe…");
+    assert.ok(absent("Starter"));
+    assert.ok(absent("Active"));
+    assert.ok(absent("No plan selected"));
+    assert.ok(absent("Inactive"));
+    // The poll resolved: the tile shows the real plan and status again.
+    act(() => setCheckoutConfirmationPending(false));
+    await screen.findByText("Starter");
+    assert.ok(screen.getByText("Active"));
+    assert.ok(absent("Confirming your purchase with Stripe…"));
+});

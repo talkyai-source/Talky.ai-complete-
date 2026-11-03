@@ -64,7 +64,7 @@ test('incident recovery control: wrong exact identity does not retire an unknown
         if (request.method === 'POST') { changed = true; throw new Error('Synthetic acknowledgement delivery lost'); }
         if (changed && request.path.endsWith(exactPath)) return response({ ...incident('resolved'), id: id(99) });
     };
-    await mountAndOpen(); await click('Acknowledge'); await click('Refresh record'); await settle();
+    await mountAndOpen(); await click('Acknowledge'); await click('Confirm'); await click('Refresh record'); await settle();
     assert.match(dialog().textContent, /No matching incident record/);
     assert.match(dialog().textContent, /Synthetic acknowledgement delivery lost/);
     assert.equal(button('Acknowledge').disabled, true); assert.equal(posts().length, 1);
@@ -96,7 +96,7 @@ for (const [name, target, changes] of malformed) {
             if (attempted && request.path.endsWith(exactPath)) return response({ detail: 'Follow-up unavailable' }, 503);
         };
         await mountAndOpen();
-        if (target === 'resolved') await resolve(); else { await click('Acknowledge'); await settle(); }
+        if (target === 'resolved') await resolve(); else { await click('Acknowledge'); await click('Confirm'); await settle(); }
         assert.equal(find('[role="status"]') === null, true, 'An incomplete/mismatching receipt must not announce confirmed success');
         assert.match(dialog().textContent, /matching receipt|could not be verified|confirm its current state/);
         assert.equal(button('Acknowledge').disabled, true);
@@ -112,7 +112,7 @@ for (const target of ['acknowledged', 'resolved']) {
             if (committed && request.path.endsWith(exactPath)) return response({ detail: 'Follow-up unavailable' }, 503);
         };
         await mountAndOpen();
-        if (target === 'resolved') await resolve(); else { await click('Acknowledge'); await settle(); }
+        if (target === 'resolved') await resolve(); else { await click('Acknowledge'); await click('Confirm'); await settle(); }
         assert.match(find('[role="status"]').textContent, /server confirmed/);
         assert.ok(dialog().textContent.includes(originalActor), 'Replay may preserve a different original operator');
         assert.match(dialog().textContent, /last confirmed record/); assert.equal(posts().length, 1);
@@ -128,7 +128,7 @@ test('incident focus baseline: close after a committed transition restores a sta
         if (request.method === 'POST') { saved = incident('acknowledged'); return response(receipt()); }
     };
     const origin = await mountAndOpen();
-    await click('Acknowledge'); await settle();
+    await click('Acknowledge'); await click('Confirm'); await settle();
     assert.equal(origin.isConnected, false, 'The revised open list has removed the original View button');
     const close = find('[aria-label="Close incident"]'); close.focus(); await act(async () => close.click()); await settle();
     assert.equal(dialog(), null);

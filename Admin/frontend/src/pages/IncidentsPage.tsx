@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { AlertTriangle, RefreshCw, X } from 'lucide-react';
 import { Sidebar } from '../components/Sidebar';
 import { Header } from '../components/Header';
+import { ConfirmationModal } from '../components/ConfirmationModal';
 import { api, type IncidentItem, type IncidentsParams } from '../lib/api';
 import { useAdminRead } from '../lib/use-admin-read';
 import { useAuthGeneration } from '../lib/use-auth-generation';
@@ -85,6 +86,7 @@ function IncidentDetail({ id, generation, returnFallback, onClose, onChanged }: 
     const [actionError, setActionError] = useState<string | null>(null);
     const [loading, setLoading] = useState(true), [busy, setBusy] = useState(false), [needsRead, setNeedsRead] = useState(false);
     const [confirmResolve, setConfirmResolve] = useState(false);
+    const [confirmAcknowledge, setConfirmAcknowledge] = useState(false);
     const owns = useCallback(() => mounted.current && generation === api.getAuthGeneration(), [generation]);
     const load = useCallback(async () => {
         if (!owns()) return false;
@@ -160,9 +162,14 @@ function IncidentDetail({ id, generation, returnFallback, onClose, onChanged }: 
         </div>
         <div className="modal-footer">
             <button className="btn btn-secondary" disabled={busy || loading} onClick={() => void load()}>Refresh record</button>
-            {item?.status === 'open' && <button className="btn btn-primary" disabled={busy || loading || Boolean(readError) || needsRead} onClick={() => void transition('acknowledged')}>Acknowledge</button>}
+            {item?.status === 'open' && <button className="btn btn-primary" disabled={busy || loading || Boolean(readError) || needsRead} onClick={() => setConfirmAcknowledge(true)}>Acknowledge</button>}
             {item && item.status !== 'resolved' && <button className="btn btn-primary" disabled={busy || loading || Boolean(readError) || needsRead} onClick={() => confirmResolve ? void transition('resolved') : setConfirmResolve(true)}>{confirmResolve ? 'Confirm resolution' : 'Resolve'}</button>}
             {confirmResolve && <button disabled={busy} onClick={() => setConfirmResolve(false)}>Cancel resolution</button>}
         </div>
+        {/* Rendered inside the incident dialog so a single focus trap owns the stacked confirmation. */}
+        <ConfirmationModal isOpen={confirmAcknowledge} title="Acknowledge"
+            message={`Acknowledge “${item?.title ?? ''}”? This records ownership of the incident; it does not resolve it.`}
+            confirmLabel="Confirm" variant="warning"
+            onConfirm={() => { setConfirmAcknowledge(false); void transition('acknowledged'); }} onCancel={() => setConfirmAcknowledge(false)} />
     </div></div>;
 }

@@ -26,6 +26,8 @@ const bundle = await build({
     stdin: {
         contents: `
             export { TenantsTable } from './src/components/TenantsTable';
+            export { placeFloatingMenu } from './src/lib/floating-menu';
+            export { formatMinorAmount } from './src/lib/money-format';
             export { TenantsPage } from './src/pages/TenantsPage';
             export { UsersPage } from './src/pages/UsersPage';
             export { FormalHoldPanel } from './src/components/FormalHoldPanel';
@@ -45,6 +47,7 @@ const bundle = await build({
             export { TopTenantsList } from './src/components/TopTenantsList';
             export { TopTenantsPanel } from './src/components/TopTenantsPanel';
             export { UsageCostPage } from './src/pages/UsageCostPage';
+            export { PlansPage } from './src/pages/PlansPage';
             export { UsageBreakdownCard } from './src/components/UsageBreakdownCard';
             export { Incidents } from './src/components/Incidents';
             export { SystemHealth } from './src/components/SystemHealth';
@@ -54,7 +57,7 @@ const bundle = await build({
             export { DatabaseHealthCard } from './src/components/DatabaseHealthCard';
             export { RecordingsTable } from './src/components/RecordingsTable';
             export { FeedbackTable } from './src/components/FeedbackTable';
-            export { AuthProvider, useAuth } from './src/lib/auth';
+            export { AuthProvider, useAuth, MFA_MARKER_KEY, MFA_REQUIRED_MESSAGE } from './src/lib/auth';
             export { api } from './src/lib/api';
             export { MemoryRouter } from 'react-router-dom';
             export { CallDetailDrawer } from './src/components/CallDetailDrawer';
@@ -88,7 +91,11 @@ export const response = (data, status = 200) => new Response(JSON.stringify(data
 export const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 export const sleep = (ms) => new Promise((done) => setTimeout(done, ms));
 
-export const state = { root: null, host: null, requests: [], route: null };
+// mfaProof: the Admin console only restores a session whose user completed 2FA
+// in this browser (auth.tsx MFA_MARKER_KEY). Page tests are not about that rule,
+// so by default a verified /auth/me identity is treated as having completed its
+// second factor here. Tests of the rule itself set state.mfaProof = false.
+export const state = { root: null, host: null, requests: [], route: null, mfaProof: true };
 // Capability-failure tests replace or remove this declared browser fixture.
 export const installSessionLocks = () => installBrowserLocks(dom.window.navigator);
 // Default: any request not explicitly routed is an error response, so a test
@@ -103,12 +110,20 @@ beforeEach(() => {
     api.setToken(`synthetic-${crypto.randomUUID()}`);
     state.requests = [];
     state.route = unrouted;
+    state.mfaProof = true;
     globalThis.fetch = async (url, options = {}) => {
         const request = { path: new URL(url).pathname + new URL(url).search, method: options.method ?? 'GET',
             authorization: options.headers?.Authorization, headers: { ...options.headers }, credentials: options.credentials,
             body: options.body ? JSON.parse(options.body) : undefined };
         state.requests.push(request);
-        return state.route(request);
+        const result = await state.route(request);
+        if (state.mfaProof && request.path.endsWith('/auth/me') && result?.ok) {
+            try {
+                const body = await result.clone().json();
+                if (typeof body?.id === 'string') localStorage.setItem(C.MFA_MARKER_KEY, JSON.stringify({ userId: body.id }));
+            } catch { /* Blocked storage or a non-JSON body: the rule then signs the session out. */ }
+        }
+        return result;
     };
 });
 afterEach(async () => { await act(async () => state.root.unmount()); state.host.remove(); api.setToken(null); });
