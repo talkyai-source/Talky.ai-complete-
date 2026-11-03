@@ -243,6 +243,21 @@ _SET_BEFORE_CONFIRM = ("Nothing is pending for this detail yet. Set it in this r
                        "said it; this confirmation then applies to that value.")
 
 
+def _supersedes_pending(current, operation, quote_turn) -> bool:
+    """A caller's newer words replace a candidate they never confirmed.
+
+    Test call 2e232920 (2026-11-03): "Uh, that's gonna be" left a phone candidate
+    with no usable number; the model then named the new number as expected_value
+    on every retry, each set was refused as contact_changed, and the agent asked
+    for the number five times. expected_value still guards a confirmed value and
+    anything quoted from the same or an older caller turn.
+    """
+    return (operation == "set" and current is not None
+            and current.status in (CaptureStatus.AWAITING_CONFIRMATION, CaptureStatus.NEEDS_CLARIFICATION)
+            and current.value_source is not None
+            and quote_turn.source.caller_turn_order > current.value_source.caller_turn_order)
+
+
 def _hold_confirm(session, turn, key, normalized) -> None:
     """Keep an early confirmation for the rest of this reply only."""
     held = getattr(session, "_held_contact_confirms", None)
@@ -355,7 +370,8 @@ async def record_contact(session, arguments, *, turn=_UNSET, pool=None) -> dict:
             # 43020665): held for that set, which brings the value's evidence.
             _hold_confirm(session, turn, (kind, field_key), normalized)
             return result("confirm_deferred", next_step=_SET_BEFORE_CONFIRM)
-        if named != getattr(current, "normalized_value", None):
+        if (named != getattr(current, "normalized_value", None)
+                and not _supersedes_pending(current, operation, quote_turn)):
             return result("contact_changed", capture=current)
         source = turn.source if operation in ("confirm", "withdraw") else quote_turn.source
         extra = {}

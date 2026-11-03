@@ -113,11 +113,13 @@ async def test_naming_the_new_value_as_expected_with_no_candidate_is_not_a_confl
     turn = _caller(s, said, 1)
     first = await record_contact(s, _args("phone", "set", "0312 075 0496", said, "0312 075 0496"), turn=turn)
     assert first["status"] == "saved" and first["value"] == "03120750496"
-    # A candidate exists now: naming the new value instead of it is a conflict.
+    # A candidate exists now, still unconfirmed: the caller's newer words replace
+    # it even when the model names the new value. Refusing this (test call
+    # 2e232920, 2026-11-03) made the agent ask for the number five times.
     later = _caller(s, "No, make it zero three one two zero seven five zero four nine seven.", 2)
     changed = await record_contact(s, _args("phone", "set", "03120750497", later.text, "03120750497"), turn=later)
-    assert changed["status"] == "contact_changed"
-    assert s.captured_slots.phone_capture.normalized_value == "03120750496"
+    assert changed["status"] == "saved"
+    assert s.captured_slots.phone_capture.normalized_value == "03120750497"
     # With no candidate, a different expected value is still a stale view.
     other = _session(Pool())
     turn = _caller(other, "It's alex at example dot com.", 1)

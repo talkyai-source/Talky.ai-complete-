@@ -480,3 +480,47 @@ async def test_caller_first_hello_reaches_model_once_without_presynth_script(mon
     assert pipeline._run_turn.await_count == 1
     assert [m.role for m in s.conversation_history] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert s.conversation_history[0].content == "Hello?"
+
+
+@pytest.mark.asyncio
+async def test_newer_caller_words_replace_a_candidate_never_confirmed():
+    """Test call 2e232920 (2026-11-03): "Uh, that's gonna be" made the model set a
+    phone with no usable number. Every later set of "03214467504" named the new
+    number as expected_value and was refused as contact_changed, so the agent
+    asked for the number four more times. The same loop hit the spelled name."""
+    pool, s = SQLPort(), session()
+    caller(s, "Uh, that's gonna be", 16)
+    first = await record_contact(s, args("that's gonna be", kind="phone", value="that's gonna be"), pool=pool)
+    assert first["validation_status"] == "needs_clarification"
+    text = "That's going to be 03214467504."
+    caller(s, text, 17)
+    result = await record_contact(s, args(text, kind="phone", value="03214467504", expected="03214467504"), pool=pool)
+    assert result["status"] != "contact_changed"
+    assert result["validation_status"] == "awaiting_confirmation" and result["value"] == "03214467504"
+
+    caller(s, "T-A-L-H-A.", 18)
+    await record_contact(s, args("T-A-L-H-A.", kind="full_name", value="T-A-L-H-A"), pool=pool)
+    text = "Yeah, that's going to be Talha."
+    caller(s, text, 19)
+    result = await record_contact(s, args(text, kind="full_name", value="Talha", expected="Talha"), pool=pool)
+    assert result["value"] == "Talha" and result["validation_status"] == "awaiting_confirmation"
+
+
+@pytest.mark.asyncio
+async def test_confirmed_or_older_candidates_still_need_the_exact_current_value():
+    pool, s = SQLPort(), session()
+    caller(s, "Use alex@example.com", 1)
+    await record_contact(s, args("Use alex@example.com"), pool=pool)
+    caller(s, "Fine by me", 2)
+    await record_contact(s, args("Fine by me", operation="confirm", expected="alex@example.com"), pool=pool)
+    text = "Use blair@example.com"
+    caller(s, text, 3)
+    confirmed = await record_contact(s, args(text, value="blair@example.com", expected="blair@example.com"), pool=pool)
+    assert confirmed["status"] == "contact_changed" and s.captured_slots.email == "alex@example.com"
+
+    pool, s = SQLPort(), session()
+    caller(s, "Call 07700900123", 1)
+    caller(s, "No, 07700900456", 2)
+    await record_contact(s, args("07700900456", kind="phone", value="07700900456"), pool=pool)
+    older = await record_contact(s, args("07700900123", kind="phone", value="07700900123", expected="07700900123"), pool=pool)
+    assert older["status"] == "contact_changed" and s.captured_slots.phone == "07700900456"
