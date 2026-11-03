@@ -547,6 +547,96 @@ async def test_context_updates_replace_latest_and_do_not_send_when_disabled(monk
     await provider.cleanup()
 
 
+def _turn_updates(ws):
+    return [
+        update
+        for update in (json.loads(payload) for payload in ws.sent if isinstance(payload, str))
+        if update.get("type") == "UpdateConfiguration" and "agent_context" not in update
+    ]
+
+
+async def _settle(provider, call_id="call"):
+    connection = provider._active_connections.get(call_id) or provider._pre_connections.get(call_id)
+    if connection and connection.turn_task:
+        await connection.turn_task
+
+
+async def test_capture_mode_gives_the_caller_time_to_read_out_a_number(monkeypatch):
+    # Test call 2e232920 (2026-11-03) ran on AssemblyAI, where capture mode did
+    # nothing: balanced mode ended "Uh, that's gonna be" as its own turn.
+    provider, ws, _ = await setup_provider(monkeypatch)
+    await provider.pre_connect("call")
+    provider.enter_capture_mode("call")
+    await _settle(provider)
+    provider.reset_capture_mode("call")
+    await _settle(provider)
+    assert _turn_updates(ws) == [
+        {
+            "type": "UpdateConfiguration",
+            "min_turn_silence": adapter.CAPTURE_MIN_TURN_SILENCE_MS,
+            "max_turn_silence": adapter.CAPTURE_MAX_TURN_SILENCE_MS,
+        },
+        # Re-applying the mode restores its silences; our interruption delay
+        # is not a mode default, so it goes back explicitly.
+        {"type": "UpdateConfiguration", "mode": "balanced", "interruption_delay": 120},
+    ]
+    await provider.cleanup()
+
+
+async def test_capture_never_shortens_a_tenants_own_silences(monkeypatch):
+    settings = {"mode": "max_accuracy", "min_turn_silence": 600, "max_turn_silence": 4000}
+    provider, ws, _ = await setup_provider(monkeypatch, settings=settings)
+    await provider.pre_connect("call")
+    provider.enter_capture_mode("call")
+    await _settle(provider)
+    provider.reset_capture_mode("call")
+    await _settle(provider)
+    assert _turn_updates(ws) == [
+        {"type": "UpdateConfiguration", "min_turn_silence": 1000, "max_turn_silence": 4000},
+        {
+            "type": "UpdateConfiguration",
+            "mode": "max_accuracy",
+            "min_turn_silence": 600,
+            "max_turn_silence": 4000,
+            "interruption_delay": 250,
+        },
+    ]
+    await provider.cleanup()
+
+
+async def test_a_session_opened_during_capture_starts_patient(monkeypatch):
+    provider, ws, connects = await setup_provider(monkeypatch)
+    provider.enter_capture_mode("call")
+    await provider.pre_connect("call")
+    await _settle(provider)
+    query = parse_qs(urlsplit(connects[0][0]).query)
+    assert query["min_turn_silence"] == [str(adapter.CAPTURE_MIN_TURN_SILENCE_MS)]
+    assert query["max_turn_silence"] == [str(adapter.CAPTURE_MAX_TURN_SILENCE_MS)]
+    assert _turn_updates(ws) == []
+    await provider.cleanup()
+
+
+async def test_a_phone_ask_arms_assemblyai_behind_the_failover_wrapper(monkeypatch):
+    from app.domain.services.voice_pipeline import capture_mode
+
+    provider, ws, _ = await setup_provider(monkeypatch)
+    await provider.pre_connect("call")
+    wrapper = SimpleNamespace(_active=provider)
+    try:
+        capture_mode.maybe_enter(wrapper, "call", "May I have a phone number where we can reach you?")
+        await _settle(provider)
+        assert capture_mode.is_capture_active("call")
+        capture_mode.maybe_exit(wrapper, "call")
+        await _settle(provider)
+    finally:
+        capture_mode.clear("call")
+    assert [sorted(update) for update in _turn_updates(ws)] == [
+        ["max_turn_silence", "min_turn_silence", "type"],
+        ["interruption_delay", "mode", "type"],
+    ]
+    await provider.cleanup()
+
+
 async def test_prewarm_is_reused_and_cleanup_is_idempotent(monkeypatch):
     provider, ws, connects = await setup_provider(monkeypatch)
     await asyncio.gather(provider.pre_connect("call"), provider.pre_connect("call"))

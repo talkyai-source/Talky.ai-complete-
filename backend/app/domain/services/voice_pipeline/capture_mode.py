@@ -1,16 +1,18 @@
-"""Capture mode — relax STT turn-detection while the caller spells an email.
+"""Capture mode — relax STT turn-detection while the caller spells an email
+or reads out a phone number.
 
 When the agent *asks* for an email (or asks the caller to spell something),
 the caller's next turn is a slow, pause-heavy spell-out: "j... o... h... n...
 at... gmail... dot com." Normal turn-detection fires EndOfTurn on the first
 gap and ships half an address to the LLM. So the instant the agent's outgoing
-line is an email/spell ask, we flip the STT into *capture mode* (longer
+line is an email/phone/spell ask, we flip the STT into *capture mode* (longer
 end-of-turn timeout, higher confidence) for that one upcoming turn, then revert.
 
 Trigger = the agent's own outgoing text (works for every persona and for both
 telephony and ask-AI — no persona/stage wiring). Mechanism lives on the STT
-provider (DeepgramFlux.enter_capture_mode / reset_capture_mode); this module
-only decides *when*. Providers that don't support it are silently skipped.
+provider (DeepgramFlux / AssemblyAI enter_capture_mode / reset_capture_mode);
+this module only decides *when*. Providers that don't support it are silently
+skipped.
 """
 from __future__ import annotations
 
@@ -54,6 +56,35 @@ _EMAIL_READBACK = re.compile(
     re.IGNORECASE | re.VERBOSE | re.DOTALL,
 )
 
+# Agent phrases asking for a phone number, or to hear it again. The caller's
+# next turn is a digit string read with thinking pauses: test call 2e232920
+# (2026-11-03) ended the turn on "Uh, that's gonna be" and the number came a
+# turn later. Same trade-off as the email ask; "number of ..." never arms.
+_PHONE_ASK = re.compile(
+    r"""(
+        (?:what'?s|what\s+is|can\s+i\s+(?:get|have|grab|take)|could\s+(?:you|i)|
+           may\s+i\s+have|give\s+me|share|tell\s+me|say|repeat|read|go\s+ahead|
+           ready\s+for)\b[^.?!]{0,40}\bnumber\b(?!\s+of\b)
+        | \b(?:groups?|chunks?)\s+of\s+(?:two|three|four|[234])\b
+        | \bdigit\s+by\s+digit\b
+        # bare "and your mobile number?" ask — a question, not "to/got your number"
+        | (?<!to\s)(?<!the\s)(?<!via\s)(?<!on\s)(?<!got\s)
+          \byour\s+(?:phone\s+|mobile\s+|cell\s+|contact\s+)?number\b(?=[^.!]*\?)
+    )""",
+    re.IGNORECASE | re.VERBOSE,
+)
+
+# The agent reading a number back ("5 5 5, 1 2 3, 4 5 6 7 -- is that right?",
+# the natural_phone_readback shape): the next turn is a "yes" or a corrected
+# number. Seven digits plus the same confirmation cue as the email read-back.
+_PHONE_READBACK = re.compile(
+    r"""(?=.*(?:\d[\s,.-]*){7})
+        (?=.*(?:did\s+i\s+(?:get|say|hear)|is\s+(?:that|this|it)\s+(?:right|correct)
+              |that\s+right|got\s+(?:that|it)\s+right|is\s+that\s+ok(?:ay)?
+              |correct\?))""",
+    re.IGNORECASE | re.VERBOSE | re.DOTALL,
+)
+
 # Calls currently in capture mode (single process / single worker).
 _active_calls: set[str] = set()
 
@@ -75,8 +106,13 @@ def detect_email_readback(text: Optional[str]) -> bool:
 
 def detect_capture_trigger(text: Optional[str]) -> bool:
     """True if the caller's NEXT turn is likely a pause-heavy spell-out: either
-    the agent just asked for an address, or it read one back to be corrected."""
-    return detect_email_ask(text) or detect_email_readback(text)
+    the agent just asked for an address or a phone number, or it read one back
+    to be corrected."""
+    return (
+        detect_email_ask(text)
+        or detect_email_readback(text)
+        or bool(text and (_PHONE_ASK.search(text) or _PHONE_READBACK.search(text)))
+    )
 
 
 def _flux(provider: Any) -> Any:
@@ -109,7 +145,7 @@ def maybe_enter(provider: Any, call_id: str, agent_text: str) -> None:
     try:
         target.enter_capture_mode(call_id)
         _active_calls.add(call_id)
-        logger.info("capture_mode ENTER call_id=%s (email/spell ask detected)", call_id[:12])
+        logger.info("capture_mode ENTER call_id=%s (email/phone/spell ask detected)", call_id[:12])
     except Exception as exc:  # never let this break the turn
         logger.warning("capture_mode enter failed call_id=%s: %s", call_id[:12], exc)
 

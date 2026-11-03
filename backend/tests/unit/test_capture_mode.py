@@ -35,6 +35,33 @@ def test_ignores_non_asks(text):
     assert capture_mode.detect_email_ask(text) is False
 
 
+# Test call 2e232920 (2026-11-03): the phone ask never armed capture mode, so
+# "Uh, that's gonna be" ended the caller's turn and the number came a turn later.
+@pytest.mark.parametrize("text", [
+    "May I have a phone number where we can reach you?",
+    "What is the best number to reach you on?",
+    "Could you give me your phone number?",
+    "Thanks, Talha. And your mobile number?",
+    "Could you say the number again, maybe in groups of three or four digits?",
+    "Sorry, could you repeat that number?",
+    "Go ahead with the number whenever you're ready.",
+    "So that's 0321 446 7504, is that right?",
+])
+def test_detects_phone_number_ask_or_readback(text):
+    assert capture_mode.detect_capture_trigger(text) is True
+
+
+@pytest.mark.parametrize("text", [
+    "We have a number of options for you.",
+    "Could you tell me the number of seats you need?",
+    "I'll text the details to your number shortly.",
+    "Our office number is 020 7946 0000.",
+    "Thanks, I've got your number.",
+])
+def test_ignores_number_statements(text):
+    assert capture_mode.detect_capture_trigger(text) is False
+
+
 # ── Flux Configure payloads ──────────────────────────────────
 def _init(**cfg):
     p = DeepgramFluxSTTProvider()

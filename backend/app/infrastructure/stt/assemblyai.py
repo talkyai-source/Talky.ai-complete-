@@ -51,6 +51,15 @@ _DRAIN_TIMEOUT = 5.0
 _CLOSE_TIMEOUT = 3.0
 _CHUNK_MS = 50  # Provider accepts 50..1000 ms PCM frames, not telephony's 20 ms.
 
+# Capture mode (capture_mode.py: the caller is about to read out a number or
+# spell an email). AssemblyAI's advice is to raise the turn silences mid-stream
+# before the caller reads an entity, then re-apply the mode. Balanced mode
+# otherwise forces the turn to end after 1280 ms of silence, which split
+# "Uh, that's gonna be" from the number in test call 2e232920 (2026-11-03).
+CAPTURE_MIN_TURN_SILENCE_MS = int(os.getenv("ASSEMBLYAI_CAPTURE_MIN_TURN_SILENCE_MS", "1000"))
+CAPTURE_MAX_TURN_SILENCE_MS = int(os.getenv("ASSEMBLYAI_CAPTURE_MAX_TURN_SILENCE_MS", "3000"))
+_TURN_DETECTION_KEYS = ("mode", "min_turn_silence", "max_turn_silence", "interruption_delay")
+
 
 def _safe_error(exc: BaseException, stage: str) -> RuntimeError:
     """Never expose upstream text: errors can include URL prompts or credentials."""
@@ -91,6 +100,8 @@ class _Connection:
     observation: ProviderAttempt | None = None
     recognition: ProviderAttempt | None = None
     agent_context: str = ""
+    turn_detection: dict | None = None
+    turn_task: asyncio.Task | None = None
     closed: bool = False
     adopted: bool = False
     terminate_sent: bool = False
@@ -132,6 +143,9 @@ class _Connection:
             if self.keepalive_task:
                 self.keepalive_task.cancel()
                 await asyncio.gather(self.keepalive_task, return_exceptions=True)
+            if self.turn_task:
+                self.turn_task.cancel()
+                await asyncio.gather(self.turn_task, return_exceptions=True)
             if not self.terminate_sent:
                 with suppress(Exception):
                     await asyncio.wait_for(self.send({"type": "Terminate"}), timeout=1.0)
@@ -181,6 +195,7 @@ class AssemblyAISTTProvider(STTProvider):
         self._active_connections: dict[str, _Connection] = {}
         self._stream_claims: dict[str, object] = {}
         self._pending_context: dict[str, str] = {}
+        self._capture_calls: set[str] = set()
         self._muted_calls: set[str] = set()
         self._mute_epoch: dict[str, int] = {}
         self._last_message_at: dict[str, float] = {}
@@ -237,7 +252,27 @@ class AssemblyAISTTProvider(STTProvider):
             params["keyterms_prompt"] = self._keyterms
         if self._settings.auto_agent_context and call_id and self._pending_context.get(call_id):
             params["agent_context"] = self._pending_context[call_id]
+        if call_id in self._capture_calls:
+            params.update(self._turn_detection(call_id))
         return params
+
+    def _turn_detection(self, call_id: str | None) -> dict:
+        """The turn-detection fields this call should run with right now."""
+        normal = {
+            key: value
+            for key, value in self._settings.connection_parameters().items()
+            if key in _TURN_DETECTION_KEYS
+        }
+        if call_id not in self._capture_calls:
+            return normal
+        # Never less patient than the tenant's own saved silences.
+        least = max(CAPTURE_MIN_TURN_SILENCE_MS, normal.get("min_turn_silence", 0))
+        return {
+            "min_turn_silence": least,
+            "max_turn_silence": max(
+                CAPTURE_MAX_TURN_SILENCE_MS, normal.get("max_turn_silence", 0), least
+            ),
+        }
 
     async def _open_connection(self, call_id: str | None) -> _Connection:
         """Open a session; when AssemblyAI refuses a platform pool key, bench
@@ -267,6 +302,7 @@ class AssemblyAISTTProvider(STTProvider):
             raise RuntimeError("AssemblyAI is not initialized")
         generation = self._generation
         params = self._connection_parameters(call_id)
+        turn_detection = self._turn_detection(call_id)
         query = urlencode(
             {
                 key: (
@@ -299,7 +335,7 @@ class AssemblyAISTTProvider(STTProvider):
             )
             connection = _Connection(
                 ws, slot, call_id, observation=observation, recognition=recognition,
-                agent_context=params.get("agent_context", "")
+                agent_context=params.get("agent_context", ""), turn_detection=turn_detection
             )
             self._connections.add(connection)
             # Opening TCP/WebSocket is insufficient: model selection is confirmed
@@ -389,6 +425,8 @@ class AssemblyAISTTProvider(STTProvider):
                         self._pre_connections.pop(call_id, None)
                     await self._close_connection(connection)
                     raise
+                # Capture may have started or ended during the handshake.
+                self._schedule_turn_detection(call_id)
         finally:
             if self._preconnect_tasks.get(call_id) is task:
                 self._preconnect_tasks.pop(call_id, None)
@@ -424,6 +462,39 @@ class AssemblyAISTTProvider(STTProvider):
                 connection.agent_context = text
             except Exception as exc:
                 raise _safe_error(exc, "context update") from None
+
+    def enter_capture_mode(self, call_id: str) -> None:
+        """Give the caller time to read out a number or spell an email: raise
+        both turn silences until reset_capture_mode (capture_mode.py decides when)."""
+        self._capture_calls.add(call_id)
+        self._schedule_turn_detection(call_id)
+
+    def reset_capture_mode(self, call_id: str) -> None:
+        """Back to the session's own mode, silences and interruption delay."""
+        self._capture_calls.discard(call_id)
+        self._schedule_turn_detection(call_id)
+
+    def _schedule_turn_detection(self, call_id: str) -> None:
+        connection = self._active_connections.get(call_id) or self._pre_connections.get(call_id)
+        if connection is None or connection.closed:
+            return  # The next session opens with this call's current values.
+        if connection.turn_task is None or connection.turn_task.done():
+            connection.turn_task = asyncio.get_running_loop().create_task(
+                self._flush_turn_detection(connection)
+            )
+
+    async def _flush_turn_detection(self, connection: _Connection) -> None:
+        """Send until the live session matches; a failed update never ends the call."""
+        try:
+            while not connection.closed:
+                wanted = self._turn_detection(connection.call_id)
+                if wanted == connection.turn_detection:
+                    return
+                await connection.send({"type": "UpdateConfiguration", **wanted})
+                connection.turn_detection = wanted
+        except Exception as exc:
+            # Provider exceptions may contain URLs or credentials.
+            logger.warning("assemblyai_turn_detection_update_failed type=%s", type(exc).__name__)
 
     async def mute(self, call_id: str) -> None:
         self._muted_calls.add(call_id)
@@ -706,6 +777,7 @@ class AssemblyAISTTProvider(STTProvider):
                 self._active_connections.pop(call_id, None)
                 self._last_message_at.pop(call_id, None)
                 self._pending_context.pop(call_id, None)
+                self._capture_calls.discard(call_id)
                 self._muted_calls.discard(call_id)
                 self._mute_epoch.pop(call_id, None)
 
