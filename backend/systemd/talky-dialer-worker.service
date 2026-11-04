@@ -8,6 +8,15 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
+User=talky
+Group=talky
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+ReadWritePaths=/opt/talky/backend/recordings /opt/talky/backend/audio_files /opt/talky/backend/feedback_audio /opt/talky/backend/support_attachments
 # Type=notify: systemd waits for the worker's READY=1 (sent from the heartbeat
 # loop at startup) before considering the unit started. WatchdogSec=180 arms
 # the watchdog — the worker pets it with WATCHDOG=1 every ~60s from the same

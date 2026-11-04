@@ -42,6 +42,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import Response
 from pydantic import BaseModel, Field
+from starlette.concurrency import run_in_threadpool
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.api.v1.endpoints._outbound_campaign import require_owned_outbound_campaign
@@ -839,16 +840,20 @@ def _local(tag: str) -> str:
     return tag.rsplit("}", 1)[-1] if "}" in tag else tag
 
 
+class _NoDTDTreeBuilder(ET.TreeBuilder):
+    def doctype(self, name, pubid, system):
+        # The parser decodes XML before this callback, covering UTF-16 as
+        # well as UTF-8. Reject before any entity references can be expanded.
+        raise ValueError("DTD not allowed")
+
+
 def parse_outbound_message(raw: bytes) -> tuple[Optional[str], List[Dict[str, str]]]:
     """Return ``(organization_id, [sobject field dicts])`` from a Salesforce
     Outbound Message envelope. Namespace-agnostic. Refuses DTDs."""
     if len(raw) > _MAX_XML_BYTES:
         raise ValueError("payload too large")
-    head = raw[:4096].lower()
-    if b"<!doctype" in head or b"<!entity" in head:
-        raise ValueError("DTD not allowed")
     try:
-        root = ET.fromstring(raw)
+        root = ET.fromstring(raw, parser=ET.XMLParser(target=_NoDTDTreeBuilder()))
     except ET.ParseError as exc:
         raise ValueError(f"invalid XML: {exc}") from exc
     org_id: Optional[str] = None
@@ -907,7 +912,7 @@ async def salesforce_outbound_message(
     _row, config = _verify_webhook(db_client, tenant_id, token)
     raw = await request.body()
     try:
-        org_id, records = parse_outbound_message(raw)
+        org_id, records = await run_in_threadpool(parse_outbound_message, raw)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 

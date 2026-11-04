@@ -212,6 +212,13 @@ ssh -t -i "$KEY" "$PROD" "
         '/opt/talky/runtime/bin/.voice_gateway.${DEPLOY_SHA}.new'
     sudo mv -f '/opt/talky/runtime/bin/.voice_gateway.${DEPLOY_SHA}.new' \
         /opt/talky/runtime/bin/voice_gateway
+    echo '--> preparing the unprivileged application identity'
+    # Calls were already frozen/drained above. Also quiesce file writers and
+    # their timers so an old root process cannot create new root-only state
+    # between the ownership migration and the application restart.
+    sudo systemctl stop talky-cleanup.timer talky-support-jobs.timer
+    sudo systemctl stop talky-api talky-api-web talky-dialer-worker talky-voice-worker talky-reminder-worker talky-trunk-status talky-cleanup talky-support-jobs
+    sudo bash backend/deploy/infra/prepare-service-user.sh
     echo '--> reconciling systemd units'
     sudo bash backend/systemd/install-services.sh
     echo '--> proving required systemd units are installed and enabled'
@@ -274,6 +281,7 @@ ssh -t -i "$KEY" "$PROD" "
     sudo backend/venv/bin/python backend/scripts/set_release_version.py --env-file /opt/talky/backend/.env --candidate-sha '${DEPLOY_SHA}'
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker talky-api-web
+    sudo systemctl start talky-cleanup.timer talky-support-jobs.timer
     sudo systemctl restart talky-inbound-synthetic.timer
     # Long-running loop since 2026-10-07 (its 15 s timer was retired). A failed
     # restart never aborts the deploy: the unit has Restart=always.

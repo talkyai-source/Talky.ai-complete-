@@ -136,6 +136,7 @@ echo "sudo $*" >> "$LOG"
 if [ "$1 $2 $3" = "systemctl restart talky-voice-gateway" ]; then touch "$STATE/gateway_restarted"; fi
 if [ "$1 $2" = "systemctl start" ] && [ "${FAIL_MIGRATE:-0}" = 1 ]; then exit 1; fi
 case "$*" in
+  "bash backend/deploy/infra/prepare-service-user.sh") if [ "${FAIL_SERVICE_USER:-0}" = 1 ]; then exit 1; fi ;;
   *"reconcile_asterisk_release.sh") if [ "${FAIL_RECONCILE:-0}" = 1 ]; then exit 1; fi ;;
   *"verify_alembic_current_heads.py") if [ "${FAIL_HEAD:-0}" = 1 ]; then exit 1; fi ;;
   *"verify_admin_runtime_privileges.py") if [ "${FAIL_PRIVILEGES:-0}" = 1 ]; then exit 1; fi ;;
@@ -352,6 +353,25 @@ def test_running_process_version_mismatch_fails_acceptance_without_code_rollback
     assert result.returncode != 0 and head == remote_sha(captured_remote_script)
     assert len([line for line in log if line.startswith("git checkout")]) == 1
     assert any("restart talky-api" in line for line in log)
+
+
+def test_service_identity_is_prepared_before_units_are_installed(tmp_path, captured_remote_script):
+    result, log, _ = _run_remote(tmp_path, captured_remote_script)
+    assert result.returncode == 0, result.stdout + result.stderr
+    prepare = _index(log, "sudo bash backend/deploy/infra/prepare-service-user.sh")
+    stop_timers = _index(log, "sudo systemctl stop talky-cleanup.timer talky-support-jobs.timer")
+    stop_writers = _index(log, "sudo systemctl stop talky-api talky-api-web")
+    install = _index(log, "sudo bash backend/systemd/install-services.sh")
+    restart = _index(log, "sudo systemctl restart talky-api talky-dialer-worker")
+    start_timers = _index(log, "sudo systemctl start talky-cleanup.timer talky-support-jobs.timer")
+    assert stop_timers < stop_writers < prepare < install < restart < start_timers
+
+
+def test_service_identity_preparation_failure_aborts_before_restarting_app(tmp_path, captured_remote_script):
+    result, log, head = _run_remote(tmp_path, captured_remote_script, FAIL_SERVICE_USER="1")
+    assert result.returncode != 0
+    assert head == PREV_SHA
+    assert not any("restart talky-api" in line for line in log)
 
 
 def test_success_checks_privileges_then_publishes_and_observes_both_api_versions(tmp_path, captured_remote_script):

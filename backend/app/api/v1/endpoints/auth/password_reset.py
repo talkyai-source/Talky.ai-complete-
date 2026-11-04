@@ -40,6 +40,7 @@ from app.core.security.password import (
     validate_password_strength,
 )
 from app.core.security.lockout import record_login_attempt
+from app.core.security.auth_abuse import claim_budget, enforce_budget, verify_turnstile
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import revoke_all_user_sessions
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
@@ -59,7 +60,8 @@ _RESET_REDIS_KEY_PREFIX = "pwreset:pending:"
 # (also avoids burning the M365 SMTP quota on noreply@talkleeai.com).
 # 3 codes / hour is generous enough for a legitimate user retrying
 # after a delayed delivery; combined with the 15-minute code TTL it
-# means an attacker can flood at most ~12 codes/day per address.
+# means an attacker can issue at most 72 codes/day per address. The separate
+# daily verification budget below bounds guesses across all of those codes.
 _RESET_RATE_LIMIT_KEY_PREFIX = "pwreset:rl:"
 _RESET_RATE_LIMIT_WINDOW_SECONDS = 60 * 60  # 1 hour
 _RESET_RATE_LIMIT_MAX = 3
@@ -70,26 +72,10 @@ def _reset_rate_limit_key(email: str) -> str:
 
 
 async def _check_reset_rate_limit(redis, email: str) -> bool:
-    """
-    Returns True if the caller may issue another reset code for this
-    email, False if they've hit the cap. Increments+sets-TTL atomically.
-
-    We INCR first, then EXPIRE only on the first hit. A stale key with
-    no TTL would be a degraded mode but never a security loss — worst
-    case, the next hour starts ~59 minutes earlier than expected.
-    """
-    key = _reset_rate_limit_key(email)
-    try:
-        count = await redis.incr(key)
-        if count == 1:
-            await redis.expire(key, _RESET_RATE_LIMIT_WINDOW_SECONDS)
-        return int(count) <= _RESET_RATE_LIMIT_MAX
-    except Exception as exc:
-        # Fail-open on Redis hiccups — better to serve a legitimate
-        # reset than to lock everyone out. We log so anomalies still
-        # surface in ops.
-        logger.warning("forgot_password_rate_limit_redis_error key=%s err=%s", key, exc)
-        return True
+    """Atomically cap reset emails, and refuse issuance if Redis fails."""
+    return await claim_budget(redis, _reset_rate_limit_key(email),
+                              limit=_RESET_RATE_LIMIT_MAX,
+                              seconds=_RESET_RATE_LIMIT_WINDOW_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -98,6 +84,7 @@ async def _check_reset_rate_limit(redis, email: str) -> bool:
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
+    turnstile_token: Optional[str] = Field(default=None, min_length=1, max_length=2048)
 
 
 class ResetPasswordRequest(BaseModel):
@@ -294,6 +281,9 @@ async def forgot_password(
     # response shape stays identical for existing / non-existing
     # addresses (no enumeration via timing or rate-limit observability).
     redis = _get_redis_or_503()
+    await enforce_budget(redis, "forgot-ip", get_client_ip(request), limit=5, seconds=60)
+    await enforce_budget(redis, "forgot-ip-day", get_client_ip(request), limit=20, seconds=24 * 60 * 60)
+    await verify_turnstile(body.turnstile_token, get_client_ip(request), "forgot_password")
     if not await _check_reset_rate_limit(redis, email):
         logger.info("forgot_password_rate_limited email=%s", email)
         # Same 200 message — never tell the attacker they hit a limit.
@@ -406,7 +396,15 @@ async def reset_password(
         ) from exc
 
     redis = _get_redis_or_503()
-    raw = await redis.get(_reset_redis_key(email))
+    await enforce_budget(redis, "reset-ip", get_client_ip(request), limit=5, seconds=60)
+    # Reserve before comparing: concurrent guesses and reissued codes share
+    # the same daily budget. Count all attempts (including success/expiry),
+    # which also avoids disclosing whether an account or pending code exists.
+    await enforce_budget(redis, "reset-email-day", email, limit=20, seconds=24 * 60 * 60)
+    try:
+        raw = await redis.get(_reset_redis_key(email))
+    except Exception as exc:
+        raise HTTPException(503, "Account service temporarily unavailable.") from exc
     if not raw:
         # Could be: never requested, expired, or already consumed.  Same
         # error message in all cases to avoid leaking timing info.
@@ -435,7 +433,8 @@ async def reset_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset code. Request a new code.",
         )
-    if not secrets.compare_digest(_hash_reset_code(code), str(pending.get("code_hash") or "")):
+    if not secrets.compare_digest(_hash_reset_code(code).encode("ascii"),
+                                  str(pending.get("code_hash") or "").encode("utf-8")):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired reset code.",
@@ -461,7 +460,8 @@ async def reset_password(
             user_id, email,
         )
         if (not row or not isinstance(pending.get("password_generation"), str)
-                or not secrets.compare_digest(pending["password_generation"], _password_generation(row["password_hash"]))):
+                or not secrets.compare_digest(pending["password_generation"].encode("utf-8"),
+                                              _password_generation(row["password_hash"]).encode("ascii"))):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Invalid or expired reset code. Request a new code.",

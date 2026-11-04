@@ -16,14 +16,16 @@ Backward compatibility:
   Existing bcrypt hashes ($2b$... / $2a$...) are verified correctly and
   transparently re-hashed to Argon2id on the next successful login.
 
-NIST SP 800-63B password length rules (applied here):
-  Minimum : 8 characters  (with MFA enabled; 15 without — enforced at call site)
+Password policy (applied explicitly by signup/change/reset flows):
+  Minimum : 15 characters (no assumption that MFA is enabled)
   Maximum : 128 characters (prevents hash-DoS on long inputs)
 """
 
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 
 import bcrypt
@@ -47,8 +49,17 @@ _ARGON2_HASH_LEN = 32  # 256-bit output
 _ARGON2_SALT_LEN = 16  # 128-bit salt (auto-generated per hash)
 
 # NIST SP 800-63B + OWASP length constraints
-MIN_PASSWORD_LENGTH = 8
+MIN_PASSWORD_LENGTH = 15
 MAX_PASSWORD_LENGTH = 128
+
+
+@lru_cache(maxsize=1)
+def _common_passwords() -> frozenset[str]:
+    # SecLists' cleaned NCSC top-100k corpus (99,840 lines). Local data keeps
+    # password validation independent of external services and sends no
+    # password material over the network. See adjacent provenance/license.
+    corpus = Path(__file__).with_name("common-passwords-ncsc.txt")
+    return frozenset(value.casefold() for value in corpus.read_text(encoding="utf-8").splitlines())
 
 # ---------------------------------------------------------------------------
 # Module-level Argon2id hasher (reused across calls — thread-safe)
@@ -76,17 +87,23 @@ def validate_password_strength(password: str) -> None:
     """
     Enforce NIST SP 800-63B length requirements.
 
-    Raises PasswordValidationError if the password is too short or too long.
+    Raises PasswordValidationError for invalid length or a known common value.
     The caller decides whether to surface the detail to the user.
 
     Note: OWASP says do NOT restrict character sets — any printable Unicode
     character (including spaces and emoji) is permitted.
     """
+    _validate_password_length(password, MIN_PASSWORD_LENGTH)
+    if password.casefold() in _common_passwords():
+        raise PasswordValidationError("Choose a password that is not commonly used.")
+
+
+def _validate_password_length(password: str, minimum: int) -> None:
     if not password:
         raise PasswordValidationError("Password cannot be empty.")
-    if len(password) < MIN_PASSWORD_LENGTH:
+    if len(password) < minimum:
         raise PasswordValidationError(
-            f"Password must be at least {MIN_PASSWORD_LENGTH} characters."
+            f"Password must be at least {minimum} characters."
         )
     if len(password) > MAX_PASSWORD_LENGTH:
         raise PasswordValidationError(
@@ -104,9 +121,11 @@ def hash_password(password: str) -> str:
     Example output:
         $argon2id$v=19$m=19456,t=2,p=1$<salt_b64>$<hash_b64>
 
-    Raises PasswordValidationError if the password fails the strength check.
+    This hashing primitive retains its legacy 8–128 input contract for admin
+    creation and rehash compatibility. Credential-setting routes must call
+    validate_password_strength first and map its error to a client response.
     """
-    validate_password_strength(password)
+    _validate_password_length(password, 8)
     return _hasher.hash(password)
 
 

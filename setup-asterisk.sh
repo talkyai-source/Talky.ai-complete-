@@ -130,6 +130,11 @@ RTPEOF
 
 # 8) pjsip.conf — Blazedigitel trunk: transport, auth, registration, AOR, endpoint, identify
 cat > /etc/asterisk/pjsip.conf <<PJSIPEOF
+[global]
+type=global
+endpoint_identifier_order=ip
+user_agent=Talk-Lee
+
 [transport-udp]
 type=transport
 protocol=udp
@@ -160,6 +165,7 @@ expiration=600
 
 [blazedigitel-endpoint]
 type=endpoint
+identify_by=ip
 transport=transport-udp
 context=from-talky-inbound
 disallow=all
@@ -189,6 +195,23 @@ match=$TRUNK_HOST
 ; hand-added include would be destroyed by the next run.
 #include pjsip.d/*.conf
 PJSIPEOF
+
+# The deployed endpoints are carrier trunks identified by source IP. The global
+# order only changes priority; omitted identifiers STILL run afterwards. Disable
+# the username/auth_username and anonymous modules, including for generated
+# trunks. This installation does not host username-identified SIP registrars.
+# IAX2 and legacy chan_sip are unused; stock Ubuntu enables an anonymous IAX
+# guest in the demo dialplan. Disable their loaders without erasing any live
+# operator contexts in extensions.conf. A restart (not reload) is required.
+sed -i -E '/^[[:space:]]*(noload|load|require)[[:space:]]*=>[[:space:]]*(chan_(iax2|sip)|res_pjsip_endpoint_identifier_(user|anonymous))\.so[[:space:]]*(;.*)?$/d' /etc/asterisk/modules.conf
+cat >> /etc/asterisk/modules.conf <<'MODULESEOF'
+
+[modules](+)
+noload => chan_iax2.so
+noload => chan_sip.so
+noload => res_pjsip_endpoint_identifier_user.so
+noload => res_pjsip_endpoint_identifier_anonymous.so
+MODULESEOF
 
 # 8b) pjsip.d — the directory the backend writes per-tenant trunks into.
 # Prerequisites (b) and (c) from pjsip_config_generator.py's docstring:

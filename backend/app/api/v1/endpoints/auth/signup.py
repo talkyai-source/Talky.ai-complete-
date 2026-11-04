@@ -32,6 +32,7 @@ from app.core.security.password import (
     validate_password_strength,
 )
 from app.core.security.sessions import create_session
+from app.core.security.auth_abuse import enforce_budget, reject_disposable_signup_email, verify_turnstile
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.email_service import get_email_service
 
@@ -172,6 +173,8 @@ async def signup_start(
     15-minute TTL. No DB row is created yet."""
 
     email = body.email.strip().lower()
+    reject_disposable_signup_email(email)
+    await verify_turnstile(body.turnstile_token, get_client_ip(request), "signup")
 
     # Reject if a real account with this email already exists.
     # Signup starts with an email, before a tenant identity exists.
@@ -194,6 +197,7 @@ async def signup_start(
     }
 
     redis = _get_redis_or_503()
+    await enforce_budget(redis, "signup-ip-day", get_client_ip(request), limit=10, seconds=24 * 60 * 60)
     await _claim_signup_send(redis, email)
     try:
         await redis.setex(
