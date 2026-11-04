@@ -3,12 +3,14 @@
 /**
  * Smart CSV contact import.
  *
- * Parses the CSV in the browser, auto-maps headers, validates + normalizes
- * every phone (same rules as the backend), flags bad/short/missing numbers in
- * red, lets the user inline-edit the bad rows, dedupes by normalized phone, and
- * imports only the clean rows. Under the hood it re-serializes the cleaned rows
- * to the backend's expected CSV (phone_number,first_name,last_name,email) and
- * reuses the existing upload endpoint — no backend change.
+ * Parses the CSV in the browser, auto-maps headers, runs every phone through
+ * the ONE shared phone module (@/lib/phone-number — E.164 or an error, never a
+ * guess), shows what each row saves as, lets the user inline-edit the bad
+ * rows, dedupes by E.164, and imports only the valid rows. The clean CSV is
+ * built by the ONE shared builder (@/lib/contact-upload-csv — same columns as
+ * the contacts page upload card) and sent to the existing upload endpoint.
+ * The Paste tab parses every pasted number the same way and sends only the
+ * valid E.164 values.
  */
 
 import { useMemo, useRef, useState } from "react";
@@ -16,36 +18,26 @@ import { AlertCircle, CheckCircle2, FileUp, Loader2, Upload } from "lucide-react
 
 import { Modal } from "@/components/ui/modal";
 import { Button } from "@/components/ui/button";
+import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
+import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
+import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 
 type Row = ContactRow;
-type PhoneCheck = { ok: boolean; normalized: string; reason?: string };
 
-/** Mirror of the backend normalize_phone_number, but flags <7 digits as a
- *  problem (a real dialer campaign wants real phone numbers, not extensions). */
-function checkPhone(raw: string): PhoneCheck {
-    const v = (raw || "").trim();
-    if (!v) return { ok: false, normalized: "", reason: "missing" };
-    const hasPlus = v.startsWith("+");
-    const digits = v.replace(/[^\d]/g, "");
-    if (!digits) return { ok: false, normalized: "", reason: "no digits" };
-    if (digits.length < 7) return { ok: false, normalized: "", reason: "too short" };
-    if (digits.length > 15) return { ok: false, normalized: "", reason: "too long" };
-    let normalized: string;
-    if (hasPlus) normalized = `+${digits}`;
-    else if (digits.length === 10) normalized = `+1${digits}`;
-    else if (digits.length === 11 && digits.startsWith("1")) normalized = `+${digits}`;
-    else normalized = `+${digits}`;
-    return { ok: true, normalized };
-}
+/** The backend numbers pasted tokens from 1. */
+const PASTE_FIRST_ROW = 1;
 
-// CSV parsing (preamble skip + fuzzy column mapping + Full Name split + company)
-// lives in the shared `@/lib/contact-csv` module so this modal and the global
-// /contacts page use ONE parser. See parseContactsCsv.
-
-function esc(s: string): string {
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+/** Split pasted text into the tokens the user wrote: one per line, or
+ *  comma / semicolon / pipe / tab separated. The token index (1-based) is the
+ *  row number shown for its error. */
+export function pasteTokens(text: string): Array<{ row: number; raw: string }> {
+    return text
+        .split(/[\n\r;,|\t]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((raw, i) => ({ row: i + 1, raw }));
 }
 
 export function SmartCsvImport({
@@ -61,27 +53,45 @@ export function SmartCsvImport({
     const [parseError, setParseError] = useState<string | null>(null);
     const [importing, setImporting] = useState(false);
     const [result, setResult] = useState<BulkImportResponse | null>(null);
+    // Backend row number in what was sent → row number in the user's own file / paste.
+    const [sentRowMap, setSentRowMap] = useState<Map<number, number>>(() => new Map());
     const [tab, setTab] = useState<"csv" | "paste">("csv");
     const [pasteText, setPasteText] = useState("");
+    // "Default country" for this entry point (both tabs): starts empty,
+    // applies only to numbers without "+", never stored between visits.
+    const [country, setCountry] = useState<CountrySelection>("");
     const fileRef = useRef<HTMLInputElement>(null);
 
     const reset = () => {
         setRows([]); setFileName(""); setParseError(null); setResult(null);
+        setSentRowMap(new Map());
         setPasteText("");
         if (fileRef.current) fileRef.current.value = "";
     };
 
-    // Count the non-empty lines/tokens in the paste box for the button label.
-    const pasteCount = useMemo(
-        () => pasteText.split(/[\n\r;,|\t]+/).map((s) => s.trim()).filter(Boolean).length,
-        [pasteText],
+    // Every pasted number through the shared module: valid ones carry their
+    // E.164, the rest their error, by the row the user wrote it on.
+    const pasted = useMemo(
+        () => pasteTokens(pasteText).map((t) => ({ ...t, check: parsePhoneNumber(t.raw, country) })),
+        [pasteText, country],
     );
+    const pasteValid = pasted.filter((p) => p.check.ok);
+    const pasteInvalid = pasted.filter((p) => !p.check.ok);
 
     const doPasteImport = async () => {
+        if (pasteValid.length === 0) return;
         setImporting(true);
         setParseError(null);
         try {
-            const res = await extendedApi.pasteContacts(campaignId, pasteText);
+            // Only the valid E.164 values are sent, one per line; the backend
+            // numbers them from 1 in the order sent.
+            const rowMap = new Map<number, number>();
+            const lines = pasteValid.map((p, i) => {
+                rowMap.set(i + PASTE_FIRST_ROW, p.row);
+                return (p.check as { ok: true; e164: string }).e164;
+            });
+            const res = await extendedApi.pasteContacts(campaignId, lines.join("\n"));
+            setSentRowMap(rowMap);
             setResult(res);
             onImported?.();
         } catch (err) {
@@ -109,19 +119,20 @@ export function SmartCsvImport({
         }
     };
 
-    // Per-row validation + duplicate detection (by normalized phone).
+    // Per-row validation of EVERY number cell (shared rule) + duplicate
+    // detection (by the main phone's E.164).
     const analyzed = useMemo(() => {
         const seen = new Set<string>();
         return rows.map((r) => {
-            const check = checkPhone(r.phone);
+            const check = parseRowNumbers(r, country);
             let dup = false;
             if (check.ok) {
-                if (seen.has(check.normalized)) dup = true;
-                else seen.add(check.normalized);
+                if (seen.has(check.numbers.e164)) dup = true;
+                else seen.add(check.numbers.e164);
             }
             return { row: r, check, dup };
         });
-    }, [rows]);
+    }, [rows, country]);
 
     const readyCount = analyzed.filter((a) => a.check.ok && !a.dup).length;
     const problemCount = analyzed.filter((a) => !a.check.ok).length;
@@ -134,14 +145,12 @@ export function SmartCsvImport({
         setImporting(true);
         setParseError(null);
         try {
-            const ready = analyzed.filter((a) => a.check.ok && !a.dup);
-            const csv = ["phone_number,first_name,last_name,email"]
-                .concat(ready.map((a) => [
-                    a.check.normalized, a.row.first_name, a.row.last_name, a.row.email,
-                ].map(esc).join(",")))
-                .join("\n");
-            const file = new File([csv], "contacts.csv", { type: "text/csv" });
-            const res = await extendedApi.uploadCSV(campaignId, file, true);
+            const ready = analyzed
+                .filter((a): a is typeof a & { check: { ok: true; numbers: RowNumbers } } => a.check.ok && !a.dup)
+                .map((a) => ({ numbers: a.check.numbers, row: a.row }));
+            const { csv, rowMap } = buildContactsUpload(ready);
+            const res = await extendedApi.uploadCSV(campaignId, uploadFileFromCsv(csv), true);
+            setSentRowMap(rowMap);
             setResult(res);
             onImported?.();
         } catch (err) {
@@ -172,6 +181,18 @@ export function SmartCsvImport({
         </div>
     );
 
+    const countrySelect = (
+        <div className="mb-3 max-w-sm">
+            <DefaultCountrySelect
+                id="campaign-import-country"
+                value={country}
+                onChange={setCountry}
+                disabled={importing}
+            />
+            <p className="mt-2 text-xs text-muted-foreground">{PHONE_HELP_TEXT}</p>
+        </div>
+    );
+
     return (
         <Modal
             open={open}
@@ -198,7 +219,7 @@ export function SmartCsvImport({
                             {result.failed} failed:
                             <ul className="mt-1 max-h-32 overflow-auto text-xs">
                                 {result.errors.slice(0, 20).map((e, i) => (
-                                    <li key={i}>row {e.row}{e.phone ? ` (${e.phone})` : ""}: {e.error}</li>
+                                    <li key={i}>row {sentRowMap.get(e.row) ?? e.row}{e.phone ? ` (${e.phone})` : ""}: {e.error}</li>
                                 ))}
                             </ul>
                         </div>
@@ -224,9 +245,11 @@ export function SmartCsvImport({
                         </button>
                     </div>
 
+                    {countrySelect}
+
                     {tab === "csv" ? (
                         <>
-                            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+                            <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" data-testid="campaign-import-file"
                                 onChange={(e) => onFile(e.target.files?.[0] ?? null)} />
                             <button
                                 type="button" onClick={() => fileRef.current?.click()}
@@ -242,17 +265,46 @@ export function SmartCsvImport({
                             <textarea
                                 value={pasteText}
                                 onChange={(e) => setPasteText(e.target.value)}
+                                aria-label="Paste phone numbers"
                                 placeholder={"Paste phone numbers — one per line, or comma/semicolon separated.\n\n+1 415 555 1234\n4155559999\n(212) 555-0000"}
                                 rows={10}
                                 className="w-full rounded-xl border border-gray-300 dark:border-white/15 bg-white dark:bg-zinc-900 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                             />
-                            <div className="flex items-center justify-between">
+                            {pasted.length > 0 && (
+                                <div className="max-h-48 overflow-y-auto rounded-lg border border-border">
+                                    <table className="w-full text-xs">
+                                        <thead className="bg-muted/50 text-left text-muted-foreground">
+                                            <tr>
+                                                <th className="px-2 py-1 font-medium">#</th>
+                                                <th className="px-2 py-1 font-medium">Number</th>
+                                                <th className="px-2 py-1 font-medium">Saves as</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {pasted.map((p) => (
+                                                <tr key={p.row} className={`border-t border-border ${p.check.ok ? "" : "bg-red-500/5"}`} data-testid="paste-row">
+                                                    <td className="px-2 py-1 tabular-nums text-muted-foreground">{p.row}</td>
+                                                    <td className="px-2 py-1 font-mono">{p.raw}</td>
+                                                    <td className="px-2 py-1">
+                                                        {p.check.ok
+                                                            ? <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{p.check.e164}</span>
+                                                            : <span className="font-semibold text-red-700 dark:text-red-300">{p.check.error}</span>}
+                                                    </td>
+                                                </tr>
+                                            ))}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                            <div className="flex flex-wrap items-center justify-between gap-2">
                                 <span className="text-xs text-muted-foreground">
-                                    {pasteCount > 0 ? `${pasteCount} number${pasteCount === 1 ? "" : "s"} detected · normalized & deduped server-side` : "One per line, or comma/semicolon separated. Normalized and deduped automatically."}
+                                    {pasted.length > 0
+                                        ? `${pasteValid.length} ready · ${pasteInvalid.length} need fixing`
+                                        : "One per line, or comma/semicolon separated."}
                                 </span>
-                                <Button onClick={doPasteImport} disabled={importing || pasteCount === 0}>
+                                <Button onClick={doPasteImport} disabled={importing || pasteValid.length === 0}>
                                     {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
-                                    {importing ? "Importing…" : `Import ${pasteCount || ""} contact${pasteCount === 1 ? "" : "s"}`}
+                                    {importing ? "Importing…" : `Import ${pasteValid.length} contact${pasteValid.length === 1 ? "" : "s"}`}
                                 </Button>
                             </div>
                         </div>
@@ -260,6 +312,7 @@ export function SmartCsvImport({
                 </div>
             ) : (
                 <div className="overflow-x-auto">
+                    {countrySelect}
                     <div className="mb-2 text-xs text-muted-foreground">
                         {fileName} — <span className="text-emerald-600 dark:text-emerald-400">{readyCount} ready</span>
                         {problemCount > 0 && <>, <span className="text-red-600 dark:text-red-400">{problemCount} need fixing</span></>}
@@ -269,7 +322,9 @@ export function SmartCsvImport({
                         <thead className="text-xs uppercase text-muted-foreground">
                             <tr>
                                 <th className="px-2 py-1 text-left w-6"></th>
+                                <th className="px-2 py-1 text-left">#</th>
                                 <th className="px-2 py-1 text-left">Phone</th>
+                                <th className="px-2 py-1 text-left">Saves as</th>
                                 <th className="px-2 py-1 text-left">First</th>
                                 <th className="px-2 py-1 text-left">Last</th>
                                 <th className="px-2 py-1 text-left">Email</th>
@@ -279,23 +334,29 @@ export function SmartCsvImport({
                             {analyzed.map((a, i) => {
                                 const bad = !a.check.ok;
                                 return (
-                                    <tr key={i} className={a.dup ? "opacity-50" : ""}>
+                                    <tr key={i} className={a.dup ? "opacity-50" : ""} data-testid="campaign-import-row">
                                         <td className="px-1 py-0.5">
                                             {bad ? <AlertCircle className="h-4 w-4 text-red-500" />
                                                 : a.dup ? <span className="text-[10px] text-muted-foreground">dup</span>
                                                     : <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
                                         </td>
+                                        <td className="px-1 py-0.5 tabular-nums text-xs text-muted-foreground">{a.row.source_row}</td>
                                         <td className="px-1 py-0.5">
                                             <input
                                                 value={a.row.phone}
                                                 onChange={(e) => editCell(i, "phone", e.target.value)}
-                                                title={bad ? a.check.reason : a.check.normalized}
+                                                aria-label={`Phone, row ${a.row.source_row}`}
+                                                aria-invalid={bad}
                                                 className={`w-36 rounded border px-2 py-1 text-sm bg-white dark:bg-zinc-900 focus:outline-none focus:ring-2 ${
                                                     bad
                                                         ? "border-red-400 text-red-700 dark:text-red-300 focus:ring-red-500"
                                                         : "border-gray-300 dark:border-white/15 focus:ring-emerald-500"}`}
                                             />
-                                            {bad && <span className="ml-1 text-[10px] text-red-600 dark:text-red-400">{a.check.reason}</span>}
+                                        </td>
+                                        <td className="px-1 py-0.5 text-xs">
+                                            {a.check.ok
+                                                ? <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{a.check.numbers.e164}</span>
+                                                : <span className="font-semibold text-red-700 dark:text-red-300">{a.check.error}</span>}
                                         </td>
                                         {(["first_name", "last_name", "email"] as const).map((f) => (
                                             <td key={f} className="px-1 py-0.5">

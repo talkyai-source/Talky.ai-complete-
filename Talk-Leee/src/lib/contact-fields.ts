@@ -1,4 +1,6 @@
 import type { ContactMutation } from "@/lib/dashboard-api";
+import { optionalE164, requiredE164 } from "@/lib/contact-form";
+import type { CountrySelection } from "@/lib/phone-number";
 
 /** Optional contact details offered by the "More details" dropdown on the
  *  Add/Edit contact form. Keys are ContactMutation fields the backend accepts. */
@@ -29,15 +31,19 @@ export const OPTIONAL_CONTACT_FIELDS: ReadonlyArray<{
     { key: "calling_notes", label: "Notes for the agent", placeholder: "Asked for a callback about card fees", maxLength: 4000 },
 ];
 
-/** Strip empty optional strings so an untouched field never overwrites a stored value with "". */
-export function contactPayload(form: ContactMutation): ContactMutation {
-    const out: Record<string, unknown> = { phone_number: form.phone_number.trim() };
+/** Keys that hold a phone number: sent only as the shared parser's E.164. */
+const NUMBER_KEYS = new Set(["mobile_number", "business_number"]);
+
+/** Strip empty optional strings so an untouched field never overwrites a stored value with "".
+ *  Numbers go through the shared phone parser (E.164 or a thrown error). */
+export function contactPayload(form: ContactMutation, country: CountrySelection = ""): ContactMutation {
+    const out: Record<string, unknown> = { phone_number: requiredE164(form.phone_number, country) };
     for (const [key, value] of Object.entries(form)) {
         if (key === "phone_number") continue;
         if (typeof value === "boolean") {
             out[key] = value;
         } else if (typeof value === "string" && value.trim()) {
-            out[key] = value.trim();
+            out[key] = NUMBER_KEYS.has(key) ? optionalE164(value, country) : value.trim();
         }
     }
     return out as unknown as ContactMutation;
@@ -47,15 +53,15 @@ export function contactPayload(form: ContactMutation): ContactMutation {
  *  operator cleared is sent explicitly (null; "" for names / mobile, which the
  *  API treats as "remove"), because the PATCH only changes keys it receives and
  *  omitting them leaves the old value stored while the UI says "Saved". */
-export function contactEditPayload(form: ContactMutation): ContactMutation {
-    const out: Record<string, unknown> = { phone_number: form.phone_number.trim() };
+export function contactEditPayload(form: ContactMutation, country: CountrySelection = ""): ContactMutation {
+    const out: Record<string, unknown> = { phone_number: requiredE164(form.phone_number, country) };
     const keepEmptyString = new Set(["first_name", "last_name", "mobile_number"]);
     for (const [key, value] of Object.entries(form)) {
         if (key === "phone_number") continue;
         if (typeof value === "boolean") {
             out[key] = value;
         } else if (typeof value === "string") {
-            const trimmed = value.trim();
+            const trimmed = NUMBER_KEYS.has(key) ? optionalE164(value, country) : value.trim();
             out[key] = trimmed || (keepEmptyString.has(key) ? "" : null);
         }
     }

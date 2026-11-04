@@ -46,16 +46,20 @@ export interface WindowCheck {
     tz: string;
 }
 
-/** Is the current moment outside the campaign's calling window? Advisory only. */
-export function checkCallingWindow(s?: CampaignCallingSchedule | null): WindowCheck {
-    const tz = s?.timezone || DEFAULT_TZ;
+/** Is the current moment outside the campaign's calling window? Advisory only.
+ *  `now` exists for tests; callers use the real clock. */
+export function checkCallingWindow(s?: CampaignCallingSchedule | null, now: Date = new Date()): WindowCheck {
+    // A window with no saved start or end is the UTC default (09:00–19:00),
+    // so it is evaluated AND shown in UTC — never presented as a local window.
+    const hoursDefaulted = !s?.time_window_start || !s?.time_window_end;
+    const tz = hoursDefaulted ? DEFAULT_TZ : (s?.timezone || DEFAULT_TZ);
     const start = s?.time_window_start || DEFAULT_START;
     const end = s?.time_window_end || DEFAULT_END;
     const days = s?.allowed_days && s.allowed_days.length ? s.allowed_days : DEFAULT_DAYS;
 
     let cur: { weekday: number; minutes: number };
     try {
-        cur = partsInZone(tz);
+        cur = partsInZone(tz, now);
     } catch {
         return { outside: false, message: "", tz };
     }
@@ -68,7 +72,9 @@ export function checkCallingWindow(s?: CampaignCallingSchedule | null): WindowCh
     }
     return {
         outside: true,
-        message: `It's ${fmt12(cur.minutes)} in ${tz}, outside the ${fmt12(toMin(start))}–${fmt12(toMin(end))} calling window.`,
+        message: hoursDefaulted
+            ? `It's ${fmt12(cur.minutes)} in UTC, outside the default ${fmt12(toMin(start))}–${fmt12(toMin(end))} UTC calling window.`
+            : `It's ${fmt12(cur.minutes)} in ${tz}, outside the ${fmt12(toMin(start))}–${fmt12(toMin(end))} calling window.`,
         tz,
     };
 }

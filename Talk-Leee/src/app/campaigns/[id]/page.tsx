@@ -10,6 +10,9 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, campaignStartErrorMessage, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
 import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
 import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPages, type OptionalContactFieldKey } from "@/lib/contact-fields";
+import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
+import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
+import { PhoneStatusLine } from "@/components/contacts/phone-status-line";
 import { SmartCsvImport } from "@/components/campaigns/smart-csv-import";
 import { ContactLists, ActiveContactsSummary } from "@/components/campaigns/contact-lists";
 import { ScriptCard } from "@/components/campaigns/script-card";
@@ -20,7 +23,7 @@ import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { TestAgentButton } from "@/components/campaigns/test-agent-button";
 import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
 import { Modal } from "@/components/ui/modal";
-import { checkCallingWindow } from "@/lib/calling-window";
+import { CallingScheduleLine, CallingScheduleStartNotice } from "@/components/campaigns/calling-schedule-notice";
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
@@ -199,6 +202,19 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     // backend already accepts every one of these on POST/PATCH contacts).
     const [extraContactFields, setExtraContactFields] = useState<OptionalContactFieldKey[]>([]);
     const [addingContact, setAddingContact] = useState(false);
+    // "Default country" for the Add/Edit contact form (EP4): starts empty,
+    // applies only to numbers without "+", never stored between visits.
+    const [contactCountry, setContactCountry] = useState<CountrySelection>("");
+    // What each number will be saved as (or why it cannot be), from the ONE
+    // shared phone module; Save stays blocked while any is invalid.
+    const phoneStatus = parsePhoneNumber(contactForm.phone_number, contactCountry);
+    const optionalNumberStatus = (key: OptionalContactFieldKey) => {
+        if (key !== "mobile_number" && key !== "business_number") return null;
+        const raw = String(contactForm[key] ?? "");
+        return raw.trim() ? parsePhoneNumber(raw, contactCountry) : null;
+    };
+    const contactFormValid = phoneStatus.ok
+        && extraContactFields.every((key) => optionalNumberStatus(key)?.ok ?? true);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
     const [contactSearch, setContactSearch] = useState("");
@@ -387,11 +403,14 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
 
     async function handleAddContact(e: React.FormEvent) {
         e.preventDefault();
+        // An invalid number never becomes a contact: the button is disabled
+        // and the submit is refused here too (the payload builders would throw).
+        if (!contactFormValid) return;
         try {
             setAddingContact(true);
             const payload = editingContact
-                ? contactEditPayload(contactForm)
-                : contactPayload(contactForm);
+                ? contactEditPayload(contactForm, contactCountry)
+                : contactPayload(contactForm, contactCountry);
             if (editingContact) {
                 await dashboardApi.updateContact(campaignId, editingContact.id, payload);
             } else {
@@ -494,6 +513,11 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             {campaign.description && (
                                 <p className="mt-2 text-muted-foreground">{campaign.description}</p>
                             )}
+                            <CallingScheduleLine
+                                callingConfig={campaign.calling_config}
+                                testId="campaign-calling-schedule"
+                                className="mt-2 text-sm text-muted-foreground"
+                            />
                         </div>
 
                         <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center lg:w-auto lg:justify-end">
@@ -754,15 +778,27 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                         {showAddContact && (
                             <form onSubmit={handleAddContact} className="mb-6 p-4 bg-muted/30 rounded-lg border border-border">
                                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+                                    <DefaultCountrySelect
+                                        id="contact-country"
+                                        value={contactCountry}
+                                        onChange={setContactCountry}
+                                        disabled={addingContact}
+                                    />
                                     <div>
                                         <Label htmlFor="phone">Phone Number</Label>
                                         <Input
                                             id="phone"
+                                            type="tel"
+                                            inputMode="tel"
                                             value={contactForm.phone_number}
                                             onChange={(e) => setContactForm((prev) => ({ ...prev, phone_number: e.target.value }))}
                                             placeholder="+1234567890"
                                             required
+                                            aria-invalid={contactForm.phone_number.trim() ? !phoneStatus.ok : undefined}
+                                            aria-describedby="phone-help phone-status"
                                         />
+                                        <p id="phone-help" className="mt-1.5 text-xs text-muted-foreground">{PHONE_HELP_TEXT}</p>
+                                        <PhoneStatusLine id="phone-status" raw={contactForm.phone_number} status={phoneStatus} />
                                     </div>
                                     <div>
                                         <Label htmlFor="first_name">First Name</Label>
@@ -822,6 +858,8 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                                             {extraContactFields.map((key) => {
                                                 const field = OPTIONAL_CONTACT_FIELDS.find((f) => f.key === key)!;
+                                                const isNumber = key === "mobile_number" || key === "business_number";
+                                                const numberStatus = optionalNumberStatus(key);
                                                 return (
                                                     <div key={key}>
                                                         <div className="flex items-center justify-between">
@@ -850,13 +888,24 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                                 ))}
                                                             </Select>
                                                         ) : (
-                                                            <Input
-                                                                id={`contact-${key}`}
-                                                                value={String(contactForm[key] ?? "")}
-                                                                onChange={(e) => setContactForm((prev) => ({ ...prev, [key]: e.target.value }))}
-                                                                placeholder={field.placeholder}
-                                                                maxLength={field.maxLength}
-                                                            />
+                                                            <>
+                                                                <Input
+                                                                    id={`contact-${key}`}
+                                                                    value={String(contactForm[key] ?? "")}
+                                                                    onChange={(e) => setContactForm((prev) => ({ ...prev, [key]: e.target.value }))}
+                                                                    placeholder={field.placeholder}
+                                                                    maxLength={field.maxLength}
+                                                                    aria-invalid={numberStatus ? !numberStatus.ok : undefined}
+                                                                    aria-describedby={isNumber ? `contact-${key}-status` : undefined}
+                                                                />
+                                                                {isNumber && (
+                                                                    <PhoneStatusLine
+                                                                        id={`contact-${key}-status`}
+                                                                        raw={String(contactForm[key] ?? "")}
+                                                                        status={numberStatus}
+                                                                    />
+                                                                )}
+                                                            </>
                                                         )}
                                                     </div>
                                                 );
@@ -865,7 +914,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     ) : null}
                                 </div>
                                 <div className="flex gap-2">
-                                    <Button type="submit" size="sm" disabled={addingContact}>
+                                    <Button type="submit" size="sm" disabled={addingContact || !contactFormValid}>
                                         {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                                     </Button>
                                     <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); }}>
@@ -1040,23 +1089,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             >
                 <div className="space-y-2">
                     <CampaignReadinessNotice readiness={readiness} />
-                    {(() => {
-                        const sched = campaign?.calling_config;
-                        if (!sched) return null;
-                        const win = checkCallingWindow(sched);
-                        if (!win.outside) return null;
-                        return (
-                            <div className="mb-2 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
-                                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                                <span>
-                                    {win.message}{" "}
-                                    {sched.ignore_schedule
-                                        ? "“Call anytime” is on, so calls will go out now."
-                                        : "Calls will wait until the window opens. You can start anyway — turn on “call anytime” in the campaign’s calling hours to dial immediately."}
-                                </span>
-                            </div>
-                        );
-                    })()}
+                    <CallingScheduleStartNotice callingConfig={campaign?.calling_config} />
                     <label
                         className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
                             firstSpeaker === "agent"

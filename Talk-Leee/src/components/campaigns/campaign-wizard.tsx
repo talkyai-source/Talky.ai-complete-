@@ -26,6 +26,7 @@ import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
+import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
 import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
 import {
@@ -157,7 +158,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     const [provider, setProvider] = useState(() => (typeof restoredDraft?.provider === "string" ? restoredDraft.provider : ""));
     const [goal, setGoal] = useState(() => (typeof restoredDraft?.goal === "string" ? restoredDraft.goal : ""));
     const [schedule, setSchedule] = useState<CampaignCallingSchedule>(() => (
-        restoredDraft?.schedule && typeof restoredDraft.schedule === "object" ? restoredDraft.schedule : {}
+        restoredDraft?.schedule && typeof restoredDraft.schedule === "object" ? restoredDraft.schedule : defaultCallingSchedule()
     ));
     const [briefDraft, setBriefDraft] = useState<CampaignBriefDraft>(() => ({
         ...EMPTY_CAMPAIGN_BRIEF_DRAFT,
@@ -319,7 +320,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                     campaign_slots: {},
                     campaign_brief: campaignBrief,
                     knowledge_driven: true,
-                    ...(inbound ? { direction: "inbound" as const } : { calling_schedule: schedule }),
+                    ...(inbound ? { direction: "inbound" as const } : { calling_schedule: callingSchedulePayload(schedule) }),
                 });
                 campaignId = campaign.id;
                 setCreatedCampaignId(campaign.id);

@@ -10,11 +10,15 @@ import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
-import { parseContactsCsv } from "@/lib/contact-csv";
+import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
 import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
+import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
+import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { ContactLists } from "@/components/campaigns/contact-lists";
 import { CsvImportMapper } from "@/components/contacts/csv-import-mapper";
+import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
+import { PhoneStatusLine } from "@/components/contacts/phone-status-line";
 import {
     AlertCircle,
     Building2,
@@ -41,14 +45,24 @@ const MAX_ROWS = 50_000;
 const PREVIEW_ROWS = 5;
 
 type ParsedRow = {
+    /** Row number in the user's ORIGINAL file (header, preamble and blank lines count). */
     rowNum: number;
     phone: string;
+    /** E.164 the shared parser produced; "" when the row is invalid. */
+    e164: string;
+    /** Every number cell as E.164 (null when the row is invalid). */
+    numbers: RowNumbers | null;
     firstName: string;
     lastName: string;
     email: string;
     valid: boolean;
     error?: string;
+    source: ContactRow;
 };
+
+/** A row the browser refused to send, listed in the result card with its
+ *  original row number so the user can find it in their own file. */
+type RejectedRow = { row: number; phone: string; error: string };
 
 type ParseSummary = {
     headers: string[];
@@ -127,22 +141,16 @@ function ContactRequirementsGuide() {
     );
 }
 
-function isLikelyValidPhone(raw: string): boolean {
-    const cleaned = raw.replace(/[^\d]/g, "");
-    if (cleaned.length < 3) return false;
-    if (cleaned.length > 15) return false;
-    return /\d/.test(cleaned);
-}
-
 function isLikelyValidEmail(raw: string): boolean {
     if (!raw) return true; // optional
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw);
 }
 
-function parseCsvText(text: string): ParseSummary {
+function parseCsvText(text: string, country: CountrySelection): ParseSummary {
     // ONE shared parser (skips preamble, fuzzy-maps columns, splits Full Name,
-    // captures company) — see @/lib/contact-csv. This page keeps its own
-    // per-row validation (phone/email sanity + in-file dedupe) on top.
+    // captures company) — see @/lib/contact-csv. Phones go through the ONE
+    // shared phone module (@/lib/phone-number); this page keeps the email
+    // sanity check and the in-file dedupe (by E.164) on top.
     const { headers, rows: contactRows, phoneFound } = parseContactsCsv(text);
     if (!phoneFound) {
         return {
@@ -161,28 +169,33 @@ function parseCsvText(text: string): ParseSummary {
     let valid = 0;
     let invalid = 0;
 
-    contactRows.forEach((c, i) => {
+    contactRows.forEach((c) => {
         const phone = c.phone;
         const email = c.email;
+        // ONE rule for every number cell (phone, mobile_number, business_number).
+        const numbers = parseRowNumbers(c, country);
+        const e164 = numbers.ok ? numbers.numbers.e164 : "";
 
         let error: string | undefined;
-        if (!phone) error = "phone_number is empty";
-        else if (!isLikelyValidPhone(phone)) error = "phone_number looks invalid";
+        if (!numbers.ok) error = numbers.error;
         else if (!isLikelyValidEmail(email)) error = "email looks invalid";
-        else if (seen.has(phone)) error = "duplicate phone_number in this file";
+        else if (seen.has(e164)) error = "duplicate phone_number in this file";
 
-        if (!error) seen.add(phone);
+        if (!error) seen.add(e164);
         const ok = !error;
         if (ok) valid++; else invalid++;
 
         rows.push({
-            rowNum: i + 2, // +2: 1 header row + 1-based display
+            rowNum: c.source_row,
             phone,
+            e164,
+            numbers: numbers.ok ? numbers.numbers : null,
             firstName: c.first_name,
             lastName: c.last_name,
             email,
             valid: ok,
             error,
+            source: c,
         });
     });
 
@@ -212,10 +225,20 @@ export default function ContactsPage() {
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
     const [selectedCampaign, setSelectedCampaign] = useState<string>("");
     const [file, setFile] = useState<File | null>(null);
-    const [parsed, setParsed] = useState<ParseSummary | null>(null);
+    // The raw file text is kept so the preview re-parses when the default
+    // country changes; `parsed` is derived from it below.
+    const [fileText, setFileText] = useState<string | null>(null);
+    // "Default country" for the upload card (EP1). Starts empty, applies only
+    // to numbers without "+", and is never stored between visits.
+    const [importCountry, setImportCountry] = useState<CountrySelection>("");
     const [dragActive, setDragActive] = useState(false);
     const [uploading, setUploading] = useState(false);
     const [result, setResult] = useState<BulkImportResponse | null>(null);
+    // Rows the browser refused to send on the last import, and the map from
+    // the backend's row numbers (in the clean CSV it received) back to the
+    // user's original file rows.
+    const [rejectedRows, setRejectedRows] = useState<RejectedRow[]>([]);
+    const [sentRowMap, setSentRowMap] = useState<Map<number, number>>(() => new Map());
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -239,9 +262,29 @@ export default function ContactsPage() {
     const [showAddContact, setShowAddContact] = useState(false);
     const [showContactDetails, setShowContactDetails] = useState(false);
     const [contactForm, setContactForm] = useState<ContactFormState>(EMPTY_CONTACT_FORM);
+    // "Default country" for the Add/Edit contact form (EP5); same rules as above.
+    const [formCountry, setFormCountry] = useState<CountrySelection>("");
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
     const [savingContact, setSavingContact] = useState(false);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
+
+    const parsed = useMemo(
+        () => (fileText === null ? null : parseCsvText(fileText, importCountry)),
+        [fileText, importCountry],
+    );
+
+    // What the form's numbers will be saved as (or why they cannot be), from
+    // the ONE shared phone module. Save stays blocked while any is invalid.
+    const phoneStatus = useMemo(() => parsePhoneNumber(contactForm.phone_number, formCountry), [contactForm.phone_number, formCountry]);
+    const mobileStatus = useMemo(
+        () => (contactForm.mobile_number.trim() ? parsePhoneNumber(contactForm.mobile_number, formCountry) : null),
+        [contactForm.mobile_number, formCountry],
+    );
+    const businessStatus = useMemo(
+        () => (contactForm.business_number.trim() ? parsePhoneNumber(contactForm.business_number, formCountry) : null),
+        [contactForm.business_number, formCountry],
+    );
+    const contactFormValid = phoneStatus.ok && (mobileStatus?.ok ?? true) && (businessStatus?.ok ?? true);
 
     async function loadCampaigns() {
         try {
@@ -329,9 +372,12 @@ export default function ContactsPage() {
 
     async function handleSaveContact(e: React.FormEvent) {
         e.preventDefault();
+        // An invalid number never becomes a contact: the button is disabled
+        // and the submit is refused here as well (contactPayload would throw).
+        if (!contactFormValid) return;
         try {
             setSavingContact(true);
-            const payload = contactPayload(contactForm);
+            const payload = contactPayload(contactForm, formCountry);
             if (editingContact) {
                 await dashboardApi.updateContact(selectedCampaign, editingContact.id, payload);
             } else {
@@ -417,13 +463,19 @@ export default function ContactsPage() {
 
     function clearFile() {
         setFile(null);
-        setParsed(null);
+        setFileText(null);
         if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+
+    function clearResult() {
+        setResult(null);
+        setRejectedRows([]);
+        setSentRowMap(new Map());
     }
 
     async function acceptFile(f: File) {
         setError("");
-        setResult(null);
+        clearResult();
         if (!f.name.toLowerCase().endsWith(".csv")) {
             setError("File must be a .csv");
             clearFile();
@@ -440,27 +492,22 @@ export default function ContactsPage() {
             return;
         }
         const text = await f.text();
-        const summary = parseCsvText(text);
+        // Structural checks only (none depends on the country); the preview
+        // itself is derived from `fileText` + `importCountry`.
+        const summary = parseCsvText(text, importCountry);
+        setFile(f);
+        setFileText(text);
         if (summary.headerError) {
             setError(summary.headerError);
-            setFile(f);
-            setParsed(summary);
             return;
         }
         if (summary.rows.length === 0) {
             setError("CSV has a header but no data rows.");
-            setFile(f);
-            setParsed(summary);
             return;
         }
         if (summary.rows.length > MAX_ROWS) {
             setError(`File has ${summary.rows.length.toLocaleString()} rows. Maximum is ${MAX_ROWS.toLocaleString()}.`);
-            setFile(f);
-            setParsed(summary);
-            return;
         }
-        setFile(f);
-        setParsed(summary);
     }
 
     function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -513,55 +560,71 @@ export default function ContactsPage() {
         if (!file || !selectedCampaign) return false;
         if (uploading) return false;
         if (!parsed || parsed.headerError) return false;
+        if (parsed.rows.length === 0 || parsed.rows.length > MAX_ROWS) return false;
         return parsed.valid > 0;
     }, [file, selectedCampaign, uploading, parsed]);
 
+    /** THE upload path. Both the upload card's Upload button (EP1) and the
+     *  "Check the file first" mapper's Import button (EP2) end here: only
+     *  rows the shared phone module accepted are written to the clean CSV
+     *  (one shared builder, same columns as the campaign Import CSV modal);
+     *  the rest are listed in the result card with their original row
+     *  number and their error. */
+    async function importParsedRows(summary: ParseSummary) {
+        const accepted = summary.rows
+            .filter((r): r is ParsedRow & { numbers: RowNumbers } => r.valid && r.numbers !== null)
+            .map((r) => ({ numbers: r.numbers, row: r.source }));
+        const rejected: RejectedRow[] = summary.rows
+            .filter((r) => !r.valid)
+            .map((r) => ({ row: r.rowNum, phone: r.phone, error: r.error ?? "" }));
+        if (accepted.length === 0) {
+            // Nothing valid to send: no request, nothing looks successful.
+            setResult(null);
+            setRejectedRows(rejected);
+            setSentRowMap(new Map());
+            return;
+        }
+        const { csv, rowMap } = buildContactsUpload(accepted);
+        const response = await extendedApi.uploadCSV(selectedCampaign, uploadFileFromCsv(csv), true);
+        setResult(response);
+        setRejectedRows(rejected);
+        setSentRowMap(rowMap);
+        clearFile();
+        // A successful import means the campaign now has contacts — flip into
+        // the home view and refresh the lists row + contacts table.
+        if (response.imported > 0) setCampaignHasContacts(true);
+        setShowUploadPanel(false);
+        setListsRefreshToken((t) => t + 1);
+        void loadContacts();
+    }
+
     async function handleUpload() {
-        if (!canUpload || !file) return;
+        if (!canUpload || !parsed) return;
         try {
             setUploading(true);
             setError("");
-            // Rebuild a CLEAN csv from the shared parser (skips the export's
-            // title/metadata preamble + normalizes headers to what the backend
-            // expects) so the raw file's junk rows never reach the server. Same
-            // approach as the campaign SmartCsvImport.
-            const esc = (s: string) => (/[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s);
-            const { rows: contactRows } = parseContactsCsv(await file.text());
-            const clean = contactRows.filter((r) => r.phone && isLikelyValidPhone(r.phone));
-            const csvHeaders = [
-                "phone_number", "full_name", "first_name", "last_name", "email",
-                "company_name", "mobile_number", "business_number", "job_title",
-                "best_time_to_call", "timezone", "calling_notes",
-                "preferred_contact_method", "do_not_call",
-            ];
-            const csv = [csvHeaders.join(",")]
-                .concat(clean.map((r) => [
-                    r.phone,
-                    r.full_name,
-                    r.first_name,
-                    r.last_name,
-                    r.email,
-                    r.company,
-                    r.mobile_number,
-                    r.business_number,
-                    r.job_title,
-                    r.best_time_to_call,
-                    r.timezone,
-                    r.calling_notes,
-                    r.preferred_contact_method,
-                    r.do_not_call,
-                ].map(esc).join(",")))
-                .join("\n");
-            const cleanFile = new File([csv], "contacts.csv", { type: "text/csv" });
-            const response = await extendedApi.uploadCSV(selectedCampaign, cleanFile, true);
-            setResult(response);
-            clearFile();
-            // A successful import means the campaign now has contacts — flip into
-            // the home view and refresh the lists row + contacts table.
-            if (response.imported > 0) setCampaignHasContacts(true);
-            setShowUploadPanel(false);
-            setListsRefreshToken((t) => t + 1);
-            void loadContacts();
+            await importParsedRows(parsed);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Upload failed");
+        } finally {
+            setUploading(false);
+        }
+    }
+
+    /** EP2: the mapper's "Import N contacts" button sends its file through
+     *  the SAME path as the Upload button above. */
+    async function handleMapperImport(mapperFile: File, country: CountrySelection) {
+        if (!selectedCampaign || uploading) return;
+        try {
+            setUploading(true);
+            setError("");
+            clearResult();
+            const summary = parseCsvText(await mapperFile.text(), country);
+            if (summary.headerError) {
+                setError(summary.headerError);
+                return;
+            }
+            await importParsedRows(summary);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Upload failed");
         } finally {
@@ -609,6 +672,16 @@ export default function ContactsPage() {
                                 </Select>
                             </div>
                             )}
+
+                            <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm">
+                                <DefaultCountrySelect
+                                    id="contacts-import-country"
+                                    value={importCountry}
+                                    onChange={setImportCountry}
+                                    disabled={uploading}
+                                />
+                                <p className="mt-2 text-xs text-muted-foreground">{PHONE_HELP_TEXT}</p>
+                            </div>
 
                             <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm">
                                 <label htmlFor="contacts-csv-file" className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">CSV File</label>
@@ -674,7 +747,7 @@ export default function ContactsPage() {
                                 <code className="inline-flex rounded-lg border border-border bg-background/70 px-2 py-1 text-xs font-semibold text-foreground">
                                     phone_number,full_name,email,company_name
                                 </code>
-                                <p className="text-xs text-muted-foreground mt-2">Phone numbers are normalized to E.164 server-side. 10-digit US numbers get +1 added automatically.</p>
+                                <p className="text-xs text-muted-foreground mt-2">{PHONE_HELP_TEXT}</p>
                             </div>
 
                             {parsed && !parsed.headerError && (
@@ -700,12 +773,12 @@ export default function ContactsPage() {
                                                     <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-muted-foreground">First</th>
                                                     <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-muted-foreground">Last</th>
                                                     <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-muted-foreground">Email</th>
-                                                    <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-muted-foreground">Status</th>
+                                                    <th className="px-2 py-1.5 text-left font-bold uppercase tracking-wide text-muted-foreground">Saves as</th>
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-border">
                                                 {previewRows.map((r) => (
-                                                    <tr key={r.rowNum} className={r.valid ? undefined : "bg-red-500/5"}>
+                                                    <tr key={r.rowNum} className={r.valid ? undefined : "bg-red-500/5"} data-testid="contacts-preview-row">
                                                         <td className="px-2 py-1.5 tabular-nums text-muted-foreground">{r.rowNum}</td>
                                                         <td className="px-2 py-1.5 text-foreground">{r.phone || <span className="text-muted-foreground">—</span>}</td>
                                                         <td className="px-2 py-1.5 text-foreground">{r.firstName || <span className="text-muted-foreground">—</span>}</td>
@@ -713,7 +786,7 @@ export default function ContactsPage() {
                                                         <td className="px-2 py-1.5 text-foreground">{r.email || <span className="text-muted-foreground">—</span>}</td>
                                                         <td className="px-2 py-1.5">
                                                             {r.valid ? (
-                                                                <span className="text-emerald-700 dark:text-emerald-300 font-semibold">OK</span>
+                                                                <span className="font-semibold tabular-nums text-emerald-700 dark:text-emerald-300">{r.e164}</span>
                                                             ) : (
                                                                 <span className="text-red-700 dark:text-red-300 font-semibold" title={r.error}>{r.error}</span>
                                                             )}
@@ -763,9 +836,20 @@ export default function ContactsPage() {
         (result as (BulkImportResponse & { field_errors?: ImportFieldError[] }) | null)
             ?.field_errors ?? [];
 
-    const resultCard = result ? (
-                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="content-card">
+    // Every row error names the row in the user's ORIGINAL file: rows the
+    // browser refused come with it already; the backend's rows (numbered in
+    // the clean CSV it received) are mapped back through `sentRowMap`.
+    const originalRow = (row: number | null | undefined): number | string =>
+        row == null ? "--" : (sentRowMap.get(row) ?? row);
+    const rowErrors: Array<{ row: number | string; phone: string; error: string }> = [
+        ...rejectedRows.map((r) => ({ row: r.row, phone: r.phone, error: r.error })),
+        ...(result?.errors ?? []).map((err) => ({ row: originalRow(err.row), phone: err.phone || "", error: err.error })),
+    ];
+
+    const resultCard = result || rejectedRows.length > 0 ? (
+                        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="content-card" data-testid="contacts-import-results">
                             <h3 className="mb-4 text-sm font-semibold text-foreground">Import Results</h3>
+                            {result && (
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                                 <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center shadow-sm">
                                     <p className="text-2xl font-black tabular-nums text-foreground">{result.total_rows}</p>
@@ -784,17 +868,18 @@ export default function ContactsPage() {
                                     <p className="text-xs font-semibold uppercase tracking-wide text-red-700/80 dark:text-red-300/80">Failed</p>
                                 </div>
                             </div>
+                            )}
 
-                            {result.imported > 0 && (
+                            {result && result.imported > 0 && (
                                 <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
                                     <CheckCircle className="h-4 w-4" />
                                     Successfully imported {result.imported} contacts
                                 </div>
                             )}
 
-                            {result.errors.length > 0 && (
+                            {rowErrors.length > 0 && (
                                 <div>
-                                    <h4 className="mb-2 text-sm font-semibold text-foreground">Errors ({result.errors.length})</h4>
+                                    <h4 className="mb-2 text-sm font-semibold text-foreground">Errors ({rowErrors.length})</h4>
                                     <div className="max-h-48 overflow-y-auto rounded-2xl border border-border bg-background/50">
                                         <table className="w-full text-sm">
                                             <thead className="sticky top-0 bg-muted/60">
@@ -805,9 +890,9 @@ export default function ContactsPage() {
                                                 </tr>
                                             </thead>
                                             <tbody className="divide-y divide-border">
-                                                {result.errors.map((err, i) => (
-                                                    <tr key={i}>
-                                                        <td className="px-3 py-2 font-semibold text-foreground">{err.row}</td>
+                                                {rowErrors.map((err, i) => (
+                                                    <tr key={i} data-testid="contacts-import-error-row">
+                                                        <td className="px-3 py-2 font-semibold tabular-nums text-foreground">{err.row}</td>
                                                         <td className="px-3 py-2 text-muted-foreground">{err.phone || "--"}</td>
                                                         <td className="px-3 py-2 text-destructive">{err.error}</td>
                                                     </tr>
@@ -846,7 +931,7 @@ export default function ContactsPage() {
                                             <tbody className="divide-y divide-border">
                                                 {fieldErrors.map((err, i) => (
                                                     <tr key={i}>
-                                                        <td className="px-3 py-2 font-semibold text-foreground">{err.row ?? "--"}</td>
+                                                        <td className="px-3 py-2 font-semibold text-foreground">{originalRow(err.row)}</td>
                                                         <td className="px-3 py-2 text-muted-foreground">{err.field ?? "--"}</td>
                                                         <td className="px-3 py-2 text-muted-foreground">{err.value || "--"}</td>
                                                         <td className="px-3 py-2 text-yellow-700 dark:text-yellow-300">{err.error}</td>
@@ -871,6 +956,12 @@ export default function ContactsPage() {
                 <p className="text-xs text-muted-foreground">Fields marked required must be completed. Extra context is optional but improves call quality.</p>
             </div>
             <div className="mb-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                <DefaultCountrySelect
+                    id="contact-country"
+                    value={formCountry}
+                    onChange={setFormCountry}
+                    disabled={savingContact}
+                />
                 <div>
                     <Label htmlFor="contact-phone">Phone Number <span className="text-destructive">*</span></Label>
                     <Input
@@ -882,9 +973,11 @@ export default function ContactsPage() {
                         onChange={(event) => setContactForm((previous) => ({ ...previous, phone_number: event.target.value }))}
                         placeholder="+1234567890"
                         required
-                        aria-describedby="contact-phone-help"
+                        aria-invalid={contactForm.phone_number.trim() ? !phoneStatus.ok : undefined}
+                        aria-describedby="contact-phone-help contact-phone-status"
                     />
-                    <p id="contact-phone-help" className="mt-1.5 text-xs text-muted-foreground">Required · include country code</p>
+                    <p id="contact-phone-help" className="mt-1.5 text-xs text-muted-foreground">{PHONE_HELP_TEXT}</p>
+                    <PhoneStatusLine id="contact-phone-status" raw={contactForm.phone_number} status={phoneStatus} />
                 </div>
                 <div>
                     <Label htmlFor="contact-first-name">First Name <span className="font-normal text-muted-foreground">(recommended)</span></Label>
@@ -950,7 +1043,10 @@ export default function ContactsPage() {
                                 value={contactForm.mobile_number}
                                 onChange={(event) => setContactForm((previous) => ({ ...previous, mobile_number: event.target.value }))}
                                 placeholder="Optional alternate mobile"
+                                aria-invalid={mobileStatus ? !mobileStatus.ok : undefined}
+                                aria-describedby="contact-mobile-number-status"
                             />
+                            <PhoneStatusLine id="contact-mobile-number-status" raw={contactForm.mobile_number} status={mobileStatus} />
                         </div>
                         <div>
                             <Label htmlFor="contact-business-number">Business Number</Label>
@@ -961,7 +1057,10 @@ export default function ContactsPage() {
                                 value={contactForm.business_number}
                                 onChange={(event) => setContactForm((previous) => ({ ...previous, business_number: event.target.value }))}
                                 placeholder="Optional office number"
+                                aria-invalid={businessStatus ? !businessStatus.ok : undefined}
+                                aria-describedby="contact-business-number-status"
                             />
+                            <PhoneStatusLine id="contact-business-number-status" raw={contactForm.business_number} status={businessStatus} />
                         </div>
                         <div>
                             <Label htmlFor="contact-company">Company</Label>
@@ -1043,7 +1142,7 @@ export default function ContactsPage() {
             </div>
 
             <div className="flex flex-wrap gap-2">
-                <Button type="submit" size="sm" disabled={savingContact}>
+                <Button type="submit" size="sm" disabled={savingContact || !contactFormValid}>
                     {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={closeContactForm}>
@@ -1120,7 +1219,7 @@ export default function ContactsPage() {
                             className="w-full sm:w-auto xl:shrink-0"
                             aria-expanded={showUploadPanel}
                             aria-controls="contacts-upload-panel"
-                            onClick={() => { setShowUploadPanel((v) => !v); setResult(null); }}
+                            onClick={() => { setShowUploadPanel((v) => !v); clearResult(); }}
                         >
                             <Plus className="w-4 h-4" />
                             Add more contacts
@@ -1143,7 +1242,7 @@ export default function ContactsPage() {
                                     See how your columns will be read and what needs
                                     attention. Nothing is saved at this step.
                                 </p>
-                                <CsvImportMapper />
+                                <CsvImportMapper onConfirm={(mapperFile, country) => void handleMapperImport(mapperFile, country)} busy={uploading} />
                             </div>
                             {uploadCard}
                         </div>

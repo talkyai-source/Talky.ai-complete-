@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { dashboardApi, PersonaType } from "@/lib/dashboard-api";
+import { dashboardApi, PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
     buildCampaignBrief,
@@ -43,6 +43,8 @@ import {
 } from "@/lib/campaign-personas";
 import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
+import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
+import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
 import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
 import {
     CampaignLeadFieldsPicker,
@@ -123,6 +125,8 @@ export interface CampaignFormInitial {
     /** Persona-specific slot values — keyed by slot.key. */
     slots: Record<string, string>;
     campaign_brief?: CampaignBrief;
+    /** Saved outbound calling schedule (`calling_config`); null when none is saved. */
+    calling_schedule?: CampaignCallingSchedule | null;
 }
 
 interface Props {
@@ -133,7 +137,9 @@ interface Props {
     initialData?: CampaignFormInitial;
     /** Where to go after a successful CREATE; defaults to the campaign page. */
     afterCreateHref?: (campaignId: string) => string;
-    /** 2026-09-09: create the campaign born inbound (same options, same form). */
+    /** 2026-09-09: create the campaign born inbound (same options, same form).
+     *  In edit mode it is the saved direction: only an outbound campaign
+     *  carries the calling schedule editor (inbound hours live elsewhere). */
     direction?: "outbound" | "inbound";
     /**
      * When set, the fields below are mirrored to sessionStorage under this
@@ -185,6 +191,11 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
     }, []);
 
     const [voiceSelection, setVoiceSelection] = useState<CampaignVoiceSettingsValue>(restoredDraft?.voiceSelection ?? initialData?.voiceSelection ?? {});
+    // Outbound calling schedule. Create starts from the browser-local defaults
+    // (every shown value is sent); edit shows ONLY what is saved, nothing implied.
+    const [schedule, setSchedule] = useState<CampaignCallingSchedule>(() => (
+        isEdit ? (initialData?.calling_schedule ?? {}) : defaultCallingSchedule()
+    ));
     const isRealtime = voiceSelection.pipeline_mode === "realtime";
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
     const [loadingVoices, setLoadingVoices] = useState(true);
@@ -598,6 +609,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             campaign_slots: buildCampaignSlots(),
             campaign_brief: campaignBrief,
             ...(!isEdit && direction === "inbound" ? { direction: "inbound" as const } : {}),
+            ...(direction === "outbound" ? { calling_schedule: callingSchedulePayload(schedule) } : {}),
         };
 
         let targetCampaignId = isEdit ? campaignId : createdCampaignId ?? undefined;
@@ -1311,6 +1323,11 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                     </div>
 
                     </fieldset>
+                    {direction === "outbound" && (
+                        <div className="rounded-lg border border-border bg-background/50 p-4">
+                            <CallingScheduleEditor value={schedule} onChange={setSchedule} />
+                        </div>
+                    )}
                     <div className="border-t border-border pt-6">
                         <CampaignLeadFieldsPicker
                             specs={leadFields.specs}

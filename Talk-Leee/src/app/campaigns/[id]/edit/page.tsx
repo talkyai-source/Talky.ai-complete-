@@ -71,6 +71,7 @@ export default function EditCampaignPage() {
     const [knowledgeDriven, setKnowledgeDriven] = useState(false);
     const [ttsProvider, setTtsProvider] = useState<string | null>(null);
     const [callingSchedule, setCallingSchedule] = useState<CampaignCallingSchedule | null>(null);
+    const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
     const [backHref, setBackHref] = useState(`/campaigns/${campaignId}`);
 
     useEffect(() => {
@@ -86,6 +87,8 @@ export default function EditCampaignPage() {
                     const inboundCampaigns = await inboundApi.list({ includeArchived: true });
                     if (!cancelled) setBackHref(inboundCampaignHrefForBase(campaignId, inboundCampaigns));
                 }
+
+                setDirection(isOutboundCampaign(campaign) ? "outbound" : "inbound");
 
                 const scriptConfig = campaign.script_config ?? {};
                 const slots: Record<string, string> = {};
@@ -110,6 +113,7 @@ export default function EditCampaignPage() {
                     agent_name_genders: scriptConfig.agent_name_genders ?? {},
                     slots,
                     campaign_brief: scriptConfig.campaign_brief,
+                    calling_schedule: (campaign as { calling_config?: CampaignCallingSchedule | null }).calling_config ?? null,
                 });
                 setKnowledgeDriven(
                     Boolean((scriptConfig as Record<string, unknown>).knowledge_driven),
@@ -182,7 +186,7 @@ export default function EditCampaignPage() {
                         />
                     </div>
                 ) : (
-                    <CampaignForm mode="edit" campaignId={campaignId} initialData={initial} />
+                    <CampaignForm mode="edit" campaignId={campaignId} initialData={initial} direction={direction} />
                 )
             ) : null}
         </DashboardLayout>

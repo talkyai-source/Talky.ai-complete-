@@ -26,6 +26,10 @@ export type ContactRow = {
     calling_notes: string;
     preferred_contact_method: string;
     do_not_call: string;
+    /** 1-based line in the user's ORIGINAL file where this row starts (the
+     *  header, preamble and blank lines all count), so every row error can
+     *  name the row the user sees in their own file, not the cleaned one. */
+    source_row: number;
 };
 
 export type ContactCsvParse = {
@@ -42,24 +46,38 @@ export type ContactCsvParse = {
 /** CSV text → grid of cells, respecting double-quoted values. Drops rows that
  *  are entirely empty (e.g. the blank separator line under a preamble). */
 export function parseCsvGrid(text: string): string[][] {
-    const rows: string[][] = [];
+    return parseCsvGridWithLines(text).map((r) => r.cells);
+}
+
+/** Like {@link parseCsvGrid} but each row also carries the 1-based line of the
+ *  original text where it starts (a quoted cell may span several lines). */
+export function parseCsvGridWithLines(text: string): Array<{ cells: string[]; line: number }> {
+    const rows: Array<{ cells: string[]; line: number }> = [];
     let row: string[] = [];
     let field = "";
     let inQuotes = false;
+    let line = 1;
+    let rowLine = 1;
     for (let i = 0; i < text.length; i++) {
         const c = text[i];
         if (inQuotes) {
             if (c === '"') {
                 if (text[i + 1] === '"') { field += '"'; i++; } else inQuotes = false;
-            } else field += c;
+            } else {
+                if (c === "\n") line++;
+                field += c;
+            }
         } else if (c === '"') inQuotes = true;
         else if (c === ",") { row.push(field); field = ""; }
         else if (c === "\r") { /* skip */ }
-        else if (c === "\n") { row.push(field); rows.push(row); row = []; field = ""; }
+        else if (c === "\n") {
+            row.push(field); rows.push({ cells: row, line: rowLine }); row = []; field = "";
+            line++; rowLine = line;
+        }
         else field += c;
     }
-    if (field.length || row.length) { row.push(field); rows.push(row); }
-    return rows.filter((r) => r.some((c) => c.trim() !== ""));
+    if (field.length || row.length) { row.push(field); rows.push({ cells: row, line: rowLine }); }
+    return rows.filter((r) => r.cells.some((c) => c.trim() !== ""));
 }
 
 /** Map a header row's cells to column indices by fuzzy substring match. */
@@ -121,7 +139,8 @@ export function findHeaderRow(grid: string[][]): number {
  *  splits Full Name, captures company. `phoneFound=false` means no phone column
  *  was located (caller should surface a header error). */
 export function parseContactsCsv(text: string): ContactCsvParse {
-    const grid = parseCsvGrid(text);
+    const gridWithLines = parseCsvGridWithLines(text);
+    const grid = gridWithLines.map((r) => r.cells);
     if (grid.length === 0) {
         return { headerRow: 0, headers: [], rows: [], phoneFound: false };
     }
@@ -131,7 +150,7 @@ export function parseContactsCsv(text: string): ContactCsvParse {
     if (m.phone < 0 && m.mobile < 0) {
         return { headerRow, headers, rows: [], phoneFound: false };
     }
-    const rows: ContactRow[] = grid.slice(headerRow + 1).map((r) => {
+    const rows: ContactRow[] = gridWithLines.slice(headerRow + 1).map(({ cells: r, line }) => {
         let first = m.first >= 0 ? (r[m.first] ?? "").trim() : "";
         let last = m.last >= 0 ? (r[m.last] ?? "").trim() : "";
         // No explicit first/last but a Full Name column → split it.
@@ -159,6 +178,7 @@ export function parseContactsCsv(text: string): ContactCsvParse {
             calling_notes: m.callingNotes >= 0 ? (r[m.callingNotes] ?? "").trim() : "",
             preferred_contact_method: m.preferredContactMethod >= 0 ? (r[m.preferredContactMethod] ?? "").trim() : "",
             do_not_call: m.doNotCall >= 0 ? (r[m.doNotCall] ?? "").trim() : "",
+            source_row: line,
         };
     }).filter((r) => r.phone || r.first_name || r.last_name);
     return { headerRow, headers, rows, phoneFound: true };

@@ -29,6 +29,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.23.26",
+    "libphonenumber-js": "1.13.15",
     "lucide-react": "^0.560.0",
     "next": "16.4.1",
     "nodemailer": "10.1.4",

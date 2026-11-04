@@ -21,6 +21,7 @@ import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
+import { callingSchedulePayload } from "@/lib/calling-schedule-text";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
 import {
@@ -121,7 +122,7 @@ export function CampaignBasicsEditor({
                 campaign_slots: {},
                 campaign_brief: campaignBrief,
                 knowledge_driven: true,
-                calling_schedule: schedule,
+                calling_schedule: callingSchedulePayload(schedule),
             });
             await leadDetailsApi.setCampaignFields(campaignId, leadFields.fields);
             router.push(`/campaigns/${campaignId}`);

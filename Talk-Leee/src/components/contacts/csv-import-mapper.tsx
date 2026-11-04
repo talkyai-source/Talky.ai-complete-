@@ -34,23 +34,33 @@ import {
 
 import { Button } from "@/components/ui/button";
 import { InfoTip } from "@/components/ui/info-tip";
+import { DefaultCountrySelect } from "@/components/contacts/default-country-select";
 import {
     buildCsvTemplate,
     leadDetailsApi,
     type ImportPreview,
 } from "@/lib/lead-details-api";
+import { PHONE_HELP_TEXT, type CountrySelection } from "@/lib/phone-number";
 
 export function CsvImportMapper({
     onConfirm,
+    busy: importing = false,
 }: {
-    /** Called with the file once the user has seen the preview and accepted it. */
-    onConfirm?: (file: File) => void;
+    /** Called with the file and the chosen default country once the user has
+     *  seen the preview and accepted it. The contacts page sends it through
+     *  the SAME upload path as the upload card's Upload button. */
+    onConfirm?: (file: File, country: CountrySelection) => void;
+    /** True while the page is sending a file through that path. */
+    busy?: boolean;
 }) {
     const inputRef = useRef<HTMLInputElement | null>(null);
     const [file, setFile] = useState<File | null>(null);
     const [preview, setPreview] = useState<ImportPreview | null>(null);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // "Default country" for this entry point: starts empty, applies only to
+    // numbers without "+", never stored between visits.
+    const [country, setCountry] = useState<CountrySelection>("");
 
     const analyse = useCallback(async (f: File) => {
         setBusy(true);
@@ -88,6 +98,15 @@ export function CsvImportMapper({
 
     return (
         <div className="space-y-4">
+            <div className="max-w-md">
+                <DefaultCountrySelect
+                    id="contacts-mapper-country"
+                    value={country}
+                    onChange={setCountry}
+                    disabled={busy || importing}
+                />
+                <p className="mt-2 text-xs text-muted-foreground">{PHONE_HELP_TEXT}</p>
+            </div>
             <div className="flex flex-wrap items-center gap-2">
                 <input
                     ref={inputRef}
@@ -234,10 +253,10 @@ export function CsvImportMapper({
 
                     <div className="flex items-center gap-3 pt-1">
                         <Button
-                            disabled={!hasPhone || !file || preview.valid_rows === 0}
-                            onClick={() => file && onConfirm?.(file)}
+                            disabled={!hasPhone || !file || preview.valid_rows === 0 || importing}
+                            onClick={() => file && onConfirm?.(file, country)}
                         >
-                            <CheckCircle2 className="h-4 w-4" />
+                            {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
                             Import {preview.valid_rows} contact
                             {preview.valid_rows === 1 ? "" : "s"}
                         </Button>
