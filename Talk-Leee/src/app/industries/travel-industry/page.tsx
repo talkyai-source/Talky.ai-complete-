@@ -302,7 +302,7 @@ export default function TravelIndustryIndustryPage() {
         "Priority Support",
       ],
       ctaLabel: "Book a Demo",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
     {
@@ -317,7 +317,7 @@ export default function TravelIndustryIndustryPage() {
         "Premium Support",
       ],
       ctaLabel: "Talk to an Expert",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
   ];
@@ -372,12 +372,12 @@ export default function TravelIndustryIndustryPage() {
           </p>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
-              <Link href="/auth/register">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See How It Works
               </Link>
             </Button>
@@ -644,12 +644,12 @@ export default function TravelIndustryIndustryPage() {
             </p>
             <div className={centeredCtaClassName}>
               <Button asChild size="lg" className={primaryButtonClassName}>
-                <Link href="/auth/register">
+                <Link href="/book-a-demo">
                   Book a Demo
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/pricing">
                   Explore Hospitality Plans
                 </Link>
               </Button>

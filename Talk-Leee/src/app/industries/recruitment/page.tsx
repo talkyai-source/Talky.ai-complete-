@@ -252,7 +252,7 @@ export default function RecruitmentIndustryPage() {
         "Priority Support",
       ],
       ctaLabel: "Book a Demo",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
     {
@@ -267,7 +267,7 @@ export default function RecruitmentIndustryPage() {
         "Premium Support",
       ],
       ctaLabel: "Talk to an Expert",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
   ];
@@ -323,12 +323,12 @@ export default function RecruitmentIndustryPage() {
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
-              <Link href="/auth/register">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See How It Works
               </Link>
             </Button>
@@ -557,12 +557,12 @@ export default function RecruitmentIndustryPage() {
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>
-                <Link href="/auth/register">
+                <Link href="/book-a-demo">
                   Book a Demo
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/pricing">
                   See Recruitment Plans
                 </Link>
               </Button>

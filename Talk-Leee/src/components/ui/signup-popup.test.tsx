@@ -220,6 +220,17 @@ test("renders only on the allow-listed public routes, matched exactly", () => {
     }
 });
 
+test("shows on /book-a-demo like every other public page", () => {
+    const { advance, navigate, restore } = mount();
+    try {
+        advance(DELAY);
+        navigate("/book-a-demo/");
+        assert.ok(popup(), "/book-a-demo (trailing-slash form the production router reports) is permitted");
+    } finally {
+        restore();
+    }
+});
+
 test("direct load on an auth page stays hidden past 10 s", () => {
     pathname = "/auth/login";
     const { advance, restore } = mount();

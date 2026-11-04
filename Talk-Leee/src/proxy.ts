@@ -93,6 +93,7 @@ function isPublicPath(pathname: string) {
     if (pathname === "/ai-voice-agent" || pathname.startsWith("/ai-voice-agent/")) return true;
     if (pathname === "/products" || pathname.startsWith("/products/")) return true;
     if (pathname === "/pricing" || pathname.startsWith("/pricing/")) return true;
+    if (pathname === "/book-a-demo" || pathname.startsWith("/book-a-demo/")) return true;
     if (pathname === "/docs" || pathname.startsWith("/docs/")) return true;
     if (pathname.startsWith("/use-cases")) return true;
     if (pathname.startsWith("/industries")) return true;
@@ -280,6 +281,7 @@ export async function proxy(req: NextRequest) {
         "base-uri 'self'",
         "form-action 'self'",
         "frame-ancestors 'none'",
+        "frame-src https://calendar.google.com",
         ...(https ? ["upgrade-insecure-requests", "block-all-mixed-content"] : []),
     ];
     const csp = cspParts.join("; ");

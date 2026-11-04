@@ -285,7 +285,7 @@ export default function RealEstateIndustryPage() {
         "Workflow automation",
       ],
       ctaLabel: "See Team Plans",
-      ctaHref: "/#contact",
+      ctaHref: "/pricing",
       ctaPrimary: false,
     },
     {
@@ -301,7 +301,7 @@ export default function RealEstateIndustryPage() {
         "Dedicated success support",
       ],
       ctaLabel: "Request a Demo",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaPrimary: false,
     },
   ];
@@ -371,7 +371,7 @@ export default function RealEstateIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
@@ -550,7 +550,7 @@ export default function RealEstateIndustryPage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
-              <Link href="/auth/register">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
@@ -666,12 +666,12 @@ export default function RealEstateIndustryPage() {
             </p>
             <div className={ctaPairClassName}>
               <Button asChild size="lg" className={primaryButtonClassName}>
-                <Link href="/auth/register">
+                <Link href="/book-a-demo">
                   Book a Demo
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   See AI in Action
                 </Link>
               </Button>

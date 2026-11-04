@@ -367,7 +367,7 @@ export default function AIVoiceAgentPage() {
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
@@ -528,7 +528,7 @@ export default function AIVoiceAgentPage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Find Out How It Fits Your Industry
               </Link>
             </Button>
@@ -601,7 +601,7 @@ export default function AIVoiceAgentPage() {
           </p>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Hear Your AI in Action &rarr;
               </Link>
             </Button>
@@ -713,12 +713,12 @@ export default function AIVoiceAgentPage() {
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>
-                <Link href="/auth/register">
+                <Link href="/book-a-demo">
                   Book a Demo
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   Talk to an AI Expert
                 </Link>
               </Button>

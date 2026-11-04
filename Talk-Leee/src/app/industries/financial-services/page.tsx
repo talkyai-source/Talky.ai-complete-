@@ -292,7 +292,7 @@ export default function FinancialServicesIndustryPage() {
         "Priority Support",
       ],
       cta: "Book a Demo",
-      href: "/#contact",
+      href: "/book-a-demo",
       primary: false,
     },
     {
@@ -308,7 +308,7 @@ export default function FinancialServicesIndustryPage() {
         "Premium Support",
       ],
       cta: "Talk to an Expert",
-      href: "/#contact",
+      href: "/book-a-demo",
       primary: false,
     },
   ];
@@ -363,12 +363,12 @@ export default function FinancialServicesIndustryPage() {
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
-              <Link href="/auth/register">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See How It Works
               </Link>
             </Button>
@@ -628,12 +628,12 @@ export default function FinancialServicesIndustryPage() {
             </p>
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>
-                <Link href="/auth/register">
+                <Link href="/book-a-demo">
                   Book a Demo
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/pricing">
                   See Plans
                 </Link>
               </Button>

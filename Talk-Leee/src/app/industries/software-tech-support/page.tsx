@@ -171,7 +171,7 @@ export default function SoftwareTechSupportIndustryPage() {
         "Priority assistance",
       ],
       ctaLabel: "See Growth Plans",
-      ctaHref: "/#contact",
+      ctaHref: "/pricing",
       ctaVariant: "outline" as const,
     },
     {
@@ -185,7 +185,7 @@ export default function SoftwareTechSupportIndustryPage() {
         "Dedicated success team",
       ],
       ctaLabel: "Request a Demo",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
   ];
@@ -244,7 +244,7 @@ export default function SoftwareTechSupportIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/auth/register">
                 Start Your Free Trial
               </Link>
             </Button>
@@ -441,12 +441,12 @@ export default function SoftwareTechSupportIndustryPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   Book a Strategy Call
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   See a Live Demo
                 </Link>
               </Button>

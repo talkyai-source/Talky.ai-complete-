@@ -197,7 +197,7 @@ export default function AIAssistPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
@@ -314,7 +314,7 @@ export default function AIAssistPage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/docs">
                 Explore Every Feature &rarr;
               </Link>
             </Button>
@@ -361,7 +361,7 @@ export default function AIAssistPage() {
             </p>
             <div className="mt-8 flex justify-center">
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   Book an AI Assist Demo
                 </Link>
               </Button>

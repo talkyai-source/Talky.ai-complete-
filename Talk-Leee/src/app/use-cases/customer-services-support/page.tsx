@@ -275,12 +275,12 @@ export default function CustomerServicesSupportUseCasePage() {
           </p>
           <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
             <Button asChild size="lg" className={primaryButtonClassName}>
-              <Link href="/auth/register">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See It in Action
               </Link>
             </Button>
@@ -356,7 +356,7 @@ export default function CustomerServicesSupportUseCasePage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
-              <Link href="/auth/register">
+              <Link href="/book-a-demo">
                 Book a Demo
               </Link>
             </Button>
@@ -438,7 +438,7 @@ export default function CustomerServicesSupportUseCasePage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See It in Action
               </Link>
             </Button>
@@ -512,7 +512,7 @@ export default function CustomerServicesSupportUseCasePage() {
             </p>
             <div className="mt-8 flex justify-center">
               <Button asChild size="lg" className={primaryButtonClassName}>
-                <Link href="/auth/register">
+                <Link href="/book-a-demo">
                   Book a Demo
                 </Link>
               </Button>

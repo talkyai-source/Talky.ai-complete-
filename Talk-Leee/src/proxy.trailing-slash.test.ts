@@ -9,6 +9,7 @@ import { trailingSlashRedirectPath } from "@/proxy";
  */
 const PAGE_ROUTES = [
     "/403",
+    "/book-a-demo",
     "/admin",
     "/admin/abuse-detection",
     "/admin/api-keys",
@@ -107,8 +108,8 @@ test("every page route redirects to its trailing-slashed form", () => {
 });
 
 test("page route count matches the app router page count", () => {
-    // 91 pages: 90 listed above plus "/" itself, which is already canonical.
-    assert.equal(PAGE_ROUTES.length + 1, 91);
+    // 92 pages: 91 listed above plus "/" itself, which is already canonical.
+    assert.equal(PAGE_ROUTES.length + 1, 92);
 });
 
 test("already-canonical paths are not redirected again", () => {

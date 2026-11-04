@@ -230,7 +230,7 @@ export default function HealthcareIndustryPage() {
         "Priority technical support",
       ],
       ctaLabel: "Book a Consultation",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
     {
@@ -244,7 +244,7 @@ export default function HealthcareIndustryPage() {
         "Dedicated success manager",
       ],
       ctaLabel: "Talk to an Expert",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
   ];
@@ -309,7 +309,7 @@ export default function HealthcareIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See How It Works
               </Link>
             </Button>
@@ -495,7 +495,7 @@ export default function HealthcareIndustryPage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Discuss Your Workflow
               </Link>
             </Button>
@@ -549,7 +549,7 @@ export default function HealthcareIndustryPage() {
             </p>
             <div className="mt-8 flex justify-center">
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   Book a Consultation
                 </Link>
               </Button>
@@ -584,7 +584,7 @@ export default function HealthcareIndustryPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   Book a Live Demo
                 </Link>
               </Button>

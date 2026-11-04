@@ -18,6 +18,7 @@ export const PUBLIC_ROUTES = [
   "/products",
   "/ai-voices",
   "/contact",
+  "/book-a-demo",
   "/pricing",
   "/privacy",
   "/terms",

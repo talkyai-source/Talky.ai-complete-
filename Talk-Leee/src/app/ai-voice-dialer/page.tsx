@@ -211,7 +211,7 @@ export default function AIVoiceDialerPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See a Live Call
               </Link>
             </Button>
@@ -370,7 +370,7 @@ export default function AIVoiceDialerPage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Still Curious? See It Live
               </Link>
             </Button>
@@ -451,7 +451,7 @@ export default function AIVoiceDialerPage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Still Have Questions? Talk to Us &rarr;
               </Link>
             </Button>
@@ -473,7 +473,7 @@ export default function AIVoiceDialerPage() {
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   Talk to a Growth Strategist
                 </Link>
               </Button>

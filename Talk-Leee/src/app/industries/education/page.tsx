@@ -242,7 +242,7 @@ export default function EducationIndustryPage() {
         "Priority support",
       ],
       ctaLabel: "Book a Demo",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
       ctaIcon: true,
     },
@@ -258,7 +258,7 @@ export default function EducationIndustryPage() {
         "Dedicated success manager",
       ],
       ctaLabel: "Talk to an Expert",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
       ctaIcon: false,
     },
@@ -323,7 +323,7 @@ export default function EducationIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 See How It Works
               </Link>
             </Button>
@@ -456,7 +456,7 @@ export default function EducationIndustryPage() {
           </div>
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 <Video aria-hidden />
                 Book a Demo
               </Link>
@@ -553,7 +553,7 @@ export default function EducationIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 <Video aria-hidden />
                 Book a Live Demo
               </Link>

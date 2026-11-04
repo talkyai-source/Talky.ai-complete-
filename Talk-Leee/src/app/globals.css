@@ -315,10 +315,10 @@
   pointer-events: none;
 }
 
-/* The horizontal navbar exists only from 1024px up (navbar.tsx: lg: prefixes
-   on .navbarMobileMenu / .navbarDesktopNav / .navbarDesktopAction). Below
-   that the drawer renders and the pill stays full width like a phone. */
-@media (min-width: 1024px) {
+/* The horizontal navbar exists only from 1060px up (navbar.tsx: min-[1060px]:
+   prefixes on .navbarMobileMenu / .navbarDesktopNav / .navbarDesktopAction).
+   Below that the drawer renders and the pill stays full width like a phone. */
+@media (min-width: 1060px) {
   .home-navbar-fixed {
     width: max-content;
     max-width: calc(100% - 1.5rem);
@@ -391,6 +391,11 @@
 
 .light .home-navbar-page a.bg-indigo-600:hover {
   background-color: #4338ca !important;
+}
+
+.light .home-navbar-page a.navbarDemoButton,
+.light .home-navbar-scrolled a.navbarDemoButton {
+  color: #004d5e !important;
 }
 
 .home-navbar-page button.home-nav-link {

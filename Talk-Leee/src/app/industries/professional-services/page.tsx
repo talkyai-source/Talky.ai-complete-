@@ -313,7 +313,7 @@ export default function ProfessionalServicesIndustryPage() {
         "Priority support",
       ],
       ctaLabel: "Book a Private Demo",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
     {
@@ -327,7 +327,7 @@ export default function ProfessionalServicesIndustryPage() {
         "Dedicated success manager",
       ],
       ctaLabel: "Contact Sales",
-      ctaHref: "/#contact",
+      ctaHref: "/book-a-demo",
       ctaVariant: "outline" as const,
     },
   ];
@@ -392,7 +392,7 @@ export default function ProfessionalServicesIndustryPage() {
               </Link>
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-              <Link href="/#contact">
+              <Link href="/book-a-demo">
                 Book a Private Demo
               </Link>
             </Button>
@@ -640,7 +640,7 @@ export default function ProfessionalServicesIndustryPage() {
             </p>
             <div className={centeredCtaClassName}>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
-                <Link href="/#contact">
+                <Link href="/book-a-demo">
                   Book a Demo
                 </Link>
               </Button>
