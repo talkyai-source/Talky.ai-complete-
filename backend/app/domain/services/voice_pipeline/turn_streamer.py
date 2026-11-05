@@ -418,12 +418,15 @@ class TurnStreamer:
             ))
 
         def _figure_sources():
-            # Everything the model was given or heard this turn (HAL-2).
+            # What the model was given, and what the agent itself already said
+            # (HAL-2). Never the caller's words: "Yes, that's 50 pounds a
+            # month." must not be sourced by the caller asking "so it's 50
+            # pounds?" (QA F3-04).
             evidence = getattr(session, "_knowledge_evidence", None) or {}
             return (
                 system_prompt, evidence.get("text"),
                 *getattr(session, "_knowledge_grounding", []), *turn_grounding,
-                *(m.content for m in session.conversation_history),
+                *(m.content for m in session.conversation_history if m.role != MessageRole.USER),
                 *(json.dumps(r, default=str) for r in action_results_for_session(session).values()),
             )
         # Canonical history source: TTS submissions that returned without
