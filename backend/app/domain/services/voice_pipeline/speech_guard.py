@@ -152,6 +152,15 @@ _CALLER_DENIES_RELATIONSHIP = re.compile(
     r"|\b(?:i|we)\s+(?:don'?t|do\s+not)\s+have\s+an?\s+account\s+with\s+you\b",
     re.IGNORECASE,
 )
+# The caller says they are a customer ("Actually, I am your customer.").
+_CALLER_AFFIRMS_RELATIONSHIP = re.compile(
+    r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+(?:a|an|your|one\s+of\s+your)\s+"
+    r"(?:existing\s+|current\s+)?(?:customer|client)s?\b",
+    re.IGNORECASE,
+)
+# Words in quotation marks are someone else's ("The script says "I am your
+# customer"."), never the caller's own affirmation.
+_QUOTED = re.compile(r'"[^"]*"|“[^”]*”')
 # The agent claims an existing relationship.
 _RELATIONSHIP_CLAIM = re.compile(
     r"\b(?:existing|current|valued|loyal)\s+(?:customer|client)s?\b"
@@ -263,14 +272,26 @@ def _action_claim_line(session: Any, sentence: str) -> Optional[str]:
     return None
 
 
-def caller_denied_relationship(history: Iterable[Any]) -> bool:
-    """True once any caller turn explicitly denies being a customer."""
+def caller_relationship(history: Iterable[Any]) -> Optional[str]:
+    """The caller's latest own statement about being a customer: "denied",
+    "affirmed", or None when they never said either (QA F10-02). A denial
+    stands until the caller takes it back; quoted words don't take it back."""
+    latest = None
     for message in history or ():
         if getattr(message, "role", None) != MessageRole.USER:
             continue
-        if _CALLER_DENIES_RELATIONSHIP.search(str(getattr(message, "content", "") or "")):
-            return True
-    return False
+        text = str(getattr(message, "content", "") or "")
+        own = _QUOTED.sub(lambda quoted: " " * len(quoted.group()), text)
+        said = [(m.start(), "denied") for m in _CALLER_DENIES_RELATIONSHIP.finditer(text)]
+        said += [(m.start(), "affirmed") for m in _CALLER_AFFIRMS_RELATIONSHIP.finditer(own)]
+        if said:
+            latest = max(said)[1]
+    return latest
+
+
+def caller_denied_relationship(history: Iterable[Any]) -> bool:
+    """True while the caller's latest own statement denies being a customer."""
+    return caller_relationship(history) == "denied"
 
 
 def guard_spoken_sentence(session: Any, sentence: str) -> str:

@@ -91,6 +91,45 @@ def test_relationship_claim_is_replaced_only_after_a_denial():
     assert guard_spoken_sentence(denied, claim) == RELATIONSHIP_ACK_LINE
 
 
+# QA F10-02 (ag04.relationship_reversal, ag04.quoted_relationship): the caller's
+# latest own statement counts. A denial followed by "Actually, I am your
+# customer." is an affirmation; words the caller quotes are someone else's.
+_DENIAL = "I am not your customer."
+
+
+@pytest.mark.parametrize("history,expected", [
+    ([_DENIAL], "denied"),
+    ([_DENIAL, "Actually, I am your customer."], "affirmed"),
+    ([_DENIAL, "Yes, I'm a customer of yours."], "affirmed"),
+    ([_DENIAL, 'The script says "I am your customer".'], "denied"),
+    (["Actually, I am your customer.", _DENIAL], "denied"),
+    (["What are your opening hours?"], None),
+])
+def test_the_callers_latest_own_statement_sets_the_relationship(history, expected):
+    from app.domain.services.voice_pipeline.speech_guard import caller_relationship
+
+    assert caller_relationship([_caller(text) for text in history]) == expected
+
+
+def test_a_reversed_denial_lets_the_relationship_be_said_again():
+    claim = "As our existing customer, your account is ready."
+    reversed_ = _session(history=[_caller(_DENIAL), _caller("Actually, I am your customer.")])
+    assert guard_spoken_sentence(reversed_, claim) == claim
+    quoted = _session(history=[_caller(_DENIAL), _caller('The script says "I am your customer".')])
+    assert guard_spoken_sentence(quoted, claim) == RELATIONSHIP_ACK_LINE
+
+
+def test_live_state_carries_the_latest_relationship():
+    from app.domain.services.voice_pipeline.live_structured_state import (
+        reduce_cascaded_session_live_state,
+    )
+
+    session = _session(history=[_caller(_DENIAL), _caller("Actually, I am your customer.")])
+    assert reduce_cascaded_session_live_state(session).customer_relationship == "affirmed"
+    session = _session(history=[_caller(_DENIAL)])
+    assert reduce_cascaded_session_live_state(session).customer_relationship == "denied"
+
+
 # -- QA F10-01: a claim must match the action's real state ---------------------
 # The offline replay (scripts.evaluate_ag04_conversations) let these reach the
 # caller in all four model profiles: a "sent" or "could not be sent" while the
