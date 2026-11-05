@@ -31,18 +31,22 @@ logger = logging.getLogger(__name__)
 # "Hello, this is John"). Anything else -- an objection, a question about the
 # call, an opt-out in any wording -- gets the normal turn, so the model's own
 # opt-out and close handling sees it (security review of F12-03).
-_PICKUP_WORDS = re.compile(
-    r"^(?:\s*(?:hello|hullo|hi|hiya|hey|allo|yes|yeah|yep|speaking|there"
-    r"|this\s+is\s+[\w'.-]+|[\w'.-]+\s+speaking"
-    r"|who(?:'s|\s+is)\s+(?:this|that|it|calling)|who\s+are\s+you"
-    r"|(?:how\s+)?(?:can|may)\s+i\s+help(?:\s+you)?|are\s+you\s+there|can\s+you\s+hear\s+me)"
-    r"[\s,.!?-]*)+$",
-    re.IGNORECASE,
+# Matched against the words joined by single spaces, at most _PICKUP_MAX_WORDS
+# of them, so the check stays linear on caller-controlled text (the first cut
+# backtracked exponentially: "hello " * 22 took 29 s).
+_PICKUP_PHRASE = (
+    r"(?:hello|hullo|hi|hiya|hey|allo|yes|yeah|yep|speaking|there"
+    r"|this is [\w']+|[\w']+ speaking"
+    r"|who(?:'s| is) (?:this|that|it|calling)|who are you"
+    r"|(?:how )?(?:can|may) i help(?: you)?|are you there|can you hear me)"
 )
+_PICKUP_WORDS = re.compile(rf"^{_PICKUP_PHRASE}(?: {_PICKUP_PHRASE})*$")
+_PICKUP_MAX_WORDS = 10
 
 
 def is_pickup_words(text: Optional[str]) -> bool:
-    return bool(text and _PICKUP_WORDS.match(text.strip()))
+    words = re.findall(r"[\w']+", (text or "")[:200].lower())
+    return 0 < len(words) <= _PICKUP_MAX_WORDS and bool(_PICKUP_WORDS.match(" ".join(words)))
 
 
 async def speak_disclosure_before_first_reply(

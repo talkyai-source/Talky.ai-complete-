@@ -285,3 +285,17 @@ async def test_an_opt_out_or_goodbye_first_is_not_answered_with_the_opener(monke
     assert p._run_turn.await_count == 1             # the model answers them
     if "call me" in words:
         purge.assert_awaited_once()                 # and the opt-out is recorded
+
+
+def test_the_pickup_check_is_fast_on_long_or_repetitive_speech():
+    # Security review: the first regex backtracked exponentially ("hello " * 22
+    # took 29 s) on caller-controlled text, blocking the call's event loop.
+    import time as _time
+
+    from app.domain.services.voice_pipeline.caller_first_disclosure import is_pickup_words
+
+    t0 = _time.perf_counter()
+    assert not is_pickup_words("hello " * 200 + "x")
+    assert not is_pickup_words("hello, " * 30 + "what is this?")
+    assert _time.perf_counter() - t0 < 0.5
+    assert is_pickup_words("Hello? " * 3)
