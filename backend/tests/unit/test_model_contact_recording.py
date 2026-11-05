@@ -513,6 +513,27 @@ async def test_newer_caller_words_replace_a_candidate_never_confirmed():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("expected", ["alex@example.com", "blair@example.com"])
+async def test_a_corrected_email_replaces_the_one_never_confirmed(expected):
+    """QA F10-02 (revised_email): "My email is alex at example dot com", then
+    "Correction, my email is blair at example dot com". The corrected address
+    is the one kept, still unconfirmed, whichever value the model names as
+    expected."""
+    pool, s = SQLPort(), session()
+    first = "My email is alex at example dot com."
+    caller(s, first, 1)
+    await record_contact(s, args(first, value="alex@example.com"), pool=pool)
+    text = "Correction, my email is blair at example dot com."
+    caller(s, text, 2)
+    result = await record_contact(s, args(text, value="blair@example.com", expected=expected), pool=pool)
+    assert result["status"] != "contact_changed"
+    assert result["value"] == "blair@example.com"
+    assert result["validation_status"] == "awaiting_confirmation"
+    assert s.captured_slots.email == "blair@example.com"
+    assert not s.captured_slots.email_confirmed
+
+
+@pytest.mark.asyncio
 async def test_confirmed_or_older_candidates_still_need_the_exact_current_value():
     pool, s = SQLPort(), session()
     caller(s, "Use alex@example.com", 1)
