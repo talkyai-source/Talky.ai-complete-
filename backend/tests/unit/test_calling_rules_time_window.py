@@ -158,3 +158,27 @@ def test_next_window_start_for_an_inverted_window_does_not_raise():
     now = _at(TUE, 12, 0)
 
     assert rules.get_next_window_start(from_time=now) > now
+
+
+# ── clock-change days (QA F2-14) ───────────────────────────────────────────
+# The same-day opening was built with replace() on the current time, which
+# keeps that time's UTC offset: on the day clocks change it was an hour off.
+
+
+@pytest.mark.parametrize(
+    "midnight_utc,opening_utc",
+    [
+        # 8 Mar 2026: New York springs forward at 02:00. 00:30 EST is 05:30 UTC;
+        # 09:00 EDT is 13:00 UTC (it was computed as 14:00, an hour late).
+        (datetime(2026, 3, 8, 5, 30, tzinfo=UTC), datetime(2026, 3, 8, 13, 0, tzinfo=UTC)),
+        # 1 Nov 2026: New York falls back at 02:00. 00:30 EDT is 04:30 UTC;
+        # 09:00 EST is 14:00 UTC (it was 13:00 -- 08:00 local, an hour early).
+        (datetime(2026, 11, 1, 4, 30, tzinfo=UTC), datetime(2026, 11, 1, 14, 0, tzinfo=UTC)),
+    ],
+)
+def test_next_window_opens_at_local_nine_on_a_clock_change_day(midnight_utc, opening_utc):
+    rules = _rules("09:00", "19:00", days=range(7), tz="America/New_York")
+
+    nxt = rules.get_next_window_start(from_time=midnight_utc)
+
+    assert nxt.astimezone(UTC) == opening_utc

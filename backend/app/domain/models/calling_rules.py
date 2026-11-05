@@ -232,9 +232,12 @@ class CallingRules(BaseModel):
             return from_time + timedelta(hours=1)
         start_hour, start_min = start.hour, start.minute
 
-        # Check if we can call today
-        today_start = from_time.replace(hour=start_hour, minute=start_min, second=0, microsecond=0)
-        
+        # Check if we can call today. Localize the wall-clock opening rather
+        # than replace() on from_time: replace keeps from_time's UTC offset, so
+        # on a clock-change day the opening was an hour off (an hour early in
+        # autumn) (QA F2-14).
+        today_start = tz.localize(datetime.combine(from_time.date(), time(start_hour, start_min)))
+
         if from_time.weekday() in self.allowed_days and from_time < today_start:
             return today_start
         
@@ -247,7 +250,7 @@ class CallingRules(BaseModel):
                 return tz.localize(next_window)
 
         # Fallback: tomorrow at start time
-        return today_start + timedelta(days=1)
+        return tz.localize(datetime.combine(from_time.date() + timedelta(days=1), time(start_hour, start_min)))
     
     @classmethod
     def default(cls) -> "CallingRules":
