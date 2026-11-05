@@ -143,7 +143,7 @@ async def add_dnc_entry(
             source=payload.source,
             reason=payload.reason,
             expires_at=payload.expires_at,
-            added_by=str(current_user.user_id) if current_user.user_id else None,
+            added_by=str(current_user.id) if current_user.id else None,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
