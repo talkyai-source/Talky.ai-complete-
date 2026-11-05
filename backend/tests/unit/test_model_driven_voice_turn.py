@@ -104,6 +104,26 @@ async def test_complete_model_answer_is_not_cut_at_a_sentence_quota(monkeypatch)
     assert " ".join(session._spoken_sentences) == answer
 
 
+async def test_demo_prompt_carries_the_sessions_live_price_list(monkeypatch):
+    """QA F11-05: the demo quotes the price list read at session start."""
+    service, session, rounds = setup_turn(monkeypatch, "How much is it?", ["What would you like to know?"])
+    session.campaign_id = "ask-ai"
+    session._ask_ai_price_list = "Current prices: Basic $99 a month (1,000 minutes, 2 agents)."
+    await service._stream_llm_and_tts(session)
+    assert "Basic $99 a month" in rounds[0][1]["system_prompt"]
+    assert "$29" not in rounds[0][1]["system_prompt"]
+
+
+async def test_demo_never_speaks_a_price_off_the_live_list(monkeypatch):
+    from app.domain.services.voice_pipeline.figure_grounding import UNGROUNDED_FIGURE_LINE
+
+    service, session, _ = setup_turn(monkeypatch, "How much is Basic?", ["Basic is $29 a month."])
+    session.campaign_id = "ask-ai"
+    session._ask_ai_price_list = "Current prices: Basic $99 a month (1,000 minutes, 2 agents)."
+    await service._stream_llm_and_tts(session)
+    assert session._spoken_sentences == [UNGROUNDED_FIGURE_LINE]
+
+
 @pytest.mark.parametrize("question", ["Can you help our shop?", "What would that mean for us?", "Hello."])
 async def test_demo_facts_are_available_without_a_keyword_gate(monkeypatch, question):
     from app.domain.services.ask_ai_constants import TALKY_PRODUCT_INFO

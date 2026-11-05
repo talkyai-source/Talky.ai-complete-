@@ -62,6 +62,44 @@ def _get_semaphore() -> asyncio.Semaphore:
     return _ask_ai_semaphore
 
 
+# The prices the demo may quote are the ones the public pricing page shows,
+# read from the same two endpoints (QA F11-05). Cached as long as the
+# catalogue caches its Stripe reads; a failure isn't cached, and a slow or
+# failed read leaves the demo pointing to the pricing page.
+_PRICE_LIST_TTL_SECONDS = 300.0
+_PRICE_LIST_WAIT_SECONDS = 2.0
+_price_list_cache: Optional[tuple[float, Optional[str]]] = None
+
+
+async def _live_price_list(pool) -> Optional[str]:
+    global _price_list_cache
+    from fastapi import HTTPException
+
+    from app.api.v1.endpoints import plans
+    from app.domain.services.ask_ai_constants import format_price_list
+
+    now = time.monotonic()
+    if _price_list_cache is not None and _price_list_cache[0] > now:
+        return _price_list_cache[1]
+    catalogue = await plans.list_plans(pool)
+    try:
+        payg = await plans.pay_as_you_go(pool)
+    except HTTPException:
+        payg = None  # not offered, or its bundles can't be read
+    text = format_price_list(catalogue, payg)
+    _price_list_cache = (now + _PRICE_LIST_TTL_SECONDS, text)
+    return text
+
+
+async def _session_price_list(pool) -> Optional[str]:
+    try:
+        return await asyncio.wait_for(_live_price_list(pool), timeout=_PRICE_LIST_WAIT_SECONDS)
+    except Exception as exc:
+        logger.warning("ask_ai_price_list_unavailable err=%s; the demo points to the pricing page",
+                       type(exc).__name__)
+        return None
+
+
 # Cache synthesized greeting bytes in memory — the text is static so there is
 # no reason to hit Cartesia on every button press.
 _greeting_audio_cache: Optional[bytes] = None
@@ -184,6 +222,11 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
             # 1. Create session via orchestrator
             config = build_ask_ai_session_config()
             voice_session = await orchestrator.create_voice_session(config)
+
+            # The prices the demo may quote: the live list (QA F11-05).
+            voice_session.call_session._ask_ai_price_list = await _session_price_list(
+                getattr(container, "db_pool", None)
+            )
 
             # Seed conversation history with the greeting the client already played.
             # This tells the LLM what was said so it never re-greets.
