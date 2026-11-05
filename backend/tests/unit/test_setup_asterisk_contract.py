@@ -288,8 +288,9 @@ def test_setup_and_deploy_share_candidate_digest_reconciler(script_text):
         "CANDIDATE_DIGEST"
     )
     assert "for required_tool in asterisk " in deploy
+    # The recovery function is defined earlier; compare the live candidate checkout.
     assert deploy.index("for required_tool in asterisk ") < deploy.index(
-        "git checkout --detach"
+        "git checkout --detach '${DEPLOY_SHA}'"
     )
 
 
@@ -313,7 +314,7 @@ def test_deploy_blocks_on_candidate_mapping_conflicts_before_checkout():
         'reconcile_asterisk_release.sh\\" --check-only'
     )
     assert candidate_check in deploy
-    assert deploy.index(candidate_check) < deploy.index("git checkout --detach")
+    assert deploy.index(candidate_check) < deploy.index("git checkout --detach '${DEPLOY_SHA}'")
 
 
 def test_managed_dialplan_preserves_catch_all_and_has_no_endpoint_variable(

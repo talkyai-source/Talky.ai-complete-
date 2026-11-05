@@ -61,7 +61,11 @@ def _launch(script_cmd: str, env: dict, cwd: Path, shim: Path):
         '[ "$(command -v ssh)" = "$SHIM_DIR/ssh" ] || exit 125; fi; ' + script_cmd
     )
     return subprocess.run(
-        [_real_bash(), "-c", launcher], env=env, cwd=cwd, capture_output=True, text=True, timeout=180
+        # Windows starts a Bash process for every logging shim. The unchanged
+        # 60-attempt deadline case exceeded 180s after the guard/log steps;
+        # bound harness overhead separately from the application retry count.
+        [_real_bash(), "-c", launcher], env=env, cwd=cwd, capture_output=True,
+        text=True, timeout=360 if os.name == "nt" else 180,
     )
 
 
@@ -94,6 +98,7 @@ def captured_remote_script(tmp_path_factory) -> str:
     subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
     shutil.copy(DEPLOY, repo / "deploy_to_server.sh")
     _write(repo / "backend/scripts/verify_deploy_drain_manifest.py", "import sys\nsys.exit(0)\n")
+    shutil.copy(ROOT / "backend/scripts/verify_code_rollback.py", repo / "backend/scripts/verify_code_rollback.py")
     git("add", "-A")
     git("commit", "-q", "-m", "x")
     git("remote", "add", "origin", str(origin))
@@ -123,6 +128,7 @@ args=("$@")
 if [ "${args[0]:-}" = "-C" ]; then args=("${args[@]:2}"); fi
 case "${args[0]:-} ${args[1]:-}" in
   "rev-parse HEAD") cat "$STATE/head" ;;
+  "show "*) printf '# trusted controller guard fixture\\n' ;;
   "checkout --detach") echo "${args[2]}" > "$STATE/head" ;;
   "worktree add")
     mkdir -p "${args[3]}/backend/scripts" "${args[3]}/backend/deploy"
@@ -134,6 +140,7 @@ esac
 exit 0
 """,
     "sudo": """#!/usr/bin/env bash
+if [ "${1:-}" = -n ]; then shift; fi
 echo "sudo $*" >> "$LOG"
 if [ "$1 $2 $3" = "systemctl restart talky-voice-gateway" ]; then touch "$STATE/gateway_restarted"; fi
 if [ "$1 $2" = "systemctl start" ] && [ "${FAIL_MIGRATE:-0}" = 1 ]; then exit 1; fi
@@ -210,6 +217,7 @@ def remote_sha(remote: str) -> str:
 
 
 def _run_remote(tmp_path: Path, remote: str, **flags: str):
+    close_output = flags.pop("CLOSE_REMOTE_OUTPUT", "0") == "1"
     fake_root = tmp_path / "optroot"
     shim = tmp_path / "shim"
     state = tmp_path / "state"
@@ -247,6 +255,9 @@ def _run_remote(tmp_path: Path, remote: str, **flags: str):
     backups = tmp_path / "unit-backups"
     backups.mkdir()  # GetShortPathName requires an existing Windows path.
     remote = remote.replace("/var/backups/talky/deploy-unit-recovery", _no_spaces(backups))
+    deploy_logs = tmp_path / "deploy-logs"
+    deploy_logs.mkdir()
+    remote = remote.replace("/home/admins/backups/talky-deploy", _no_spaces(deploy_logs))
     _write(script, remote)
     env = dict(os.environ)
     env.update(LOG=_no_spaces(log), STATE=_no_spaces(state), FAKE_NEW_SHA=remote_sha(remote), WEB_UNIT=_no_spaces(unit))
@@ -254,7 +265,10 @@ def _run_remote(tmp_path: Path, remote: str, **flags: str):
         # Git Bash otherwise emulates a copied symlink as a plain file.
         env["MSYS"] = "winsymlinks:nativestrict"
     env.update(flags)
-    result = _launch(f'exec bash "{_no_spaces(script)}"', env, tmp_path, shim)
+    command = (f'set -o pipefail; bash "{_no_spaces(script)}" | head -n 1' if close_output
+               else f'exec bash "{_no_spaces(script)}"')
+    result = _launch(command, env, tmp_path, shim)
+    result.deploy_log = "\n".join(path.read_text(encoding="utf-8") for path in deploy_logs.glob("deploy.*.log"))
     head = (state / "head").read_text(encoding="utf-8").strip()
     return result, log.read_text(encoding="utf-8").splitlines(), head
 
@@ -270,7 +284,7 @@ def test_an_active_call_blocks_the_deploy_before_the_checkout_moves(tmp_path, ca
     result, log, head = _run_remote(tmp_path, captured_remote_script, FAKE_SESSIONS="2")
 
     assert result.returncode != 0
-    assert "Gateway still owns 2 active session(s); deploy is blocked." in result.stderr
+    assert "Gateway still owns 2 active session(s); deploy is blocked." in result.deploy_log
     assert not [line for line in log if line.startswith("git checkout")], "checkout must not move"
     assert not [line for line in log if "install-services.sh" in line], "unit files must not be rewritten"
     assert head == PREV_SHA
@@ -294,8 +308,9 @@ def test_a_failed_migration_keeps_candidate_for_reviewed_recovery(tmp_path, capt
     assert head == remote_sha(captured_remote_script), "a failed migration cannot prove that it did not commit"
     checkouts = [i for i, line in enumerate(log) if line.startswith("git checkout --detach")]
     assert len(checkouts) == 1
-    assert "After verifying code/schema compatibility" in result.stderr
+    assert "After verifying code/schema compatibility" in result.deploy_log
     assert len([line for line in log if "install-services.sh" in line]) == 1
+    assert "Migration may have committed" in result.deploy_log
     assert not [line for line in log if "systemctl restart talky-api" in line], "no restart after a failed migration"
 
 
@@ -308,8 +323,12 @@ def test_a_failure_after_the_migration_succeeded_is_not_rolled_back(tmp_path, ca
 
 
 @pytest.mark.parametrize("kind", ["file", "symlink"])
-def test_pre_migration_failure_restores_exact_pinned_web_unit_after_old_installer(tmp_path, captured_remote_script, kind):
-    result, log, head = _run_remote(tmp_path, captured_remote_script, FAIL_SERVICE_USER="1", UNIT_KIND=kind)
+@pytest.mark.parametrize("failure", [
+    {"FAIL_SERVICE_USER": "1"},
+    {"FAKE_GATEWAY_READY_JSON": '{"ready": false}'},
+], ids=["service-user", "gateway-ready"])
+def test_pre_migration_failure_restores_exact_pinned_web_unit_after_old_installer(tmp_path, captured_remote_script, kind, failure):
+    result, log, head = _run_remote(tmp_path, captured_remote_script, UNIT_KIND=kind, **failure)
     assert result.returncode != 0 and head == PREV_SHA
     unit = tmp_path / "units/talky-api-web.service"
     assert unit.read_bytes() == b"original pinned web unit\n"
@@ -322,7 +341,11 @@ def test_pre_migration_failure_restores_exact_pinned_web_unit_after_old_installe
     if kind == "symlink":
         assert os.readlink(backups[0]) == os.readlink(unit)
     restore = _index(log, "sudo cp -a --remove-destination")
+    checkouts = [i for i, line in enumerate(log) if line.startswith("git checkout --detach")]
+    assert len(checkouts) == 2 and log[checkouts[1]].endswith(PREV_SHA)
     reinstall = max(i for i, line in enumerate(log) if "install-services.sh" in line)
+    assert reinstall > checkouts[1]
+    assert "restoring checkout" in result.deploy_log
     reload = _index(log, "sudo systemctl daemon-reload", restore)
     assert reinstall < restore < reload
     assert reload < _index(log, "sudo systemctl start talky-cleanup.timer")
@@ -402,9 +425,9 @@ def test_post_restart_probes_wait_for_a_slow_api_instead_of_one_shot_curl(tmp_pa
     result, log, _ = _run_remote(tmp_path, captured_remote_script, FAKE_FAIL_PROBES="7")
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "liveness OK" in result.stdout
-    assert "dependency readiness OK" in result.stdout
-    assert "dashboard API liveness OK" in result.stdout
+    assert "liveness OK" in result.deploy_log
+    assert "dependency readiness OK" in result.deploy_log
+    assert "dashboard API liveness OK" in result.deploy_log
     assert len([line for line in log if line.startswith("sleep 2")]) >= 7
 
 
@@ -412,9 +435,9 @@ def test_post_restart_probes_still_fail_the_deploy_at_the_deadline(tmp_path, cap
     result, log, _ = _run_remote(tmp_path, captured_remote_script, FAKE_FAIL_PROBES="100000")
 
     assert result.returncode != 0
-    assert "did not become healthy" in result.stderr
+    assert "did not become healthy" in result.deploy_log
     health_calls = [line for line in log if line.endswith(":8000/health")]
-    assert 2 <= len(health_calls) <= 100, "the wait must be bounded"
+    assert len(health_calls) == 60, "the application's exact retry bound must hold"
 
 
 def test_gateway_restart_waits_for_listener_and_ready_endpoint(tmp_path, captured_remote_script):
@@ -435,7 +458,7 @@ def test_gateway_restart_waits_for_listener_and_ready_endpoint(tmp_path, capture
 def test_gateway_startup_deadline_blocks_migration(tmp_path, captured_remote_script, failure):
     result, log, head = _run_remote(tmp_path, captured_remote_script, **{failure: "100000"})
     assert result.returncode != 0 and head == PREV_SHA
-    assert "gateway probe did not become healthy" in result.stderr
+    assert "gateway probe did not become healthy" in result.deploy_log
     assert not any("systemctl start talky-migrate" in line for line in log)
     name = "gateway_stats_calls" if "STATS" in failure else "gateway_ready_calls"
     assert int((tmp_path / "state" / name).read_text()) == 30
