@@ -51,6 +51,7 @@ import { useAccessToken } from "@/lib/auth-hooks";
 import { isPlatformAdminRole } from "@/lib/admin-access";
 import { getMfaStatus, disableMfa, regenerateRecoveryCodes, validateTotpCode } from "@/lib/mfa-utils";
 import { api } from "@/lib/api";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import MFASetup from "@/components/auth/mfa-setup";
 import PasskeyRegistration from "@/components/auth/passkey-registration";
 import PasskeyList from "@/components/auth/passkey-list";
@@ -130,6 +131,10 @@ function ChangePasswordForm() {
             e.preventDefault();
             setError(null);
             setDone(false);
+            if (next.length < MIN_PASSWORD_LENGTH) {
+                setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+                return;
+            }
             if (next !== confirm) {
                 setError("The new passwords do not match.");
                 return;
@@ -176,7 +181,8 @@ function ChangePasswordForm() {
                         value={next}
                         onChange={(e) => setNext(e.target.value)}
                         required
-                        minLength={8}
+                        minLength={MIN_PASSWORD_LENGTH}
+                        placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-ring"
                     />
                 </label>
@@ -190,6 +196,7 @@ function ChangePasswordForm() {
                         value={confirm}
                         onChange={(e) => setConfirm(e.target.value)}
                         required
+                        minLength={MIN_PASSWORD_LENGTH}
                         aria-invalid={mismatch}
                         className={`w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring ${mismatch ? "border-red-500/60" : "border-border"
                             }`}
