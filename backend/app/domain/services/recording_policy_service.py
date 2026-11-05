@@ -35,6 +35,21 @@ CONSENT_ONE_PARTY = "one_party"
 CONSENT_TWO_PARTY = "two_party"
 CONSENT_DISABLED = "disabled"
 
+# Where every party must know about a recording: the default
+# two_party_country_codes of tenant_recording_policy (migration 20260425), US
+# states as "US-XX". A one-party tenant still announces to a callee here
+# (QA F12-04): its one-party assertion can't cover a callee whose own law
+# needs a notice.
+PLATFORM_TWO_PARTY_CODES = frozenset({
+    "US-CA", "US-MA", "US-IL", "US-WA", "US-FL", "US-MD", "US-MT",
+    "US-NH", "US-PA", "US-CT", "US-DE", "US-MI", "US-NV", "US-OR",
+    "CA",
+    "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR",
+    "DE", "GR", "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL",
+    "PL", "PT", "RO", "SK", "SI", "ES", "SE",
+    "GB", "AU",
+})
+
 
 @dataclass
 class RecordingDecision:
@@ -86,6 +101,7 @@ class RecordingPolicyService:
         *,
         tenant_id: str,
         destination_country_code: Optional[str] = None,
+        callee_country_code: Optional[str] = None,
     ) -> RecordingDecision:
         """Return the recording decision for a specific outbound call.
 
@@ -93,6 +109,10 @@ class RecordingPolicyService:
         or the more specific "US-CA" / "US-MA" form used by the default
         two-party list for US states. Pass None if you don't know — we
         default to two-party in that case.
+
+        `callee_country_code` is the country of the number on the call (see
+        `callee_country`). It only decides whether a one-party tenant owes
+        a notice; None means the callee can't be placed, so it does.
         """
         try:
             row = await self._load_row(tenant_id)
@@ -134,7 +154,20 @@ class RecordingPolicyService:
 
         if mode == CONSENT_ONE_PARTY:
             # Record without announcement — legal only in one-party-consent
-            # jurisdictions. The tenant is asserting responsibility.
+            # jurisdictions. The tenant is asserting responsibility for those
+            # alone: a callee in a two-party country (platform list or the
+            # tenant's own), or one we can't place, still gets the notice.
+            if _country_matches_any(
+                callee_country_code, two_party_codes | PLATFORM_TWO_PARTY_CODES
+            ):
+                return RecordingDecision(
+                    should_record=True,
+                    announcement_required=True,
+                    announcement_text=announcement_text,
+                    opt_out_dtmf_digit=dtmf,
+                    retention_days=retention_days,
+                    reason="tenant_policy_one_party_two_party_destination",
+                )
             return RecordingDecision(
                 should_record=True,
                 announcement_required=False,
@@ -232,6 +265,47 @@ def clear_disclosure_state(*call_ids: Optional[str]) -> None:
     for call_id in call_ids:
         if call_id:
             _DISCLOSURE_LEDGER.pop(str(call_id), None)
+            _CALLEE_COUNTRY.pop(str(call_id), None)
+
+
+# call_id -> the callee country the notice decision used (QA F12-04), so the
+# save-time gate re-runs the same decision. Same bound and fail-closed reading
+# as the disclosure ledger: a missing entry reads as "can't be placed", which
+# makes a one-party tenant owe a notice that was never delivered.
+_CALLEE_COUNTRY: "OrderedDict[str, Optional[str]]" = OrderedDict()
+
+
+def record_callee_country(country: Optional[str], *call_ids: Optional[str]) -> None:
+    """Remember the callee country under every id of the call."""
+    for call_id in call_ids:
+        if not call_id:
+            continue
+        key = str(call_id)
+        _CALLEE_COUNTRY[key] = country
+        _CALLEE_COUNTRY.move_to_end(key)
+    while len(_CALLEE_COUNTRY) > _LEDGER_MAX_ENTRIES:
+        _CALLEE_COUNTRY.popitem(last=False)
+
+
+def get_callee_country(*call_ids: Optional[str]) -> Optional[str]:
+    """The recorded callee country under any of `call_ids`, else None."""
+    for call_id in call_ids:
+        if call_id and _CALLEE_COUNTRY.get(str(call_id)) is not None:
+            return _CALLEE_COUNTRY[str(call_id)]
+    return None
+
+
+def callee_country(voice_session: Any) -> Optional[str]:
+    """ISO country of the other party on a telephony call, or None.
+
+    ``_dialer_phone`` is the dialled number on an outbound call and the
+    caller's number on an inbound one. A US number gives only "US", which
+    matches every "US-XX" entry: the state can't be told from the number.
+    """
+    from app.domain.services.phone_number_normalizer import region_of_e164
+
+    phone = getattr(voice_session, "_dialer_phone", None)
+    return region_of_e164(phone) if isinstance(phone, str) else None
 
 
 def disclosure_delivered(*call_ids: Optional[str]) -> bool:

@@ -152,6 +152,16 @@ async def test_policy_revocation_during_encoding_prevents_storage(fixture, entry
 
 
 @pytest.mark.asyncio
+async def test_save_gate_decides_for_the_callee_country_of_the_notice_decision(fixture):
+    """QA F12-04: the live notice decision records the callee's country beside
+    the disclosure state; the save-time gate re-runs the decision with it, so
+    both ends agree on whether a one-party tenant owed a notice."""
+    policy.record_callee_country("PK", CALL)
+    assert await invoke(fixture, "cloud")
+    assert fixture.decide.await_args.kwargs.get("callee_country_code") == "PK"
+
+
+@pytest.mark.asyncio
 async def test_teardown_database_failure_never_creates_disk_only_orphan(fixture, monkeypatch):
     from app.domain.services.telephony.recording import _save_call_recording
 

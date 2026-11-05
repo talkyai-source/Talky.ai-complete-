@@ -199,7 +199,9 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
         DISCLOSURE_SPOKEN,
         DISCLOSURE_TRANSMITTED,
         RecordingPolicyService,
+        callee_country,
         is_platform_notice_text,
+        record_callee_country,
         record_disclosure_state,
         spoken_disclosure_text,
     )
@@ -248,16 +250,17 @@ async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None)
 
         # destination_country_code is deliberately left None. It is the
         # ONLY input that can turn the announcement off for a two-party
-        # tenant, and we cannot derive it safely from the dialled number:
-        # the policy's two-party list is written in US STATE terms
-        # ("US-CA"), which no E.164 prefix resolves to. Guessing "US"
-        # against a "US-CA" list returns "no announcement needed" and
-        # would record a Californian in silence. Passing None means
-        # "unknown" -> announce, and it matches what save_and_link passes
-        # when it re-runs the same decision, so the two ends never
-        # disagree about whether a notice was owed.
+        # tenant; None means "unknown" -> announce, and it matches what
+        # save_and_link passes when it re-runs the same decision. The
+        # callee's country only decides whether a one-party tenant owes a
+        # notice (QA F12-04). It is recorded beside the disclosure state so
+        # the save-time gate decides for the same country, and the two ends
+        # never disagree about whether a notice was owed.
+        callee = callee_country(voice_session)
+        record_callee_country(callee, *call_ids)
         decision = await RecordingPolicyService(db_pool).decide(
             tenant_id=tenant_id,
+            callee_country_code=callee,
         )
         pinned_override = getattr(
             voice_session, "_recording_disclosure_text_override", None

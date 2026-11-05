@@ -583,10 +583,13 @@ class RecordingService:
             from app.domain.services.recording_policy_service import (
                 RecordingPolicyService,
                 consent_satisfied,
+                get_callee_country,
             )
             decision = await RecordingPolicyService(self._db).decide(
                 tenant_id=str(tenant_uuid),
                 destination_country_code=destination_country_code,
+                # The country the live notice decision used (QA F12-04).
+                callee_country_code=get_callee_country(call_id, str(row["id"])),
             )
             allowed = bool(
                 decision.should_record and consent_satisfied(decision, call_id, str(row["id"]))
