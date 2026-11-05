@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+import asyncio
 import importlib.util
 import os
 from pathlib import Path
@@ -326,7 +327,7 @@ def test_invalid_or_missing_target_never_opens_database(trusted_history, tmp_pat
     env_file.write_text(f"DATABASE_URL={SYNTHETIC_DSN}\n", encoding="utf-8")
     observed = []
 
-    async def observe(dsn):
+    async def observe(dsn, **kwargs):
         observed.append(dsn)
         return guard.PaygState("payg", False, False)
 
@@ -345,7 +346,8 @@ def test_cli_uses_explicit_primary_env_file_without_inherited_or_replica_dsn(tru
     monkeypatch.setenv("DATABASE_URL", "postgresql://inherited.invalid/qa")
     observed = []
 
-    async def observe(dsn):
+    async def observe(dsn, **kwargs):
+        assert kwargs == {"repo": trusted_history[0], "target_sha": trusted_history[3]}
         observed.append(dsn)
         return guard.PaygState("payg", False, False)
 
@@ -363,3 +365,200 @@ def test_git_timeout_is_a_sanitized_refusal(tmp_path, monkeypatch):
     with pytest.raises(guard.RollbackRefused, match="Repository compatibility") as raised:
         guard.verify_target(tmp_path, "f" * 40, guard.PaygState("payg", False, False))
     assert "synthetic-password" not in str(raised.value)
+
+
+def _b2_revision(repo, revision, parent):
+    directory = repo / "backend" / "Alembic" / "versions"
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / f"{revision}.py").write_text(
+        f"revision: str = {revision!r}\ndown_revision = {parent!r}\n"
+        "raise RuntimeError('Rollback inspection must not execute migration code')\n",
+        encoding="utf-8",
+    )
+
+
+@pytest.fixture
+def b2_history(tmp_path, monkeypatch):
+    repo = tmp_path / "trusted-repository"
+    repo.mkdir()
+    _git(repo, "init", "--quiet")
+    commits = []
+    for revision, parent in (
+        (guard.PRE_PAYG_HEAD, None),
+        (guard.PAYG_HEAD, guard.PRE_PAYG_HEAD),
+        ("0084_future_change", guard.PAYG_HEAD),
+    ):
+        _b2_revision(repo, revision, parent)
+        _git(repo, "add", "backend/Alembic/versions")
+        _git(repo, "commit", "--quiet", "--no-gpg-sign", "-m", revision)
+        commits.append(_git(repo, "rev-parse", "HEAD"))
+    monkeypatch.setattr(guard, "PAYG_INTRODUCTION", commits[1])
+    return repo, *commits
+
+
+def _b2_cli(repo, target, tmp_path, monkeypatch, conn):
+    _connect(monkeypatch, conn)
+    env_file = tmp_path / "b2-synthetic.env"
+    env_file.write_text(f"DATABASE_URL={SYNTHETIC_DSN}\n", encoding="utf-8")
+    return guard.main([
+        "--repo", str(repo), "--target-sha", target, "--env-file", str(env_file),
+    ])
+
+
+@pytest.mark.parametrize("target_index", [2, 3])
+def test_b2_known_newer_payg_head_accepts_compatible_code_without_executing_migrations(
+    b2_history, tmp_path, monkeypatch, capsys, target_index,
+):
+    repo = b2_history[0]
+    # Deliberately unrelated cwd: the explicit trusted repository owns the graph.
+    monkeypatch.chdir(tmp_path)
+    conn = _Connection(head="0084_future_change")
+    conn.data_error = PermissionError("Customer rows must remain unread")
+
+    assert _b2_cli(repo, b2_history[target_index], tmp_path, monkeypatch, conn) == 0
+
+    output = capsys.readouterr()
+    assert "schema=payg" in output.out
+    assert "synthetic-password" not in output.out + output.err
+    assert not any("FROM public.tenants" in sql or "FROM public.topup_packages" in sql for sql in conn.queries)
+
+
+def test_b2_frozen_forward_target_supplies_newer_graph_before_checkout(
+    b2_history, tmp_path, monkeypatch,
+):
+    repo, _, introduction, target = b2_history
+    _git(repo, "checkout", "--quiet", "--detach", introduction)
+    assert _b2_cli(repo, target, tmp_path, monkeypatch, _Connection(head="0084_future_change")) == 0
+    assert _git(repo, "rev-parse", "HEAD") == introduction
+
+
+def test_b2_known_newer_payg_head_still_refuses_pre_payg_target(
+    b2_history, tmp_path, monkeypatch, capsys,
+):
+    repo, legacy, _, _ = b2_history
+    assert _b2_cli(repo, legacy, tmp_path, monkeypatch, _Connection(head="0084_future_change")) == 1
+    assert "Legacy target is incompatible" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("head", ["0085_unknown_change", "9999_future_number"])
+def test_b2_unknown_head_is_refused_even_with_payg_columns(
+    b2_history, tmp_path, monkeypatch, capsys, head,
+):
+    repo, _, _, target = b2_history
+    assert _b2_cli(repo, target, tmp_path, monkeypatch, _Connection(head=head)) == 1
+    assert "synthetic-password" not in capsys.readouterr().err
+
+
+def test_b2_uncommitted_revision_cannot_make_unknown_database_head_trusted(
+    b2_history, tmp_path, monkeypatch,
+):
+    repo, _, _, target = b2_history
+    _b2_revision(repo, "0085_uncommitted", "0084_future_change")
+    assert _b2_cli(repo, target, tmp_path, monkeypatch, _Connection(head="0085_uncommitted")) == 1
+
+
+def test_b2_known_unrelated_migration_branch_is_not_a_payg_descendant(
+    b2_history, tmp_path, monkeypatch,
+):
+    repo, _, _, _ = b2_history
+    _b2_revision(repo, "0085_other_branch", guard.PRE_PAYG_HEAD)
+    _git(repo, "add", "backend/Alembic/versions")
+    _git(repo, "commit", "--quiet", "--no-gpg-sign", "-m", "unrelated migration branch")
+    target = _git(repo, "rev-parse", "HEAD")
+    assert _b2_cli(repo, target, tmp_path, monkeypatch, _Connection(head="0085_other_branch")) == 1
+
+
+@pytest.mark.parametrize("billing,audience", [(False, False), (True, False), (False, True)])
+def test_b2_newer_graph_head_does_not_replace_actual_payg_schema_proof(
+    b2_history, tmp_path, monkeypatch, billing, audience,
+):
+    repo, _, _, target = b2_history
+    conn = _Connection(head="0084_future_change", billing=billing, audience=audience)
+    assert _b2_cli(repo, target, tmp_path, monkeypatch, conn) == 1
+
+
+@pytest.mark.asyncio
+async def test_b2_one_transient_connection_failure_retries_then_succeeds(monkeypatch, capsys):
+    conn = _Connection()
+    calls, sleeps = [], []
+
+    async def connect(dsn, **kwargs):
+        calls.append((dsn, kwargs))
+        if len(calls) == 1:
+            raise ConnectionRefusedError(SYNTHETIC_DSN)
+        return conn
+
+    async def sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(guard.asyncpg, "connect", connect)
+    monkeypatch.setattr(guard.asyncio, "sleep", sleep)
+    assert await guard.read_payg_state(SYNTHETIC_DSN) == guard.PaygState("payg", None, None)
+    assert calls == [(SYNTHETIC_DSN, {"timeout": 10, "command_timeout": 10})] * 2
+    assert len(sleeps) == 1 and 0 < sleeps[0] <= 1
+    assert conn.closed == [5]
+    output = capsys.readouterr()
+    assert "synthetic-password" not in output.out + output.err
+
+
+@pytest.mark.asyncio
+async def test_b2_repeated_connection_failures_have_bounded_backoff_and_safe_error(monkeypatch, capsys):
+    calls, sleeps = [], []
+
+    async def connect(dsn, **kwargs):
+        calls.append((dsn, kwargs))
+        raise TimeoutError(SYNTHETIC_DSN)
+
+    async def sleep(delay):
+        sleeps.append(delay)
+
+    monkeypatch.setattr(guard.asyncpg, "connect", connect)
+    monkeypatch.setattr(guard.asyncio, "sleep", sleep)
+    with pytest.raises(guard.RollbackRefused) as raised:
+        await guard.read_payg_state(SYNTHETIC_DSN)
+    assert len(calls) == 3
+    assert len(sleeps) == 2 and 0 < sleeps[0] <= sleeps[1] <= 1
+    output = capsys.readouterr()
+    assert "synthetic-password" not in str(raised.value) + output.out + output.err
+
+
+@pytest.mark.asyncio
+async def test_b2_permanent_auth_failure_does_not_retry_or_expose_password(monkeypatch):
+    calls = []
+
+    async def connect(dsn, **kwargs):
+        calls.append(dsn)
+        raise guard.asyncpg.InvalidPasswordError(SYNTHETIC_DSN)
+
+    monkeypatch.setattr(guard.asyncpg, "connect", connect)
+    with pytest.raises(guard.RollbackRefused) as raised:
+        await guard.read_payg_state(SYNTHETIC_DSN)
+    assert calls == [SYNTHETIC_DSN]
+    assert "synthetic-password" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_b2_cancellation_is_not_retried_or_replaced(monkeypatch):
+    calls = []
+    cancellation = asyncio.CancelledError()
+
+    async def connect(dsn, **kwargs):
+        calls.append(dsn)
+        raise cancellation
+
+    monkeypatch.setattr(guard.asyncpg, "connect", connect)
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await guard.read_payg_state(SYNTHETIC_DSN)
+    assert raised.value is cancellation
+    assert calls == [SYNTHETIC_DSN]
+
+
+@pytest.mark.asyncio
+async def test_b2_connection_retry_does_not_repeat_an_observation_failure(monkeypatch):
+    conn = _Connection()
+    conn.observation_error = ConnectionError(SYNTHETIC_DSN)
+    calls = _connect(monkeypatch, conn)
+    with pytest.raises(guard.RollbackRefused):
+        await guard.read_payg_state(SYNTHETIC_DSN)
+    assert len(calls) == 1
+    assert conn.closed == [5]

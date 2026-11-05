@@ -377,6 +377,13 @@ safe. It accepts an older target only for the recognized pre-PAYG schema with
 no PAYG state; unknown or mixed schema is refused. This is a PAYG boundary
 check, not proof of every gateway, migration or frontend compatibility rule.
 
+PAYG state is determined from the billing columns. Newer database heads are
+accepted only when the immutable current or target release's migration graph
+proves they descend from `0083_pay_as_you_go`; uncommitted migration files and
+unknown heads are refused. Migration metadata is parsed without executing it.
+Transient primary connection failures receive at most three bounded attempts,
+with 0.25/0.5-second backoff; schema/query/authentication failures are not retried.
+
 Use the reviewed guard from a current compatible release for manual rollback,
 before checkout. Never take it from the older rollback target, delete it to
 proceed, or automatically clear customer plans/deactivate packages. Keep the

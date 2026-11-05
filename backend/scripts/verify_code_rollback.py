@@ -7,6 +7,7 @@ release. Never execute a rollback target's own copy to authorize that target.
 from __future__ import annotations
 
 import argparse
+import ast
 import asyncio
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,7 +34,9 @@ class PaygState:
     has_active_payg_bundles: bool | None
 
 
-async def read_payg_state(database_url: str) -> PaygState:
+async def read_payg_state(
+    database_url: str, *, repo: Path | None = None, target_sha: str | None = None,
+) -> PaygState:
     """Observe the authoritative primary, without silently filtering RLS rows."""
     if database_url.startswith("postgresql+asyncpg://"):
         database_url = "postgresql://" + database_url[len("postgresql+asyncpg://"):]
@@ -44,7 +47,14 @@ async def read_payg_state(database_url: str) -> PaygState:
     try:
         # Pass the full DSN through: asyncpg consumes sslmode, sslrootcert,
         # sslcert and sslkey. Never weaken TLS or strip its query parameters.
-        conn = await asyncpg.connect(database_url, timeout=10, command_timeout=10)
+        for attempt in range(3):
+            try:
+                conn = await asyncpg.connect(database_url, timeout=10, command_timeout=10)
+                break
+            except (OSError, asyncpg.CannotConnectNowError, asyncpg.ConnectionDoesNotExistError):
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(0.25 * (2 ** attempt))
         async with conn.transaction(readonly=True):
             await conn.execute("SET LOCAL statement_timeout = '5000ms'")
             await conn.execute("SET LOCAL lock_timeout = '1000ms'")
@@ -73,7 +83,9 @@ async def read_payg_state(database_url: str) -> PaygState:
             )
             if head == PRE_PAYG_HEAD and columns["billing"] is False and columns["audience"] is False:
                 schema_state = "pre_payg"
-            elif head == PAYG_HEAD and columns["billing"] is True and columns["audience"] is True:
+            elif columns["billing"] is True and columns["audience"] is True and (
+                head == PAYG_HEAD or _known_payg_descendant(repo, target_sha, head)
+            ):
                 schema_state = "payg"
             else:
                 raise RollbackRefused("Unknown or mixed PAYG schema; reviewed recovery is required")
@@ -115,10 +127,81 @@ async def read_payg_state(database_url: str) -> PaygState:
 def _git(repo: Path, *args: str) -> subprocess.CompletedProcess:
     try:
         return subprocess.run(
-            ["git", "-C", str(repo), *args], capture_output=True, text=True, timeout=10,
+            ["git", "-C", str(repo), *args], capture_output=True, text=True,
+            encoding="utf-8", timeout=10,
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
         raise RollbackRefused("Repository compatibility could not be inspected") from None
+
+
+def _migration_graph(repo: Path, commit: str) -> dict[str, tuple[str, ...]]:
+    """Read literal metadata from committed blobs, never import migration code."""
+    listing = _git(repo, "ls-tree", "-r", "-z", "--name-only", commit, "--", "backend/Alembic/versions")
+    if listing.returncode:
+        raise RollbackRefused("Repository migration graph could not be inspected")
+    graph = {}
+    for path in listing.stdout.split("\0"):
+        if not path.endswith(".py") or path.endswith("/__init__.py"):
+            continue
+        source = _git(repo, "show", f"{commit}:{path}")
+        if source.returncode:
+            raise RollbackRefused("Committed migration metadata is unavailable")
+        metadata = {}
+        try:
+            for node in ast.parse(source.stdout).body:
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                elif isinstance(node, ast.AnnAssign):
+                    targets = [node.target]
+                else:
+                    continue
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id in {"revision", "down_revision"}:
+                        if target.id in metadata:
+                            raise ValueError("Duplicate migration metadata")
+                        metadata[target.id] = ast.literal_eval(node.value)
+            revision = metadata["revision"]
+            parent = metadata["down_revision"]
+            parents = () if parent is None else (parent,) if isinstance(parent, str) else parent
+            if (
+                not isinstance(revision, str) or not revision or revision in graph
+                or not isinstance(parents, (tuple, list))
+                or not all(isinstance(item, str) and item for item in parents)
+            ):
+                raise ValueError("Invalid migration metadata")
+            graph[revision] = tuple(parents)
+        except (KeyError, SyntaxError, TypeError, ValueError):
+            raise RollbackRefused("Committed migration metadata was not proved") from None
+    return graph
+
+
+def _known_payg_descendant(repo: Path | None, target_sha: str | None, head: str) -> bool:
+    if repo is None or target_sha is None:
+        return False
+    _verify_target_commit(repo, target_sha)
+    current = _git(repo, "rev-parse", "--verify", "HEAD^{commit}")
+    if current.returncode or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", current.stdout.strip()):
+        raise RollbackRefused("Current repository commit was not proved")
+    # HEAD recognizes an installed newer schema during rollback; the immutable
+    # target recognizes a forward migration before that target is checked out.
+    for commit in dict.fromkeys((current.stdout.strip(), target_sha)):
+        graph = _migration_graph(repo, commit)
+        if head not in graph:
+            continue
+
+        def descends(revision: str, visiting: frozenset[str]) -> bool:
+            if revision in visiting or revision not in graph:
+                raise RollbackRefused("Migration ancestry is cyclic or incomplete")
+            if revision == PAYG_HEAD:
+                return True
+            # Evaluate every merge parent so a missing or cyclic branch cannot
+            # be hidden by another parent that already reaches PAYG.
+            ancestors = [descends(parent, visiting | {revision}) for parent in graph[revision]]
+            return any(ancestors)
+
+        if descends(head, frozenset()):
+            return True
+    return False
 
 
 def _verify_target_commit(repo: Path, target_sha: str) -> None:
@@ -165,7 +248,7 @@ def main(argv: list[str] | None = None) -> int:
         database_url = settings.get("MIGRATION_DATABASE_URL") or settings.get("DATABASE_URL")
         if not database_url:
             raise RollbackRefused("Primary database URL is absent from the environment file")
-        state = asyncio.run(read_payg_state(database_url))
+        state = asyncio.run(read_payg_state(database_url, repo=args.repo, target_sha=args.target_sha))
         verify_target(args.repo, args.target_sha, state)
     except RollbackRefused as exc:
         print(f"CODE ROLLBACK CHECK FAILED: {exc}", file=sys.stderr)
