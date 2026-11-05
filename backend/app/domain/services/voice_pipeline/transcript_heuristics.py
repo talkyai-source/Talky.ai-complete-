@@ -90,6 +90,48 @@ _VOICEMAIL_PHRASES = (
     "the party at extension",
     "at the sound of the tone",
     "at the sound of the beep",
+    # QA F10-06 (labelled set: 21 of 30 machines caught): mailbox states,
+    # "text me or leave a voicemail", O2's "the person you are calling", and
+    # recorded office-closed messages. A person who just picked up says none
+    # of these. "Please hold while we try to connect you" is left out on
+    # purpose: a live answer can follow it.
+    "leave a voicemail",
+    "mailbox is full",
+    "voicemail is full",
+    "cannot accept any more messages",
+    "mailbox has not been set up",
+    "voicemail has not been set up",
+    "mailbox is not set up",
+    "voicemail is not set up",
+    "the person you are calling",
+    "the person you have called",
+    "person you're calling",
+    "o two messaging",
+    "o2 messaging",
+    "office is currently closed",
+    "offices are currently closed",
+    "office is now closed",
+    "offices are now closed",
+)
+
+# Network intercepts (QA F10-06): the network, not the callee, is speaking.
+# They end the call like a voicemail, but are recorded as the carrier's own
+# cause code would be: a number not in service like Q.850 1 (INVALID), a phone
+# that is off or out of reach like Q.850 20 (NO_ANSWER).
+_NOT_IN_SERVICE_PHRASES = (
+    "not in service",
+    "no longer in service",
+    "has not been recognised",
+    "has not been recognized",
+    "is not a valid number",
+)
+_UNREACHABLE_PHRASES = (
+    "subscriber you have called",
+    "subscriber you are calling",
+    "the subscriber is not available",
+    "is switched off",
+    "is not reachable",
+    "cannot be reached at the moment",
 )
 
 
@@ -115,3 +157,17 @@ def is_voicemail_greeting(text: str) -> bool:
         return False
     blob = _normalise_voicemail_blob(text)
     return any(phrase in blob for phrase in _VOICEMAIL_PHRASES)
+
+
+def network_intercept(text: str) -> str | None:
+    """"not_in_service" or "unreachable" when the network itself answered
+    with an intercept message, else None. Same precision rule as
+    ``is_voicemail_greeting``: no person answers a call this way."""
+    if not text:
+        return None
+    blob = _normalise_voicemail_blob(text)
+    if any(phrase in blob for phrase in _NOT_IN_SERVICE_PHRASES):
+        return "not_in_service"
+    if any(phrase in blob for phrase in _UNREACHABLE_PHRASES):
+        return "unreachable"
+    return None

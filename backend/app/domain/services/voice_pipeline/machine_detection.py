@@ -37,6 +37,7 @@ import logging
 
 from app.domain.services.voice_pipeline.transcript_heuristics import (
     is_voicemail_greeting,
+    network_intercept,
 )
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,13 @@ _SCREENING_PHRASES = (
     "if you record your name",
     "see if this person is available",
     "see if this call is available",
+    # Google Call Screen and similar (QA F10-06: Google's own screener was not
+    # even flagged as screening).
+    "using a screening service",
+    "say your name and why you're calling",
+    "say your name and why you are calling",
+    "state your name and the reason",
+    "state your name and reason",
 )
 
 # The screening endgame / any-time machine wording. Only consulted once
@@ -137,14 +145,25 @@ def assess_machine_text(
       * ``"screening"``    — a screening service answered → flag it (no hangup).
       * ``"machine_end"``  — post-screening "not available / after the tone"
                              → hang up.
+      * ``"network_not_in_service"`` / ``"network_unreachable"`` — the
+                             network answered with an intercept message → hang
+                             up; recorded like Q.850 1 / 20, not as voicemail.
       * ``"none"``         — nothing machine-like.
     """
     if not text:
         return "none"
     blob = " ".join(text.lower().split())
 
-    if turn_index <= _MAX_TURN_INDEX_FOR_OPENING and is_voicemail_greeting(blob):
-        return "voicemail"
+    # A screener's opening can also read like a greeting (Google: "the person
+    # you're calling is using a screening service"); it may still put the call
+    # through, so screening wording wins over the opening hang-up.
+    screening = any(p in blob for p in _SCREENING_PHRASES)
+    if turn_index <= _MAX_TURN_INDEX_FOR_OPENING and not screening:
+        intercept = network_intercept(blob)
+        if intercept is not None:
+            return "network_" + intercept
+        if is_voicemail_greeting(blob):
+            return "voicemail"
 
     # Mailbox/IVR menu wording is machine-only at ANY point in a call.
     if any(p in blob for p in _ALWAYS_MACHINE_PHRASES):
@@ -153,7 +172,7 @@ def assess_machine_text(
     if screening_seen and any(p in blob for p in _MACHINE_END_PHRASES):
         return "machine_end"
 
-    if any(p in blob for p in _SCREENING_PHRASES):
+    if screening:
         return "screening"
 
     return "none"
@@ -221,24 +240,34 @@ async def handle_machine_interim(
                 )
             return False
 
-        # voicemail | machine_end → hang up now, mark VOICEMAIL.
+        # voicemail | machine_end → hang up now, mark VOICEMAIL. A network
+        # intercept hangs up too, but is recorded as the matching carrier
+        # cause would be (QA F10-06), so it is not marked VOICEMAIL.
         logger.info(
             "machine_detected_interim call=%s verdict=%s turn=%s — hanging up "
             "(text=%r)",
             str(call_id)[:12], verdict, getattr(session, "turn_id", "?"),
             (text or "")[:80],
         )
-        try:
-            session._amd_voicemail = True
-        except Exception:
-            pass
-        try:
-            from app.domain.services.voice_pipeline.voicemail_detector import (
-                _flag_session_voicemail,
-            )
-            _flag_session_voicemail(call_id)
-        except Exception:
-            pass
+        if verdict.startswith("network_"):
+            try:
+                session._amd_network_outcome = (
+                    "invalid" if verdict == "network_not_in_service" else "no_answer"
+                )
+            except Exception:
+                pass
+        else:
+            try:
+                session._amd_voicemail = True
+            except Exception:
+                pass
+            try:
+                from app.domain.services.voice_pipeline.voicemail_detector import (
+                    _flag_session_voicemail,
+                )
+                _flag_session_voicemail(call_id)
+            except Exception:
+                pass
 
         # Owner decision 2026-10-21: after an ARMED screening bot says the person
         # is unavailable, leave one short message instead of hanging up silently.
