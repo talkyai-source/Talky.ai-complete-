@@ -30,6 +30,10 @@ RECOVERABLE_TYPES = frozenset(
         "refund.created", "refund.updated", "refund.failed", "charge.refund.updated",
         "charge.refunded",
         "charge.dispute.created",
+        # Idempotent: a won dispute restores a subscription only while its
+        # recorded dispute is still open, and top-up minutes through a ledger
+        # row unique per event (billing_state_events._apply_dispute).
+        "charge.dispute.closed",
     }
 )
 
@@ -93,7 +97,7 @@ class BillingReconciliation:
                     if event_type.startswith("invoice.")
                     else (
                         "Dispute"
-                        if event_type == "charge.dispute.created"
+                        if event_type in {"charge.dispute.created", "charge.dispute.closed"}
                         else "Charge" if event_type == "charge.refunded"
                         else "Refund" if event_type.startswith("refund.") or event_type == "charge.refund.updated"
                         else "CreditNote" if event_type.startswith("credit_note.") else None
