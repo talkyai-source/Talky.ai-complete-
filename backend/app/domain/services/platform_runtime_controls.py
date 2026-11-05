@@ -14,6 +14,8 @@ from typing import Any
 
 import asyncpg
 
+from app.core.db_utils import acquire_connection
+
 logger = logging.getLogger(__name__)
 
 
@@ -34,7 +36,7 @@ async def get_outbound_call_pause(db_pool: Any) -> OutboundCallPause:
     emergency pause must not silently stop working during a database fault.
     """
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_connection(db_pool) as conn:
             row = await conn.fetchrow(
                 """
                 SELECT outbound_calls_paused, paused_at, paused_by, pause_reason
@@ -67,7 +69,7 @@ async def set_outbound_call_pause(
 ) -> OutboundCallPause:
     """Idempotently set the platform-wide outbound-call pause state."""
     normalized_reason = reason.strip()[:500] if reason and reason.strip() else None
-    async with db_pool.acquire() as conn:
+    async with acquire_connection(db_pool) as conn:
         row = await conn.fetchrow(
             """
             INSERT INTO platform_runtime_controls (
