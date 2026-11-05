@@ -40,7 +40,9 @@ from app.core.security.password import (
     validate_password_strength,
 )
 from app.core.security.lockout import record_login_attempt
-from app.core.security.auth_abuse import claim_budget, enforce_budget, verify_turnstile
+from app.core.security.auth_abuse import (
+    claim_budget, enforce_budget, enforce_reset_failure_budget, verify_turnstile,
+)
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import revoke_all_user_sessions
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
@@ -253,6 +255,16 @@ def _get_redis_or_503():
     return container.redis
 
 
+async def _reject_reset_code(redis, email: str, address: str, *, request_new: bool = False) -> None:
+    # Gate the observable failure atomically; concurrent requests cannot expose
+    # more failed verification outcomes than either distributed budget permits.
+    await enforce_reset_failure_budget(redis, email, address, failed=True)
+    detail = "Invalid or expired reset code."
+    if request_new:
+        detail += " Request a new code."
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -396,11 +408,12 @@ async def reset_password(
         ) from exc
 
     redis = _get_redis_or_503()
-    await enforce_budget(redis, "reset-ip", get_client_ip(request), limit=5, seconds=60)
-    # Reserve before comparing: concurrent guesses and reissued codes share
-    # the same daily budget. Count all attempts (including success/expiry),
-    # which also avoids disclosing whether an account or pending code exists.
-    await enforce_budget(redis, "reset-email-day", email, limit=20, seconds=24 * 60 * 60)
+    address = get_client_ip(request)
+    await enforce_budget(redis, "reset-ip", address, limit=5, seconds=60)
+    # Reject exhausted budgets early. Each failure and the final successful
+    # verification must also pass the atomic gate below; this precheck alone
+    # cannot bound concurrent requests. Success consumes no failed budget.
+    await enforce_reset_failure_budget(redis, email, address, failed=False)
     try:
         raw = await redis.get(_reset_redis_key(email))
     except Exception as exc:
@@ -408,46 +421,28 @@ async def reset_password(
     if not raw:
         # Could be: never requested, expired, or already consumed.  Same
         # error message in all cases to avoid leaking timing info.
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset code.",
-        )
+        await _reject_reset_code(redis, email, address)
 
     try:
         pending = json.loads(raw)
     except Exception:
         # Corrupted Redis entry — treat as invalid.
         await _clear_reset_request(redis, email, raw)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset code.",
-        )
+        await _reject_reset_code(redis, email, address)
 
     if not isinstance(pending, dict):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset code.",
-        )
+        await _reject_reset_code(redis, email, address)
     if not await _claim_reset_attempt(redis, email, raw, pending):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset code. Request a new code.",
-        )
+        await _reject_reset_code(redis, email, address, request_new=True)
     if not secrets.compare_digest(_hash_reset_code(code).encode("ascii"),
                                   str(pending.get("code_hash") or "").encode("utf-8")):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset code.",
-        )
+        await _reject_reset_code(redis, email, address)
 
     user_id = pending.get("user_id")
     if not user_id:
         # Should never happen — defensive guard.
         await _clear_reset_request(redis, email, raw)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid or expired reset code.",
-        )
+        await _reject_reset_code(redis, email, address)
 
     new_hash = hash_password(new_password)
 
@@ -462,10 +457,12 @@ async def reset_password(
         if (not row or not isinstance(pending.get("password_generation"), str)
                 or not secrets.compare_digest(pending["password_generation"].encode("utf-8"),
                                               _password_generation(row["password_hash"]).encode("ascii"))):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid or expired reset code. Request a new code.",
-            )
+            await _reject_reset_code(redis, email, address, request_new=True)
+
+        # A code match is observable only after this final atomic decision.
+        # A concurrent failure that fills the last slot must block the match,
+        # rather than letting a stale precheck become an extra success oracle.
+        await enforce_reset_failure_budget(redis, email, address, failed=False)
 
         async with conn.transaction():
             await conn.execute(

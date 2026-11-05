@@ -69,13 +69,13 @@ async def test_reset_caps_ip_before_even_looking_up_pending_code(flow):
 
 async def test_daily_email_budget_survives_new_codes_and_source_ips(flow):
     redis, _ = flow
-    for n in range(21):
+    for n in range(101):
         await redis.setex(reset._reset_redis_key(EMAIL), 900, json.dumps({
             "user_id": "synthetic-user", "code_hash": reset._hash_reset_code(f"{n+1:06d}")
         }))
         with pytest.raises(HTTPException) as exc:
             await attempt(f"203.0.113.{n+1}")
-        assert exc.value.status_code == (400 if n < 20 else 429)
+        assert exc.value.status_code == (400 if n < 100 else 429)
 
 
 async def test_send_cap_fails_closed_without_redis():
