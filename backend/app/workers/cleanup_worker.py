@@ -217,6 +217,10 @@ async def cleanup_old_records(
 
 
 async def main() -> int:
+    # Workers never ran app_bootstrap.configure_logging, so personal data
+    # reached the journal in clear (QA F2-10). Idempotent.
+    from app.core.log_redact import install_pii_log_redaction
+    install_pii_log_redaction()
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
