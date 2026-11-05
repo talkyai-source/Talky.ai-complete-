@@ -34,3 +34,17 @@ def test_ask_ai_still_lean_no_markdown_rule():
     # Keeps its voice-safety rules.
     assert "No markdown" in ASK_AI_SYSTEM_PROMPT
     assert "do NOT greet again" in ASK_AI_SYSTEM_PROMPT
+
+
+def test_tessa_never_hides_that_she_is_an_ai():
+    """QA F11-04: asked "Am I talking to a real person?", the public demo said
+    "I'm a real person on the line" in 3 of 3 live sessions (2 Nov 2026),
+    because its own prompt said "Never say you are an AI". Judged by the same
+    detector that warns tenants who write such instructions."""
+    from app.domain.services.ask_ai_session_config import create_ask_ai_agent_config
+    from app.services.scripts.prompts.guardrails import scan_instruction_conflicts
+
+    rules = " ".join(create_ask_ai_agent_config().rules.do_not_say_rules)
+    assert scan_instruction_conflicts(ASK_AI_SYSTEM_PROMPT) == []
+    assert scan_instruction_conflicts(rules) == []
+    assert "Talk-Lee's AI assistant" in ASK_AI_SYSTEM_PROMPT
