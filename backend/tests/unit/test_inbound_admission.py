@@ -241,6 +241,7 @@ class _AllowedConn:
         self,
         *,
         allocated_minutes=100,
+        plan_minutes=None,
         used_seconds=0,
         reserved_seconds=0,
         route_overrides=None,
@@ -249,6 +250,9 @@ class _AllowedConn:
         knowledge_nodes=None,
     ):
         self.allocated_minutes = allocated_minutes
+        # The bound plan's included minutes; by default the allocation itself,
+        # so a zero allocation sits on a zero-minute (unlimited) plan.
+        self.plan_minutes = allocated_minutes if plan_minutes is None else plan_minutes
         self.used_seconds = used_seconds
         self.reserved_seconds = reserved_seconds
         self.route_overrides = route_overrides or {}
@@ -281,6 +285,15 @@ class _AllowedConn:
         if "INSERT INTO calls" in query:
             self.call_insert_args = args
             return {"id": args[0]}
+        if "AS has_ledger" in query and "FOR UPDATE" in query:
+            return {
+                "minutes_allocated": self.allocated_minutes,
+                "plan_minutes": self.plan_minutes,
+                "billing_model": "subscription",
+                "no_plan": False,
+                "has_ledger": False,
+                "window_start": None,
+            }
         if "SELECT minutes_allocated FROM tenants" in query:
             return {"minutes_allocated": self.allocated_minutes}
         if "INSERT INTO inbound_usage_transactions" in query:
@@ -545,8 +558,10 @@ async def test_concurrency_denial_remains_nonterminal_until_pbx_proof(monkeypatc
 
 @pytest.mark.asyncio
 async def test_non_positive_allocation_preserves_unlimited_plan_contract(monkeypatch):
+    # Zero minutes on a zero-minute subscription plan is the unlimited sentinel.
     conn = _AllowedConn(
         allocated_minutes=0,
+        plan_minutes=0,
         used_seconds=10_000_000,
         reserved_seconds=10_000_000,
     )
@@ -560,6 +575,83 @@ async def test_non_positive_allocation_preserves_unlimited_plan_contract(monkeyp
         )
     )
     assert decision.allowed is True
+
+
+@pytest.mark.asyncio
+async def test_admin_zero_allocation_on_a_limited_plan_admits_nothing(monkeypatch):
+    # QA F13-04: outbound treats this account as out of minutes; inbound used
+    # to read the zero as unlimited.
+    conn = _AllowedConn(allocated_minutes=0, plan_minutes=300)
+    monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_args: _acquire(conn))
+    decision = await InboundAdmissionService(object(), _Limiter()).admit(
+        InboundAdmissionRequest(
+            provider="asterisk",
+            provider_call_id="admin-zero-call",
+            called_did="+15551234567",
+            reservation_seconds=3600,
+        )
+    )
+    assert decision.allowed is False
+    assert decision.reason == "insufficient_minutes"
+
+
+def _bought_minutes_only(remaining_seconds):
+    """Stand-in for ``tenant_inbound_allowance``: bought minutes, nothing used."""
+
+    async def allowance(*_args, **_kwargs):
+        return SimpleNamespace(
+            allocated_minutes=remaining_seconds // 60,
+            accounted_seconds=0,
+            remaining_seconds=remaining_seconds,
+        )
+
+    return allowance
+
+
+@pytest.mark.asyncio
+async def test_pay_as_you_go_account_is_admitted_on_its_bought_minutes(monkeypatch):
+    # QA F13-04: a prepaid account has no Stripe subscription, so the gate
+    # used to refuse every inbound call ("subscription_inactive").
+    conn = _AllowedConn(
+        allocated_minutes=0,
+        route_overrides={"subscription_status": "inactive", "plan_billing_model": "prepaid"},
+    )
+    monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_args: _acquire(conn))
+    monkeypatch.setattr(
+        admission_module, "tenant_inbound_allowance", _bought_minutes_only(600), raising=False
+    )
+    decision = await InboundAdmissionService(object(), _Limiter()).admit(
+        InboundAdmissionRequest(
+            provider="asterisk",
+            provider_call_id="payg-call",
+            called_did="+15551234567",
+            reservation_seconds=14_400,
+        )
+    )
+    assert decision.allowed is True
+    assert decision.config_snapshot["route"]["reservation_seconds"] == 600
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status", ["suspended", "past_due", "cancelled"])
+async def test_blocked_pay_as_you_go_account_is_still_refused(monkeypatch, status):
+    conn = _AllowedConn(
+        allocated_minutes=0,
+        route_overrides={"subscription_status": status, "plan_billing_model": "prepaid"},
+    )
+    monkeypatch.setattr(admission_module, "acquire_with_tenant", lambda *_args: _acquire(conn))
+    monkeypatch.setattr(
+        admission_module, "tenant_inbound_allowance", _bought_minutes_only(600), raising=False
+    )
+    decision = await InboundAdmissionService(object(), _Limiter()).admit(
+        InboundAdmissionRequest(
+            provider="asterisk",
+            provider_call_id=f"payg-{status}",
+            called_did="+15551234567",
+            reservation_seconds=14_400,
+        )
+    )
+    assert decision.allowed is False
 
 
 @pytest.mark.asyncio
