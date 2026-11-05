@@ -360,6 +360,7 @@ async def execute_action(
                 tenant_id=tenant_id,
                 db_client=db_client,
                 campaign_id=merged_params.get("campaign_id", ""),
+                confirm=True,
                 conversation_id=conversation_id,
             )
 
