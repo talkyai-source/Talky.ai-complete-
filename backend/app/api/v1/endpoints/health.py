@@ -62,10 +62,10 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
     Policy:
       - DB down / unreachable  → ready=false, HTTP 503 (there is NO fallback
         for Postgres; a pod that can't reach it cannot serve).
-      - Redis down             → reported as "down" but ready stays true. The
-        container is designed to degrade to an in-memory fallback when Redis
-        is unavailable (see ServiceContainer._initialize_redis), so failing
-        closed here would cause spurious pod evictions.
+      - Redis down or disabled → reported as "down"/"disabled". In production
+        ready=false, HTTP 503: the in-memory fallback queues jobs in one
+        process and rate-limits per process (QA F2-16). Elsewhere ready stays
+        true, since development degrades to that fallback by design.
       - Container not started   → ready=false, HTTP 503.
 
     Each ping is capped at ~500ms via asyncio.wait_for; a timeout is treated
@@ -92,8 +92,8 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
         result["db"] = "down"
         result["ready"] = False
 
-    # Redis — report only; the in-memory fallback means a dead Redis is
-    # degraded, not fatal, so it does not flip ready=false.
+    # Redis — fatal in production (QA F2-16); elsewhere the in-memory fallback
+    # makes a dead Redis degraded, not fatal.
     try:
         redis_client = container.redis
         if redis_client is None:
@@ -105,6 +105,10 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
             result["redis"] = "ok"
     except Exception:
         result["redis"] = "down"
+    from app.core.container import redis_required
+
+    if result["redis"] in {"disabled", "down"} and redis_required():
+        result["ready"] = False
 
     if not result["ready"]:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
