@@ -317,7 +317,14 @@ off-host key recovery.
 
 During an isolated restore, verify a known test record from each encryption
 class using the recovered keys, without printing plaintext or contacting any
-provider. Verify that a wrong key refuses access; tenant-secret reads must
+provider. The audited wrong-key repair in `SecretsManager.get()` covers that
+component only: no production code calls that method. Live provider, trunk,
+connector and webhook secret reads use the encryption service and need their
+own restore/decryption verification. The existing credential resolver can fall
+back to the platform provider key when tenant-key decryption fails; this older
+behavior is not repaired by the secret audit change.
+
+Verify that a wrong key refuses access; tenant-secret reads must
 also record a failed audit entry without increasing successful access counts.
 Missing keys, failed decryption or failed audit persistence block acceptance.
 Repeat the key-recovery drill at least quarterly and after key/custody changes.
