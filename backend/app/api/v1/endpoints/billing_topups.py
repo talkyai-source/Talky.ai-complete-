@@ -50,6 +50,7 @@ from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.billing_service import BillingService
 from app.domain.services.minutes_quota import compute_minutes_status
 from app.domain.services.payg import PurchaseRefused, tenant_purchase_audience
+from app.domain.services.telephony.call_authority import CallAuthorityUnavailable
 from app.domain.services.topup_service import TopupError, TopupService, public_ledger_entry
 from app.domain.services.topup_usage import topup_minutes_left
 
@@ -72,11 +73,18 @@ async def _purchase_audience(tenant_id: str) -> str:
     """Which bundles this account may buy: ``subscriber`` top-ups for a paid
     plan in good standing, ``payg`` bundles for any other account that may
     place calls (owner decision 2026-10-31). Refused accounts get a 409."""
-    async with acquire_with_tenant(get_container().db_pool, tenant_id) as conn:
+    # The formal parent/hold rows belong to other tenants: use the service
+    # read with an explicit bound tenant predicate, as the call guard does.
+    async with acquire_with_tenant(get_container().db_pool, None) as conn:
         try:
             return await tenant_purchase_audience(conn, tenant_id)
         except PurchaseRefused as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
+        except CallAuthorityUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Your account could not be checked just now. Please try again.",
+            ) from exc
 
 
 def _service() -> TopupService:

@@ -143,7 +143,9 @@ async def payg_db():
 
 
 async def _audience(db, key):
-    async with acquire_with_tenant(db.pool, str(db.tenants[key])) as conn:
+    # A service-scoped read, as the endpoint and the call guard use: the
+    # formal parent and hold rows belong to other tenants.
+    async with acquire_with_tenant(db.pool, None) as conn:
         return await tenant_purchase_audience(conn, str(db.tenants[key]))
 
 
@@ -179,6 +181,31 @@ async def test_who_buys_which_bundles_comes_from_the_account(payg_db):
     assert await _audience(db, "subscriber") == SUBSCRIBER
     with pytest.raises(PurchaseRefused):
         await _audience(db, "suspended")
+
+
+@pytest.mark.parametrize("barred", ["status_suspended", "pending_deletion", "formal_hold"])
+async def test_an_account_barred_from_calling_cannot_buy_minutes(payg_db, barred):
+    # QA F13-07 / FT-135: the gate read only subscription_status, so these
+    # accounts, which the call authority refuses, could still pay for minutes.
+    db = payg_db
+    key = "barred_" + barred
+    db.tenants[key] = uuid4()
+    status = {"status_suspended": "suspended", "pending_deletion": "pending_deletion"}.get(barred, "active")
+    async with db.owner.transaction():
+        await db.owner.execute("SET LOCAL app.bypass_rls = 'on'")
+        await db.owner.execute(
+            """INSERT INTO tenants (id, business_name, plan_id, minutes_allocated, minutes_used,
+                   subscription_status, status)
+               VALUES ($1, 'Synthetic barred account', NULL, 0, 0, 'inactive', $2)""",
+            db.tenants[key], status)
+        if barred == "formal_hold":
+            await db.owner.execute(
+                """INSERT INTO suspension_events (target_type, target_id, suspension_type,
+                       reason_category, reason_description)
+                   VALUES ('tenant', $1, 'immediate', 'qa', 'Synthetic formal hold')""",
+                db.tenants[key])
+    with pytest.raises(PurchaseRefused):
+        await _audience(db, key)
 
 
 async def test_paying_for_a_bundle_moves_a_new_account_to_pay_as_you_go_with_exactly_those_minutes(payg_db):

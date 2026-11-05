@@ -16,6 +16,7 @@ from app.domain.services.subscription_status import (
     TRIALING,
     canonical,
 )
+from app.domain.services.telephony.call_authority import read_call_authority
 
 PAYG_PLAN_ID = "payg"
 SUBSCRIBER = "subscriber"
@@ -49,6 +50,20 @@ def purchase_audience(stripe_subscription_id: Optional[str], subscription_status
 
 
 async def tenant_purchase_audience(conn, tenant_id: str) -> str:
+    """The audience for ``tenant_id``, refusing any account barred from calling.
+
+    The account's status, a pending deletion and formal holds come from the
+    call authority every call path uses (QA F13-07: they were ignored here).
+    ``conn`` must be a service-scoped read, as in the call guard: the formal
+    parent and hold rows belong to other tenants. Raises
+    ``CallAuthorityUnavailable`` when that authority cannot be read.
+    """
+    authority = await read_call_authority(conn, tenant_id)
+    if not authority.allowed:
+        raise PurchaseRefused(
+            "account_cannot_buy_minutes",
+            "This account cannot buy minutes. Contact support.",
+        )
     row = await conn.fetchrow(
         "SELECT stripe_subscription_id, subscription_status FROM tenants WHERE id = $1::uuid",
         str(tenant_id),
