@@ -97,7 +97,10 @@ class GuardCheck(str, Enum):
 # ordinary availability checks (rate limiter, concurrency, etc.). These are
 # compliance-critical: silently allowing a call to proceed because a DNC (or
 # spend-cap) lookup errored is a compliance violation, not a mere degraded
-# experience. Keep this set narrow — everything NOT listed here keeps the
+# experience. Calling hours, blocked destinations and abuse velocity are the
+# same kind of rule (QA F7-07): a failed lookup must not dial at night or into
+# a blocked country. The dialer defers a ``check_error_blocked`` job and
+# retries. Keep this set narrow — everything NOT listed here keeps the
 # original fail-open-on-infra-error behavior intentionally, so a DB blip in
 # e.g. the rate limiter or concurrency lookup never blocks legitimate calls.
 _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
@@ -107,6 +110,9 @@ _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
         GuardCheck.DNC_CHECK,
         GuardCheck.SPEND_LIMIT,
         GuardCheck.MINUTES_QUOTA,
+        GuardCheck.GEOGRAPHIC_ALLOWED,
+        GuardCheck.BUSINESS_HOURS,
+        GuardCheck.VELOCITY_CHECK,
     }
 )
 
@@ -1240,6 +1246,11 @@ class CallGuard:
                         details={"recent_high_severity_events": recent_events},
                     )
         except asyncpg.PostgresError as e:
+            # Only a deployment without the table may skip this check. Any
+            # other error says nothing about abuse; raise so evaluate() blocks
+            # (VELOCITY_CHECK fails closed) instead of passing the call.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"abuse_events query failed (table may not exist): {e}")
 
         return CheckResult(
