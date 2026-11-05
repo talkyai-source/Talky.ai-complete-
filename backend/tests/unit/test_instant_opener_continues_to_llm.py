@@ -178,9 +178,16 @@ async def test_a_real_question_never_triggers_the_instant_opener(monkeypatch):
         _spy_greeting,
     )
 
+    voice_session.pipeline = pipeline
     await TurnEnder(pipeline).handle(session, None, user_text="Who's this?")
 
     assert called["n"] == 0, "a real question must not trigger the instant opener"
-    assert pipeline._run_turn.await_args is not None
-    roles = [m.role for m in session.conversation_history]
-    assert roles == [MessageRole.USER, MessageRole.ASSISTANT]
+    # Owner decision 2026-11-05 (QA F12-03): the identity opener answers it
+    # ("Hi, this is ..., an AI assistant from ... Who am I speaking with?");
+    # the model does not also reply to the same words.
+    assert pipeline._run_turn.await_args is None
+    spoken = pipeline.synthesize_and_send_audio.await_args.args[1]
+    assert "an AI assistant from" in spoken
+    assert [(m.role, m.content) for m in session.conversation_history] == [
+        (MessageRole.USER, "Who's this?"), (MessageRole.ASSISTANT, spoken),
+    ]

@@ -466,20 +466,26 @@ def test_canonical_contact_bundle_resolves_only_one_current_owned_row(state):
 
 
 @pytest.mark.asyncio
-async def test_caller_first_hello_reaches_model_once_without_presynth_script(monkeypatch):
+async def test_caller_first_hello_gets_the_identity_opener_once_without_presynth_script(monkeypatch):
+    """Owner decision 2026-11-05 (QA F12-03): the reply to the callee's first
+    "Hello?" is the identity opener, spoken live, not the pre-synth script;
+    the model does not also answer the same words."""
     from unittest.mock import AsyncMock
     from app.domain.models.conversation import MessageRole
     from app.domain.services.voice_pipeline.turn_ender import TurnEnder
     from tests.unit.test_instant_opener_continues_to_llm import _session, _pipeline_stub, _FakeVoiceSession
     s, pipeline = _session(), _pipeline_stub("Hello, what would you like to discuss?")
     s._voice_session_ref = _FakeVoiceSession(s)
+    s._voice_session_ref.pipeline = pipeline
     player = AsyncMock()
     monkeypatch.setattr("app.domain.services.telephony.modes.agent_first._send_outbound_greeting", player)
     await TurnEnder(pipeline).handle(s, None, user_text="Hello?")
     player.assert_not_awaited()
-    assert pipeline._run_turn.await_count == 1
+    assert pipeline._run_turn.await_count == 0
+    assert pipeline.synthesize_and_send_audio.await_count == 1
     assert [m.role for m in s.conversation_history] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert s.conversation_history[0].content == "Hello?"
+    assert "an AI assistant from" in s.conversation_history[1].content
 
 
 @pytest.mark.asyncio
