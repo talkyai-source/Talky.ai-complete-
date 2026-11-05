@@ -21,6 +21,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
+from app.core.db import DatabasePoolTimeoutError
+from app.core.db_utils import acquire_connection
 from app.infrastructure.connectors.encryption import get_encryption_service
 from app.domain.services.telephony.provider_availability import CLOUD_PROVIDERS, cloud_availability
 
@@ -153,7 +155,7 @@ async def list_providers(
     tenant_uuid = _assert_tenant(current_user)
 
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_connection(db_pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 active_row = await conn.fetchrow(
@@ -170,6 +172,8 @@ async def list_providers(
                     """,
                     tenant_uuid,
                 )
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as e:
         logger.error("list_providers failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to list providers")
@@ -214,7 +218,7 @@ async def save_provider(
     encrypted = get_encryption_service().encrypt(json.dumps(clean_creds))
 
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_connection(db_pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 row = await conn.fetchrow(
@@ -237,6 +241,8 @@ async def save_provider(
                     tenant_uuid, provider, body.label,
                     encrypted, body.from_number,
                 )
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as e:
         logger.error("save_provider failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to save provider credentials")
@@ -266,7 +272,7 @@ async def delete_provider(
     provider = _assert_provider(provider)
 
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_connection(db_pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 await conn.execute(
@@ -284,6 +290,8 @@ async def delete_provider(
                     """,
                     tenant_uuid, provider,
                 )
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as e:
         logger.error("delete_provider failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to delete provider")
@@ -308,7 +316,7 @@ async def test_provider(
     provider = _assert_provider(provider)
 
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_connection(db_pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 row = await conn.fetchrow(
@@ -319,6 +327,8 @@ async def test_provider(
                     """,
                     tenant_uuid, provider,
                 )
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as e:
         logger.error("test_provider fetch failed: %s", e)
         raise HTTPException(status_code=500, detail="Failed to load credentials")
@@ -359,7 +369,7 @@ async def test_provider(
     tested_at = datetime.now(timezone.utc)
 
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_connection(db_pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 await conn.execute(
@@ -420,7 +430,7 @@ async def activate_provider(
             })
 
     try:
-        async with db_pool.acquire() as conn:
+        async with acquire_connection(db_pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 if target in ("twilio", "vonage"):
@@ -458,7 +468,7 @@ async def activate_provider(
                     """,
                     target, tenant_uuid,
                 )
-    except HTTPException:
+    except (HTTPException, DatabasePoolTimeoutError):
         raise
     except Exception as e:
         logger.error("activate_provider failed: %s", e)

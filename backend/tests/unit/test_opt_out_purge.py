@@ -128,7 +128,11 @@ async def test_purge_runs_all_three_steps():
     jobs = next((sql, args) for sql, args in pool.conn.executed if "UPDATE dialer_jobs" in sql)
     assert OPT_OUT_REASON in jobs[1]
     assert set(jobs[1][-1]) == {"pending", "queued", "retry_scheduled"}
-    assert sum(sql.startswith("SET LOCAL") for sql, _ in pool.conn.executed) == 3
+    assert [sql for sql, _ in pool.conn.executed if sql.startswith("SET LOCAL app.")] == [
+        f"SET LOCAL app.current_tenant_id = '{_TENANT_ID}'",
+    ] * 3
+    assert sum(sql.startswith("SET LOCAL statement_timeout = ") for sql, _ in pool.conn.executed) == 3
+    assert sum(sql.startswith("SET LOCAL lock_timeout = ") for sql, _ in pool.conn.executed) == 3
 
 
 @pytest.mark.asyncio

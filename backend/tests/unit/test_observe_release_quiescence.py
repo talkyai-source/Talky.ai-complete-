@@ -124,10 +124,23 @@ async def test_redis_scan_has_page_and_item_bounds(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_actual_canonical_db_context_and_live_states_used_readonly():
+async def test_actual_canonical_db_context_and_live_states_used_readonly(monkeypatch):
+    from app.core import db_utils
     from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
 
     calls = []
+    budgets = []
+    acquire = db_utils.acquire_connection
+
+    @asynccontextmanager
+    async def checked_acquire(pool, *, timeout=None):
+        budgets.append(timeout)
+        # Retain the actual acquisition deadline and release behavior.
+        async with acquire(pool, timeout=timeout) as conn:
+            yield conn
+
+    monkeypatch.setattr(db_utils, "acquire_connection", checked_acquire)
+
     class Connection:
         @asynccontextmanager
         async def transaction(self):
@@ -150,13 +163,16 @@ async def test_actual_canonical_db_context_and_live_states_used_readonly():
 
     class Pool:
         @asynccontextmanager
-        async def acquire(self, *, timeout):
-            assert timeout == 3
+        async def acquire(self, *, timeout=None):
             yield Connection()
 
     assert await observer.database_counts(Pool()) == {"count": 7}
-    assert calls[:3] == ["transaction", "SET LOCAL app.bypass_rls = 'on'",
-                         "SET LOCAL app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"]
+    assert budgets == [3]
+    assert calls[0] == "transaction"
+    assert calls[1].startswith("SET LOCAL statement_timeout = ")
+    assert calls[2].startswith("SET LOCAL lock_timeout = ")
+    assert calls[3:5] == ["SET LOCAL app.bypass_rls = 'on'",
+                          "SET LOCAL app.current_tenant_id = '00000000-0000-0000-0000-000000000000'"]
 
 
 @pytest.mark.asyncio

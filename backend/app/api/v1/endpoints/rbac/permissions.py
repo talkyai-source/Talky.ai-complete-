@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_connection
 
 from .schemas import PermissionResponse
 
@@ -20,7 +21,7 @@ async def list_permissions(
     resource: Optional[str] = Query(None, description="Filter by resource"),
 ) -> List[PermissionResponse]:
     """List all available permissions."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         if resource:
             rows = await conn.fetch(
                 """

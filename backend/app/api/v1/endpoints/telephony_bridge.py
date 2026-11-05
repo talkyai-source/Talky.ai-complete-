@@ -42,6 +42,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.process_role import telephony_enabled
+from app.core.db import DatabasePoolTimeoutError
+from app.core.db_utils import acquire_connection
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
 from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
@@ -2680,7 +2682,7 @@ async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
     if not getattr(container, "is_initialized", False) or container.db_pool is None:
         raise HTTPException(status_code=503, detail="Call ownership check unavailable")
     try:
-        async with container.db_pool.acquire() as conn:
+        async with acquire_connection(container.db_pool) as conn:
             # The transaction is load-bearing, not decoration: SET LOCAL outside
             # an explicit transaction applies only to the implicit single-statement
             # transaction it runs in, and is discarded before the fetchrow below.
@@ -2694,6 +2696,8 @@ async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
                     "ORDER BY created_at DESC LIMIT 1",
                     call_id,
                 )
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("call ownership lookup failed call_id=%s err=%s", call_id, exc)
         raise HTTPException(status_code=503, detail="Call ownership check failed")
@@ -3034,7 +3038,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
         "active",
     )
     try:
-        async with pool.acquire() as conn:
+        async with acquire_connection(pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'on'")
                 call_rows = list(

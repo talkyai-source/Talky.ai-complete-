@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import asyncpg
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -28,6 +29,21 @@ from app.core.request_id_middleware import get_request_id
 from app.core.db import DatabasePoolTimeoutError
 
 logger = logging.getLogger(__name__)
+
+_DATABASE_CAPACITY_ERRORS = (
+    DatabasePoolTimeoutError, asyncpg.QueryCanceledError, asyncpg.LockNotAvailableError,
+)
+
+
+def _database_capacity_cause(exc: BaseException) -> BaseException | None:
+    """Keep retry semantics when a route wraps the driver error in HTTP 500."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, _DATABASE_CAPACITY_ERRORS):
+            return exc
+        exc = exc.__cause__ or exc.__context__
+    return None
 
 
 # Map HTTP status codes to stable error codes for HTTPException paths
@@ -83,6 +99,10 @@ async def http_exception_handler(
         `{"error":{"message":"{'error': 'x', ...}"}}` — a Python repr
         inside JSON that clients can't reliably parse.
     """
+    if exc.status_code == 500:
+        database_error = _database_capacity_cause(exc)
+        if database_error is not None:
+            return await db_pool_timeout_exception_handler(request, database_error)
     default_code = _DEFAULT_CODES.get(exc.status_code, "http_error")
     headers = dict(exc.headers or {})
 
@@ -149,12 +169,12 @@ async def rate_limit_exception_handler(
 
 
 async def db_pool_timeout_exception_handler(
-    request: Request, exc: DatabasePoolTimeoutError
+    request: Request, exc: BaseException
 ) -> JSONResponse:
     # Pool exhaustion / DB unresponsive — this is a transient capacity
     # problem, not a client error or a code bug, so 503 (not 500) is the
     # correct signal for clients/load-balancers to back off and retry.
-    logger.error("DB pool acquire timed out: %s", exc)
+    logger.error("DB capacity timeout: %s", type(exc).__name__)
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content=_envelope(
@@ -212,5 +232,6 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(RateLimitExceeded, rate_limit_exception_handler)
-    app.add_exception_handler(DatabasePoolTimeoutError, db_pool_timeout_exception_handler)
+    for error_type in _DATABASE_CAPACITY_ERRORS:
+        app.add_exception_handler(error_type, db_pool_timeout_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

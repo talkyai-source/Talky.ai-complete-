@@ -21,6 +21,7 @@ the real endpoint handlers exercise the real fix.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -77,6 +78,12 @@ class _FakeConn:
 
     async def execute(self, sql: str, *args: Any):
         stripped = sql.strip()
+        timeout_setting = re.fullmatch(
+            r"SET LOCAL (?:statement_timeout|lock_timeout) = '([1-9][0-9]*)ms'", stripped,
+        )
+        if timeout_setting and int(timeout_setting.group(1)) <= 2147483647:
+            assert not args
+            return "SET"
         if stripped.startswith("SET LOCAL app.current_tenant_id"):
             self.guc = stripped.split("'")[1]
             return "SET"
