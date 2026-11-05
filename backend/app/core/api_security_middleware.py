@@ -235,23 +235,68 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
     Runs early in the middleware stack to validate requests.
     """
 
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await super().__call__(scope, receive, send)
+
+        # Enforce the cap before any handler or body parser runs, including
+        # auth and other paths exempt from the unrelated checks in dispatch.
+        # Content-Length is only an early rejection hint: count actual ASGI
+        # body bytes as well, so chunking or a false length cannot bypass it.
+        request = Request(scope)
+        if len(request.headers.getlist("content-length")) > 1:
+            response = JSONResponse(status_code=400, content={"detail": "Ambiguous Content-Length"})
+            return await response(scope, receive, send)
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                size = int(content_length)
+                if size < 0:
+                    raise ValueError
+            except ValueError:
+                response = JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+                return await response(scope, receive, send)
+            if size > MAX_REQUEST_BODY_SIZE:
+                return await self._body_too_large()(scope, receive, send)
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > MAX_REQUEST_BODY_SIZE:
+                return await self._body_too_large()(scope, receive, send)
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        pending_body = bytes(body)
+        del body
+
+        async def bounded_receive():
+            nonlocal pending_body
+            if pending_body is not None:
+                message = {"type": "http.request", "body": pending_body, "more_body": False}
+                pending_body = None
+                return message
+            # StreamingResponse polls for a real disconnect after reading the
+            # body; never replay synthetic http.request messages at that point.
+            return await receive()
+
+        await super().__call__(scope, bounded_receive, send)
+
+    @staticmethod
+    def _body_too_large():
+        return JSONResponse(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            content={"detail": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)"},
+        )
+
     async def dispatch(self, request: Request, call_next):
         # Skip for public/static paths
         if self._is_exempt_path(request.url.path):
             return await call_next(request)
-
-        # 1. Request size check (Content-Length)
-        content_length = request.headers.get("content-length")
-        if content_length:
-            try:
-                size = int(content_length)
-                if size > MAX_REQUEST_BODY_SIZE:
-                    return JSONResponse(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        content={"detail": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)"}
-                    )
-            except ValueError:
-                pass
 
         # 2. Content-Type validation and Payload Sanitization
         content_type = request.headers.get("content-type", "").split(";")[0].strip()

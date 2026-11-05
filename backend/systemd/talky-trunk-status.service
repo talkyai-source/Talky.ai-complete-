@@ -4,11 +4,21 @@ After=asterisk.service docker.service
 StartLimitIntervalSec=0
 
 [Service]
+User=talky
+Group=talky
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+ReadWritePaths=/etc/asterisk/pjsip.d
+SupplementaryGroups=asterisk
 # Long-running since 2026-10-07: one process, one pass every 10 s (was a
 # oneshot started by talky-trunk-status.timer, 5,760 interpreter starts a day).
 Type=simple
-# root: needs the asterisk CLI + reads /opt/talky/backend/.env for DATABASE_URL
-User=root
+# Also removes inactive managed configs; needs pjsip.d and CLI socket access.
+# No Docker or sudo access.
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env
 ExecStart=/opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/trunk_live_status_updater.py --loop 10

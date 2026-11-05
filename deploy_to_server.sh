@@ -143,6 +143,8 @@ ssh -t -i "$KEY" "$PROD" "
     echo '--> validating mandatory carrier-hairpin synthetic configuration'
     sudo bash \"\$candidate_worktree/backend/deploy/inbound-synthetic-call.sh\" \
         --check-config-file /etc/talky/inbound-synthetic.env
+    echo '--> checking service-user prerequisites without stopping writers'
+    sudo bash \"\$candidate_worktree/backend/deploy/infra/prepare-service-user.sh\" --check
     git -C /opt/talky worktree remove --force \"\$candidate_worktree\"
     candidate_worktree=''
     # Prove the drain BEFORE the live checkout moves: an active call must leave
@@ -160,20 +162,21 @@ ssh -t -i "$KEY" "$PROD" "
     web_unit_backup=\"\$(sudo mktemp -d /var/backups/talky/deploy-unit-recovery/api-web.${DEPLOY_SHA}.XXXXXX)\"
     sudo cp -a -- /etc/systemd/system/talky-api-web.service \"\$web_unit_backup/talky-api-web.service\"
     echo \"    retained private unit recovery directory: \$web_unit_backup\"
-    # Anything that aborts between the checkout and a SUCCESSFUL migration puts
+    # Anything that aborts between the checkout and the START of migration puts
     # the previous commit and its unit definitions back, so a later crash-restart
     # cannot load new code against the un-migrated schema. Disarmed (rollback_sha
-    # cleared) once talky-migrate succeeds: rolling code back under an already
-    # migrated schema is worse than leaving it. Running services are never
-    # restarted by the rollback; a gateway restarted before the abort keeps
-    # running the new binary until the next deploy.
+    # cleared) before talky-migrate starts: a failed client cannot prove whether
+    # migration committed. Restore only units this deploy stopped, and only
+    # after successful pre-migration code and unit restoration.
     rollback_sha=\"\$(git rev-parse HEAD)\"
+    stopped_units=()
     on_exit() {
         exit_code=\$?
         trap - EXIT
+        set +e
         cleanup_candidate
         if [ \"\$exit_code\" -ne 0 ] && [ -n \"\$rollback_sha\" ]; then
-            echo \"!! deploy aborted before migrations completed; restoring checkout \$rollback_sha and its unit definitions\" >&2
+            echo \"!! deploy aborted before migration started; restoring checkout \$rollback_sha and its unit definitions\" >&2
             rollback_ok=1
             if ! { git checkout --detach \"\$rollback_sha\" && sudo bash backend/systemd/install-services.sh; }; then
                 rollback_ok=0
@@ -184,10 +187,21 @@ ssh -t -i "$KEY" "$PROD" "
                 rollback_ok=0
             fi
             if [ \"\$rollback_ok\" -eq 1 ]; then
-                echo '!! previous checkout restored; no service was restarted by the rollback.' >&2
+                if [ \"\${#stopped_units[@]}\" -eq 0 ] || sudo systemctl start \"\${stopped_units[@]}\"; then
+                    echo '!! previous checkout restored; previously active stopped units recovered.' >&2
+                    stopped_units=()
+                else
+                    echo '!! Unit recovery failed; operator recovery is required.' >&2
+                fi
             else
                 echo '!! ROLLBACK FAILED: reconcile /opt/talky and the systemd units by hand (docs/DEPLOYMENT.md).' >&2
             fi
+        fi
+        if [ \"\$exit_code\" -ne 0 ] && [ \"\${#stopped_units[@]}\" -gt 0 ]; then
+            echo '!! Keep ingress frozen. After verifying code/schema compatibility, recover the stopped units with:' >&2
+            printf 'sudo systemctl start' >&2
+            printf ' %s' \"\${stopped_units[@]}\" >&2
+            printf '\\n' >&2
         fi
         exit \"\$exit_code\"
     }
@@ -212,6 +226,18 @@ ssh -t -i "$KEY" "$PROD" "
         '/opt/talky/runtime/bin/.voice_gateway.${DEPLOY_SHA}.new'
     sudo mv -f '/opt/talky/runtime/bin/.voice_gateway.${DEPLOY_SHA}.new' \
         /opt/talky/runtime/bin/voice_gateway
+    echo '--> preparing the unprivileged application identity'
+    # Calls were already frozen/drained above. Also quiesce file writers and
+    # their timers so an old root process cannot create new root-only state
+    # between the ownership migration and the application restart.
+    for stopped_unit in talky-cleanup.timer talky-support-jobs.timer talky-api talky-api-web talky-dialer-worker talky-voice-worker talky-reminder-worker talky-trunk-status talky-cleanup talky-support-jobs; do
+        if systemctl is-active --quiet \"\$stopped_unit\"; then
+            # Record before stop: a failed stop can still have stopped the unit.
+            stopped_units+=(\"\$stopped_unit\")
+            sudo systemctl stop \"\$stopped_unit\"
+        fi
+    done
+    sudo bash backend/deploy/infra/prepare-service-user.sh
     echo '--> reconciling systemd units'
     sudo bash backend/systemd/install-services.sh
     echo '--> proving required systemd units are installed and enabled'
@@ -263,8 +289,8 @@ ssh -t -i "$KEY" "$PROD" "
     cleanup_candidate
     gateway_candidate=''
     echo '--> applying database migrations (service restart is blocked on failure)'
-    sudo systemctl start talky-migrate.service
     rollback_sha=''
+    sudo systemctl start talky-migrate.service
     sudo env -u DATABASE_URL -u READ_DATABASE_URL backend/venv/bin/python backend/scripts/verify_alembic_current_heads.py
     echo '--> verifying the application runtime database privileges'
     sudo env -u DATABASE_URL -u READ_DATABASE_URL backend/venv/bin/python backend/scripts/verify_admin_runtime_privileges.py
@@ -274,6 +300,7 @@ ssh -t -i "$KEY" "$PROD" "
     sudo backend/venv/bin/python backend/scripts/set_release_version.py --env-file /opt/talky/backend/.env --candidate-sha '${DEPLOY_SHA}'
     echo '--> restarting backend services after the authenticated gateway is healthy'
     sudo systemctl restart talky-api talky-dialer-worker talky-voice-worker talky-reminder-worker talky-api-web
+    sudo systemctl start talky-cleanup.timer talky-support-jobs.timer
     sudo systemctl restart talky-inbound-synthetic.timer
     # Long-running loop since 2026-10-07 (its 15 s timer was retired). A failed
     # restart never aborts the deploy: the unit has Restart=always.

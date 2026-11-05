@@ -106,12 +106,25 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
     exact `APP_VERSION` without printing its environment; any failure keeps the
     deploy command non-zero
 
-An abort before a successful migration restores the previous checkout and runs
+The release containing the security-edge branch is the non-root/loopback cutover:
+its next deploy automatically runs `prepare-service-user.sh` and installs units
+with `User=talky`; the API binds to `127.0.0.1`. These are not optional follow-up
+owner commands. Before approving that release, the owner must check every client
+that reaches the public API address directly, the nginx upstream's loopback
+destination, ownership/readability of default and custom state directories, and
+the Asterisk group and CLI/configuration permissions. The deploy runs the
+read-only service-user check before stopping writers; custom paths still need
+owner-reviewed unit drop-ins. Firewall application remains a separate owner step.
+
+An abort before migration starts restores the previous checkout and runs
 its unit installer, then restores the saved API-web file or symlink with
 `cp -a --remove-destination` and reloads systemd. This preserves an independently
 pinned maintenance web unit that the old installer alone would overwrite. The
-rollback does not restart services, and retains the private unit backup for
-recovery. Once migration succeeds, failures require code-forward recovery or a
+rollback starts the previously active units/timers that this deploy stopped,
+only after code and unit restoration succeeds, and retains the private unit
+backup for recovery. Once migration starts, its outcome may be uncertain;
+failures print the exact stopped-unit restart command for operator review and
+require code-forward recovery or a
 separately approved compatible restore; the deploy does not roll code backward
 under the migrated schema.
 

@@ -15,6 +15,16 @@ After=network.target
 StartLimitIntervalSec=0
 
 [Service]
+User=talky
+Group=talky
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+ReadWritePaths=/opt/talky/backend/recordings /opt/talky/backend/audio_files /opt/talky/backend/feedback_audio /opt/talky/backend/support_attachments /etc/asterisk/pjsip.d
+SupplementaryGroups=asterisk
 Type=exec
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env

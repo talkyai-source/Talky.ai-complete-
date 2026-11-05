@@ -41,7 +41,7 @@ class TestPasswordValidation:
 
     def test_too_short_raises(self):
         with pytest.raises(PasswordValidationError, match="at least"):
-            validate_password_strength("Ab1234!")  # 7 chars < 8
+            validate_password_strength("Ab1234!")  # below the new-credential minimum
 
     def test_too_long_raises(self):
         with pytest.raises(PasswordValidationError, match="cannot exceed"):
@@ -49,14 +49,14 @@ class TestPasswordValidation:
 
     def test_exactly_min_length_passes(self):
         # Should NOT raise
-        validate_password_strength("A" * MIN_PASSWORD_LENGTH)
+        validate_password_strength("xK9_!a" + "Z" * (MIN_PASSWORD_LENGTH - 6))
 
     def test_exactly_max_length_passes(self):
         validate_password_strength("A" * MAX_PASSWORD_LENGTH)
 
     def test_unicode_password_accepted(self):
         # OWASP: any printable Unicode is permitted
-        validate_password_strength("P@ẞwörd🔑secure")
+        validate_password_strength("P@ẞwörd🔑secure-2026")
 
     def test_spaces_allowed(self):
         validate_password_strength("pass word with spaces")
