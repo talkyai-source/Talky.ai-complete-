@@ -783,6 +783,12 @@ class RecordingService:
             )
         except Exception as exc:
             logger.error(f"Local recording save failed for call {call_id}: {exc}", exc_info=True)
+            # A full disk (ENOSPC) used to leave no trace but this log line
+            # (QA F7-04): leave the same 'failed' row the cloud path does.
+            await self._mark_upload_failed(
+                call_id, tenant_id, campaign_id, f"local_write_failed:{type(exc).__name__}",
+                bucket="local", region="local",
+            )
             return None
 
         # Insert DB record so the frontend can find this recording.
@@ -1102,8 +1108,20 @@ class RecordingService:
         tenant_id: str,
         campaign_id: str,
         reason: str,
+        *,
+        bucket: Optional[str] = None,
+        region: Optional[str] = None,
     ) -> None:
-        """Insert a 'failed' row so the failure is visible in the admin panel."""
+        """Insert a 'failed' row so the failure is visible in the admin panel.
+
+        ``bucket``/``region`` default to the cloud store; local-disk saves pass
+        "local", as their success rows do. A campaign id that is not a UUID
+        ("unknown") is stored as NULL rather than losing the row.
+        """
+        try:
+            campaign_uuid = UUID(str(campaign_id))
+        except (ValueError, TypeError, AttributeError):
+            campaign_uuid = None
         try:
             async with acquire_with_tenant(self._db, tenant_id) as conn:
                 # call_id may be a PBX channel id, not a UUID: use the
@@ -1125,10 +1143,10 @@ class RecordingService:
                     """,
                     call_uuid,
                     UUID(tenant_id),
-                    UUID(campaign_id) if campaign_id else None,
-                    self._s3.bucket,
+                    campaign_uuid,
+                    bucket if bucket is not None else self._s3.bucket,
                     f"failed/{call_id}.wav",
-                    self._s3.region,
+                    region if region is not None else self._s3.region,
                 )
         except Exception as exc:
             # Best-effort - don't shadow the original error, but leave a trace.
