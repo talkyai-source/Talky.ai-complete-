@@ -149,6 +149,25 @@ _CHECK_ERROR_BLOCKED = "check_error_blocked"
 _SCHEMA_CHECK_SKIPPED = "schema_check_skipped"
 
 
+def _is_premium_rate(e164: str) -> bool:
+    """True for a premium-rate line (phonenumbers metadata).
+
+    phonenumbers puts UK 084x/087x "service numbers" in that class too, but
+    their service charge is capped and they are common business lines, so they
+    stay callable; the 09x-style ranges (UK 09, US 900, AU 1900) are refused.
+    """
+    import phonenumbers
+
+    try:
+        parsed = phonenumbers.parse(e164, None)
+    except phonenumbers.NumberParseException:
+        return False
+    if phonenumbers.number_type(parsed) != phonenumbers.PhoneNumberType.PREMIUM_RATE:
+        return False
+    national = phonenumbers.national_significant_number(parsed)
+    return not (parsed.country_code == 44 and national.startswith(("84", "87")))
+
+
 def _is_missing_schema_error(exc: BaseException) -> bool:
     """True only when ``exc`` means "that table / column does not exist".
 
@@ -749,6 +768,16 @@ class CallGuard:
                 passed=False,
                 reason="invalid_e164_format",
                 details={"received": phone_number},
+            )
+
+        # A premium-rate line costs far more per minute than a normal call and
+        # is the classic toll-fraud target: an uploaded lead list must never
+        # make the dialer call one (QA F2-14).
+        if _is_premium_rate(phone_number):
+            return CheckResult(
+                check=GuardCheck.NUMBER_VALID,
+                passed=False,
+                reason="premium_rate_destination",
             )
 
         return CheckResult(
