@@ -56,7 +56,9 @@ def _launch(script_cmd: str, env: dict, cwd: Path, shim: Path):
     env["SHIM_DIR"] = str(shim)
     launcher = (
         'if command -v cygpath >/dev/null 2>&1; then SHIM_DIR="$(cygpath -u "$SHIM_DIR")"; fi; '
-        'PATH="$SHIM_DIR:$PATH"; ' + script_cmd
+        'PATH="$SHIM_DIR:$PATH"; '
+        'if [ -n "${CAPTURE_FILE:-}" ]; then '
+        '[ "$(command -v ssh)" = "$SHIM_DIR/ssh" ] || exit 125; fi; ' + script_cmd
     )
     return subprocess.run(
         [_real_bash(), "-c", launcher], env=env, cwd=cwd, capture_output=True, text=True, timeout=180
@@ -285,17 +287,15 @@ def test_a_clean_deploy_checks_out_after_the_drain_proof_and_does_not_roll_back(
     assert len([line for line in log if line.startswith("git checkout")]) == 1
 
 
-def test_a_failed_migration_puts_the_previous_checkout_and_units_back(tmp_path, captured_remote_script):
+def test_a_failed_migration_keeps_candidate_for_reviewed_recovery(tmp_path, captured_remote_script):
     result, log, head = _run_remote(tmp_path, captured_remote_script, FAIL_MIGRATE="1")
 
     assert result.returncode != 0
-    assert head == PREV_SHA, "the old commit must be restored when migration fails"
+    assert head == remote_sha(captured_remote_script), "a failed migration cannot prove that it did not commit"
     checkouts = [i for i, line in enumerate(log) if line.startswith("git checkout --detach")]
-    assert len(checkouts) == 2
-    assert log[checkouts[1]].endswith(PREV_SHA)
-    reinstall = _index(log, "sudo bash backend/systemd/install-services.sh", checkouts[1])
-    assert reinstall > checkouts[1]
-    assert "restoring checkout" in result.stderr
+    assert len(checkouts) == 1
+    assert "After verifying code/schema compatibility" in result.stderr
+    assert len([line for line in log if "install-services.sh" in line]) == 1
     assert not [line for line in log if "systemctl restart talky-api" in line], "no restart after a failed migration"
 
 
@@ -308,8 +308,8 @@ def test_a_failure_after_the_migration_succeeded_is_not_rolled_back(tmp_path, ca
 
 
 @pytest.mark.parametrize("kind", ["file", "symlink"])
-def test_failed_migration_restores_exact_pinned_web_unit_after_old_installer(tmp_path, captured_remote_script, kind):
-    result, log, head = _run_remote(tmp_path, captured_remote_script, FAIL_MIGRATE="1", UNIT_KIND=kind)
+def test_pre_migration_failure_restores_exact_pinned_web_unit_after_old_installer(tmp_path, captured_remote_script, kind):
+    result, log, head = _run_remote(tmp_path, captured_remote_script, FAIL_SERVICE_USER="1", UNIT_KIND=kind)
     assert result.returncode != 0 and head == PREV_SHA
     unit = tmp_path / "units/talky-api-web.service"
     assert unit.read_bytes() == b"original pinned web unit\n"
@@ -325,6 +325,8 @@ def test_failed_migration_restores_exact_pinned_web_unit_after_old_installer(tmp
     reinstall = max(i for i, line in enumerate(log) if "install-services.sh" in line)
     reload = _index(log, "sudo systemctl daemon-reload", restore)
     assert reinstall < restore < reload
+    assert reload < _index(log, "sudo systemctl start talky-cleanup.timer")
+    assert not any("systemctl start talky-migrate" in line for line in log)
     assert not any("restart talky-api" in line for line in log)
 
 
@@ -359,19 +361,26 @@ def test_service_identity_is_prepared_before_units_are_installed(tmp_path, captu
     result, log, _ = _run_remote(tmp_path, captured_remote_script)
     assert result.returncode == 0, result.stdout + result.stderr
     prepare = _index(log, "sudo bash backend/deploy/infra/prepare-service-user.sh")
-    stop_timers = _index(log, "sudo systemctl stop talky-cleanup.timer talky-support-jobs.timer")
-    stop_writers = _index(log, "sudo systemctl stop talky-api talky-api-web")
+    preflight = next(i for i, line in enumerate(log) if "prepare-service-user.sh" in line and line.endswith(" --check"))
+    stop_timers = _index(log, "sudo systemctl stop talky-cleanup.timer")
+    stop_writers = _index(log, "sudo systemctl stop talky-api")
     install = _index(log, "sudo bash backend/systemd/install-services.sh")
     restart = _index(log, "sudo systemctl restart talky-api talky-dialer-worker")
     start_timers = _index(log, "sudo systemctl start talky-cleanup.timer talky-support-jobs.timer")
-    assert stop_timers < stop_writers < prepare < install < restart < start_timers
+    assert preflight < stop_timers < stop_writers < prepare < install < restart < start_timers
 
 
-def test_service_identity_preparation_failure_aborts_before_restarting_app(tmp_path, captured_remote_script):
+def test_service_identity_preparation_failure_recovers_stopped_apps(tmp_path, captured_remote_script):
     result, log, head = _run_remote(tmp_path, captured_remote_script, FAIL_SERVICE_USER="1")
     assert result.returncode != 0
     assert head == PREV_SHA
     assert not any("restart talky-api" in line for line in log)
+    recover = _index(log, "sudo systemctl start talky-cleanup.timer")
+    assert log[recover].split()[3:] == [
+        "talky-cleanup.timer", "talky-support-jobs.timer", "talky-api", "talky-api-web",
+        "talky-dialer-worker", "talky-voice-worker", "talky-reminder-worker",
+        "talky-trunk-status", "talky-cleanup", "talky-support-jobs",
+    ]
 
 
 def test_success_checks_privileges_then_publishes_and_observes_both_api_versions(tmp_path, captured_remote_script):
