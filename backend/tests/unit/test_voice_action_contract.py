@@ -13,6 +13,7 @@ import pytest
 from app.domain.models.conversation import Message, MessageRole
 from app.domain.models.session import CallSession
 from app.domain.models.agent_config import ConversationRule
+from app.domain.services.voice_pipeline.speech_guard import UNBACKED_ACTION_LINE
 from app.domain.services.voice_pipeline.action_tools import (
     ACTION_END_CALL,
     ACTION_SCHEDULE_CALLBACK,
@@ -342,7 +343,16 @@ async def test_live_action_gate_does_not_activate_legacy_rule_keyword_heuristic(
 
 
 @pytest.mark.asyncio
-async def test_action_turn_feeds_failed_result_without_rewriting_model_speech(monkeypatch):
+@pytest.mark.parametrize("model_line,spoken", [
+    # An honest line about the failure is the model's own wording.
+    ("I wasn't able to send that email.", "I wasn't able to send that email."),
+    # A completion claim the failed result does not back never reaches the
+    # caller (speech_guard.py; QA F10-01, replay fixture ag04.failed_action).
+    ("The email was sent to you.", UNBACKED_ACTION_LINE),
+])
+async def test_action_turn_feeds_failed_result_and_guards_only_unbacked_claims(
+    monkeypatch, model_line, spoken,
+):
     monkeypatch.setenv("TELEPHONY_FILLER_DELAY_MS", "0")
 
     class _ActionLLM:
@@ -358,7 +368,7 @@ async def test_action_turn_feeds_failed_result_without_rewriting_model_speech(mo
             self.seen_result = json.loads(
                 await kwargs["tool_runner"](ACTION_SEND_EMAIL, {"recipient": "a@example.com"})
             )
-            yield "The email was sent to you."
+            yield model_line
 
         async def stream_chat_with_timeout(self, *args, **kwargs):
             yield "unused"
@@ -383,7 +393,7 @@ async def test_action_turn_feeds_failed_result_without_rewriting_model_speech(mo
     assert llm.require_strict is False
     assert llm.seen_result["success"] is False
     assert llm.seen_result["status"] == "unavailable"
-    assert response == "The email was sent to you."
+    assert response == spoken
     service.synthesize_and_send_audio.assert_awaited_once_with(
         session,
         response,
