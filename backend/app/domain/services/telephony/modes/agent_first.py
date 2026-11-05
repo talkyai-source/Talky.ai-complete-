@@ -38,6 +38,8 @@ import logging
 
 from app.domain.services.telephony.config import (
     _build_call_greeting,
+    opener_for_log,
+    outbound_opener_with_notice,
 )
 
 logger = logging.getLogger(__name__)
@@ -178,11 +180,17 @@ def _disclosure_tenant_id(voice_session):
     return None
 
 
-async def _speak_recording_disclosure(voice_session) -> None:
+async def _speak_recording_disclosure(voice_session, *, opener_with_notice=None) -> None:
     """Deliver the configured notice before the greeting and record transport proof.
 
     Failure suppresses recording without terminating the call. This technical
     receipt gate does not establish human hearing or legal consent.
+
+    ``opener_with_notice`` is the outbound identity opener saying ", on a
+    recorded line". Where the notice owed is the platform's own wording, that
+    line is spoken in its place, under the same proof rule, and
+    ``_opener_spoken_as_notice`` tells the greeting not to speak again
+    (owner decision 2026-11-05, QA F12-03).
     """
     from app.domain.models.conversation import Message, MessageRole
     from app.domain.services.recording_policy_service import (
@@ -191,6 +199,7 @@ async def _speak_recording_disclosure(voice_session) -> None:
         DISCLOSURE_SPOKEN,
         DISCLOSURE_TRANSMITTED,
         RecordingPolicyService,
+        is_platform_notice_text,
         record_disclosure_state,
         spoken_disclosure_text,
     )
@@ -259,6 +268,9 @@ async def _speak_recording_disclosure(voice_session) -> None:
                 raise RuntimeError("pinned recording disclosure is empty")
         else:
             text = spoken_disclosure_text(decision)
+        as_opener = bool(opener_with_notice and text and is_platform_notice_text(text))
+        if as_opener:
+            text = opener_with_notice
         if not text:
             record_disclosure_state(DISCLOSURE_NOT_REQUIRED, *call_ids)
             logger.info(
@@ -298,7 +310,7 @@ async def _speak_recording_disclosure(voice_session) -> None:
 
         logger.info(
             "recording_disclosure_speaking call_id=%s reason=%s text=%r",
-            call_id[:12], getattr(decision, "reason", "-"), text[:80],
+            call_id[:12], getattr(decision, "reason", "-"), opener_for_log(text)[:80],
         )
         # SINGLE ATTEMPT, NO RESTART (2026-08-11 — see module docstring for
         # the production traces that drove this). A callee who speaks during
@@ -339,6 +351,9 @@ async def _speak_recording_disclosure(voice_session) -> None:
             )
         finally:
             session._disclosure_in_flight = disclosure_was_in_flight
+        # Spoken, even if cut short: the opener is never restarted from the
+        # top (same rule as the notice, see the single-attempt note above).
+        voice_session._opener_spoken_as_notice = as_opener
         receipt = getattr(session, "_tts_playback_receipt", None)
         # The phone gateway's finish receipt is status="transmitted" with
         # evidence="transmitted" (voice_gateway /v1/sessions/tts/finish); the
@@ -375,6 +390,8 @@ async def _speak_recording_disclosure(voice_session) -> None:
             else DISCLOSURE_TRANSMITTED,
             *call_ids,
         )
+        if as_opener:
+            session._has_introduced = True
         # Put it in history so the LLM knows the notice was already given
         # and does not repeat it (or contradict it) on the first turn.
         try:
@@ -491,7 +508,19 @@ async def _send_outbound_greeting(voice_session) -> None:
         # that answering produces cannot cut it short. A failure here only
         # suppresses the recording (see _speak_recording_disclosure) — the
         # greeting below still plays and the call continues normally.
-        await _speak_recording_disclosure(voice_session)
+        # Where the platform's own notice is owed, the identity opener says
+        # it (", on a recorded line") instead of a notice before the opener
+        # (owner decision 2026-11-05, QA F12-03). Prepared with the pre-synth
+        # greeting; a pinned inbound greeting is never merged.
+        opener_with_notice = (
+            None if str(getattr(voice_session, "_pinned_inbound_greeting", "") or "").strip()
+            else getattr(voice_session, "_opener_with_notice_text", None)
+        )
+        await _speak_recording_disclosure(voice_session, opener_with_notice=opener_with_notice)
+        if getattr(voice_session, "_opener_spoken_as_notice", False):
+            voice_session._presynth_greeting_audio = None
+            voice_session._presynth_greeting_text = None
+            return
 
         # ── Fast path: pre-synthesized greeting from ringing phase ──────
         presynth_chunks = getattr(voice_session, "_presynth_greeting_audio", None)
@@ -530,7 +559,7 @@ async def _send_outbound_greeting(voice_session) -> None:
             greeting = presynth_text
             logger.info(
                 "outbound_greeting_presynth call_id=%s chunks=%d text=%r",
-                call_id[:12], len(presynth_chunks), greeting[:60],
+                call_id[:12], len(presynth_chunks), opener_for_log(greeting)[:60],
             )
 
             session.tts_active = True
@@ -640,7 +669,7 @@ async def _send_outbound_greeting(voice_session) -> None:
 
             logger.info(
                 "outbound_greeting_realtime call_id=%s first_speaker=%s text=%r",
-                call_id[:12], first_speaker, greeting[:60],
+                call_id[:12], first_speaker, opener_for_log(greeting)[:60],
             )
             # track_latency=False: the greeting is not an LLM turn either
             # (same 6e0e221b reasoning as the disclosure call above) -- it
@@ -821,10 +850,15 @@ async def prepare_pre_originate_greeting(
 
     pre_warm_session._presynth_greeting_audio = chunks
     pre_warm_session._presynth_greeting_text = greeting_text
+    # Spoken live at answer, under the notice's proof rule, when the
+    # platform's own recording notice is owed (_send_outbound_greeting).
+    pre_warm_session._opener_with_notice_text = outbound_opener_with_notice(
+        pre_warm_session.call_session
+    )
     logger.info(
         "pre_originate_greeting_ready first_speaker=%s chunks=%d bytes=%d text=%r",
         effective_first_speaker,
-        len(chunks), sum(len(c) for c in chunks), greeting_text[:60],
+        len(chunks), sum(len(c) for c in chunks), opener_for_log(greeting_text)[:60],
     )
 
 

@@ -811,6 +811,30 @@ _PERSONA_GREETINGS: dict[str, dict[str, list[str]]] = {
 }
 
 
+def build_identity_opener(
+    agent_name: Optional[str],
+    company_name: Optional[str],
+    callee_first_name: Optional[str] = None,
+    *,
+    recorded_line: bool = False,
+) -> str:
+    """The first line of every outbound call (owner decision 2026-11-05, QA F12-03).
+
+    "Hi, this is Sarah, an AI assistant from All State Estimation, on a
+    recorded line. Am I speaking with John?" Who is calling, for which
+    business, and that it is an AI come first. ", on a recorded line" is said
+    only where it stands in for the platform's own recording notice; with no
+    name on file the question is "Who am I speaking with?".
+    """
+    agent = (agent_name or "").strip()
+    company = (company_name or "").strip() or TELEPHONY_COMPANY_NAME
+    who = f"this is {agent}, an AI assistant from {company}" if agent else (
+        f"this is an AI assistant from {company}")
+    name = (callee_first_name or "").strip()
+    question = f"Am I speaking with {name}?" if name else "Who am I speaking with?"
+    return f"Hi, {who}{', on a recorded line' if recorded_line else ''}. {question}"
+
+
 def build_persona_greeting(
     *,
     persona_type: Optional[str],
@@ -818,6 +842,7 @@ def build_persona_greeting(
     company_name: str,
     direction: str = "outbound",
     call_reason: Optional[str] = None,
+    callee_first_name: Optional[str] = None,
 ) -> str:
     """Pick the first-turn TTS opener for this persona × direction.
 
@@ -826,13 +851,11 @@ def build_persona_greeting(
     variants in :data:`_PERSONA_GREETINGS`, falling back to
     ``build_telephony_inbound_greeting`` when the persona is unknown.
 
-    OUTBOUND (default) and any unrecognised direction value: the bare
-    pickup greeting from :func:`build_telephony_greeting` — see the
-    2026-08-11 OPENER REDESIGN note above this dict for why persona and
-    ``call_reason`` no longer vary this turn's text. ``call_reason`` is
-    accepted for call-site / signature compatibility (some callers still
-    pass it) but is a no-op here; the reason is spoken on the RELOCATED
-    turn instead, driven by the persona's own STAGE 1 / OPENING block.
+    OUTBOUND (default) and any unrecognised direction value: the identity
+    opener from :func:`build_telephony_greeting` (owner decision
+    2026-11-05). Persona and ``call_reason`` do not vary it; ``call_reason``
+    is accepted for call-site compatibility and the reason is given on the
+    next turn, driven by the persona's own STAGE 1 / OPENING block.
     """
     import random as _random
 
@@ -840,7 +863,7 @@ def build_persona_greeting(
 
     if direction_key != "inbound":
         del call_reason  # unused outbound — see module note above
-        return build_telephony_greeting(agent_name, company_name)
+        return build_telephony_greeting(agent_name, company_name, callee_first_name)
 
     if persona_type and persona_type in _PERSONA_GREETINGS:
         per_persona = _PERSONA_GREETINGS[persona_type]
@@ -854,37 +877,19 @@ def build_persona_greeting(
     return build_telephony_inbound_greeting(agent_name, company_name)
 
 
-def build_telephony_greeting(agent_name: str, company_name: str) -> str:
+def build_telephony_greeting(
+    agent_name: str, company_name: str, callee_first_name: Optional[str] = None,
+) -> str:
     """
-    Return the FIRST audio spoken on an outbound call: a short, natural
-    pickup greeting and nothing else — no name, no company, no reason, no
-    time-ask. See the 2026-08-11 OPENER REDESIGN note above
-    ``_PERSONA_GREETINGS`` for the full rationale and where the identity +
-    reason content that used to live here moved to.
-
-    ``agent_name`` / ``company_name`` are kept in the signature for
-    call-site compatibility (every caller currently passes both) but are
-    intentionally unused: the entire point of this turn is that it carries
-    no identity yet, so there is nothing to interpolate.
+    Return the FIRST audio spoken on an outbound call: the identity opener
+    (:func:`build_identity_opener`). The 2026-08-11 bare pickup greeting
+    ("Hi there.") left the AI disclosure to the model, which QA found it did
+    not reliably give (F12-03); the owner chose this line on 2026-11-05.
 
     Synthesized directly via TTS (no LLM round-trip) so first audio
     lands within ~100ms of answer.
     """
-    import random as _random
-
-    del agent_name, company_name  # deliberately unused — see docstring
-    # Plain human pickup variants — 1-3 words, picked at random per call so
-    # consecutive dials don't sound canned. Deliberately NOT questions about
-    # time ("got a minute?") — that ask belongs to the relocated identity
-    # turn, not the hello.
-    variants = [
-        "Hi there.",
-        "Hello?",
-        "Hi, hello.",
-        "Hey there.",
-        "Oh, hi.",
-    ]
-    return _random.choice(variants)
+    return build_identity_opener(agent_name, company_name, callee_first_name)
 
 
 # ---------------------------------------------------------------------------
@@ -1160,9 +1165,9 @@ def build_call_target_block(
         "\n------------------------------------------------------------\n"
         f"PERSON YOU'RE CALLING: {full}{company_clause}. This is who the number "
         "belongs to on our list — you have NOT spoken to them yet, so treat the "
-        "name as who you expect to reach, not a confirmed fact. Open by greeting "
-        f'them by their first name naturally (e.g. "Hi, is this {greet_name}?") '
-        "and confirm you've reached the right person before launching in. Do not "
+        "name as who you expect to reach, not a confirmed fact. The call's opening "
+        f'line already asks for them by first name ("Am I speaking with {greet_name}?"); '
+        "confirm you've reached the right person before launching in. Do not "
         "read their details back robotically or recite the company name at them.\n"
         # Trust marker (OWASP LLM01) — the fence's framing sentence without the
         # fence, so the spoken sentence above stays natural.

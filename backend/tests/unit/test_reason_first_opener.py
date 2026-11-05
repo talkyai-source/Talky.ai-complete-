@@ -174,7 +174,8 @@ def test_the_spoken_opener_no_longer_states_the_reason():
             call_reason=REASON,
         )
         assert REASON not in out
-        assert "Sarah" not in out and "All-state" not in out
+        # Who is calling and that it is an AI, yes (QA F12-03); the reason, no.
+        assert "Sarah" in out and "All-state" in out and "AI assistant" in out
 
 
 def test_the_spoken_opener_is_persona_and_reason_independent():

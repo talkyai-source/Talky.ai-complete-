@@ -286,6 +286,20 @@ _OPT_OUT_SENTENCE = re.compile(
 )
 
 
+# The platform's own notice wording, as spoken (the migration and
+# recordings.DEFAULT_ANNOUNCEMENT_TEXT after the opt-out strip, or the
+# minimum). An outbound opener says ", on a recorded line" in its place; a
+# tenant's own wording is still spoken as written (owner decision 2026-11-05).
+_PLATFORM_NOTICE_TEXTS = frozenset({
+    "This call may be recorded for quality and training purposes.",
+    MINIMUM_DISCLOSURE_TEXT,
+})
+
+
+def is_platform_notice_text(text: Optional[str]) -> bool:
+    return isinstance(text, str) and " ".join(text.split()) in _PLATFORM_NOTICE_TEXTS
+
+
 def contains_unsupported_dtmf_opt_out(text: Optional[str]) -> bool:
     """Whether text promises a recording opt-out the runtime cannot honour."""
 

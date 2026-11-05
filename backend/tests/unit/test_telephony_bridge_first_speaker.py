@@ -237,7 +237,10 @@ class TestOutboundFirstSpeaker:
             _llm_opener_text="outbound-only opener",
         )
         assert _build_call_greeting(inbound, first_speaker="agent") == "Welcome to Acme support."
-        assert _build_call_greeting(outbound, first_speaker="agent") == "outbound-only opener"
+        # An LLM opener stash never replaces the identity opener (QA F12-03).
+        assert _build_call_greeting(outbound, first_speaker="agent") == (
+            "Hi, this is Maya, an AI assistant from Acme. Who am I speaking with?"
+        )
 
     def test_default_is_agent(self):
         """TELEPHONY_FIRST_SPEAKER not set → default must be 'agent'."""
