@@ -100,6 +100,34 @@ _BOOL_ARGS = {
 }
 
 
+# Query tools read tenant data, so each needs the permission the matching REST
+# endpoint requires (QA F4-04: only action tools were checked, so a readonly
+# or billing user could read calls, leads, email and calendar through the
+# assistant). ``None`` means the tool authorizes the actor itself. A query
+# tool missing from this map is refused, like an action without a policy.
+QUERY_TOOL_PERMISSIONS: Dict[str, Optional[Permission]] = {
+    "get_dashboard_stats": Permission.ANALYTICS_READ,
+    "get_actions_today": Permission.ANALYTICS_READ,
+    "get_usage_info": Permission.BILLING_READ,
+    "get_leads": Permission.CALLS_READ,
+    "get_lead_followup": Permission.CALLS_READ,
+    "get_qualified_leads": Permission.CALLS_READ,
+    "get_recent_calls": Permission.CALLS_READ,
+    "read_emails": Permission.CONNECTORS_READ,
+    "read_email": Permission.CONNECTORS_READ,
+    "drive_list_files": Permission.CONNECTORS_READ,
+    "drive_read_file": Permission.CONNECTORS_READ,
+    "read_calendar_events": Permission.CALENDAR_READ,
+    "get_campaigns": Permission.CAMPAIGNS_READ,
+    "get_campaign_detail": Permission.CAMPAIGNS_READ,
+    # Campaign knowledge authorizes the actor per campaign inside its read
+    # lease (an inbound campaign needs inbound:read, others campaigns:read).
+    "get_knowledge_tree": None,
+    "retrieve_knowledge": None,
+    "list_voices": Permission.CAMPAIGNS_READ,
+}
+
+
 def _authorization_failure(
     error: str,
     message: str,
@@ -110,6 +138,51 @@ def _authorization_failure(
     if required is not None:
         result["required"] = required
     return result
+
+
+async def _authorize_query_tool(
+    func_name: str,
+    tenant_id: str,
+    db_client: Any,
+    actor_user_id: Optional[str],
+) -> Dict[str, Any] | None:
+    """Return a stable failure, or None when this user may read this data."""
+
+    actor = str(actor_user_id or "").strip()
+    if not actor or func_name not in QUERY_TOOL_PERMISSIONS:
+        return _authorization_failure(
+            "permission_denied",
+            "You do not have access to that information.",
+        )
+    required = QUERY_TOOL_PERMISSIONS[func_name]
+    if required is None:
+        return None  # the tool authorizes the actor itself
+    pool = getattr(db_client, "pool", None)
+    if pool is None or not str(tenant_id or "").strip():
+        return _authorization_failure(
+            "authorization_unavailable",
+            "Authorization is temporarily unavailable. Please try again.",
+        )
+    try:
+        allowed = check_permission(
+            await get_effective_permissions(pool, actor, tenant_id), required,
+        )
+    except Exception as exc:  # noqa: BLE001 - query authorization fails closed
+        logger.error(
+            "assistant_query_authorization_unavailable tool=%s tenant=%s actor=%s err_type=%s",
+            func_name, str(tenant_id)[:8], actor[:8], type(exc).__name__,
+        )
+        return _authorization_failure(
+            "authorization_unavailable",
+            "Authorization is temporarily unavailable. Please try again.",
+        )
+    if not allowed:
+        return _authorization_failure(
+            "permission_denied",
+            "You do not have access to that information.",
+            required=required.value,
+        )
+    return None
 
 
 async def _authorize_action_tool(
@@ -292,6 +365,12 @@ async def dispatch_tool(
             db_client,
             actor,
             call_args,
+        )
+        if authorization_failure is not None:
+            return authorization_failure
+    else:
+        authorization_failure = await _authorize_query_tool(
+            func_name, tenant_id, db_client, actor_user_id,
         )
         if authorization_failure is not None:
             return authorization_failure

@@ -5,8 +5,11 @@ from decimal import Decimal
 
 import pytest
 
+from types import SimpleNamespace
+
+from app.core.security.rbac import Permission
 from app.infrastructure.assistant import agent
-from app.infrastructure.assistant.tools import ALL_TOOLS
+from app.infrastructure.assistant.tools import ALL_TOOLS, dispatch
 
 
 @pytest.mark.asyncio
@@ -24,6 +27,12 @@ async def test_tool_executor_json_encodes_decimal_payloads(monkeypatch):
     # name. The behaviour under test — _dump_json encoding Decimals in the
     # ToolMessage — is unchanged.
     monkeypatch.setitem(ALL_TOOLS["get_usage_info"], "function", fake_get_usage_info)
+
+    # Query tools are authorized too (QA F4-04): this user may read billing.
+    async def billing_reader(*_args, **_kwargs):
+        return {Permission.BILLING_READ.value}
+
+    monkeypatch.setattr(dispatch, "get_effective_permissions", billing_reader)
 
     result = await agent.tool_executor(
         {
@@ -45,7 +54,7 @@ async def test_tool_executor_json_encodes_decimal_payloads(monkeypatch):
             "tenant_id": "tenant-1",
             "user_id": "user-1",
             "conversation_id": None,
-            "db_client": object(),
+            "db_client": SimpleNamespace(pool=object()),
             "tool_results": [],
         }
     )
