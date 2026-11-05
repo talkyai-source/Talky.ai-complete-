@@ -576,6 +576,7 @@ class DialerWorker:
                 lead_attempts_today=lead_attempts_today,
                 lead_timezone=lead_tz,
                 enforce_window=not ignore_schedule,
+                phone_number=job.phone_number,
             )
 
             # 3b. TESTING OVERRIDE — explicit, opt-in, OFF by default.
@@ -656,6 +657,7 @@ class DialerWorker:
                     delay = self.rules_engine.get_delay_until_next_window(
                         rules,
                         lead_timezone=lead_tz,
+                        phone_number=job.phone_number,
                     )
                     logger.info(
                         f"Outside calling window (tz={lead_tz or rules.timezone}"
@@ -3069,6 +3071,7 @@ class DialerWorker:
             lead_attempts_today=None,
             lead_timezone=lead_tz,
             enforce_window=not schedule_ignored(campaign_cfg),
+            phone_number=job.phone_number,
         )
         if in_window:
             if schedule_ignored(campaign_cfg):

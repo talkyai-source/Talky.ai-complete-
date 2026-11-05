@@ -401,11 +401,18 @@ async def test_unavailable_tenant_count_keeps_the_in_memory_fallback():
 
 
 @pytest.mark.asyncio
-async def test_one_tenants_ten_live_calls_do_not_block_another_tenant():
+async def test_one_tenants_ten_live_calls_do_not_block_another_tenant(monkeypatch):
     """End to end through the REAL rules engine: tenant A is at its cap of 10,
     tenant B (zero live calls) must still dial."""
     fakeredis = pytest.importorskip("fakeredis")
+    from datetime import datetime, timezone
     from app.domain.services import global_concurrency as gc
+    from app.domain.services.dialer import legal_hours
+
+    # A UK weekday afternoon: the legal calling-hours floor is open for the
+    # job's London number, so only concurrency decides, whatever the hour the
+    # suite runs at.
+    monkeypatch.setattr(legal_hours, "_utcnow", lambda: datetime(2026, 11, 3, 14, 0, tzinfo=timezone.utc))
 
     redis = fakeredis.FakeAsyncRedis(decode_responses=True)
     await redis.sadd(gc._ACTIVE_SET_KEY, *[f"call-{i}" for i in range(10)])

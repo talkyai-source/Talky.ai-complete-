@@ -36,6 +36,7 @@ class SchedulingRuleEngine:
         lead_attempts_today: Optional[int] = None,
         lead_timezone: Optional[str] = None,
         enforce_window: bool = True,
+        phone_number: Optional[str] = None,
     ) -> Tuple[bool, str]:
         """
         Check if a call can be made now.
@@ -49,6 +50,16 @@ class SchedulingRuleEngine:
         Returns:
             (can_call, reason)
         """
+        # Rule 0: the legal calling-hours floor for the person being called.
+        # Checked before, and regardless of, the campaign window: "call
+        # anytime" means any time inside this floor (see legal_hours.py).
+        if phone_number is not None:
+            from app.domain.services.dialer.legal_hours import within_legal_hours
+
+            legal, legal_reason = within_legal_hours(phone_number, lead_timezone)
+            if not legal:
+                return False, legal_reason
+
         # Rule 1: Time window check — evaluated in the campaign's timezone
         # (Phase 3c-v2, via the effective rules' tz) or an explicit
         # lead_timezone override. Skipped entirely when enforce_window is
@@ -133,6 +144,7 @@ class SchedulingRuleEngine:
     
     def get_delay_until_next_window(
         self, rules: CallingRules, lead_timezone: Optional[str] = None,
+        phone_number: Optional[str] = None,
     ) -> int:
         """
         Calculate seconds until next calling window opens.
@@ -143,15 +155,25 @@ class SchedulingRuleEngine:
                 computed against the prospect's local window when set.
 
         Returns:
-            Seconds until next window (0 if currently in window)
+            Seconds until next window (0 if currently in window). With a
+            ``phone_number``, never less than the wait for the legal floor, so
+            a "call anytime" campaign blocked at night sleeps until morning
+            instead of re-waking at once.
         """
+        floor_delay = 0
+        if phone_number is not None:
+            from app.domain.services.dialer.legal_hours import seconds_until_legal
+
+            until_legal = seconds_until_legal(phone_number, lead_timezone)
+            floor_delay = 3600 if until_legal is None else until_legal
+
         in_window, _ = rules.is_within_time_window(tz_override=lead_timezone)
         if in_window:
-            return 0
+            return floor_delay
 
         next_window = rules.get_next_window_start(tz_override=lead_timezone)
         delay = (next_window - datetime.now(timezone.utc)).total_seconds()
-        return max(0, int(delay))
+        return max(0, int(delay), floor_delay)
     
     def reset(self) -> None:
         """Reset all counters (for testing)."""
