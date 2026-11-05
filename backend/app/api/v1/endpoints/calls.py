@@ -13,7 +13,8 @@ from typing import Any, List, Literal, Optional
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
-from app.core.db_utils import acquire_with_tenant
+from app.core.db import DatabasePoolTimeoutError
+from app.core.db_utils import acquire_connection, acquire_with_tenant
 from app.core.security.rbac import require_permission, Permission
 from app.core.security.api_security import rate_limit_dependency
 from app.domain.services.call_redial_service import RedialError, preview_redial, request_redial
@@ -1354,7 +1355,7 @@ async def list_calls(
 
         where = " AND ".join(conditions)
 
-        async with db_client.pool.acquire() as conn:
+        async with acquire_connection(db_client.pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 rows = await conn.fetch(
@@ -1471,6 +1472,8 @@ async def list_calls(
             total=total or 0,
         )
 
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as e:
         logger.error(f"Failed to fetch calls: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch calls")
@@ -1571,7 +1574,7 @@ async def get_call(
         except (TypeError, ValueError, AttributeError):
             raise HTTPException(status_code=404, detail="Call not found")
 
-        async with db_client.pool.acquire() as conn:
+        async with acquire_connection(db_client.pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 call_row = await conn.fetchrow(
@@ -1721,7 +1724,7 @@ async def get_call(
             transfer_legs=transfer_legs,
         )
 
-    except HTTPException:
+    except (HTTPException, DatabasePoolTimeoutError):
         raise
     except Exception as e:
         logger.error(f"Failed to fetch call {call_id}: {e}", exc_info=True)

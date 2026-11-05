@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -537,6 +538,12 @@ class FakeTelephonyConn:
 
     async def execute(self, query: str, *args):
         normalized = " ".join(query.split())
+        timeout_setting = re.fullmatch(
+            r"SET LOCAL (?:statement_timeout|lock_timeout) = '([1-9][0-9]*)ms'", normalized,
+        )
+        if timeout_setting and int(timeout_setting.group(1)) <= 2147483647:
+            assert not args
+            return "SET"
         if normalized.startswith("SET LOCAL app."):
             return "SET"
         if normalized.startswith("SELECT set_config('app.current_tenant_id'"):
