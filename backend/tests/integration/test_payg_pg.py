@@ -293,6 +293,27 @@ async def test_an_admin_can_add_a_bundle_and_take_one_off_sale(payg_db):
     assert "test_payg_500" not in {p["code"] for p in await db.service.packages(audience=PAYG)}
 
 
+async def test_a_bundle_cannot_be_sold_in_a_currency_the_credit_path_refuses(payg_db):
+    # QA F13-09: SEK passed the admin API and Stripe, then the credit path
+    # failed closed, so the customer paid and got no minutes.
+    db = payg_db
+    refused = await db.http("staff", "POST", "/admin/billing/packages", json={
+        "code": "test_payg_sek", "name": "100 minutes", "minutes": 100, "price_cents": 5000,
+        "currency": "SEK", "audience": "payg"})
+    assert refused.status_code == 422, refused.text
+    # A bundle already stored in such a currency is never ordered either.
+    code = "test_sek_" + uuid4().hex[:8]
+    await db.owner.execute(
+        """INSERT INTO topup_packages (code, name, minutes, price_cents, currency, audience, is_active, sort_order)
+           VALUES ($1, 'Legacy SEK bundle', 100, 5000, 'SEK', 'payg', TRUE, 90)""", code)
+    try:
+        with pytest.raises(TopupError, match="cannot be credited"):
+            await db.service.create_order(tenant_id=str(db.tenants["new"]), user_id=None,
+                                          package_code=code, audience=PAYG)
+    finally:
+        await db.owner.execute("DELETE FROM topup_packages WHERE code = $1", code)
+
+
 async def test_only_a_platform_admin_can_change_prices(payg_db):
     db = payg_db
     response = await db.http("member", "PATCH", "/admin/billing/packages/payg_125", json={"price_cents": 1})
