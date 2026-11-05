@@ -122,16 +122,29 @@ async def get_usage_info(
 
         plan = plan_response.data or {}
 
-        minutes_allocated = tenant.get("minutes_allocated", 0)
-        minutes_used = tenant.get("minutes_used", 0)
+        # The minutes come from the meter the Billing page and every call
+        # gate use (plan minutes plus bought minutes, this allowance month).
+        # tenants.minutes_used is stale and minutes_allocated omits bought
+        # minutes, so a pay-as-you-go customer was told they had none (QA
+        # F3-07). An unknown meter is reported as unknown, never as zero.
+        from app.domain.services import minutes_quota
+
+        status = await minutes_quota.tenant_minutes_status(tenant_id)
+        known = status.state == "known"
+        minutes_allocated = status.allocated if known else None
+        minutes_used = status.used_minutes if status.state != "unavailable" else None
 
         return {
             "plan_name": plan.get("name", "Free"),
             "plan_price": plan.get("price", 0),
+            "minutes_state": status.state,
             "minutes_allocated": minutes_allocated,
             "minutes_used": minutes_used,
-            "minutes_remaining": max(0, minutes_allocated - minutes_used),
-            "usage_percentage": round((minutes_used / minutes_allocated * 100), 1) if minutes_allocated > 0 else 0,
+            "minutes_remaining": status.remaining_minutes if known else None,
+            "usage_percentage": (
+                round(minutes_used / minutes_allocated * 100, 1)
+                if known and minutes_allocated else None
+            ),
             "subscription_status": tenant.get("subscription_status", "inactive")
         }
     except Exception as e:
