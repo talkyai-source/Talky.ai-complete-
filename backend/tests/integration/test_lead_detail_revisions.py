@@ -251,6 +251,22 @@ async def test_a_confirmed_row_is_not_replaced_by_the_post_call_note(detail_db):
     assert (saved["job_title"]["value"], saved["job_title"]["confirmed"]) == ("Director", True)
 
 
+async def test_another_tenants_call_details_are_unreadable_even_without_rls(detail_db):
+    admin, pool = detail_db
+    tenant, call, row = await seed(admin)
+    assert await persist_business_details(pool, tenant, call, detail(), row) == 1
+    schema = (await admin.fetchval("SHOW search_path")).split(",")[0].strip().strip('"')
+    # A superuser pool: RLS does not apply, so only the SQL predicate protects the tenant.
+    superuser = await asyncpg.create_pool(os.environ["TALKY_CRM_TEST_DATABASE_URL"], min_size=1, max_size=1,
+                                          server_settings={"search_path": schema})
+    try:
+        service = LeadCaptureService(superuser)
+        assert await service.details_for_call(str(uuid4()), call) == []
+        assert [d["field_key"] for d in await service.details_for_call(tenant, call)] == ["current_provider"]
+    finally:
+        await superuser.close()
+
+
 async def test_another_tenants_campaign_definitions_are_unreadable_even_without_rls(detail_db):
     admin, _ = detail_db
     tenant, _, campaign, _ = await seed_campaign_call(admin, CAMPAIGN_FIELDS)
