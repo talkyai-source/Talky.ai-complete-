@@ -361,10 +361,10 @@ _KNOWN_NO_GUC: dict[str, str] = {}
 
 
 def _acquisitions_without_tenant_context(path: Path) -> list[tuple[str, int, list[str]]]:
-    """Report ``.acquire()`` sites in `path` that establish no RLS context.
+    """Report raw/bounded acquisition sites that establish no RLS context.
 
     Returns ``(qualified_function, lineno, tables)`` for every
-    ``async with <expr>.acquire(...)`` where:
+    ``async with <expr>.acquire(...)`` or ``acquire_connection(...)`` where:
 
       * the enclosing function -- or any function enclosing *that* one, since a
         closure inherits the context its owner opened -- neither calls a helper
@@ -404,8 +404,12 @@ def _acquisitions_without_tenant_context(path: Path) -> list[tuple[str, int, lis
                     call = item.context_expr
                     if (
                         isinstance(call, ast.Call)
-                        and isinstance(call.func, ast.Attribute)
-                        and call.func.attr == "acquire"
+                        and (
+                            isinstance(call.func, ast.Attribute)
+                            and call.func.attr in {"acquire", "acquire_connection"}
+                            or isinstance(call.func, ast.Name)
+                            and call.func.id == "acquire_connection"
+                        )
                     ):
                         if any(establishes_context(fn) for fn in functions):
                             continue
@@ -472,6 +476,20 @@ def test_incident_queries_require_an_rls_context(tmp_path: Path) -> None:
     )
     assert _acquisitions_without_tenant_context(path) == [
         ("read_incidents", 2, ["incidents"])
+    ]
+
+
+@pytest.mark.parametrize("acquire", ["acquire_connection", "db_utils.acquire_connection"])
+def test_bounded_acquire_without_tenant_context_is_rejected(tmp_path: Path, acquire: str) -> None:
+    path = tmp_path / "unsafe_bounded_reader.py"
+    path.write_text(
+        "async def read_calls(pool):\n"
+        f"    async with {acquire}(pool) as conn:\n"
+        "        return await conn.fetch('SELECT * FROM calls')\n",
+        encoding="utf-8",
+    )
+    assert _acquisitions_without_tenant_context(path) == [
+        ("read_calls", 2, ["calls"])
     ]
 
 
