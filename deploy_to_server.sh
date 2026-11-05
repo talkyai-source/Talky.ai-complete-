@@ -102,7 +102,6 @@ ssh -t -i "$KEY" "$PROD" "
     # Authenticate before mutation; no later command may wait for a lost TTY.
     command sudo -v
     sudo() { command sudo -n \"\$@\"; }
-    umask 077
     deploy_log_dir=/home/admins/backups/talky-deploy
     test ! -L \"\$deploy_log_dir\"
     mkdir -p -m 0700 -- \"\$deploy_log_dir\"
