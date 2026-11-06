@@ -87,7 +87,7 @@ async def test_dnc_postgres_error_fails_closed():
     `passed=True` — this test fails against it (asserts `passed is False`)."""
     guard = _guard_with_conn(_FakeConn(raise_exc=asyncpg.PostgresError("db down")))
 
-    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+15551234567")
+    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+14155552671")
 
     assert result.check == GuardCheck.DNC_CHECK
     assert result.passed is False, (
@@ -102,7 +102,7 @@ async def test_dnc_listed_number_still_blocks():
     row = {"id": "dnc-1", "source": "tenant_upload", "reason": "opt_out"}
     guard = _guard_with_conn(_FakeConn(row=row))
 
-    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+15551234567")
+    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+14155552671")
 
     assert result.passed is False
     assert "number_on_dnc_list" in result.reason
@@ -112,7 +112,7 @@ async def test_dnc_listed_number_still_blocks():
 async def test_dnc_clean_number_passes():
     guard = _guard_with_conn(_FakeConn(row=None))
 
-    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+15551234567")
+    result = await guard._check_dnc(tenant_id=_TENANT_ID, phone_number="+14155552671")
 
     assert result.passed is True
 
@@ -171,7 +171,7 @@ async def test_evaluate_blocks_when_dnc_check_raises_unexpectedly():
     guard._check_dnc = _boom
     guard._log_decision = lambda *a, **k: _none()
 
-    result = await guard.evaluate(tenant_id="t1", phone_number="+15551234567")
+    result = await guard.evaluate(tenant_id="t1", phone_number="+14155552671")
 
     assert result.decision == GuardDecision.BLOCK, (
         "an unexpected error inside the DNC check must BLOCK the call, not "

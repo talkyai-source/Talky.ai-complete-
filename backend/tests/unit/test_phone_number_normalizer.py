@@ -27,7 +27,7 @@ class TestStrictNormalizer:
 
 class TestLenientNormalizer:
     def test_normal_us_number_still_e164(self):
-        assert normalize_phone_number_lenient("5551234567") == "+15551234567"
+        assert normalize_phone_number_lenient("4155552671") == "+14155552671"
 
     def test_keeps_existing_plus_country_code(self):
         # International number — strict path via libphonenumber.

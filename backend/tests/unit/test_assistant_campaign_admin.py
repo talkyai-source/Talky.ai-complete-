@@ -619,7 +619,7 @@ async def test_manage_lead_add_preview_no_write():
         campaign_id="c1",
         action="add",
         name="John Doe",
-        phone_number="+15551234567",
+        phone_number="+14155552671",
         confirm=False,
     )
     assert result.get("preview") is True
@@ -627,7 +627,7 @@ async def test_manage_lead_add_preview_no_write():
 
     change = result["changes"][0]
     assert change["before"] is None
-    assert change["after"]["phone_number"] == "+15551234567"
+    assert change["after"]["phone_number"] == "+14155552671"
     assert change["after"]["first_name"] == "John"
     assert change["after"]["last_name"] == "Doe"
 
@@ -640,7 +640,7 @@ async def test_manage_lead_add_confirm_inserts():
     db.configure_response(
         "leads",
         "insert",
-        data=[{"id": "lead-xyz", "phone_number": "+15551234567"}],
+        data=[{"id": "lead-xyz", "phone_number": "+14155552671"}],
     )
 
     result = await manage_lead(
@@ -649,13 +649,13 @@ async def test_manage_lead_add_confirm_inserts():
         campaign_id="c1",
         action="add",
         name="Jane",
-        phone_number="+15551234567",
+        phone_number="+14155552671",
         confirm=True,
     )
     assert result.get("applied") is True
     assert len(db._insert_calls) == 1
     inserted = db._insert_calls[0]["payload"]
-    assert inserted["phone_number"] == "+15551234567"
+    assert inserted["phone_number"] == "+14155552671"
     assert inserted["tenant_id"] == "t1"
     assert inserted["campaign_id"] == "c1"
 

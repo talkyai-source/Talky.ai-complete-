@@ -1716,19 +1716,6 @@ async def get_campaign_stats(
 # Day 9: Contact Management Endpoints
 # =============================================================================
 
-# TEMP — relaxed phone validation (remove ~2026-08; see memory
-# "phone_validation_relaxed_temp"). Accounts in this set may add contacts with
-# short/odd test numbers that the strict validator would reject. Scoped by login
-# email so it only affects these accounts and never other tenants.
-_RELAXED_PHONE_EMAILS = {"uzairdevelops@gmail.com", "allestateestimation@gmail.com"}
-
-
-def _phone_validation_relaxed(user) -> bool:
-    """True when the signed-in user's phone validation is temporarily relaxed."""
-    email = getattr(user, "email", None)
-    return bool(email and email.strip().lower() in _RELAXED_PHONE_EMAILS)
-
-
 def _split_contact_full_name(full_name: Optional[str]) -> tuple[Optional[str], Optional[str]]:
     """Split the single Full name field used by the UI into the database parts.
 
@@ -1768,26 +1755,8 @@ def _contact_custom_fields(contact: ContactCreate | ContactUpdate, existing: Opt
 
 
 def campaign_default_country(campaign: Optional[dict]) -> str:
-    """The ISO country a campaign's national-format numbers belong to.
-
-    Read from ``script_config.default_country_code`` (or the nested
-    ``campaign_slots.default_country_code``), defaulting to ``"US"``.
-
-    Public because the CSV/paste import in ``contacts.py`` must resolve it the
-    SAME way the manual Add-Contact path below does — when only one of the two
-    passed a country, a UK campaign's "07700 900123" normalised to
-    ``+447700900123`` on one path and the un-dialable ``+07700900123`` on the
-    other, for the same contact.
-    """
-    script_cfg = campaign.get("script_config") if isinstance(campaign, dict) else None
-    if isinstance(script_cfg, dict):
-        candidate = (
-            script_cfg.get("default_country_code")
-            or (script_cfg.get("campaign_slots") or {}).get("default_country_code")
-        )
-        if candidate:
-            return str(candidate).upper()
-    return "US"
+    from app.domain.services.phone_number_normalizer import campaign_country
+    return campaign_country(campaign)
 
 
 def _contact_response(row: dict) -> dict:
@@ -1842,19 +1811,14 @@ async def add_contact_to_campaign(
         # default country (from script_config.campaign_slots or
         # top-level default_country_code) so non-US campaigns route
         # correctly. Falls back to US when not configured.
-        default_country = campaign_default_country(campaign)
+        from app.api.v1.endpoints.contacts import _resolve_country
+        default_country = _resolve_country(db_client, current_user.tenant_id, campaign, contact.default_country)
 
-        # Phone validation is relaxed for specific accounts (TEMP) so they can
-        # add short/odd test numbers; normal numbers still normalize to E.164.
+        # Every account uses the same valid-only parser.
         try:
-            if _phone_validation_relaxed(current_user):
-                normalized_phone = normalize_phone_number_lenient(contact.phone_number)
-            else:
-                normalized_phone = normalize_phone_number(
-                    contact.phone_number, default_country=default_country,
-                )
+            normalized_phone = normalize_phone_number(contact.phone_number, default_country=default_country)
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
+            raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": "Invalid phone number for the selected country"}]) from e
         
         # 3. Look up ANY existing row for this phone (including soft-deleted).
         #    - A live row is a real duplicate -> 409.
@@ -1960,8 +1924,7 @@ async def update_contact_in_campaign(
     supabase: Client = Depends(get_db_client),
 ):
     """Edit a single contact (lead) — phone, name, or email. Only the provided
-    fields change. Phone is normalized the same way as add-contact (relaxed for
-    flagged accounts). Tenant-scoped.
+    fields change. Phone is normalized the same way as add-contact. Tenant-scoped.
     """
     db_client = supabase
     try:
@@ -1973,7 +1936,8 @@ async def update_contact_in_campaign(
         )
         # Same country the Add-Contact and CSV paths use, so all write paths
         # normalise a national-format number identically.
-        default_country = campaign_default_country(campaign)
+        from app.api.v1.endpoints.contacts import _resolve_country
+        default_country = _resolve_country(db_client, current_user.tenant_id, campaign, contact.default_country)
         existing = (
             db_client.table("leads")
             .select("*")
@@ -1989,14 +1953,9 @@ async def update_contact_in_campaign(
 
         if contact.phone_number is not None:
             try:
-                if _phone_validation_relaxed(current_user):
-                    normalized_phone = normalize_phone_number_lenient(contact.phone_number)
-                else:
-                    normalized_phone = normalize_phone_number(
-                        contact.phone_number, default_country=default_country,
-                    )
+                normalized_phone = normalize_phone_number(contact.phone_number, default_country=default_country)
             except ValueError as e:
-                raise HTTPException(status_code=400, detail=f"Invalid phone number: {str(e)}")
+                raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": "Invalid phone number for the selected country"}]) from e
 
             # Reject duplicate within the campaign (excluding this same lead).
             dupe = (

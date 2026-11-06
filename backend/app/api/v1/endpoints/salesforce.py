@@ -139,6 +139,7 @@ class CallbackResponse(BaseModel):
 
 
 class ImportRequest(BaseModel):
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     campaign_id: str
     object_type: str = Field("Lead", pattern="^(?:[Ll]ead|[Cc]ontact)$")
     where: Optional[str] = Field(None, max_length=500, description="Optional SOQL WHERE fragment")
@@ -505,10 +506,7 @@ async def import_salesforce_people(
 
     object_label = "Contact" if body.object_type.lower() == "contact" else "Lead"
     list_name = (body.list_name or "").strip() or f"Salesforce {object_label}s {datetime.now(timezone.utc).date().isoformat()}"
-    list_id = create_contact_list(
-        db_client, campaign_id=str(campaign["id"]), tenant_id=current_user.tenant_id,
-        name=list_name, source="manual",
-    )
+
 
     records: List[LeadRecord] = []
     for idx, person in enumerate(people, start=1):
@@ -533,7 +531,13 @@ async def import_salesforce_people(
             source_row=idx,
         ))
 
-    default_country = _campaign_default_country(campaign)
+    from app.api.v1.endpoints.contacts import _resolve_country, _preflight_phones
+    default_country = _resolve_country(db_client, current_user.tenant_id, campaign, body.default_country)
+    _preflight_phones(records, default_country)
+    list_id = create_contact_list(
+        db_client, campaign_id=str(campaign["id"]), tenant_id=current_user.tenant_id,
+        name=list_name, source="manual",
+    )
     from app.domain.services.phone_number_normalizer import normalize_phone_number
 
     result = ingest_lead_records(
@@ -545,7 +549,7 @@ async def import_salesforce_people(
         list_id=list_id,
     )
     # Stamp the Salesforce Id onto crm_contact_id for the rows that landed.
-    _stamp_crm_ids(db_client, str(campaign["id"]), current_user.tenant_id, records)
+    _stamp_crm_ids(db_client, str(campaign["id"]), current_user.tenant_id, records, default_country)
 
     return ImportResponse(
         campaign_id=str(campaign["id"]),
@@ -567,7 +571,7 @@ def _campaign_default_country(campaign: Optional[dict]) -> str:
         return "US"
 
 
-def _stamp_crm_ids(db_client: Client, campaign_id: str, tenant_id: str, records) -> None:
+def _stamp_crm_ids(db_client: Client, campaign_id: str, tenant_id: str, records, default_country="US") -> None:
     """Best-effort: copy custom_fields.salesforce_id into leads.crm_contact_id
     so legacy readers and the sync service agree."""
     for rec in records:
@@ -575,8 +579,8 @@ def _stamp_crm_ids(db_client: Client, campaign_id: str, tenant_id: str, records)
         if not sf_id:
             continue
         try:
-            from app.domain.services.phone_number_normalizer import normalize_phone_number_lenient
-            phone = normalize_phone_number_lenient(rec.phone_raw)
+            from app.domain.services.phone_number_normalizer import normalize_phone_number
+            phone = normalize_phone_number(rec.phone_raw, default_country)
         except Exception:  # noqa: BLE001
             continue
         try:
@@ -646,9 +650,14 @@ async def _enqueue_callback(
         raise _CallbackConflict(exc.status_code, exc.detail)
 
     try:
-        phone = normalize_phone_number(payload.phone, default_country=_campaign_default_country(campaign))
+        from app.domain.services.phone_number_normalizer import resolve_default_country
+        country = resolve_default_country(db_client, tenant_id, campaign)
+        phone = normalize_phone_number(payload.phone, default_country=country)
     except ValueError as exc:
-        raise _CallbackConflict(422, {"error": "invalid_phone", "message": str(exc)})
+        raise _CallbackConflict(422, {
+            "error": "invalid_phone", "row": 1, "field": "phone_number",
+            "message": "Invalid phone number for the selected country",
+        }) from exc
 
     # The tenant's DNC list is the suppression source the call guard enforces;
     # refuse before saving or queuing anything. Same normaliser as the guard

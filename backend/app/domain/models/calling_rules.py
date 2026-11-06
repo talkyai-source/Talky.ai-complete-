@@ -2,7 +2,7 @@
 Calling Rules Model
 Tenant-configurable rules for outbound calling
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional
 from datetime import datetime, time, timedelta
 import pytz
@@ -35,6 +35,16 @@ class CallingRules(BaseModel):
     Users can configure their own time windows, limits, and retry settings.
     """
     
+    default_country: Optional[str] = Field(None, description="ISO alpha-2 country for national phone numbers")
+
+    @field_validator("default_country")
+    @classmethod
+    def validate_default_country(cls, value):
+        if value is None:
+            return None
+        from app.domain.services.phone_number_normalizer import validate_country
+        return validate_country(value)
+
     # Time Window Configuration
     time_window_start: str = Field(
         default="09:00",

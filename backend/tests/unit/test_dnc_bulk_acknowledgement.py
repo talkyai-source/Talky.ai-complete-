@@ -8,7 +8,7 @@ from tests.unit.test_dnc_service import _FakePool
 
 TENANT = "20000000-0000-4000-8000-000000000017"
 FOREIGN = "20000000-0000-4000-8000-000000000018"
-PHONE = "+15555550107"
+PHONE = "+14155550107"
 
 
 @pytest.mark.asyncio
@@ -31,7 +31,7 @@ async def test_active_duplicate_acknowledges_existing_suppression_without_changi
     service = DNCService(pool)
     expiry = datetime.now(timezone.utc) + timedelta(days=2)
     row = await service.add(tenant_id=TENANT, e164=PHONE, source="bulk_import", expires_at=expiry)
-    result = await service.bulk_import(tenant_id=TENANT, numbers=[PHONE, "+1 (555) 555-0107"], source="bulk_import")
+    result = await service.bulk_import(tenant_id=TENANT, numbers=[PHONE, "+1 (415) 555-0107"], source="bulk_import")
     assert result["accepted_count"] == 2
     assert len(pool.store["by_id"]) == 1
     assert pool.store["by_id"][row.id]["expires_at"] == expiry

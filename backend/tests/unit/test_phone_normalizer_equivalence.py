@@ -1,32 +1,9 @@
-"""Behavioural baseline for EVERY phone/E.164 normaliser in the codebase.
+"""Phone contracts after QA F2-14/F14-03/F3-13 (6 Nov 2026).
 
-Why this file exists
---------------------
-The repo grew six independent phone normalisers.  They disagree -- and a
-disagreement between the DNC *write* path and the CallGuard *read* path has
-already produced a real incident.  Before any of them can be consolidated we
-need a frozen, executable record of what each one does *today*.
-
-That is all this file is: a table of ~44 inputs x 6 implementations recording
-the CURRENT output (or the current exception type).  The consolidation work
-makes the four endpoint/service-level normalisers delegate to
-``app.domain.services.phone_number_normalizer``; this test passing UNCHANGED
-before and after that delegation is the proof the refactor is behaviour
-preserving.
-
-Do NOT "fix" a surprising value here.  If a row looks like a bug, it *is*
-recorded as one in the consolidation report -- changing it is a separate,
-deliberate behaviour change with its own test.
-
-ONE column has been deliberately re-recorded since: ``dnc_service``.  On
-2026-08-27 the DNC write path was moved off ``normalize_e164_libphonenumber``
-onto ``normalize_e164_digits`` -- the exact function ``CallGuard`` uses to look
-``dnc_entries`` up -- because the two disagreed on a bare 10-digit US number
-and the row therefore never matched, leaving a number the customer had put on
-Do-Not-Call dialable.  The ``dnc_service`` and ``call_guard`` columns are now
-identical BY DESIGN, and
-``test_dnc_and_call_guard_agree_on_every_baseline_input`` at the bottom of this
-file is what keeps them that way.  Every other column is untouched.
+Strict dial destinations and DNC/guard keys now require library validity;
+extensions are excluded. The static cases below deliberately replace the
+previous guessing behavior. Legacy contacts and DID registration retain their
+separate contracts. No runtime expected value is derived from the implementation.
 """
 from __future__ import annotations
 
@@ -105,47 +82,47 @@ def _outcome(fn, value) -> str:
 
 BASELINE = (
     ('+14155551234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'"),
-    ('14155551234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "ERR_ValueError"),
-    ('4155551234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "ERR_ValueError"),
-    ('(415) 555-1234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "ERR_ValueError"),
-    ('415-555-1234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "ERR_ValueError"),
-    ('415.555.1234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "ERR_ValueError"),
-    (' +1 415 555 1234 ', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "ERR_ValueError"),
-    ('001 415 555 1234', "'+0014155551234'", "'+0014155551234'", "'+0014155551234'", "'+0014155551234'", "'+0014155551234'", "ERR_ValueError"),
-    ('+1 (415) 555-1234 ext 22', "'+14155551234'", "'+14155551234'", "'+1415555123422'", "'+1415555123422'", "'+1415555123422'", "ERR_ValueError"),
-    ('+447700900123', "'+447700900123'", "'+447700900123'", "'+447700900123'", "'+447700900123'", "'+447700900123'", "'+447700900123'"),
-    ('447700900123', "'+447700900123'", "'+447700900123'", "'+447700900123'", "'+447700900123'", "'+447700900123'", "ERR_ValueError"),
-    ('07700 900123', "'+07700900123'", "'+07700900123'", "'+07700900123'", "'+07700900123'", "'+07700900123'", "ERR_ValueError"),
-    ('07700900123', "'+07700900123'", "'+07700900123'", "'+07700900123'", "'+07700900123'", "'+07700900123'", "ERR_ValueError"),
-    ('+44 7700 900 123', "'+447700900123'", "'+447700900123'", "'+447700900123'", "'+447700900123'", "'+447700900123'", "ERR_ValueError"),
-    ('0044 7700 900123', "'+00447700900123'", "'+00447700900123'", "'+00447700900123'", "'+00447700900123'", "'+00447700900123'", "ERR_ValueError"),
-    ('+44 20 7946 0958', "'+442079460958'", "'+442079460958'", "'+442079460958'", "'+442079460958'", "'+442079460958'", "ERR_ValueError"),
-    ('02079460958', "'+02079460958'", "'+02079460958'", "'+02079460958'", "'+02079460958'", "'+02079460958'", "ERR_ValueError"),
+    ('14155551234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    ('4155551234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    ('(415) 555-1234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    ('415-555-1234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    ('415.555.1234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    (' +1 415 555 1234 ', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    ('001 415 555 1234', 'ERR_ValueError', "'0014155551234'", "'+0014155551234'", "''", "''", 'ERR_ValueError'),
+    ('+1 (415) 555-1234 ext 22', "'+14155551234'", "'+14155551234'", "'+1415555123422'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    ('+447700900123', 'ERR_ValueError', "'+447700900123'", "'+447700900123'", "''", "''", "'+447700900123'"),
+    ('447700900123', 'ERR_ValueError', "'447700900123'", "'+447700900123'", "''", "''", 'ERR_ValueError'),
+    ('07700 900123', 'ERR_ValueError', "'07700900123'", "'+07700900123'", "''", "''", 'ERR_ValueError'),
+    ('07700900123', 'ERR_ValueError', "'07700900123'", "'+07700900123'", "''", "''", 'ERR_ValueError'),
+    ('+44 7700 900 123', 'ERR_ValueError', "'+447700900123'", "'+447700900123'", "''", "''", 'ERR_ValueError'),
+    ('0044 7700 900123', 'ERR_ValueError', "'00447700900123'", "'+00447700900123'", "''", "''", 'ERR_ValueError'),
+    ('+44 20 7946 0958', "'+442079460958'", "'+442079460958'", "'+442079460958'", "'+442079460958'", "'+442079460958'", 'ERR_ValueError'),
+    ('02079460958', 'ERR_ValueError', "'02079460958'", "'+02079460958'", "''", "''", 'ERR_ValueError'),
     ('+923001234567', "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'"),
-    ('923001234567', "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", "ERR_ValueError"),
-    ('03001234567', "'+03001234567'", "'+03001234567'", "'+03001234567'", "'+03001234567'", "'+03001234567'", "ERR_ValueError"),
-    ('0300 123 4567', "'+03001234567'", "'+03001234567'", "'+03001234567'", "'+03001234567'", "'+03001234567'", "ERR_ValueError"),
-    ('+92 300 1234567', "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", "ERR_ValueError"),
-    ('1234', "'1234'", "'1234'", "'1234'", "'+1234'", "'+1234'", "ERR_ValueError"),
-    ('123', "ERR_ValueError", "'123'", "'123'", "'+123'", "'+123'", "ERR_ValueError"),
-    ('12345', "'12345'", "'12345'", "'12345'", "'+12345'", "'+12345'", "ERR_ValueError"),
-    ('123456', "ERR_ValueError", "'123456'", "'123456'", "'+123456'", "'+123456'", "ERR_ValueError"),
-    ('1234567', "'+1234567'", "'+1234567'", "'+1234567'", "'+1234567'", "'+1234567'", "ERR_ValueError"),
-    ('+123456789012345', "'+123456789012345'", "'+123456789012345'", "'+123456789012345'", "'+123456789012345'", "'+123456789012345'", "'+123456789012345'"),
-    ('+1234567890123456', "ERR_ValueError", "'+1234567890123456'", "ERR_ValueError", "'+1234567890123456'", "'+1234567890123456'", "ERR_ValueError"),
-    ('', "ERR_ValueError", "ERR_ValueError", "ERR_ValueError", "''", "''", "ERR_ValueError"),
-    ('   ', "ERR_ValueError", "ERR_ValueError", "ERR_ValueError", "'+'", "'+'", "ERR_ValueError"),
-    ('abc', "ERR_ValueError", "ERR_ValueError", "ERR_ValueError", "'+'", "'+'", "ERR_ValueError"),
-    ('phone', "ERR_ValueError", "ERR_ValueError", "ERR_ValueError", "'+'", "'+'", "ERR_ValueError"),
-    ('+', "ERR_ValueError", "ERR_ValueError", "ERR_ValueError", "'+'", "'+'", "ERR_ValueError"),
-    ('++14155551234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "ERR_ValueError"),
-    ('-', "ERR_ValueError", "ERR_ValueError", "ERR_ValueError", "'+'", "'+'", "ERR_ValueError"),
-    ('()', "ERR_ValueError", "ERR_ValueError", "ERR_ValueError", "'+'", "'+'", "ERR_ValueError"),
-    ('555-CALL-NOW', "ERR_ValueError", "'555'", "'555'", "'+555'", "'+555'", "ERR_ValueError"),
-    ('+1-800-FLOWERS', "'1800'", "'1800'", "'1800'", "'+1800'", "'+1800'", "ERR_ValueError"),
-    ('0', "ERR_ValueError", "'0'", "ERR_ValueError", "'+0'", "'+0'", "ERR_ValueError"),
-    ('00', "ERR_ValueError", "'00'", "ERR_ValueError", "'+00'", "'+00'", "ERR_ValueError"),
-    ('0000000000', "'+10000000000'", "'+10000000000'", "'+10000000000'", "'+10000000000'", "'+10000000000'", "ERR_ValueError"),
+    ('923001234567', 'ERR_ValueError', "'923001234567'", "'+923001234567'", "''", "''", 'ERR_ValueError'),
+    ('03001234567', 'ERR_ValueError', "'03001234567'", "'+03001234567'", "''", "''", 'ERR_ValueError'),
+    ('0300 123 4567', 'ERR_ValueError', "'03001234567'", "'+03001234567'", "''", "''", 'ERR_ValueError'),
+    ('+92 300 1234567', "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", "'+923001234567'", 'ERR_ValueError'),
+    ('1234', 'ERR_ValueError', "'1234'", "'1234'", "''", "''", 'ERR_ValueError'),
+    ('123', 'ERR_ValueError', "'123'", "'123'", "''", "''", 'ERR_ValueError'),
+    ('12345', 'ERR_ValueError', "'12345'", "'12345'", "''", "''", 'ERR_ValueError'),
+    ('123456', 'ERR_ValueError', "'123456'", "'123456'", "''", "''", 'ERR_ValueError'),
+    ('1234567', 'ERR_ValueError', "'1234567'", "'+1234567'", "''", "''", 'ERR_ValueError'),
+    ('+123456789012345', 'ERR_ValueError', "'+123456789012345'", "'+123456789012345'", "''", "''", "'+123456789012345'"),
+    ('+1234567890123456', 'ERR_ValueError', "'+1234567890123456'", 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('', 'ERR_ValueError', 'ERR_ValueError', 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('   ', 'ERR_ValueError', 'ERR_ValueError', 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('abc', 'ERR_ValueError', 'ERR_ValueError', 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('phone', 'ERR_ValueError', 'ERR_ValueError', 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('+', 'ERR_ValueError', 'ERR_ValueError', 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('++14155551234', "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", "'+14155551234'", 'ERR_ValueError'),
+    ('-', 'ERR_ValueError', 'ERR_ValueError', 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('()', 'ERR_ValueError', 'ERR_ValueError', 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('555-CALL-NOW', 'ERR_ValueError', "'555'", "'555'", "''", "''", 'ERR_ValueError'),
+    ('+1-800-FLOWERS', "'+18003569377'", "'+18003569377'", "'1800'", "'+18003569377'", "'+18003569377'", 'ERR_ValueError'),
+    ('0', 'ERR_ValueError', "'0'", 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('00', 'ERR_ValueError', "'00'", 'ERR_ValueError', "''", "''", 'ERR_ValueError'),
+    ('0000000000', 'ERR_ValueError', "'0000000000'", "'+10000000000'", "''", "''", 'ERR_ValueError'),
     ('+4915112345678', "'+4915112345678'", "'+4915112345678'", "'+4915112345678'", "'+4915112345678'", "'+4915112345678'", "'+4915112345678'"),
     ('+61412345678', "'+61412345678'", "'+61412345678'", "'+61412345678'", "'+61412345678'", "'+61412345678'", "'+61412345678'"),
 )
@@ -172,8 +149,8 @@ def test_normaliser_baseline(impl_name: str, raw: str, expected: str) -> None:
 # ---------------------------------------------------------------------------
 
 NONE_BASELINE = {
-    "canonical_strict": "ERR_AttributeError",
-    "canonical_lenient": "ERR_AttributeError",
+    "canonical_strict": "ERR_ValueError",
+    "canonical_lenient": "ERR_ValueError",
     "contacts_legacy": "ERR_ValueError",
     "call_guard": "''",
     "dnc_service": "''",
@@ -193,16 +170,16 @@ def test_normaliser_none_baseline(impl_name: str, expected: str) -> None:
 # ---------------------------------------------------------------------------
 
 DEFAULT_COUNTRY_BASELINE = (
-    ("07700900123", "US", "+07700900123"),
-    ("07700900123", "GB", "+447700900123"),
-    ("07700900123", "PK", "+07700900123"),
+    ("07700900123", "US", None),
+    ("07700900123", "GB", None),
+    ("07700900123", "PK", None),
     ("07700900123", "DE", "+497700900123"),
-    ("02079460958", "US", "+02079460958"),
+    ("02079460958", "US", None),
     ("02079460958", "GB", "+442079460958"),
     ("03001234567", "PK", "+923001234567"),
     ("03001234567", "GB", "+443001234567"),
     ("4155551234", "US", "+14155551234"),
-    ("4155551234", "GB", "+14155551234"),
+    ("4155551234", "GB", None),
     ("4155551234", "PK", "+924155551234"),
     ("0300 123 4567", "PK", "+923001234567"),
 )
@@ -210,7 +187,11 @@ DEFAULT_COUNTRY_BASELINE = (
 
 @pytest.mark.parametrize("raw,country,expected", DEFAULT_COUNTRY_BASELINE)
 def test_canonical_strict_default_country(raw: str, country: str, expected: str) -> None:
-    assert canonical_strict(raw, default_country=country) == expected
+    if expected is None:
+        with pytest.raises(ValueError):
+            canonical_strict(raw, default_country=country)
+    else:
+        assert canonical_strict(raw, default_country=country) == expected
 
 
 # ---------------------------------------------------------------------------

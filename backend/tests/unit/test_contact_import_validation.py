@@ -147,7 +147,7 @@ def _run(csv_text: str, db: Optional[FakeDB] = None):
 
 GOOD = (
     "phone_number,first_name,last_name,email,company_name,timezone\n"
-    "+447700900123,Sian,Roberts,sian@buildwright.co.uk,BuildWright,Europe/London\n"
+    "+442079460123,Sian,Roberts,sian@buildwright.co.uk,BuildWright,Europe/London\n"
 )
 
 
@@ -157,7 +157,7 @@ def test_a_valid_import_still_works_end_to_end():
     resp, db = _run(GOOD)
     assert resp.total_rows == 1 and resp.imported == 1 and resp.failed == 0
     row = db.inserted[0]
-    assert row["phone_number"] == "+447700900123"
+    assert row["phone_number"] == "+442079460123"
     assert row["first_name"] == "Sian" and row["last_name"] == "Roberts"
     assert row["company_name"] == "BuildWright"
     assert row["timezone"] == "Europe/London"
@@ -168,8 +168,8 @@ def test_a_valid_import_still_works_end_to_end():
 def test_a_bad_row_produces_an_error_naming_the_row_and_the_field():
     resp, _ = _run(
         "phone_number,email,timezone\n"
-        "+447700900123,sian@buildwright.co.uk,Europe/London\n"
-        "+447700900124,not-an-email,Europe/London\n"
+        "+442079460123,sian@buildwright.co.uk,Europe/London\n"
+        "+442079460124,not-an-email,Europe/London\n"
     )
     bad = [e for e in resp.field_errors if e.field == "email"]
     assert bad, f"expected an email issue, got {resp.field_errors}"
@@ -179,7 +179,7 @@ def test_a_bad_row_produces_an_error_naming_the_row_and_the_field():
 
 def test_an_invalid_timezone_is_reported_and_not_written():
     resp, db = _run(
-        "phone_number,first_name,timezone\n+447700900123,Sian,Mars/Base\n"
+        "phone_number,first_name,timezone\n+442079460123,Sian,Mars/Base\n"
     )
     assert resp.imported == 1, "one bad cell must not lose the contact"
     assert [e.field for e in resp.field_errors] == ["timezone"]
@@ -190,22 +190,27 @@ def test_an_invalid_timezone_is_reported_and_not_written():
 def test_an_unparseable_do_not_call_is_reported_rather_than_read_as_no():
     """A "maybe" silently coercing to False is the worst outcome here: it turns
     an ambiguous cell into permission to dial."""
-    resp, db = _run("phone_number,do_not_call\n+447700900123,maybe\n")
+    resp, db = _run("phone_number,do_not_call\n+442079460123,maybe\n")
     assert [e.field for e in resp.field_errors] == ["do_not_call"]
     assert "do_not_call" not in db.inserted[0]
 
 
 def test_a_recognised_do_not_call_still_lands():
-    _, db = _run("phone_number,do_not_call\n+447700900123,yes\n")
+    _, db = _run("phone_number,do_not_call\n+442079460123,yes\n")
     assert db.inserted[0]["do_not_call"] is True
 
 
 def test_a_missing_phone_is_a_row_failure_naming_the_row():
-    resp, _ = _run("phone_number,first_name\n,Sian\n+447700900123,Rhys\n")
-    assert resp.imported == 1
-    assert resp.failed == 1
-    assert resp.errors[0].row == 2
-    assert resp.errors[0].field == "phone_number"
+    import pytest
+    from fastapi import HTTPException
+    db = FakeDB()
+    with pytest.raises(HTTPException) as caught:
+        _run("phone_number,first_name\n,Sian\n+442079460123,Rhys\n", db)
+    assert caught.value.status_code == 422
+    assert caught.value.detail[0]["row"] == 2
+    assert caught.value.detail[0]["field"] == "phone_number"
+    assert db.inserted == []
+
 
 
 # ── unknown columns are preserved, never discarded ─────────────────────────
@@ -214,7 +219,7 @@ def test_an_unknown_column_is_preserved_into_custom_fields():
     """The registry docstring promises this: losing a column silently is worse
     than not understanding it."""
     _, db = _run(
-        "phone_number,Lead Score,Postcode\n+447700900123,88,SW1A 1AA\n"
+        "phone_number,Lead Score,Postcode\n+442079460123,88,SW1A 1AA\n"
     )
     cf = db.inserted[0]["custom_fields"]
     assert cf["Lead Score"] == "88"

@@ -262,12 +262,12 @@ async def test_is_on_dnc_matches_tenant_and_global():
     # Tenant-scoped entry
     await svc.add(tenant_id=TENANT_1, e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
     # Global entry (tenant_id=None) — FTC-style
-    await svc.add(tenant_id=None, e164="+19995551234", source="ftc_national")
+    await svc.add(tenant_id=None, e164="+12125551234", source="ftc_national")
 
     # Tenant sees its own entry
     assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="+1 415 555 1234") is True
     # Tenant sees the global entry
-    assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="+1 999 555 1234") is True
+    assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="+1 212 555 1234") is True
     # Clean number not on the list
     assert await svc.is_on_dnc(tenant_id=TENANT_1, e164="+14155559999") is False
     # Normalisation applied to the query side too
@@ -303,7 +303,7 @@ async def test_list_for_tenant_excludes_global_by_default():
     pool = _FakePool()
     svc = DNCService(pool)
     await svc.add(tenant_id=TENANT_1, e164="+14155551234", source=SOURCE_MANUAL_ADMIN)
-    await svc.add(tenant_id=None, e164="+19995551234", source="ftc_national")
+    await svc.add(tenant_id=None, e164="+12125551234", source="ftc_national")
 
     own = await svc.list_for_tenant(TENANT_1)
     assert len(own) == 1

@@ -3,7 +3,7 @@ Clients Endpoints
 CRUD operations for client/contact management
 """
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
 from app.core.postgres_adapter import Client
 
@@ -31,6 +31,7 @@ def _tenant_scoped(permission: Permission):
 
 class ClientCreate(BaseModel):
     """Create client request"""
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     name: str
     company: Optional[str] = None
     phone: Optional[str] = None
@@ -98,11 +99,21 @@ async def create_client(
     Used by: /dashboard/clients create form.
     """
     try:
+        phone = client.phone
+        if phone:
+            from app.api.v1.endpoints.contacts import _resolve_country
+            from app.domain.services.phone_number_normalizer import normalize_phone_number
+            country = _resolve_country(db_client, current_user.tenant_id, requested=client.default_country)
+            try:
+                phone = normalize_phone_number(phone, country)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone",
+                                    "message": "Invalid phone number for the selected country"}]) from exc
         # Prepare client data
         client_data = {
             "name": client.name,
             "company": client.company,
-            "phone": client.phone,
+            "phone": phone,
             "email": client.email,
             "tags": client.tags,
             "notes": client.notes,

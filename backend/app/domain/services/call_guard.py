@@ -48,7 +48,7 @@ import asyncpg
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.telephony_rate_limiter import TelephonyRateLimiter, RateLimitAction
 from app.domain.services.telephony_concurrency_limiter import TelephonyConcurrencyLimiter, LeaseKind
-from app.domain.services.phone_number_normalizer import normalize_e164_digits
+from app.domain.services.phone_number_normalizer import normalize_suppression_key
 from app.domain.services.platform_runtime_controls import get_outbound_call_pause
 from app.domain.services.telephony.call_authority import read_call_authority
 from app.domain.services.subscription_status import (
@@ -1291,15 +1291,9 @@ class CallGuard:
     # Helper Methods
     # -------------------------------------------------------------------------
 
-    def _normalize_phone_number(self, phone_number: str) -> str:
-        """Normalize phone number to E.164 format.
-
-        Thin wrapper over the canonical
-        ``phone_number_normalizer.normalize_e164_digits`` -- see that module
-        for why the guard uses the never-raising digit form and how it
-        differs from the DNC list's stored form.
-        """
-        return normalize_e164_digits(phone_number)
+    def _normalize_phone_number(self, phone_number: str, default_country: str = "US") -> str:
+        """Use the DNC parser; invalid destinations become an undialable key."""
+        return normalize_suppression_key(phone_number, default_country)
 
     def _extract_country_code(self, phone_number: str) -> Optional[str]:
         """Extract ISO country code from E.164 phone number."""

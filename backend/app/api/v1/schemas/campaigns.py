@@ -430,6 +430,8 @@ class ApplyTtsConfigRequest(BaseModel):
 class ContactCreate(BaseModel):
     """Request body for adding a single contact to a campaign."""
 
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
+
     phone_number: str = Field(..., description="Phone number in any format (will be normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
@@ -452,9 +454,7 @@ class ContactCreate(BaseModel):
         cleaned = re.sub(r"[\s\-\(\)\.]", "", v)
         if not cleaned:
             raise ValueError("Phone number cannot be empty")
-        # Length/format is enforced in the add-contact endpoint, where it can be
-        # tenant-scoped (some accounts have phone validation relaxed for
-        # testing). Only emptiness is rejected here.
+        # Library validity is enforced with campaign/account country in the endpoint.
         return v
 
 
@@ -462,6 +462,7 @@ class ContactUpdate(BaseModel):
     """Request body for editing an existing contact. All fields optional —
     only the provided fields are changed."""
 
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     phone_number: Optional[str] = Field(None, description="New phone number (normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)

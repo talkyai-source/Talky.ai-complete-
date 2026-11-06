@@ -179,7 +179,7 @@ async def test_new_lead_is_ingested_into_the_callback_list_and_dialed_now(campai
         ("leads", "update"): [_resp([{"id": "lead-9"}])],
     })
     payload = sf.CallbackRequest(
-        phone="+1 (555) 010-0100", record_id="00Q000000000001", object_type="Lead",
+        phone="+1 (415) 555-0100", record_id="00Q000000000001", object_type="Lead",
         first_name="Pat", last_name="Lee", email="pat@acme.com", company="ACME", notes="Asked for a call back",
     )
     out = await sf._enqueue_callback(db, tenant_id=TENANT, config={"callback_campaign_id": CAMPAIGN}, payload=payload)
@@ -191,7 +191,7 @@ async def test_new_lead_is_ingested_into_the_callback_list_and_dialed_now(campai
     assert campaign_ok["list"][1]["name"] == sf.CALLBACK_LIST_NAME
     # The lead carries the Salesforce id so the post-call sync logs against it.
     rec = dispatch["ingest"]["records"][0]
-    assert rec.phone_raw == "+15550100100"
+    assert rec.phone_raw == "+14155550100"
     assert rec.custom_fields["crm_ids"] == {"salesforce": "00Q000000000001"}
     assert rec.custom_fields["source"] == "salesforce_callback"
     assert rec.calling_notes == "Asked for a call back"
@@ -209,7 +209,7 @@ async def test_repeat_request_for_a_finished_lead_revives_it_and_redials(campaig
         ("leads", "select"): [_resp([{"id": "lead-1", "status": "completed", "do_not_call": False, "custom_fields": {"company": "Old"}}])],
         ("leads", "update"): [_resp([{"id": "lead-1"}])],
     })
-    payload = sf.CallbackRequest(phone="+15550100100", record_id="00Q1", priority=10)
+    payload = sf.CallbackRequest(phone="+14155550100", record_id="00Q1", priority=10)
     out = await sf._enqueue_callback(db, tenant_id=TENANT, config={"callback_campaign_id": CAMPAIGN}, payload=payload)
 
     assert out.duplicate is True and out.queued is True and out.lead_id == "lead-1"
@@ -227,7 +227,7 @@ async def test_do_not_call_lead_is_refused_and_never_dialed(campaign_ok, dispatc
     db = FakeDB({("leads", "select"): [_resp([{"id": "lead-1", "status": "completed", "do_not_call": True, "custom_fields": {}}])]})
     with pytest.raises(sf._CallbackConflict) as exc:
         await sf._enqueue_callback(db, tenant_id=TENANT, config={"callback_campaign_id": CAMPAIGN},
-                                   payload=sf.CallbackRequest(phone="+15550100100"))
+                                   payload=sf.CallbackRequest(phone="+14155550100"))
     assert exc.value.status_code == 409 and exc.value.detail["error"] == "do_not_call"
     assert dispatch["start"] is None
 
@@ -237,7 +237,7 @@ async def test_paused_campaign_saves_the_lead_but_does_not_start_dialing(campaig
     campaign_ok["status"] = "paused"
     db = FakeDB({("leads", "select"): [_resp([]), _resp([{"id": "lead-2"}])], ("leads", "update"): [_resp([{"id": "lead-2"}])]})
     out = await sf._enqueue_callback(db, tenant_id=TENANT, config={"callback_campaign_id": CAMPAIGN},
-                                     payload=sf.CallbackRequest(phone="+15550100100"))
+                                     payload=sf.CallbackRequest(phone="+14155550100"))
     assert out.accepted and out.queued is False and dispatch["start"] is None
     assert "paused" in out.message
 
@@ -245,7 +245,7 @@ async def test_paused_campaign_saves_the_lead_but_does_not_start_dialing(campaig
 @pytest.mark.asyncio
 async def test_missing_callback_campaign_is_a_409_the_operator_can_act_on(dispatch):
     with pytest.raises(sf._CallbackConflict) as exc:
-        await sf._enqueue_callback(FakeDB({}), tenant_id=TENANT, config={}, payload=sf.CallbackRequest(phone="+15550100100"))
+        await sf._enqueue_callback(FakeDB({}), tenant_id=TENANT, config={}, payload=sf.CallbackRequest(phone="+14155550100"))
     assert exc.value.status_code == 409 and exc.value.detail["error"] == "callback_campaign_not_configured"
 
 
@@ -259,7 +259,7 @@ async def test_inbound_campaign_can_never_be_a_callback_target(monkeypatch, disp
     monkeypatch.setattr(sf, "require_owned_outbound_campaign", refuse)
     with pytest.raises(sf._CallbackConflict) as exc:
         await sf._enqueue_callback(FakeDB({}), tenant_id=TENANT, config={"callback_campaign_id": CAMPAIGN},
-                                   payload=sf.CallbackRequest(phone="+15550100100"))
+                                   payload=sf.CallbackRequest(phone="+14155550100"))
     assert exc.value.status_code == 409
     assert exc.value.detail["error"] == "inbound_campaign_managed_separately"
     assert dispatch["start"] is None

@@ -62,6 +62,7 @@ class DNCEntryResponse(BaseModel):
 
 
 class DNCAddRequest(BaseModel):
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     e164: str = Field(..., description="Phone number — any format; normalised server-side.")
     source: str = Field(default=SOURCE_MANUAL_ADMIN, max_length=64)
     reason: Optional[str] = Field(default=None, max_length=512)
@@ -69,6 +70,7 @@ class DNCAddRequest(BaseModel):
 
 
 class DNCBulkImportRequest(BaseModel):
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     numbers: List[str] = Field(..., min_length=1, max_length=10_000)
     source: str = Field(default=SOURCE_BULK_IMPORT, max_length=64)
     reason: Optional[str] = Field(default=None, max_length=512)
@@ -149,6 +151,7 @@ async def add_dnc_entry(
             tenant_id=tenant_id,
             e164=payload.e164,
             source=payload.source,
+            default_country=payload.default_country,
             reason=payload.reason,
             expires_at=payload.expires_at,
             added_by=str(current_user.id) if current_user.id else None,
@@ -156,7 +159,7 @@ async def add_dnc_entry(
             actor_role=getattr(current_user, "role", None),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=[{"row": 1, "field": "e164", "message": "Invalid phone number for the selected country"}]) from exc
     logger.info(
         "dnc_entry_added tenant=%s number=%s source=%s",
         tenant_id, entry.normalized_number, entry.source,
@@ -173,12 +176,18 @@ async def bulk_import(
 ) -> DNCBulkImportResponse:
     tenant_id = _require_tenant(current_user)
     svc = DNCService(db_pool)
-    result = await svc.bulk_import(
-        tenant_id=tenant_id,
-        numbers=payload.numbers,
-        source=payload.source,
-        reason=payload.reason,
-    )
+    try:
+        result = await svc.bulk_import(
+            tenant_id=tenant_id,
+            numbers=payload.numbers,
+            default_country=payload.default_country,
+            source=payload.source,
+            reason=payload.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=[{
+            "row": 1, "field": "default_country", "message": "Use a supported ISO alpha-2 country",
+        }]) from exc
     # One summary row after the import (QA F12-10). Holding the audit chain
     # lock across a 10,000-number import would stall every audited write.
     await audit.log(

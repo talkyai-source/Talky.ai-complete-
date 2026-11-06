@@ -20,7 +20,7 @@ TENANT = "11111111-1111-4111-8111-111111111111"
 ENTRY = "22222222-2222-4222-8222-222222222222"
 USER = "33333333-3333-4333-8333-333333333333"
 _ROW = {
-    "id": ENTRY, "tenant_id": TENANT, "normalized_number": "+447700900123",
+    "id": ENTRY, "tenant_id": TENANT, "normalized_number": "+442079460123",
     "source": "caller_opt_out", "reason": "Caller opt-out", "expires_at": None,
     "created_at": datetime(2026, 11, 1, tzinfo=timezone.utc),
 }
@@ -57,7 +57,7 @@ async def test_removing_an_opt_out_leaves_an_audit_row_in_the_same_transaction(m
     kwargs = audit.log_in_transaction.await_args.kwargs
     assert kwargs["action"] == "dnc.entry.remove"
     assert kwargs["actor_id"] == USER and kwargs["tenant_id"] == TENANT
-    assert kwargs["before_state"]["normalized_number"] == "+447700900123"
+    assert kwargs["before_state"]["normalized_number"] == "+442079460123"
     assert kwargs["before_state"]["source"] == "caller_opt_out"
 
 
@@ -73,12 +73,12 @@ async def test_removing_nothing_writes_no_audit_row(monkeypatch):
 async def test_adding_an_entry_leaves_an_audit_row(monkeypatch):
     order, audit = _fake_db(monkeypatch, row=_ROW)
     svc = dnc_service.DNCService(object())
-    await svc.add(tenant_id=TENANT, e164="+447700900123", source="manual",
+    await svc.add(tenant_id=TENANT, e164="+442079460123", source="manual",
                   added_by=USER, audit=audit, actor_role="tenant_admin")
     assert order[0] == "lock" and order[-1] == "audit"
     kwargs = audit.log_in_transaction.await_args.kwargs
     assert kwargs["action"] == "dnc.entry.add"
-    assert kwargs["after_state"]["normalized_number"] == "+447700900123"
+    assert kwargs["after_state"]["normalized_number"] == "+442079460123"
 
 
 @pytest.mark.asyncio
@@ -97,7 +97,7 @@ async def test_the_routes_pass_the_audit_logger_and_the_actor(monkeypatch):
 
         async def bulk_import(self, **kwargs):
             return {"accepted_count": 2, "skipped_count": 1, "invalid_count": 0,
-                    "accepted": ["+447700900123", "+447700900124"], "invalid": []}
+                    "accepted": ["+442079460123", "+442079460124"], "invalid": []}
 
     monkeypatch.setattr(dnc, "DNCService", _Svc)
     user = SimpleNamespace(id=USER, tenant_id=TENANT, role="tenant_admin")
@@ -105,7 +105,7 @@ async def test_the_routes_pass_the_audit_logger_and_the_actor(monkeypatch):
     await dnc.remove_dnc_entry(ENTRY, current_user=user, db_pool=object(), audit=audit)
     assert calls["remove"]["audit"] is audit and calls["remove"]["actor_id"] == USER
 
-    payload = dnc.DNCBulkImportRequest(numbers=["+447700900123", "+447700900124"], source="manual")
+    payload = dnc.DNCBulkImportRequest(numbers=["+442079460123", "+442079460124"], source="manual")
     await dnc.bulk_import(payload, current_user=user, db_pool=object(), audit=audit)
     kwargs = audit.log.await_args.kwargs
     assert kwargs["action"] == "dnc.bulk_import"
