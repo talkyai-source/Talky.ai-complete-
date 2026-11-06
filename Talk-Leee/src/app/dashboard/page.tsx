@@ -171,82 +171,26 @@ function KpiCard({
     );
 }
 
-// Pulls real call-volume buckets from /analytics/calls and shapes them into
-// LiveTimeBucket[] for the dashboard charts. Polls every 30s; when no data is
-// returned the chart shows an empty state rather than fake numbers.
-function useLiveBuckets(timeZone?: string) {
-    const [state, setState] = useState<{
-        loading: boolean;
-        error: string;
-        lastUpdatedMs: number;
-        buckets: LiveTimeBucket[];
-    }>({ loading: true, error: "", lastUpdatedMs: 0, buckets: [] });
-
-    useEffect(() => {
-        if (!timeZone) return;
-        let cancelled = false;
-
-        const seriesToBuckets = (series: CallSeriesItem[]): LiveTimeBucket[] => {
-            // Backend returns daily-grouped rows; use day boundaries for the
-            // bucket window. Time-of-day breakdowns require a per-minute
-            // endpoint that doesn't exist yet (tracked in
-            // API_CONNECTIVITY_GAP_ANALYSIS.md §2.1).
-            const out: LiveTimeBucket[] = [];
-            for (const s of series) {
-                const { startMs, endMs } = calendarBucketBounds(s.date, timeZone);
-                if (!Number.isFinite(startMs)) continue;
-                out.push({
-                    startMs,
-                    endMs,
-                    total: s.total_calls ?? 0,
-                    answered: s.answered ?? 0,
-                    failed: s.failed ?? 0,
-                    avgDurationSec: null,
-                });
-            }
-            out.sort((a, b) => a.startMs - b.startMs);
-            return out;
-        };
-
-        const fetchOnce = async () => {
-            try {
-                const month = reportingDateRange(timeZone, "month");
-                const resp = await extendedApi.getCallAnalytics(
-                    month.from,
-                    month.to,
-                    "day",
-                    "outbound",
-                    false,
-                    timeZone,
-                );
-                if (cancelled) return;
-                const buckets = seriesToBuckets(resp?.series ?? []);
-                setState({
-                    loading: false,
-                    error: "",
-                    lastUpdatedMs: Date.now(),
-                    buckets,
-                });
-            } catch (err) {
-                if (cancelled) return;
-                setState((prev) => ({
-                    ...prev,
-                    loading: false,
-                    error: err instanceof Error ? err.message : "Failed to load live buckets",
-                    lastUpdatedMs: Date.now(),
-                }));
-            }
-        };
-
-        void fetchOnce();
-        const id = window.setInterval(fetchOnce, 30_000);
-        return () => {
-            cancelled = true;
-            window.clearInterval(id);
-        };
-    }, [timeZone]);
-
-    return state;
+// Both charts use the same daily response. Convert it before replacing the
+// snapshot so a failed fetch/transform preserves both last-good consumers.
+function dailySnapshot(series: CallSeriesItem[], timeZone: string) {
+    const buckets: LiveTimeBucket[] = [];
+    for (const s of series) {
+        // Daily rows retain account-local day boundaries; they are not
+        // per-minute observations (API_CONNECTIVITY_GAP_ANALYSIS.md §2.1).
+        const { startMs, endMs } = calendarBucketBounds(s.date, timeZone);
+        if (!Number.isFinite(startMs)) continue;
+        buckets.push({
+            startMs,
+            endMs,
+            total: s.total_calls ?? 0,
+            answered: s.answered ?? 0,
+            failed: s.failed ?? 0,
+            avgDurationSec: null,
+        });
+    }
+    buckets.sort((a, b) => a.startMs - b.startMs);
+    return { series, buckets, lastUpdatedMs: Date.now() };
 }
 
 function toDatetimeLocalValue(ms: number) {
@@ -698,7 +642,8 @@ export default function DashboardPage() {
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [liveSummary, setLiveSummary] = useState<DashboardSummary | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [series, setSeries] = useState<CallSeriesItem[]>([]);
+    const [daily, setDaily] = useState<ReturnType<typeof dailySnapshot>>({ series: [], buckets: [], lastUpdatedMs: 0 });
+    const series = daily.series;
     // Real hourly buckets (heatmap) + real per-campaign series (campaign lines).
     const [hourSeries, setHourSeries] = useState<CallSeriesItem[]>([]);
     const [campaignSeries, setCampaignSeries] = useState<Array<{ campaign_id: string; name: string; series: CallSeriesItem[] }>>([]);
@@ -723,7 +668,7 @@ export default function DashboardPage() {
     const [activeBucket, setActiveBucket] = useState<LiveTimeBucket | null>(null);
     const [callStatsView, setCallStatsView] = useState<"status" | "campaigns" | "outcomes">("status");
 
-    const sim = useLiveBuckets(summary?.timezone);
+    const sim = daily;
 
     const activeRange = useMemo(() => {
         const end = callRangeMode === "custom" ? (customEndMs ?? sim.lastUpdatedMs) : sim.lastUpdatedMs;
@@ -1005,10 +950,11 @@ export default function DashboardPage() {
                 extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false, summaryData.timezone),
                 extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false, summaryData.timezone),
             ]);
+            const snapshot = dailySnapshot(analytics.series ?? [], summaryData.timezone);
             setSummary(summaryData);
             setLiveSummary(summaryData);
             setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
-            setSeries(analytics.series ?? []);
+            setDaily(snapshot);
             setHourSeries(hourly.series ?? []);
             setCampaignSeries(byCampaign.campaigns ?? []);
         } catch (err) {
@@ -1025,6 +971,33 @@ export default function DashboardPage() {
         // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; loadData sets loading/error/series as it resolves
         loadData();
     }, []);
+
+    // Initial load already fetched this slice. Later polls replace one shared
+    // snapshot, keeping the live buckets and stacked series in step.
+    useEffect(() => {
+        const timeZone = summary?.timezone;
+        if (!timeZone) return;
+        let cancelled = false;
+        let inFlight = false;
+        const refreshDaily = async () => {
+            if (inFlight) return;
+            inFlight = true;
+            try {
+                const month = reportingDateRange(timeZone, "month");
+                const response = await extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false, timeZone);
+                if (!cancelled) setDaily(dailySnapshot(response.series ?? [], timeZone));
+            } catch {
+                // Keep both last-good charts; the next scheduled poll retries.
+            } finally {
+                inFlight = false;
+            }
+        };
+        const id = window.setInterval(refreshDaily, 30_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
+    }, [summary?.timezone]);
 
     // liveSummary and liveBars are now driven exclusively by the WebSocket
     // stream (when connected) and the initial REST fetch. The previous
