@@ -10,6 +10,12 @@ SYSTEMD_DIR="/etc/systemd/system"
 echo "=== Talky.ai Systemd Service Installer ==="
 echo ""
 
+# Keep rebuilds on the same journal budget as the existing host. install -D
+# creates the drop-in directory and gives the non-secret policy an explicit mode.
+install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/journald-talky.conf" \
+  /etc/systemd/journald.conf.d/60-talky.conf
+systemctl restart systemd-journald.service
+
 # 1. Symlink every service/target/timer file in this directory.
 #
 # backend/systemd/ is now the SINGLE source of truth for units. The second
