@@ -24,6 +24,15 @@ class RetentionPeriod(str, Enum):
 # Plan-based retention defaults (CRITICAL - maps to purchased plan)
 PLAN_RETENTION_DEFAULTS: Dict[str, "RetentionConfig"] = {}
 
+# Proposed worker windows, not purchased-plan entitlements. The personal-data
+# cleanup targets stay preview-only until the owner separately enables them.
+# Inline calls content, audit chains and external Drive copies are not covered.
+PROPOSED_CLEANUP_RETENTION_DAYS = {
+    "transcripts": 365,
+    "conversations": 365,
+    "call_guard_decisions": 90,
+}
+
 
 class RetentionConfig(BaseModel):
     """
