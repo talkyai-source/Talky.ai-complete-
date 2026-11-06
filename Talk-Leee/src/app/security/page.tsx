@@ -204,17 +204,10 @@ function ChangePasswordForm() {
                 </label>
             </div>
 
-            {/* Not a footnote: changing your password signs out every other
-                session, which is the point of doing it after a scare.
-
-                The 15 minutes is not padding. auth/password.py:131 revokes
-                every refresh token, but a device that already holds an access
-                token keeps using it until it expires — 15 minutes at most.
-                "Signs out all of your other sessions" on its own reads as
-                instant, and someone acting on a compromise needs the real
-                number. */}
+            {/* Describe observable sign-out without assuming that this
+                deployment has activated the legacy-token lifetime cutover. */}
             <p className="text-xs text-muted-foreground">
-                Changing your password signs out all of your other sessions, each within 15 minutes.
+                Changing your password signs out your other sessions when they next refresh or make a request.
             </p>
 
             <div className="flex items-center gap-3">
@@ -490,33 +483,14 @@ export default function SecurityPage() {
                 </Section>
 
                 {/* ── 3. Active sessions ───────────────────────────────────── */}
-                {/* WHAT REVOKING ACTUALLY DOES.
-
-                    This used to say "Revoking ends that session immediately",
-                    which is not what happens. DELETE /sessions/{id} removes the
-                    row in `security_sessions` and the legacy `talky_sid`
-                    session, and stops there: there is no column linking
-                    `refresh_tokens` to `security_sessions`, so the device's
-                    refresh token survives and it can keep minting access tokens
-                    on a rolling 7-day window
-                    (backend/app/api/v1/endpoints/sessions.py:213-249,
-                    refresh_tokens.py REFRESH_TOKEN_LIFETIME_DAYS = 7).
-
-                    The consequence — "the device you just revoked still works"
-                    — is the whole reason someone opens this section after a
-                    scare, so it goes in the always-visible description and not
-                    only in the tip (goals.md §8: do not hide essential warnings
-                    inside a tooltip).
-
-                    The password route is real, not a consolation:
-                    auth/password.py:131 calls revoke_all_user_refresh_tokens,
-                    so every device is forced to re-authenticate once its
-                    15-minute access token expires. */}
+                {/* Refresh tokens carry their login session, and authenticated
+                    requests check that session. Keep the consequence visible;
+                    do not promise an instantaneous browser-page transition. */}
                 <Section
                     icon={Monitor}
                     title="Active sessions"
-                    description="Everywhere your account is currently signed in. Revoking an entry does not sign that device out — to do that, change your password."
-                    tip="Revoking removes the entry from this list and ends its server-side session. It cannot invalidate that device's sign-in token: the two are not linked in the database. So the device keeps access, and each time it checks in it renews that access for another 7 days. Changing your password revokes the tokens instead, and every other device is signed out within 15 minutes."
+                    description="Everywhere your account is currently signed in. Revoking signs that device out at its next token refresh. New requests from that session are rejected."
+                    tip="Revoked sessions cannot refresh their sign-in tokens. New requests require that device to sign in again. You do not need to change your password to revoke one device."
                 >
                     <DeviceList token={token} />
                 </Section>
