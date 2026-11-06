@@ -103,11 +103,11 @@ class CallingRules(BaseModel):
         ge=0,
         le=20,
         description=(
-            "Hard ceiling on dial attempts to the same lead within one "
-            "calendar day (tenant timezone). Defense-in-depth above the "
-            "per-disposition caps: even if busy/no-answer retries stack up, "
-            "a lead is never dialled more than this many times per day. "
-            "0 = disabled (rely on per-disposition caps only)."
+            "Hard ceiling on dial attempts to the same number in any 24 "
+            "hours, across all of the tenant's campaigns. Defense-in-depth "
+            "above the per-disposition caps: even if busy/no-answer retries "
+            "stack up, a number is never dialled more than this. "
+            "0 = the platform cap (3, DIAL_CAP_PER_NUMBER_24H)."
         )
     )
 

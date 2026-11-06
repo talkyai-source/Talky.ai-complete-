@@ -3,12 +3,23 @@ Scheduling Rules Engine
 Determines if a call can be made based on tenant rules
 """
 import logging
+import os
 from typing import Tuple, Optional
 from datetime import datetime, timezone
 
 from app.domain.models.calling_rules import CallingRules
 
 logger = logging.getLogger(__name__)
+
+
+def platform_dial_cap() -> int:
+    """Dials to one number in any 24 hours when the tenant set no cap of its
+    own (QA F12-05). ``DIAL_CAP_PER_NUMBER_24H`` overrides it; 0 switches it
+    off."""
+    try:
+        return max(0, int(os.getenv("DIAL_CAP_PER_NUMBER_24H", "3")))
+    except ValueError:
+        return 3
 
 
 class SchedulingRuleEngine:
@@ -102,12 +113,14 @@ class SchedulingRuleEngine:
                 logger.debug(f"Lead cooldown active: {reason}")
                 return False, reason
 
-        # Rule 4: Daily per-lead attempt ceiling. Defense-in-depth above
-        # the per-disposition caps — even if busy/no-answer retries stack
-        # up, a single lead is never dialled more than the configured
-        # number of times within one calendar day. Disabled when the cap
-        # is 0 or the caller didn't supply today's count.
-        daily_cap = getattr(rules, "max_calls_per_lead_per_day", 0)
+        # Rule 4: Repeat-dial ceiling. Defense-in-depth above the
+        # per-disposition caps — even if busy/no-answer retries stack up, a
+        # number is never dialled more than the cap in any 24 hours across
+        # the tenant's campaigns (``lead_attempts_today`` is that count). The
+        # tenant's own cap wins; otherwise the platform cap applies (QA
+        # F12-05: it used to default to off). Skipped only when the caller
+        # didn't supply the count.
+        daily_cap = getattr(rules, "max_calls_per_lead_per_day", 0) or platform_dial_cap()
         if daily_cap and lead_attempts_today is not None and lead_attempts_today >= daily_cap:
             reason = f"daily_lead_cap_reached_{lead_attempts_today}/{daily_cap}"
             logger.debug(f"Daily per-lead cap reached: {reason}")
