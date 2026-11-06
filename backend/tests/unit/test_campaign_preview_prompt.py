@@ -90,9 +90,9 @@ class TestPreviewPromptEndpoint:
         # Inbound greeting variant 0 contains the canonical phrase.
         assert "thanks for reaching out" in resp.greeting.lower()
 
-    async def test_missing_required_slot_returns_400(self):
-        # Drop a required slot — composer raises PromptCompositionError,
-        # which the endpoint maps to a 400 with the message intact.
+    async def test_missing_required_slot_returns_400(self, caplog):
+        # Keep the 400 and internal diagnostic; raw exception prose must not
+        # become the public response after the safe-error boundary.
         broken_slots = {**LEAD_GEN_SLOTS}
         broken_slots.pop("call_reason")
         body = CampaignPromptPreviewRequest(
@@ -105,7 +105,15 @@ class TestPreviewPromptEndpoint:
         with pytest.raises(HTTPException) as exc_info:
             await preview_prompt(body=body, current_user=_fake_user())
         assert exc_info.value.status_code == 400
-        assert "call_reason" in str(exc_info.value.detail)
+        assert exc_info.value.detail == "The request could not be completed."
+        assert "call_reason" not in str(exc_info.value.detail)
+        assert any(
+            record.name == "app.core.error_handlers"
+            and record.exc_info
+            and record.exc_info[0].__name__ == "PromptCompositionError"
+            and "call_reason" in str(record.exc_info[1])
+            for record in caplog.records
+        )
 
     async def test_response_prompt_chars_matches_actual_length(self):
         body = CampaignPromptPreviewRequest(

@@ -167,4 +167,5 @@ async def test_billing_unconfirmed_outcome_maps_to_503_without_claiming_rollback
             user=ADMIN, idempotency_key="synthetic-resolution-key", db_pool=object())
     assert exc.value.status_code == 503
     assert exc.value.detail == {"code": "inbound_hold_resolution_unconfirmed",
-                                "message": "Reconcile the original idempotency key"}
+                                "message": "The request could not be completed."}
+    assert "Reconcile the original idempotency key" not in str(exc.value.detail)
