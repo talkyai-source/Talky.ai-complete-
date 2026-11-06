@@ -1,0 +1,22 @@
+[Unit]
+OnFailure=talky-notify@%n.service
+Description=Prepared read-only PostgreSQL/PITR health monitor
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/talky/pitr.enabled
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+EnvironmentFile=/etc/talky/pitr.env
+ExecStart=/usr/bin/python3 /opt/talky/scripts/database/monitor.py --service-file /etc/talky/pitr-pg-service.conf --service talky_pitr_monitor check --capacity-bytes ${TALKY_PITR_CAPACITY_BYTES} --require-archiving --archive-max-age-minutes 15 --skip-role-check --prometheus-textfile /var/lib/talky-pitr-monitor/database.prom
+TimeoutStartSec=90
+StateDirectory=talky-pitr-monitor
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+# Item16's OnFailure receiver owns delivery; configure no second webhook here.
+# Skipping role classification does not provision or modify database roles.

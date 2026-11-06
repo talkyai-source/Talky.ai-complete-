@@ -1,0 +1,11 @@
+[Unit]
+OnFailure=talky-notify@%n.service
+Description=Prepared PostgreSQL/PITR monitoring schedule
+
+[Timer]
+OnCalendar=*:0/5
+Persistent=true
+Unit=talklee-db-monitor.service
+
+[Install]
+WantedBy=timers.target
