@@ -23,8 +23,11 @@ def test_installer_copies_retention_policy_and_activates_it(tmp_path):
 set -euo pipefail
 printf '%s\n' "install $*" >> "$OPERATIONS"
 [ "$#" = 5 ] && [ "$1" = -D ] && [ "$2" = -m ] && [ "$3" = 0644 ]
-[ "$5" = /etc/systemd/journald.conf.d/60-talky.conf ]
-cp -- "$4" "$COPIED_POLICY"
+case "$5" in
+  /etc/systemd/journald.conf.d/60-talky.conf) cp -- "$4" "$COPIED_POLICY" ;;
+  /etc/systemd/system/docker.service.d/60-talky-oom.conf) test -f "$4" ;;
+  *) exit 92 ;;
+esac
 ''')
     env = dict(os.environ, OPERATIONS=str(log), COPIED_POLICY=str(copied),
                TALKY_PROD_HOST="nobody@example.invalid", TALKY_PROD_KEY="fake-key")

@@ -5,6 +5,7 @@ After=network.target
 # a failed run surfaces via exit code in journald and retries next night.
 
 [Service]
+OOMScoreAdjust=300
 User=talky
 Group=talky
 NoNewPrivileges=yes

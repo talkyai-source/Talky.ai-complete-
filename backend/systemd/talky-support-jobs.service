@@ -6,6 +6,7 @@ After=network.target
 # Does nothing while SUPPORT_ENABLED=false.
 
 [Service]
+OOMScoreAdjust=300
 User=talky
 Group=talky
 NoNewPrivileges=yes

@@ -8,6 +8,7 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
+OOMScoreAdjust=300
 User=talky
 Group=talky
 NoNewPrivileges=yes

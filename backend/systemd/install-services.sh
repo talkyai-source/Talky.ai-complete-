@@ -16,6 +16,11 @@ install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/journald-talky.conf" \
   /etc/systemd/journald.conf.d/60-talky.conf
 systemctl restart systemd-journald.service
 
+# Apply the daemon priority on its next normal start; never restart Docker
+# from an application deploy, because it owns the live database containers.
+install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/docker-oom.conf" \
+  /etc/systemd/system/docker.service.d/60-talky-oom.conf
+
 # 1. Symlink every service/target/timer file in this directory.
 #
 # backend/systemd/ is now the SINGLE source of truth for units. The second
