@@ -4227,6 +4227,8 @@ class DialerWorker:
 
 async def main():
     """Entry point for running dialer worker as separate process."""
+    from app.core.sentry_init import init_sentry
+    init_sentry()
     # Workers never ran app_bootstrap.configure_logging, so lead phone
     # numbers reached the journal in clear (QA F2-10). Idempotent.
     from app.core.log_redact import install_pii_log_redaction

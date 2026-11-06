@@ -4529,6 +4529,22 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
+      "id": "7d55dc34899253559a050f211b00f39c8a1e345b8f1d97d0356c9d357e13b6b8",
+      "file": "app/workers/dialer_worker.py",
+      "function": "DialerWorker._update_lead_status",
+      "line": 3823,
+      "method": "execute",
+      "tables": [
+        "leads"
+      ],
+      "sql": "UPDATE leads SET status = $1{IfExp(test=Compare(left=Name(id='status', ctx=Load()), ops=[In()], comparators=[Tuple(elts=[Constant(value='pending'), Constant(value='calling')], ctx=Load())]), body=Constant(value=''), orelse=Constant(value=', last_called_at = NOW()'))} WHERE id = $2::uuid AND tenant_id = $3::uuid AND campaign_id = $4::uuid AND status NOT IN ('dnc', 'deleted')",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged."
+    },
+    {
       "id": "7d57110ee8cf98f1615cd92b7116bf0fc15e16a0ef33b2e55c0dc0c16f94187c",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_invoice",
@@ -5487,22 +5503,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "9679aa48e250b10e7b4ebbc647d530920e70e6c8712b6d2b294fa5b2770e59f3",
-      "file": "app/workers/dialer_worker.py",
-      "function": "DialerWorker._update_lead_status",
-      "line": 3823,
-      "method": "execute",
-      "tables": [
-        "leads"
-      ],
-      "sql": "UPDATE leads SET status = $1{IfExp(test=Compare(left=Name(id='status', ctx=Load()), ops=[In()], comparators=[Tuple(elts=[Constant(value='pending'), Constant(value='calling')], ctx=Load())]), body=Constant(value=''), orelse=Constant(value=', last_called_at = NOW()'))} WHERE id = $2::uuid AND tenant_id = $3::uuid AND campaign_id = $4::uuid AND status NOT IN ('dnc', 'deleted')",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "9725927d8ce322f66bd8b99149314fb0b90525e65d5fa0254ae06ecc771193ed",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "authorize_inbound_transfer",
@@ -5709,22 +5709,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "9dfee19097ebbfbd241ae0f1f44ef34d05d0a8de9da363dc05dbaae1770f38c9",
-      "file": "app/workers/dialer_worker.py",
-      "function": "DialerWorker._release_intent_line_not_ready",
-      "line": 3509,
-      "method": "execute",
-      "tables": [
-        "calls"
-      ],
-      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[Eq()], comparators=[Constant(value='telephony_unavailable')]), body=Constant(value='telephony_unavailable'), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated')",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -8051,6 +8035,22 @@
       "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "d5ca2863386453383a6f3861b054c9f462b1c73dc754226d7caaf33ba912c3ae",
+      "file": "app/workers/dialer_worker.py",
+      "function": "DialerWorker._release_intent_line_not_ready",
+      "line": 3509,
+      "method": "execute",
+      "tables": [
+        "calls"
+      ],
+      "sql": "UPDATE calls SET status = 'cancelled', failure_reason = '{IfExp(test=Compare(left=Name(id='reason', ctx=Load()), ops=[Eq()], comparators=[Constant(value='telephony_unavailable')]), body=Constant(value='telephony_unavailable'), orelse=Constant(value='line_not_ready'))}', ended_at = COALESCE(ended_at, NOW()), terminal_settled_at = COALESCE(terminal_settled_at, NOW()), dialer_attempt_number = NULL, updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid AND dialer_job_id = $3::uuid AND dialer_attempt_number = $4 AND direction = 'outbound' AND provider_call_id IS NULL AND external_call_uuid IS NULL AND status IN ('queued', 'initiated')",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged."
     },
     {
       "id": "d602352ddb8940b30e249bcec6ab0c468a8c3ad26fcc04c7c693a339b22ac740",
@@ -10792,21 +10792,6 @@
       "category": "system_delivery_outbox"
     },
     {
-      "id": "48a342e1ffd7f421624cd2624811196503d46f930b099205c4ed4adf09feb6d2",
-      "file": "app/workers/cleanup_worker.py",
-      "function": "_delete_batch",
-      "line": 205,
-      "method": "execute",
-      "tables": [],
-      "sql": "DELETE FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked} AND r.id IN ( SELECT r.id FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r {unpacked} WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked} ORDER BY r.created_at, r.id LIMIT $3 )",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Fixed six-table builder repeats tenant=$1 ownership in both outer DELETE and limited-ID subquery, including owned-parent proofs for tenantless/nullable children. Cutoff and batch limit are parameters; hold serialization remains in the same tenant transaction. This exception does not certify other retention policy decisions. Exact reviewed operation: execute; app/workers/cleanup_worker.py:205.",
-      "category": "reviewed_tenant_scoped"
-    },
-    {
       "id": "48b358a1c349d2fbc4ddf0c429d588ce3402322b6c2ee2de1a5f99064a9dd0bf",
       "file": "app/core/security/auth_abuse.py",
       "function": "_reset_failure_decision",
@@ -12526,6 +12511,21 @@
       "category": "platform_supplier_evidence"
     },
     {
+      "id": "9d65d3ce773f369fc343cd8bd7e35b2bc3e26ccf57b23eef12fabe6fca2babe2",
+      "file": "app/workers/cleanup_worker.py",
+      "function": "_count_expired",
+      "line": 184,
+      "method": "fetchval",
+      "tables": [],
+      "sql": "SELECT count(*) FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r {unpacked} WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Fixed six-table _target_sql registry supplies tenant=$1 ownership, using parent calls for tenantless children and rejecting conflicting non-NULL transcript tenants. Cutoff=$2 is bound; compliance hold is checked in the same tenant transaction. Module AST pins the builder. Exact reviewed operation: fetchval; app/workers/cleanup_worker.py:184. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
       "id": "9d666e1e6354ac0a7a7fe4d1762d520eb496ea9ea45730bce92cd0c8a6e3f56f",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
@@ -13178,6 +13178,21 @@
       "count": 1,
       "reason": "Platform media deletion locks the administrator-selected recording/feedback and its persistent idempotency claim; admin entrypoints require platform-admin authorization. Claims preserve actor/request/resource identity across retries. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/media.py:1047.",
       "category": "platform_admin"
+    },
+    {
+      "id": "c4f6cc2c0db766d5d7be33cc5ef351c56d242d4edcc8c51c7b0a6073e07db78d",
+      "file": "app/workers/cleanup_worker.py",
+      "function": "_delete_batch",
+      "line": 205,
+      "method": "execute",
+      "tables": [],
+      "sql": "DELETE FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked} AND r.id IN ( SELECT r.id FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r {unpacked} WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked} ORDER BY r.created_at, r.id LIMIT $3 )",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Fixed six-table builder repeats tenant=$1 ownership in both outer DELETE and limited-ID subquery, including owned-parent proofs for tenantless/nullable children. Cutoff and batch limit are parameters; hold serialization remains in the same tenant transaction. This exception does not certify other retention policy decisions. Exact reviewed operation: execute; app/workers/cleanup_worker.py:205. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged.",
+      "category": "reviewed_tenant_scoped"
     },
     {
       "id": "c78b43e35436c7211198fc7e3dafe40fcf1b88a85a8d546b0dd3dc790745f550",
@@ -13996,21 +14011,6 @@
       "bypass": null,
       "count": 1,
       "reason": "Fixed SQL format binds tenant_id=$1. Its only optional fragment is OR tenant_id IS NULL for the intentional global DNC list; it never selects a different non-NULL tenant. expiry and limit remain server-owned/parameterized. Exact reviewed operation: fetch; app/domain/services/dnc_service.py:360.",
-      "category": "reviewed_tenant_scoped"
-    },
-    {
-      "id": "fd18c508b4126fdfab6f376761ff8c651f21496b8e29e7fb914fe30a5355e3ce",
-      "file": "app/workers/cleanup_worker.py",
-      "function": "_count_expired",
-      "line": 184,
-      "method": "fetchval",
-      "tables": [],
-      "sql": "SELECT count(*) FROM public.{Attribute(value=Name(id='target', ctx=Load()), attr='table', ctx=Load())} AS r {unpacked} WHERE {unpacked} AND r.created_at < $2::timestamptz{unpacked}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Fixed six-table _target_sql registry supplies tenant=$1 ownership, using parent calls for tenantless children and rejecting conflicting non-NULL transcript tenants. Cutoff=$2 is bound; compliance hold is checked in the same tenant transaction. Module AST pins the builder. Exact reviewed operation: fetchval; app/workers/cleanup_worker.py:184.",
       "category": "reviewed_tenant_scoped"
     }
   ]

@@ -410,6 +410,8 @@ class VoicePipelineWorker:
 
 async def main():
     """Entry point for running voice worker as separate process."""
+    from app.core.sentry_init import init_sentry
+    init_sentry()
     from app.core.voice_config import get_voice_config
     _vc = get_voice_config()
 

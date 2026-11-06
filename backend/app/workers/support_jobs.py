@@ -27,6 +27,8 @@ def should_run_hourly(now: datetime, forced: bool) -> bool:
 
 
 async def main(argv: list[str] | None = None) -> int:
+    from app.core.sentry_init import init_sentry
+    init_sentry()
     # Workers never ran app_bootstrap.configure_logging, so customer details
     # reached the journal in clear (QA F2-10). Idempotent.
     from app.core.log_redact import install_pii_log_redaction
