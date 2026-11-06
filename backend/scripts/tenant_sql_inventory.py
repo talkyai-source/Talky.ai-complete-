@@ -114,6 +114,24 @@ def _predicate_scope(sql, protected_tables, tenant_tables):
     tables = sorted({table for table, _alias in relations})
     if not tables:
         return tables, False
+    # A same-table copy can retain the source row's tenant without binding a
+    # second tenant value. Prove only a plain projection of columns/constants;
+    # expressions, aliases, joins and cross-table copies stay unresolved.
+    copy = re.fullmatch(
+        r"\s*INSERT\s+INTO\s+(?:public\.)?(?P<table>\w+)\s*\((?P<columns>[\w\s,]+)\)\s*"
+        r"(?P<select>SELECT\s+(?P<values>[^()]+?)\s+FROM\s+(?:public\.)?(?P=table)\s+WHERE\b[\s\S]*)",
+        clean.strip().rstrip(";"), re.I,
+    )
+    if copy:
+        columns = [value.strip().lower() for value in copy['columns'].split(',')]
+        values = [value.strip().lower() for value in copy['values'].split(',')]
+        if (copy['table'].lower() in tenant_tables and len(columns) == len(values)
+                and columns.count('tenant_id') == 1
+                and values[columns.index('tenant_id')] == 'tenant_id'
+                and all(re.fullmatch(r"(?:[a-z_]\w*|\$\d+|-?\d+)", value) for value in values)):
+            source_tables, scoped = _predicate_scope(copy['select'], protected_tables, tenant_tables)
+            return sorted(set(tables) | set(source_tables)), scoped
+        return tables, False
     # COALESCE in an UPDATE value does not weaken its WHERE predicate. Keep
     # refusing it in filters (where it can turn UNKNOWN into true), and retain
     # the independent subquery/boolean checks below for the entire statement.
@@ -193,7 +211,7 @@ def _predicate_scope(sql, protected_tables, tenant_tables):
         following = clean[match.end():].lstrip()
         following = re.sub(r"^(?:\)\s*)+", "", following)
         if following and not re.match(
-            r"^(?:;\s*$|(?:AND|JOIN|INNER|CROSS|WHERE|GROUP|ORDER|LIMIT|OFFSET|FETCH|FOR)\b)", following, re.I,
+            r"^(?:;\s*$|(?:AND|JOIN|INNER|CROSS|WHERE|GROUP|ORDER|LIMIT|OFFSET|FETCH|FOR|RETURNING)\b)", following, re.I,
         ):
             continue
         left, right = reference(match.group("left")), reference(match.group("right"))

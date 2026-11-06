@@ -131,6 +131,22 @@ def test_update_value_functions_do_not_change_predicate_scope(scanner, sql, scop
     assert findings[0]["scoped"] is scoped
 
 
+@pytest.mark.parametrize("sql,scoped", [
+    ("INSERT INTO calls (id,tenant_id,status) SELECT $2,tenant_id,'pending' FROM calls WHERE tenant_id=$1 RETURNING id", True),
+    ("INSERT INTO calls (id,tenant_id,status) SELECT $3,tenant_id,status FROM calls WHERE id=$1 AND tenant_id=$2 RETURNING *", True),
+    ("INSERT INTO calls (id,tenant_id) SELECT $2,tenant_id FROM calls", False),
+    ("INSERT INTO calls (id,tenant_id) SELECT $2,$3 FROM calls WHERE tenant_id=$1", False),
+    ("INSERT INTO calls (id,tenant_id) SELECT $2,tenant_id FROM calls WHERE tenant_id=$1 OR true", False),
+    ("INSERT INTO calls (id,tenant_id) SELECT $2,COALESCE(tenant_id,$3) FROM calls WHERE tenant_id=$1", False),
+    ("INSERT INTO calls (id,tenant_id) SELECT c.id,c.tenant_id FROM calls c JOIN leads l ON l.id=c.id WHERE c.tenant_id=$1", False),
+    ("INSERT INTO calls (id,tenant_id) SELECT $2,tenant_id FROM leads WHERE tenant_id=$1", False),
+])
+def test_copy_select_must_retain_its_scoped_source_tenant(scanner, sql, scoped):
+    findings = scan(scanner, reader(sql))
+    assert len(findings) == 1
+    assert findings[0]["scoped"] is scoped
+
+
 @pytest.mark.parametrize("sql", [
     "SELECT tenant_id, id FROM calls",
     "SELECT id FROM calls -- WHERE tenant_id = $1\n",

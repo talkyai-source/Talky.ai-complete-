@@ -790,22 +790,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "1b5d7c14b7772217a1ee51f8902f65387f5d6eada280bbb8cbc9641ecf240115",
-      "file": "app/services/crm_sync_service.py",
-      "function": "CRMSyncService._remember_contact_id",
-      "line": 771,
-      "method": "execute",
-      "tables": [
-        "leads"
-      ],
-      "sql": "UPDATE leads SET crm_contact_id = $3, custom_fields = COALESCE(custom_fields, '{}'::jsonb) || jsonb_build_object('crm_ids', COALESCE(custom_fields->'crm_ids','{}'::jsonb) || $4::jsonb) || jsonb_build_object('crm_destinations', COALESCE(custom_fields->'crm_destinations','{}'::jsonb) || $5::jsonb), updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "1b8246ef58ed0268c33045abcd0100380ff01b2f8ce45a7a891125495c64c4fb",
       "file": "app/services/connector_lifecycle.py",
       "function": "ConnectorLifecycle._retire",
@@ -7207,22 +7191,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c3a485230013256da02a084139b961e53dffc330c949abdde5fe9d72fd0e63d8",
-      "file": "app/services/crm_sync_service.py",
-      "function": "CRMSyncService._mark_call_synced",
-      "line": 792,
-      "method": "execute",
-      "tables": [
-        "calls"
-      ],
-      "sql": "UPDATE calls SET crm_call_id = COALESCE(crm_call_id, $3), crm_synced_at = NOW(), updated_at = NOW() WHERE id = $1::uuid AND tenant_id = $2::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "c3e85b181ba0eb761a0e0c6b81b281986d62ba2f1b86153a4213388c3cd74a7b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_lifecycle",
@@ -8536,22 +8504,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e8367d5a03ed46e5ae50ced264f8b5f817faf5f97cf9f8745206e4869029f296",
-      "file": "app/domain/services/telephony/inbound_admission.py",
-      "function": "InboundAdmissionService.resolve_billing_hold",
-      "line": 2478,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "UPDATE calls SET duration_seconds=$4, cost=COALESCE($5,cost), billing_status=$6, billing_hold_reason=NULL, updated_at=NOW() WHERE id=$1::uuid AND tenant_id=$2::uuid AND direction='inbound' AND billing_status='held' AND billing_hold_reason=$3 RETURNING id, billing_status, billing_hold_reason, duration_seconds, cost",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "e9271bdb4199f4c144db3a8839974928ceb14fe59be764342e703f81d8cf2fea",
       "file": "app/domain/services/call_summary/store.py",
       "function": "generate_and_store",
@@ -9285,22 +9237,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "fbced2223833f64697c030f3762061d3476f5ccec9acb4b8d8c5ba8585ab92fd",
-      "file": "app/services/action_execution.py",
-      "function": "DurableActionExecutor._save",
-      "line": 263,
-      "method": "execute",
-      "tables": [
-        "assistant_actions"
-      ],
-      "sql": "UPDATE assistant_actions SET status=$3, output_data=$4::jsonb, completed_at=NOW(), scheduled_at=COALESCE($5::timestamptz,scheduled_at) WHERE tenant_id=$1::uuid AND id=$2::uuid AND status='running'",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
