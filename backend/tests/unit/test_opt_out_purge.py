@@ -60,7 +60,7 @@ class _FakeDNCConn:
 
     async def fetchrow(self, *a, **k):
         return {
-            "id": "1", "tenant_id": _TENANT_ID, "normalized_number": "+15551234567",
+            "id": "1", "tenant_id": _TENANT_ID, "normalized_number": "+14155550100",
             "source": "caller_opt_out", "reason": "x",
             "expires_at": None, "created_at": None,
         }
@@ -116,7 +116,7 @@ async def test_purge_runs_all_three_steps():
     client = _FakeClient(rows=[{"id": "j1"}, {"id": "j2"}])
     res = await purge_lead_on_opt_out(
         db_pool=pool, db_client=client,
-        tenant_id=_TENANT_ID, lead_id="lead-1", phone_number="+1 (555) 123-4567",
+        tenant_id=_TENANT_ID, lead_id="lead-1", phone_number="+1 (415) 555-0100",
         call_id="call-9",
     )
     assert res["dnc_added"] is True
