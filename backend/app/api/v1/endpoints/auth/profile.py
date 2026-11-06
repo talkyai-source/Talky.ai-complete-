@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from app.api.v1.dependencies import CurrentUser, get_audit_logger, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
@@ -11,8 +11,8 @@ from app.core.postgres_adapter import Client
 from app.core.security.rbac import UserRole, normalize_role
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
-from ._shared import normalize_optional_text
-from .schemas import MeResponse, UpdateMeRequest
+from ._shared import get_client_ip, get_user_agent, normalize_optional_text
+from .schemas import LegalAcceptanceRequest, MeResponse, UpdateMeRequest
 
 router = APIRouter(tags=["auth"])
 
@@ -56,9 +56,14 @@ async def get_me(
             FROM   user_profiles up
             LEFT   JOIN tenants t                ON t.id = up.tenant_id
             LEFT   JOIN white_label_partners p   ON p.id = t.white_label_partner_id
-            WHERE  up.id = $1
+            WHERE  up.id = $1 AND up.tenant_id IS NOT DISTINCT FROM $2::uuid
             """,
             current_user.id,
+            current_user.tenant_id,
+        )
+        from app.domain.services.legal_acceptance import acceptance_status
+        legal_status = await acceptance_status(
+            conn, tenant_id=current_user.tenant_id, user_id=current_user.id,
         )
 
     tenant_id = str(row["tenant_id"]) if row and row["tenant_id"] else None
@@ -80,6 +85,7 @@ async def get_me(
         suspended_at_dt = None
 
     return MeResponse(
+        **legal_status,
         id=current_user.id,
         email=current_user.email,
         name=current_user.name,
@@ -95,6 +101,26 @@ async def get_me(
         suspension_reason=suspension_reason,
         suspended_at=suspended_at_dt.isoformat() if suspended_at_dt else None,
     )
+
+
+@router.post("/legal-acceptance")
+async def accept_legal_versions(
+    request: Request,
+    body: LegalAcceptanceRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+):
+    """Append the authenticated tenant user's explicit current-version receipt."""
+    from app.domain.services.legal_acceptance import record_acceptance, validate_signup_acceptance
+    if not current_user.tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant context required")
+    versions = validate_signup_acceptance(body.terms_version, body.privacy_version)
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        await record_acceptance(
+            conn, tenant_id=current_user.tenant_id, user_id=current_user.id,
+            versions=versions, ip_address=get_client_ip(request), user_agent=get_user_agent(request),
+        )
+    return {"accepted": True, "terms_version": versions[0], "privacy_version": versions[1]}
 
 
 @router.patch("/me", response_model=MeResponse)

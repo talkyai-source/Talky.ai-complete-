@@ -178,7 +178,7 @@ async def test_campaign_hangup_timeout_retains_truthful_failure_summary(monkeypa
     assert pool.active == 0
 
 
-async def test_provider_result_survives_bounded_best_effort_persistence(monkeypatch):
+async def test_provider_persistence_timeout_is_retryable_without_repeating_probe(monkeypatch):
     pool = Pool()
     pool.conn.row = {"credentials_encrypted": "synthetic", "from_number": None}
     app, _ = mounted_app(monkeypatch, pool, "providers")
@@ -205,9 +205,11 @@ async def test_provider_result_survives_bounded_best_effort_persistence(monkeypa
             transport=httpx.ASGITransport(app=app, raise_app_exceptions=False), base_url="http://synthetic",
         ) as client:
             response = await asyncio.wait_for(client.post("/api/v1/telephony/providers/twilio/test"), 0.5)
-        assert response.status_code == 200
-        assert response.json()["ok"] is True
-        assert response.json()["check_scope"] == "provider_account"
+        # QA F12-10 makes persistence and its audit receipt mandatory. The
+        # completed external probe is never replayed to hide a storage failure.
+        assert response.status_code == 503
+        assert response.headers["Retry-After"] == "5"
+        assert response.json()["error"]["code"] == "service_unavailable"
         assert checks == [True]
     finally:
         if blocker is not None:

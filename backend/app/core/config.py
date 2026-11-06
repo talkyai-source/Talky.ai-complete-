@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict
 from functools import lru_cache
 from urllib.parse import urlsplit, urlunsplit
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -71,6 +71,11 @@ class Settings(BaseSettings):
 
     # API Settings
     api_prefix: str = "/api/v1"
+
+    # Legal supplies the identifiers/text; enable only after the acceptance UI ships.
+    legal_acceptance_required: bool = False
+    legal_terms_version: str | None = Field(default=None, max_length=128)
+    legal_privacy_version: str | None = Field(default=None, max_length=128)
 
     # CORS — populated from CORS_ORIGINS env var (comma-separated or a JSON
     # array). Falls back to FRONTEND_URL if CORS_ORIGINS is not set. The str

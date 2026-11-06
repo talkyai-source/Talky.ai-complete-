@@ -75,6 +75,9 @@ class MeResponse(BaseModel):
     name: Optional[str] = None
     business_name: Optional[str] = None
     role: str
+    legal_acceptance_required: bool = False
+    terms_version: Optional[str] = None
+    privacy_version: Optional[str] = None
     minutes_remaining: Optional[int] = None
     minutes_state: Literal["known", "unlimited", "unavailable"] = "unavailable"
 
@@ -98,6 +101,12 @@ class MeResponse(BaseModel):
 class UpdateMeRequest(BaseModel):
     name: Optional[AccountName] = None
     business_name: Optional[AccountName] = None
+
+
+class LegalAcceptanceRequest(BaseModel):
+    terms_version: str = Field(..., min_length=1, max_length=128)
+    privacy_version: str = Field(..., min_length=1, max_length=128)
+    model_config = {"extra": "forbid"}
 
 
 class ChangePasswordRequest(BaseModel):
@@ -147,4 +156,6 @@ class SignupCompleteRequest(BaseModel):
     code: str
     password: str
     confirm_password: str
+    terms_version: Optional[str] = Field(None, min_length=1, max_length=128)
+    privacy_version: Optional[str] = Field(None, min_length=1, max_length=128)
     model_config = {"extra": "forbid"}

@@ -17,11 +17,13 @@ from app.api.v1.dependencies import (
     CurrentUser,
     UserRole,
     get_current_user,
+    get_audit_logger,
     get_db_client,
     require_role,
 )
 from app.core.postgres_adapter import Client
-from app.core.db_utils import acquire_connection
+from app.core.db_utils import acquire_connection, acquire_with_tenant
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from .schemas import PermissionResponse, RolePermissionResponse, RoleResponse
 
@@ -147,13 +149,16 @@ async def add_permission_to_role(
     role_id: str,
     permission_id: str,
     db_client: Client = Depends(get_db_client),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> Dict[str, str]:
     """
     Assign a permission to a role.
 
     **Requires platform_admin role.**
     """
-    async with acquire_connection(db_client.pool) as conn:
+    async with acquire_with_tenant(db_client.pool, None) as conn:
+        await audit_logger.lock_transaction(conn)
         # Verify role exists
         role_row = await conn.fetchrow(
             "SELECT id, is_system_role FROM roles WHERE id = $1",
@@ -178,7 +183,7 @@ async def add_permission_to_role(
 
         # Insert role-permission mapping
         try:
-            await conn.execute(
+            inserted = await conn.execute(
                 """
                 INSERT INTO role_permissions (role_id, permission_id)
                 VALUES ($1, $2)
@@ -193,6 +198,13 @@ async def add_permission_to_role(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to assign permission",
             )
+        if inserted == "INSERT 0 1":
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="rbac.permission.add",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=None,
+                resource_type="role", resource_id=role_id, before_state=None,
+                after_state={"role_id": role_id, "permission_id": permission_id},
+            )
 
     return {"detail": "Permission assigned to role successfully"}
 
@@ -205,13 +217,16 @@ async def remove_permission_from_role(
     role_id: str,
     permission_id: str,
     db_client: Client = Depends(get_db_client),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> Dict[str, str]:
     """
     Remove a permission from a role.
 
     **Requires platform_admin role.**
     """
-    async with acquire_connection(db_client.pool) as conn:
+    async with acquire_with_tenant(db_client.pool, None) as conn:
+        await audit_logger.lock_transaction(conn)
         result = await conn.execute(
             """
             DELETE FROM role_permissions
@@ -220,6 +235,14 @@ async def remove_permission_from_role(
             role_id,
             permission_id,
         )
+        if result != "DELETE 0":
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="rbac.permission.remove",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=None,
+                resource_type="role", resource_id=role_id,
+                before_state={"role_id": role_id, "permission_id": permission_id},
+                after_state=None,
+            )
 
     if result == "DELETE 0":
         raise HTTPException(

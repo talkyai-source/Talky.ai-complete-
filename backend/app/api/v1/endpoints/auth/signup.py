@@ -303,6 +303,9 @@ async def signup_complete(
     email = body.email.strip().lower()
 
     # Confirm passwords match.
+    from app.domain.services.legal_acceptance import record_acceptance, validate_signup_acceptance
+    legal_versions = validate_signup_acceptance(body.terms_version, body.privacy_version)
+
     if body.password != body.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -446,6 +449,10 @@ async def signup_complete(
 
             ip = get_client_ip(request)
             ua = get_user_agent(request)
+            await record_acceptance(
+                conn, tenant_id=str(tenant["id"]), user_id=user_id,
+                versions=legal_versions, ip_address=ip, user_agent=ua,
+            )
             raw_session_token, session_id = await create_session(
                 conn,
                 user_id=user_id,

@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import uuid
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import asyncpg
 import pytest
@@ -98,6 +99,7 @@ async def _configure(pool, tenant):
         tenant_id=str(tenant),
         db_client=SimpleNamespace(pool=pool),
         _admin=None,
+        audit_logger=SimpleNamespace(lock_transaction=AsyncMock(), log_in_transaction=AsyncMock()),
     )
 
 

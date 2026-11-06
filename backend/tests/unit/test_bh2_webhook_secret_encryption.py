@@ -14,6 +14,7 @@ when the key is missing or unusable and never stores plaintext.
 import logging
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID
 
 import httpx
@@ -24,7 +25,7 @@ from fastapi import FastAPI, HTTPException
 import app.api.v1.dependencies  # noqa: F401  (resolve the import cycle first)
 import app.api.v1.endpoints.webhooks_secure as ws
 import app.core.security.webhook_verification as wv
-from app.api.v1.dependencies import get_db_client
+from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.core.security.api_security import rate_limit_dependency
 from app.core.security.webhook_verification import (
     WebhookSecretManager,
@@ -58,6 +59,10 @@ class _FakeWebhookConfigs:
 
     async def fetchrow(self, query, tenant_id, name):
         sql = " ".join(query.split())
+        if "FOR UPDATE" in sql:
+            assert "WHERE tenant_id = $1 AND webhook_name = $2" in sql
+            return ({"webhook_name": name, "is_active": True}
+                    if (str(tenant_id), name) in self.rows else None)
         assert "WHERE tenant_id = $1 AND webhook_name = $2" in sql and "is_active = TRUE" in sql
         self.reads += 1
         stored = self.rows.get((str(tenant_id), name))
@@ -113,6 +118,8 @@ async def client(monkeypatch, db):
     app = FastAPI()
     app.include_router(ws.router, prefix="/api/v1")
     app.dependency_overrides[get_db_client] = lambda: SimpleNamespace(pool=object())
+    app.dependency_overrides[get_audit_logger] = lambda: SimpleNamespace(
+        lock_transaction=AsyncMock(), log_in_transaction=AsyncMock())
     app.dependency_overrides[rate_limit_dependency] = lambda: None  # process-wide limiter state is not under test
     transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
@@ -127,6 +134,7 @@ async def _configure_direct(db, tenant=TENANT, name=NAME):
         tenant_id=tenant,
         db_client=SimpleNamespace(pool=object()),
         _admin=None,
+        audit_logger=SimpleNamespace(lock_transaction=AsyncMock(), log_in_transaction=AsyncMock()),
     )
 
 

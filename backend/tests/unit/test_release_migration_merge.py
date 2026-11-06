@@ -19,7 +19,8 @@ PAYMENT = "0073_payment_test_plan"
 PAYMENT_MERGE = "0081_admin_payment_merge"
 SUPPORT = "0082_support_system"
 PAYG = "0083_pay_as_you_go"
-HEAD = "0084_call_failure_lead_signals"
+CALL_SIGNALS = "0084_call_failure_lead_signals"
+HEAD = "0085_legal_acceptance"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -32,7 +33,8 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # 0084 (hand-run call-failure/lead-signal columns, QA F14-02) sits on 0083
     # (pay as you go), on 0082 (support system), which sits on the payment
     # merge that joins both histories.
-    assert SCRIPTS.get_revision(HEAD).down_revision == PAYG
+    assert SCRIPTS.get_revision(HEAD).down_revision == CALL_SIGNALS
+    assert SCRIPTS.get_revision(CALL_SIGNALS).down_revision == PAYG
     assert SCRIPTS.get_revision(PAYG).down_revision == SUPPORT
     assert SCRIPTS.get_revision(SUPPORT).down_revision == PAYMENT_MERGE
     assert set(SCRIPTS.get_revision(PAYMENT_MERGE).down_revision) == {SUPPLIER_ALLOWANCE, PAYMENT}
@@ -170,4 +172,4 @@ def test_payment_merge_has_no_business_sql_and_refuses_history_split():
 
 def test_upgrade_after_the_payment_merge_runs_only_support_pay_as_you_go_then_the_fold():
     revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", PAYMENT_MERGE)]
-    assert revisions == [SUPPORT, PAYG, HEAD]
+    assert revisions == [SUPPORT, PAYG, CALL_SIGNALS, HEAD]

@@ -20,9 +20,10 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
+from app.api.v1.dependencies import CurrentUser, get_audit_logger, get_current_user, get_db_pool, require_admin
 from app.core.db import DatabasePoolTimeoutError
-from app.core.db_utils import acquire_connection
+from app.core.db_utils import acquire_connection, acquire_with_tenant
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.infrastructure.connectors.encryption import get_encryption_service
 from app.domain.services.telephony.provider_availability import CLOUD_PROVIDERS, cloud_availability
 
@@ -137,6 +138,26 @@ def _validate_credentials_shape(provider: str, creds: Dict[str, str]) -> Dict[st
     raise HTTPException(status_code=400, detail=f"Unknown provider: {provider}")
 
 
+def _provider_state(row):
+    if not row:
+        return None
+    state = {name: row[name] for name in
+             ("provider", "label", "from_number", "status", "last_tested_at")}
+    result = row.get("last_test_result") or {}
+    if isinstance(result, str):
+        result = json.loads(result)
+    # Provider error strings can echo authentication data. Retain only the
+    # bounded check outcome, never raw results or encrypted/plain credentials.
+    state["last_test_result"] = {key: result[key] for key in
+                                 ("ok", "latency_ms", "status_code", "check_scope") if key in result}
+    return state
+
+
+_PROVIDER_AUDIT_SELECT = """SELECT provider, label, from_number, status,
+    last_tested_at, last_test_result FROM tenant_telephony_credentials
+    WHERE tenant_id=$1 AND provider=$2 FOR UPDATE"""
+
+
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
@@ -205,6 +226,7 @@ async def save_provider(
     body: ProviderSaveRequest,
     current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Upsert credentials for one provider. Encrypts the credentials blob
@@ -218,9 +240,10 @@ async def save_provider(
     encrypted = get_encryption_service().encrypt(json.dumps(clean_creds))
 
     try:
-        async with acquire_connection(db_pool) as conn:
+        async with acquire_with_tenant(db_pool, str(tenant_uuid)) as conn:
+            await audit_logger.lock_transaction(conn)
             async with conn.transaction():
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                before = await conn.fetchrow(_PROVIDER_AUDIT_SELECT, tenant_uuid, provider)
                 row = await conn.fetchrow(
                     """
                     INSERT INTO tenant_telephony_credentials
@@ -240,6 +263,13 @@ async def save_provider(
                     """,
                     tenant_uuid, provider, body.label,
                     encrypted, body.from_number,
+                )
+                await audit_logger.log_in_transaction(
+                    conn, event_type=AuditEvent.CONFIG_CHANGED, action="telephony.provider.save",
+                    actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_uuid,
+                    resource_type="telephony_provider", resource_id=tenant_uuid,
+                    before_state=_provider_state(before), after_state=_provider_state(row),
+                    metadata={"provider": provider, "credentials_changed": True},
                 )
     except DatabasePoolTimeoutError:
         raise
@@ -263,6 +293,7 @@ async def delete_provider(
     provider: str,
     current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Forget credentials for one provider. If this provider was active,
@@ -272,9 +303,14 @@ async def delete_provider(
     provider = _assert_provider(provider)
 
     try:
-        async with acquire_connection(db_pool) as conn:
+        async with acquire_with_tenant(db_pool, str(tenant_uuid)) as conn:
+            await audit_logger.lock_transaction(conn)
             async with conn.transaction():
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                selection = await conn.fetchrow(
+                    "SELECT active_telephony_provider FROM tenants WHERE id=$1 FOR UPDATE", tenant_uuid,
+                )
+                selected = selection["active_telephony_provider"] if selection else None
+                before = await conn.fetchrow(_PROVIDER_AUDIT_SELECT, tenant_uuid, provider)
                 await conn.execute(
                     """
                     DELETE FROM tenant_telephony_credentials
@@ -282,6 +318,15 @@ async def delete_provider(
                     """,
                     tenant_uuid, provider,
                 )
+                if before or selected == provider:
+                    await audit_logger.log_in_transaction(
+                        conn, event_type=AuditEvent.CONFIG_CHANGED, action="telephony.provider.delete",
+                        actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_uuid,
+                        resource_type="telephony_provider", resource_id=tenant_uuid,
+                        before_state={"credential": _provider_state(before), "active_provider": selected},
+                        after_state={"credential": None, "active_provider": "none" if selected == provider else selected},
+                        metadata={"provider": provider},
+                    )
                 await conn.execute(
                     """
                     UPDATE tenants
@@ -303,6 +348,7 @@ async def test_provider(
     provider: str,
     current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Check the saved provider configuration; this is not a call readiness test.
@@ -369,9 +415,12 @@ async def test_provider(
     tested_at = datetime.now(timezone.utc)
 
     try:
-        async with acquire_connection(db_pool) as conn:
+        async with acquire_with_tenant(db_pool, str(tenant_uuid)) as conn:
+            await audit_logger.lock_transaction(conn)
             async with conn.transaction():
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                before = await conn.fetchrow(_PROVIDER_AUDIT_SELECT, tenant_uuid, provider)
+                if not before:
+                    raise HTTPException(status_code=409, detail="Provider credentials changed during the check")
                 await conn.execute(
                     """
                     UPDATE tenant_telephony_credentials
@@ -384,9 +433,19 @@ async def test_provider(
                     new_status, tested_at, json.dumps(result),
                     tenant_uuid, provider,
                 )
+                after = {**dict(before), "status": new_status, "last_tested_at": tested_at, "last_test_result": result}
+                await audit_logger.log_in_transaction(
+                    conn, event_type=AuditEvent.CONFIG_CHANGED, action="telephony.provider.check",
+                    actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_uuid,
+                    resource_type="telephony_provider", resource_id=tenant_uuid,
+                    before_state=_provider_state(before), after_state=_provider_state(after),
+                    metadata={"provider": provider},
+                )
+    except (HTTPException, DatabasePoolTimeoutError):
+        raise
     except Exception as e:
-        # Test happened, persistence failed — return the test result anyway.
-        logger.warning("Could not persist test result: %s", e)
+        logger.warning("Provider check receipt failed error_type=%s", type(e).__name__)
+        raise HTTPException(status_code=503, detail="Provider check result was not saved; retry later") from e
 
     return TestResult(
         ok=bool(result.get("ok")),
@@ -404,6 +463,7 @@ async def activate_provider(
     body: ProviderActivateRequest,
     current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool=Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Save a selection without promising a supported cloud campaign route.
@@ -430,9 +490,12 @@ async def activate_provider(
             })
 
     try:
-        async with acquire_connection(db_pool) as conn:
+        async with acquire_with_tenant(db_pool, str(tenant_uuid)) as conn:
+            await audit_logger.lock_transaction(conn)
             async with conn.transaction():
-                await conn.execute("SET LOCAL app.bypass_rls = 'true'")
+                before = await conn.fetchrow(
+                    "SELECT active_telephony_provider FROM tenants WHERE id=$1 FOR UPDATE", tenant_uuid,
+                )
                 if target in ("twilio", "vonage"):
                     row = await conn.fetchrow(
                         """
@@ -467,6 +530,13 @@ async def activate_provider(
                     WHERE id = $2
                     """,
                     target, tenant_uuid,
+                )
+                await audit_logger.log_in_transaction(
+                    conn, event_type=AuditEvent.CONFIG_CHANGED, action="telephony.provider.activate",
+                    actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_uuid,
+                    resource_type="telephony_provider", resource_id=tenant_uuid,
+                    before_state=dict(before) if before else None,
+                    after_state={"active_telephony_provider": target},
                 )
     except (HTTPException, DatabasePoolTimeoutError):
         raise
