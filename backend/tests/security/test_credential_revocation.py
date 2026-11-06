@@ -21,6 +21,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import asyncpg
+import fakeredis
 import pytest
 
 from app.api.v1.endpoints.auth import password_reset as pr_mod
@@ -92,10 +93,14 @@ def _fake_redis():
         "code_hash": hashlib.sha256(CODE.encode("utf-8")).hexdigest(),
         "password_generation": hashlib.sha256(b"synthetic-current-password-generation").hexdigest(),
     }
-    r = AsyncMock()
-    r.get = AsyncMock(return_value=json.dumps(payload))
-    r.delete = AsyncMock(return_value=1)
-    return r
+    server = fakeredis.FakeServer()
+    with fakeredis.FakeRedis(server=server, decode_responses=True) as seed:
+        seed.setex(
+            pr_mod._reset_redis_key(EMAIL),
+            pr_mod._RESET_CODE_TTL_SECONDS,
+            json.dumps(payload),
+        )
+    return fakeredis.FakeAsyncRedis(server=server, decode_responses=True)
 
 
 class Recorder:
