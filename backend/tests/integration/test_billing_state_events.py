@@ -90,6 +90,25 @@ async def _apply(fixture, kind, data):
         return await apply_billing_event(conn, fixture.billing, kind, data)
 
 
+async def test_the_account_owner_is_addressed_on_payment_emails(state_db):
+    # QA F3-09: sign-up stores the owner as tenant_admin, but receipts looked
+    # for role 'owner', which user_profiles.role cannot hold.
+    fixture = state_db
+    receipt, subscription, session, invoice = await _paid(fixture)
+    owner = uuid4()
+    async with acquire_with_tenant(fixture.pool, None) as conn:
+        await conn.execute(
+            """INSERT INTO user_profiles (id, email, name, tenant_id, role, is_active, is_verified, email_verified_at)
+               VALUES ($1, $2, 'Synthetic owner', $3, 'tenant_admin', TRUE, TRUE, now())""",
+            owner, f"{owner}@example.invalid", fixture.tenants[0])
+    try:
+        result = await _apply(fixture, "invoice.paid", {"id": invoice["id"], "parent": invoice["parent"]})
+        assert result["notifications"][0]["recipient"] == f"{owner}@example.invalid"
+    finally:
+        async with acquire_with_tenant(fixture.pool, None) as conn:
+            await conn.execute("DELETE FROM user_profiles WHERE id=$1", owner)
+
+
 async def test_paid_invoice_first_recovers_missing_session_then_checkout_never_resets_usage(state_db):
     fixture = state_db
     receipt, subscription, session, invoice = await _paid(fixture)

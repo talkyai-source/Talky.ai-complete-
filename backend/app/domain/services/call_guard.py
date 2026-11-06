@@ -97,7 +97,10 @@ class GuardCheck(str, Enum):
 # ordinary availability checks (rate limiter, concurrency, etc.). These are
 # compliance-critical: silently allowing a call to proceed because a DNC (or
 # spend-cap) lookup errored is a compliance violation, not a mere degraded
-# experience. Keep this set narrow — everything NOT listed here keeps the
+# experience. Calling hours, blocked destinations and abuse velocity are the
+# same kind of rule (QA F7-07): a failed lookup must not dial at night or into
+# a blocked country. The dialer defers a ``check_error_blocked`` job and
+# retries. Keep this set narrow — everything NOT listed here keeps the
 # original fail-open-on-infra-error behavior intentionally, so a DB blip in
 # e.g. the rate limiter or concurrency lookup never blocks legitimate calls.
 _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
@@ -107,6 +110,9 @@ _FAIL_CLOSED_ON_ERROR_CHECKS = frozenset(
         GuardCheck.DNC_CHECK,
         GuardCheck.SPEND_LIMIT,
         GuardCheck.MINUTES_QUOTA,
+        GuardCheck.GEOGRAPHIC_ALLOWED,
+        GuardCheck.BUSINESS_HOURS,
+        GuardCheck.VELOCITY_CHECK,
     }
 )
 
@@ -141,6 +147,25 @@ class CheckResult:
 _CHECK_ERROR_BLOCKED = "check_error_blocked"
 # Reason of an account gate that passed only because its schema is not there.
 _SCHEMA_CHECK_SKIPPED = "schema_check_skipped"
+
+
+def _is_premium_rate(e164: str) -> bool:
+    """True for a premium-rate line (phonenumbers metadata).
+
+    phonenumbers puts UK 084x/087x "service numbers" in that class too, but
+    their service charge is capped and they are common business lines, so they
+    stay callable; the 09x-style ranges (UK 09, US 900, AU 1900) are refused.
+    """
+    import phonenumbers
+
+    try:
+        parsed = phonenumbers.parse(e164, None)
+    except phonenumbers.NumberParseException:
+        return False
+    if phonenumbers.number_type(parsed) != phonenumbers.PhoneNumberType.PREMIUM_RATE:
+        return False
+    national = phonenumbers.national_significant_number(parsed)
+    return not (parsed.country_code == 44 and national.startswith(("84", "87")))
 
 
 def _is_missing_schema_error(exc: BaseException) -> bool:
@@ -745,6 +770,16 @@ class CallGuard:
                 details={"received": phone_number},
             )
 
+        # A premium-rate line costs far more per minute than a normal call and
+        # is the classic toll-fraud target: an uploaded lead list must never
+        # make the dialer call one (QA F2-14).
+        if _is_premium_rate(phone_number):
+            return CheckResult(
+                check=GuardCheck.NUMBER_VALID,
+                passed=False,
+                reason="premium_rate_destination",
+            )
+
         return CheckResult(
             check=GuardCheck.NUMBER_VALID,
             passed=True,
@@ -1240,6 +1275,11 @@ class CallGuard:
                         details={"recent_high_severity_events": recent_events},
                     )
         except asyncpg.PostgresError as e:
+            # Only a deployment without the table may skip this check. Any
+            # other error says nothing about abuse; raise so evaluate() blocks
+            # (VELOCITY_CHECK fails closed) instead of passing the call.
+            if not _is_missing_schema_error(e):
+                raise
             logger.debug(f"abuse_events query failed (table may not exist): {e}")
 
         return CheckResult(

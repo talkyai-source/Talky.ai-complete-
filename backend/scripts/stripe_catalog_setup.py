@@ -29,7 +29,8 @@ to live keys later is step 1 with the live key, removing
 secret would fail every live signature), then step 2 again. In live mode step 2
 lists accounts still holding a plan bought with a TEST card: no money was
 taken for those, so end them (set subscription_status to 'cancelled') before
-opening checkout to customers.
+opening checkout to customers. It lists accounts holding minutes bought with a
+TEST card the same way; reverse those with a compensating ledger row.
 """
 from __future__ import annotations
 
@@ -240,6 +241,14 @@ async def report_test_mode_plans() -> None:
                     WHERE s.metadata->'purchase'->>'stripe_price_id' IN
                           (SELECT stripe_price_id FROM plan_price_options WHERE provider_mode = 'test')"""
             )
+            # Minute bundles paid in test mode too (QA F13-10): their ledger
+            # credits survive the switch and would be spent as real minutes.
+            credits = await conn.fetch(
+                r"""SELECT l.tenant_id, SUM(l.minutes_delta)::int AS minutes
+                      FROM billing_ledger l JOIN topup_orders o ON o.id = l.order_id
+                     WHERE o.provider_session_id LIKE 'cs\_test\_%'
+                     GROUP BY l.tenant_id HAVING SUM(l.minutes_delta) > 0"""
+            )
     finally:
         await conn.close()
     if rows:
@@ -247,6 +256,12 @@ async def report_test_mode_plans() -> None:
               + ", ".join(str(r["id"])[:8] for r in rows) + ". End them before opening checkout.")
     else:
         print("no account holds a test-mode plan")
+    if credits:
+        print(f"WARNING: {len(credits)} account(s) hold minutes bought with a TEST card: "
+              + ", ".join(f"{str(r['tenant_id'])[:8]} ({r['minutes']} min)" for r in credits)
+              + ". Reverse them with a compensating ledger row before opening checkout.")
+    else:
+        print("no account holds test-mode minutes")
 
 
 def ensure_webhook(client, url: str, env_file: Path, apply: bool) -> None:

@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
+from fastapi.encoders import jsonable_encoder
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.dotenv_compat import load_dotenv
@@ -691,9 +692,11 @@ async def create_campaign(
         result = {"campaign": response.data[0]}
 
         # Store for idempotency (Hisham's billing layer — replays return the
-        # cached response instead of double-creating).
+        # cached response instead of double-creating). The row holds a UUID
+        # and datetimes: plain json.dumps raised after the insert committed,
+        # the key was released and a retry created a second campaign (QA F2-09).
         if idempotency_key:
-            await store_idempotent_response(request, 200, json.dumps(result))
+            await store_idempotent_response(request, 200, json.dumps(jsonable_encoder(result)))
 
         return result
     except HTTPException:
@@ -1080,9 +1083,10 @@ async def start_campaign(
             "campaign": {"id": result.campaign_id, "status": "running"}
         }
 
-        # Store for idempotency
+        # Store for idempotency (encoded as FastAPI encodes the response, so a
+        # UUID or datetime cannot fail after the campaign started; QA F2-09)
         if idempotency_key:
-            await store_idempotent_response(request, 200, json.dumps(response_data))
+            await store_idempotent_response(request, 200, json.dumps(jsonable_encoder(response_data)))
 
         if tenant_id:
             # stream_events is under FORCE ROW LEVEL SECURITY (migration 0013);

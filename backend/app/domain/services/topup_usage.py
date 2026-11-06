@@ -33,6 +33,25 @@ def usage_event_id(tenant_id: Any, month_key: str) -> str:
 # the meter uses (minutes_quota.allowance_window_start_sql): monthly from the
 # plan's purchase, or calendar months without one. Keys are the window start
 # date. Python arithmetic on the UTC instants asyncpg returns would shift them.
+# A window whose date is already taken by an earlier window (two plan
+# re-anchors on one day) is keyed by its start instant instead; see
+# ``_window_key``. Both forms sort chronologically as text.
+_PRECISE_KEY_SQL = """to_char({0}, 'YYYY-MM-DD"T"HH24:MI:SS.US')"""
+
+
+def _window_key(month: Any, recorded_at: dict[str, datetime]) -> str:
+    """The ledger key of one allowance window.
+
+    A plan change records the running window and re-anchors the allowance at
+    the same NOW(), so a usage row already under this date that was written no
+    later than this window began belongs to an earlier window that started the
+    same day. Sharing its key hid this window's bought-minute usage, which was
+    then never debited (QA BIL-18).
+    """
+    stamp = recorded_at.get(month["key"])
+    if stamp is not None and stamp <= month["start"]:
+        return month["precise_key"]
+    return month["key"]
 
 
 async def _closed_windows(conn: Any, tenant_id: str, first: datetime, close_current: bool) -> list:
@@ -46,7 +65,8 @@ async def _closed_windows(conn: Any, tenant_id: str, first: datetime, close_curr
     anchor = await conn.fetchval("SELECT allowance_anchor_at FROM tenants WHERE id=$1::uuid", str(tenant_id))
     if anchor is None:
         windows = await conn.fetch(
-            """SELECT to_char(m, 'YYYY-MM-DD') AS key, m AS start, m + interval '1 month' AS end
+            f"""SELECT to_char(m, 'YYYY-MM-DD') AS key, {_PRECISE_KEY_SQL.format('m')} AS precise_key,
+                       m AS start, m + interval '1 month' AS end
                  FROM generate_series(date_trunc('month', $1::timestamptz),
                                       date_trunc('month', NOW()) - interval '1 month',
                                       interval '1 month') AS m
@@ -54,22 +74,25 @@ async def _closed_windows(conn: Any, tenant_id: str, first: datetime, close_curr
             first,
         )
         current = await conn.fetchrow(
-            "SELECT to_char(date_trunc('month', NOW()), 'YYYY-MM-DD') AS key, date_trunc('month', NOW()) AS start, NOW() AS end"
+            f"""SELECT to_char(m, 'YYYY-MM-DD') AS key, {_PRECISE_KEY_SQL.format('m')} AS precise_key,
+                       m AS start, NOW() AS end
+                  FROM (SELECT date_trunc('month', NOW()) AS m) w"""
         ) if close_current else None
     else:
         # Windows before the anchor were closed when the plan (re)started.
         index_first = allowance_window_index_sql("$1::timestamptz", "GREATEST($2::timestamptz, $1::timestamptz)")
         index_now = allowance_window_index_sql("$1::timestamptz", "NOW()")
         windows = await conn.fetch(
-            f"""SELECT to_char(w.start, 'YYYY-MM-DD') AS key, w.start,
-                       $1::timestamptz + make_interval(months => w.k + 1) AS end
+            f"""SELECT to_char(w.start, 'YYYY-MM-DD') AS key, {_PRECISE_KEY_SQL.format('w.start')} AS precise_key,
+                       w.start, $1::timestamptz + make_interval(months => w.k + 1) AS end
                   FROM (SELECT k, $1::timestamptz + make_interval(months => k) AS start
                           FROM generate_series({index_first}, {index_now} - 1) AS k) w
                  ORDER BY w.k""",
             anchor, first,
         )
         current = await conn.fetchrow(
-            f"""SELECT to_char(s, 'YYYY-MM-DD') AS key, s AS start, NOW() AS end
+            f"""SELECT to_char(s, 'YYYY-MM-DD') AS key, {_PRECISE_KEY_SQL.format('s')} AS precise_key,
+                       s AS start, NOW() AS end
                   FROM (SELECT $1::timestamptz + make_interval(months => {index_now}) AS s) w""",
             anchor,
         ) if close_current and anchor <= await conn.fetchval("SELECT NOW()") else None
@@ -114,16 +137,19 @@ async def unrecorded_topup_usage(conn: Any, tenant_id: str, base: int, rows: lis
         rows = await _ledger_rows(conn, tenant_id)
     if not rows:
         return []
-    months = await _closed_windows(conn, tenant_id, min(row["created_at"] for row in rows), close_current)
+    windows = await _closed_windows(conn, tenant_id, min(row["created_at"] for row in rows), close_current)
     prefix = f"{USAGE_EVENT_PREFIX}{tenant_id}:"
     recorded: dict[str, int] = {}
+    recorded_at: dict[str, datetime] = {}
     purchases: list[tuple[datetime, int]] = []
     for row in rows:
         event_id = row["provider_event_id"] or ""
         if event_id.startswith(prefix):
             recorded[event_id[len(prefix):]] = row["minutes_delta"]
+            recorded_at[event_id[len(prefix):]] = row["created_at"]
         else:
             purchases.append((row["created_at"], row["minutes_delta"]))
+    months = [{**dict(month), "key": _window_key(month, recorded_at)} for month in windows]
     open_months = [m for m in months if m["key"] not in recorded]
     if not open_months:
         return []

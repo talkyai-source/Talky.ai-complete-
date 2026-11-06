@@ -273,8 +273,7 @@ async def _preview_plan(tenant_id, db_client, intent, actions, context, conversa
                 for change in preview.get("changes", [])
             )
         else:
-            # Read-only availability and campaign-start arguments are explicit.
-            # Do not call start_campaign during preview.
+            # Read-only availability arguments are explicit.
             changes.append(
                 {
                     "field": f"Step {index + 1}: {name}",

@@ -190,6 +190,16 @@ class _Acquire:
 
         class Conn:
             async def fetchrow(self, sql, *args):
+                if "authority_scope_ok" in sql:
+                    # The call-authority read (service scope, no holds).
+                    return None if row is None else {
+                        "id": TENANT, "status": "active",
+                        "subscription_status": row["subscription_status"],
+                        "suspended_at": None, "suspended_by": None, "suspension_reason": None,
+                        "white_label_partner_id": None, "formal_partner_id": None,
+                        "formal_partner_status": None, "active_holds": [],
+                        "authority_scope_ok": True,
+                    }
                 return row
 
         return Conn()

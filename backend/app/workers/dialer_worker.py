@@ -559,13 +559,10 @@ class DialerWorker:
             # in-memory fallback.
             active_override = await self._tenant_live_call_count(job.tenant_id)
 
-            # Daily per-lead cap: only pay the COUNT query when the tenant
-            # actually enabled the ceiling (default off → zero overhead).
-            lead_attempts_today = None
-            if getattr(rules, "max_calls_per_lead_per_day", 0):
-                lead_attempts_today = await self._get_lead_attempts_today(
-                    job.lead_id, rules._resolve_tz(lead_tz).zone
-                )
+            # Repeat-dial cap (QA F12-05): dials to this lead's number in the
+            # last 24 hours across all the tenant's campaigns. Always counted,
+            # since the platform cap applies when the tenant set none.
+            lead_attempts_today = await self._get_lead_attempts_today(job.lead_id)
 
             can_call, reason = await self.rules_engine.can_make_call(
                 tenant_id=job.tenant_id,
@@ -576,6 +573,7 @@ class DialerWorker:
                 lead_attempts_today=lead_attempts_today,
                 lead_timezone=lead_tz,
                 enforce_window=not ignore_schedule,
+                phone_number=job.phone_number,
             )
 
             # 3b. TESTING OVERRIDE — explicit, opt-in, OFF by default.
@@ -656,6 +654,7 @@ class DialerWorker:
                     delay = self.rules_engine.get_delay_until_next_window(
                         rules,
                         lead_timezone=lead_tz,
+                        phone_number=job.phone_number,
                     )
                     logger.info(
                         f"Outside calling window (tz={lead_tz or rules.timezone}"
@@ -729,21 +728,13 @@ class DialerWorker:
                         max(300.0, remaining if remaining is not None else fallback_delay)
                     )
                 elif "daily_lead_cap" in reason:
-                    # The per-day ceiling resets at UTC midnight. Reschedule
-                    # the lead for just after the day rolls over; the
-                    # calling-window gate then holds it until the tenant's
-                    # allowed hours. Avoids burning retries hammering the cap.
-                    # Local midnight (the zone the cap counts in), not UTC.
-                    cap_tz = rules._resolve_tz(lead_tz)
-                    now = datetime.now(cap_tz)
-                    next_midnight = cap_tz.localize(
-                        datetime(now.year, now.month, now.day, 0, 5)
-                        + timedelta(days=1)
-                    )
-                    delay = max(300, int((next_midnight - now).total_seconds()))
+                    # The cap counts any 24 hours (QA F12-05): the number frees
+                    # up as its oldest dial ages out, so re-check hourly; the
+                    # calling-window gate then holds it until allowed hours.
+                    delay = 3600
                     logger.info(
-                        "Daily per-lead cap hit for lead %s (%s) — retrying after "
-                        "midnight in %ds (~%.1fh)",
+                        "Repeat-dial cap hit for lead %s (%s) — re-checking "
+                        "in %ds (~%.1fh)",
                         job.lead_id,
                         reason,
                         delay,
@@ -2411,32 +2402,29 @@ class DialerWorker:
             logger.warning(f"Failed to get lead timezone: {e}")
         return None
 
-    async def _get_lead_attempts_today(self, lead_id: str, tz_name: str = "UTC") -> int:
-        """Count dial attempts already made to a lead since local midnight.
+    async def _get_lead_attempts_today(self, lead_id: str) -> int:
+        """Count dials to this lead's number in the last 24 hours, across all
+        of the lead's tenant's campaigns (QA F12-05).
 
-        ``tz_name`` is the zone the calling window is evaluated in (lead, else
-        campaign/tenant); the day rolls over there, not at UTC midnight.
-
-        Used only when the tenant has a daily per-lead cap configured
-        (``max_calls_per_lead_per_day`` > 0); otherwise this is never
-        called, so it adds zero overhead to the default path. Counts
-        ``calls`` rows rather than the cumulative ``leads.call_attempts``
-        because the cap is a *per-day* ceiling.
+        The same number in another campaign or list is the same person, so
+        the count follows the number, and the window rolls rather than
+        resetting at midnight (3 dials at 23:00 and 3 more at 00:30 would
+        pass a per-day count). Counts ``calls`` rows, scoped to the lead's
+        own tenant explicitly.
         """
         try:
             async with self._acquire_db() as conn:
                 val = await conn.fetchval(
-                    "SELECT COUNT(*) FROM calls "
-                    "WHERE lead_id = $1 AND created_at >= "
-                    "(date_trunc('day', now() AT TIME ZONE $2::text) AT TIME ZONE $2::text) "
+                    "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 "
+                    "WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number "
+                    "AND c.created_at >= now() - interval '24 hours' "
                     # Testing an agent must not burn a lead's daily attempt quota.
-                    "AND NOT is_test "
+                    "AND NOT c.is_test "
                     # Nor may intents released while the line was refused:
                     # those calls were never handed to a carrier.
-                    "AND NOT (provider_call_id IS NULL AND COALESCE(failure_reason, '') "
+                    "AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') "
                     "IN ('line_not_ready', 'telephony_unavailable'))",
                     lead_id,
-                    tz_name or "UTC",
                 )
                 return int(val or 0)
         except Exception as e:
@@ -3069,6 +3057,7 @@ class DialerWorker:
             lead_attempts_today=None,
             lead_timezone=lead_tz,
             enforce_window=not schedule_ignored(campaign_cfg),
+            phone_number=job.phone_number,
         )
         if in_window:
             if schedule_ignored(campaign_cfg):
@@ -4238,6 +4227,10 @@ class DialerWorker:
 
 async def main():
     """Entry point for running dialer worker as separate process."""
+    # Workers never ran app_bootstrap.configure_logging, so lead phone
+    # numbers reached the journal in clear (QA F2-10). Idempotent.
+    from app.core.log_redact import install_pii_log_redaction
+    install_pii_log_redaction()
     # Setup simple logging first
     logging.basicConfig(level=logging.INFO)
 

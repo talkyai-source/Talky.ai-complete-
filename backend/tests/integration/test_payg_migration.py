@@ -11,6 +11,9 @@ from tests.integration.test_support_migration import _alembic
 
 pytestmark = pytest.mark.integration
 
+# The deployment head; 0083 (pay as you go) sits just below it.
+HEAD = "0084_call_failure_lead_signals"
+
 
 async def _state(dsn: str) -> tuple:
     conn = await asyncpg.connect(dsn, timeout=5)
@@ -28,14 +31,14 @@ async def _state(dsn: str) -> tuple:
 
 async def test_downgrade_then_upgrade_round_trips_and_refuses_while_an_account_is_on_it():
     dsn = require_test_dsn()
-    assert await _state(dsn) == ("0083_pay_as_you_go", True, True)
+    assert await _state(dsn) == (HEAD, True, True)
 
     down = _alembic(dsn, "downgrade", "0082_support_system")
     assert down.returncode == 0, down.stderr[-2000:]
     assert await _state(dsn) == ("0082_support_system", False, False)
     up = _alembic(dsn, "upgrade", "head")
     assert up.returncode == 0, up.stderr[-2000:]
-    assert await _state(dsn) == ("0083_pay_as_you_go", True, True)
+    assert await _state(dsn) == (HEAD, True, True)
 
     conn = await asyncpg.connect(dsn, timeout=5)
     tenant = uuid4()
@@ -46,7 +49,7 @@ async def test_downgrade_then_upgrade_round_trips_and_refuses_while_an_account_i
         refused = _alembic(dsn, "downgrade", "0082_support_system")
         assert refused.returncode != 0
         assert "Refusing to remove pay as you go" in refused.stderr
-        assert await _state(dsn) == ("0083_pay_as_you_go", True, True)
+        assert await _state(dsn) == (HEAD, True, True)
     finally:
         await conn.execute("DELETE FROM tenants WHERE id = $1", tenant)
         await conn.close()

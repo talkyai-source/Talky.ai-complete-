@@ -106,6 +106,15 @@ class _Conn:
                 "completed_hop_count": self.completed_hops,
                 "transfer_active": self.transfer_active,
             }
+        if "AS has_ledger" in query and "FOR UPDATE" in query:
+            return {
+                "minutes_allocated": self.quota_minutes,
+                "plan_minutes": self.quota_minutes,
+                "billing_model": "subscription",
+                "no_plan": False,
+                "has_ledger": False,
+                "window_start": None,
+            }
         if "SELECT minutes_allocated FROM tenants" in query:
             return {"minutes_allocated": self.quota_minutes}
         if "INSERT INTO inbound_usage_transactions" in query:

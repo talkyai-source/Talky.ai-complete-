@@ -328,10 +328,16 @@ async def _apply_invoice(conn, billing, event_type, data, *, source_reference=No
     else:
         kind = None
     if kind:
-        # Retain the existing owner-only recipient policy. CP06 owns replacing
-        # its known gap; no guessed admin/global recipient is introduced here.
+        # Retain the existing owner-only recipient policy. CP06 owns any wider
+        # billing-contact policy; no guessed admin/global recipient is
+        # introduced here. The owner's canonical role is tenant_admin
+        # (rbac.ROLE_ALIASES) and user_profiles.role admits only canonical
+        # names, so 'owner' matched nobody and no payment email was ever
+        # addressed (QA F3-09).
         recipients = await conn.fetch(
-            "SELECT email FROM user_profiles WHERE tenant_id=$1::uuid AND role='owner' LIMIT 2", tenant_id,
+            """SELECT email FROM user_profiles
+                WHERE tenant_id=$1::uuid AND role='tenant_admin' AND is_active IS NOT FALSE
+                LIMIT 2""", tenant_id,
         )
         recipient = recipients[0]["email"] if len(recipients) == 1 else None
         suffix = "paid" if paid else "payment_failed"

@@ -71,6 +71,40 @@ async def test_review_authorization_preserves_legacy_evidence_and_applies_nothin
     assert billing._apply_webhook_event.await_count == 1 and (await inspect(f))[1] == 1
 
 
+async def test_a_reviewed_closed_dispute_can_be_replayed_once(webhook_db):
+    # QA F13-05: a won chargeback stuck in review had no operator recovery, so
+    # the restored plan or top-up minutes could never be applied.
+    f = webhook_db
+    closed = {"id": f.prefix, "object": "event", "type": "charge.dispute.closed",
+              "livemode": False, "created": 1700000000, "api_version": "2025-09-30.clover",
+              "data": {"object": {"id": "dp_synthetic", "object": "dispute"}}}
+    async with acquire_with_tenant(f.pool, None) as conn:
+        await conn.execute("""INSERT INTO processed_webhook_events(event_id,event_type,processed_at)
+            VALUES($1,'charge.dispute.closed',now())""", f.prefix)
+    reads = []
+
+    async def provider(resource, method, identity):
+        reads.append(resource)
+        if resource == "Event":
+            return deepcopy(closed)
+        assert resource == "Dispute" and identity == "dp_synthetic"
+        return {"id": "dp_synthetic", "object": "dispute", "livemode": False, "status": "won"}
+
+    async def handler(conn, evt):
+        await effect(conn, evt)
+        return {"status": "handled"}
+
+    billing = SimpleNamespace(billing_mode="test", _stripe_call=AsyncMock(side_effect=provider),
+                              _apply_webhook_event=AsyncMock(side_effect=handler))
+    recovery = BillingReconciliation(f.pool, billing)
+    result = await recovery.authorize_retry(
+        f.prefix, operator="synthetic operator", reason="Dispute won at the provider; restore once.")
+    assert result["state"] == "pending" and "Dispute" in reads
+    assert (await recovery.retry(f.prefix))["status"] == "handled"
+    assert (await recovery.retry(f.prefix))["status"] == "duplicate"
+    assert billing._apply_webhook_event.await_count == 1 and (await inspect(f))[1] == 1
+
+
 @pytest.mark.parametrize("operator,reason", [("", "Substantive review reason"), ("operator", "short")])
 async def test_retry_authorization_requires_operator_and_substantive_reason(webhook_db, operator, reason):
     f = webhook_db

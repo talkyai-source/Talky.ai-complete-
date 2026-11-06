@@ -27,6 +27,10 @@ def should_run_hourly(now: datetime, forced: bool) -> bool:
 
 
 async def main(argv: list[str] | None = None) -> int:
+    # Workers never ran app_bootstrap.configure_logging, so customer details
+    # reached the journal in clear (QA F2-10). Idempotent.
+    from app.core.log_redact import install_pii_log_redaction
+    install_pii_log_redaction()
     parser = argparse.ArgumentParser(description="Support deadline and housekeeping passes")
     parser.add_argument("--hourly", action="store_true", help="also run the hourly housekeeping now")
     args = parser.parse_args(argv)

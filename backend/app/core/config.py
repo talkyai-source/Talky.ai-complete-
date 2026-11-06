@@ -127,6 +127,12 @@ class Settings(BaseSettings):
     jwt_audience: str | None = None  # Optional audience claim (aud)
     jwt_leeway_seconds: int = 60  # Clock skew tolerance (60 seconds)
 
+    @field_validator("environment", mode="before")
+    @classmethod
+    def _normalize_environment(cls, value: Any) -> Any:
+        # Read one way everywhere (QA F2-15): " Production " is production.
+        return value.strip().lower() if isinstance(value, str) else value
+
     @field_validator("jwt_secret", "secret_key", "jwt_secret_previous", mode="before")
     @classmethod
     def _normalize_secret_fields(cls, value: Any) -> str | None:

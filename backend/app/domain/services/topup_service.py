@@ -150,6 +150,12 @@ class TopupService:
         if row.get("expires_days") is not None:
             # Bought minutes carry over until used; the meter has no expiry.
             raise TopupError(f"Top-up package {code!r} expires, which is not supported")
+        from app.domain.services.billing_catalog import _EXPONENTS
+
+        if str(row.get("currency") or "").lower() not in _EXPONENTS:
+            # The credit path fails closed on a currency outside this table,
+            # so a sale would be paid and never credited (QA F13-09).
+            raise TopupError(f"Package {code!r} is priced in a currency that cannot be credited")
         return dict(row)
 
     # ── order ───────────────────────────────────────────────────────────────

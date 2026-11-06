@@ -21,6 +21,7 @@ from app.core.security.platform_admin_guard import (
     require_platform_admin_mutation,
 )
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.billing_catalog import _EXPONENTS
 from app.domain.services.payg import AUDIENCES
 
 router = APIRouter(prefix="/billing/packages", tags=["admin"])
@@ -54,6 +55,10 @@ class PackageCreate(BaseModel):
     def _currency(cls, value: str) -> str:
         if not re.fullmatch(r"[A-Z]{3}", value):
             raise ValueError("currency: three capital letters, e.g. USD")
+        # Stripe accepts more currencies than the minute-credit path, which
+        # fails closed: such a bundle would be paid and never credited.
+        if value.lower() not in _EXPONENTS:
+            raise ValueError("currency: one the minute credit supports, e.g. USD, GBP or EUR")
         return value
 
     @field_validator("audience")

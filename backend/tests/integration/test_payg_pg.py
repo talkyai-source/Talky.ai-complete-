@@ -143,7 +143,9 @@ async def payg_db():
 
 
 async def _audience(db, key):
-    async with acquire_with_tenant(db.pool, str(db.tenants[key])) as conn:
+    # A service-scoped read, as the endpoint and the call guard use: the
+    # formal parent and hold rows belong to other tenants.
+    async with acquire_with_tenant(db.pool, None) as conn:
         return await tenant_purchase_audience(conn, str(db.tenants[key]))
 
 
@@ -179,6 +181,31 @@ async def test_who_buys_which_bundles_comes_from_the_account(payg_db):
     assert await _audience(db, "subscriber") == SUBSCRIBER
     with pytest.raises(PurchaseRefused):
         await _audience(db, "suspended")
+
+
+@pytest.mark.parametrize("barred", ["status_suspended", "pending_deletion", "formal_hold"])
+async def test_an_account_barred_from_calling_cannot_buy_minutes(payg_db, barred):
+    # QA F13-07 / FT-135: the gate read only subscription_status, so these
+    # accounts, which the call authority refuses, could still pay for minutes.
+    db = payg_db
+    key = "barred_" + barred
+    db.tenants[key] = uuid4()
+    status = {"status_suspended": "suspended", "pending_deletion": "pending_deletion"}.get(barred, "active")
+    async with db.owner.transaction():
+        await db.owner.execute("SET LOCAL app.bypass_rls = 'on'")
+        await db.owner.execute(
+            """INSERT INTO tenants (id, business_name, plan_id, minutes_allocated, minutes_used,
+                   subscription_status, status)
+               VALUES ($1, 'Synthetic barred account', NULL, 0, 0, 'inactive', $2)""",
+            db.tenants[key], status)
+        if barred == "formal_hold":
+            await db.owner.execute(
+                """INSERT INTO suspension_events (target_type, target_id, suspension_type,
+                       reason_category, reason_description)
+                   VALUES ('tenant', $1, 'immediate', 'qa', 'Synthetic formal hold')""",
+                db.tenants[key])
+    with pytest.raises(PurchaseRefused):
+        await _audience(db, key)
 
 
 async def test_paying_for_a_bundle_moves_a_new_account_to_pay_as_you_go_with_exactly_those_minutes(payg_db):
@@ -264,6 +291,27 @@ async def test_an_admin_can_add_a_bundle_and_take_one_off_sale(payg_db):
 
     assert off.status_code == 200, off.text
     assert "test_payg_500" not in {p["code"] for p in await db.service.packages(audience=PAYG)}
+
+
+async def test_a_bundle_cannot_be_sold_in_a_currency_the_credit_path_refuses(payg_db):
+    # QA F13-09: SEK passed the admin API and Stripe, then the credit path
+    # failed closed, so the customer paid and got no minutes.
+    db = payg_db
+    refused = await db.http("staff", "POST", "/admin/billing/packages", json={
+        "code": "test_payg_sek", "name": "100 minutes", "minutes": 100, "price_cents": 5000,
+        "currency": "SEK", "audience": "payg"})
+    assert refused.status_code == 422, refused.text
+    # A bundle already stored in such a currency is never ordered either.
+    code = "test_sek_" + uuid4().hex[:8]
+    await db.owner.execute(
+        """INSERT INTO topup_packages (code, name, minutes, price_cents, currency, audience, is_active, sort_order)
+           VALUES ($1, 'Legacy SEK bundle', 100, 5000, 'SEK', 'payg', TRUE, 90)""", code)
+    try:
+        with pytest.raises(TopupError, match="cannot be credited"):
+            await db.service.create_order(tenant_id=str(db.tenants["new"]), user_id=None,
+                                          package_code=code, audience=PAYG)
+    finally:
+        await db.owner.execute("DELETE FROM topup_packages WHERE code = $1", code)
 
 
 async def test_only_a_platform_admin_can_change_prices(payg_db):

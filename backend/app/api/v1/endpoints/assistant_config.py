@@ -3,7 +3,7 @@ Assistant Model Configuration Endpoint
 
 Per-tenant GET/PUT for the dashboard assistant's Groq model selection.
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
@@ -67,6 +67,7 @@ async def set_assistant_model(
 
 @router.get("/ws-token")
 async def assistant_ws_token(
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Mint a short-lived token for the assistant WebSocket auth frame.
@@ -82,6 +83,17 @@ async def assistant_ws_token(
     """
     if not current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No tenant_id on user")
+    # The socket accepts only a session-bound token (it checks that the
+    # token's ``sid`` session is still live). Minted without one, this
+    # fallback could never open the socket, so the assistant showed "session
+    # ended" whenever the cookie missed the handshake (QA F11-07). Bind it to
+    # the session this request was verified against.
+    session_id = getattr(request.state, "authenticated_session_id", None)
+    if not session_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Your login session has ended. Please sign in again.",
+        )
 
     from datetime import timedelta
     from app.core.jwt_security import encode_access_token
@@ -91,6 +103,7 @@ async def assistant_ws_token(
         email=current_user.email,
         role=current_user.role,
         tenant_id=str(current_user.tenant_id),
+        session_id=str(session_id),
         ttl=timedelta(minutes=2),
     )
     return {"token": token}

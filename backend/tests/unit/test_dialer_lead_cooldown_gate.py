@@ -168,3 +168,29 @@ async def test_genuine_cooldown_retry_delay_has_a_floor_and_a_fallback():
 
     # CallingRules(min_hours_between_calls=2) -> fallback is the full 2h window.
     assert worker2.queue_service._redefer_inflight.call_args.kwargs["delay_seconds"] == 7200
+
+
+@pytest.mark.asyncio
+async def test_repeat_dials_are_counted_even_when_the_tenant_set_no_cap():
+    """QA F12-05: the count used to be taken only when a tenant had set a cap,
+    which no screen could do, so the platform cap never saw any dials."""
+    worker = _cooldown_worker()
+    worker._lead_has_live_or_answered_call = AsyncMock(return_value=True)
+
+    await worker.process_job(_job())
+
+    worker._get_lead_attempts_today.assert_awaited_once()
+    assert worker.rules_engine.can_make_call.await_args.kwargs["lead_attempts_today"] == 0
+
+
+@pytest.mark.asyncio
+async def test_the_gate_is_given_the_number_being_dialled():
+    """The legal calling-hours floor (QA F12-01) runs inside can_make_call
+    only when the dialer passes the number; a gate that never receives its
+    input is a gate that never runs."""
+    worker = _cooldown_worker()
+    worker._lead_has_live_or_answered_call = AsyncMock(return_value=True)
+
+    await worker.process_job(_job())
+
+    assert worker.rules_engine.can_make_call.await_args.kwargs["phone_number"] == "+16478471491"

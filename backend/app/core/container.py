@@ -5,6 +5,7 @@ Manages creation and lifecycle of all services and providers.
 FIX: Redis connection now reads REDIS_PASSWORD from environment and
      builds the authenticated connection URL correctly.
 """
+import asyncio
 import os
 import logging
 from typing import Optional
@@ -23,6 +24,18 @@ from app.core.db import init_db_pool, close_db_pool
 from app.core.postgres_adapter import Client
 
 logger = logging.getLogger(__name__)
+
+
+# Production never runs on the in-memory fallback (QA F2-16): every service
+# would hold None for good, queue jobs in one process's memory and rate-limit
+# per process. Redis gets about 30 s to answer at start-up (it can come up late
+# after a reboot); then the API refuses to start and systemd restarts it.
+_REDIS_STARTUP_RETRY_DELAYS_S = (1, 2, 4, 8, 8, 8)
+
+
+def redis_required() -> bool:
+    """True where the API must not start, or report ready, without Redis."""
+    return os.getenv("ENVIRONMENT", "development").strip().lower() == "production"
 
 
 def _build_redis_url() -> str:
@@ -180,7 +193,7 @@ class ServiceContainer:
         logger.info("PostgreSQL connection pool initialized")
 
         # 2. Redis (with auth)
-        await self._initialize_redis()
+        await self._initialize_redis_with_retry()
 
         # 3. Queue
         await self._initialize_queue_service()
@@ -328,6 +341,8 @@ class ServiceContainer:
             behaviour exactly so dev/staging single-Redis setups keep working.
         """
         if not REDIS_AVAILABLE:
+            if redis_required():
+                raise RuntimeError("redis.asyncio is not installed; ENVIRONMENT=production requires Redis")
             logger.warning("redis.asyncio not installed — queue features will use fallback")
             return
 
@@ -378,9 +393,33 @@ class ServiceContainer:
                 logger.info(f"redis_connected mode=single url={log_url}")
             await self._redis.ping()
         except Exception as e:
-            logger.warning(f"Redis not available ({e}) — using in-memory fallback")
             self._redis = None
             self._redis_pubsub = None
+            if redis_required():
+                raise  # _initialize_redis_with_retry retries, then refuses to start
+            logger.warning(f"Redis not available ({e}) — using in-memory fallback")
+
+    async def _initialize_redis_with_retry(self) -> None:
+        """Production retries Redis for about 30 s, then refuses to start rather
+        than run on the in-memory fallback (QA F2-16). Elsewhere the first
+        attempt stands, fallback included."""
+        delays = iter(_REDIS_STARTUP_RETRY_DELAYS_S)
+        while True:
+            try:
+                await self._initialize_redis()
+                return
+            except Exception as exc:
+                delay = next(delays, None)
+                if delay is None:
+                    raise RuntimeError(
+                        "Redis is required when ENVIRONMENT=production and is unreachable; "
+                        "refusing to start on the in-memory fallback"
+                    ) from exc
+                logger.warning(
+                    "redis_unavailable_at_startup err=%s retry_in=%ss",
+                    type(exc).__name__, delay,
+                )
+                await asyncio.sleep(delay)
 
     async def _initialize_queue_service(self) -> None:
         try:

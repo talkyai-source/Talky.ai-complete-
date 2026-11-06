@@ -149,3 +149,31 @@ async def test_deep_probe_not_ready_when_container_uninitialized(monkeypatch):
     assert result["db"] == "not_initialized"
     assert result["redis"] == "not_initialized"
     assert resp.status_code == 503
+
+
+# QA F2-16: production booted with Redis unreachable, swapped in the in-memory
+# fallback and reported ready, while campaign jobs queued in one process's
+# memory and rate limits ran per process. Production never runs that way.
+@pytest.mark.parametrize("redis_state", ["disabled", "down"])
+async def test_production_without_redis_is_not_ready(monkeypatch, redis_state):
+    monkeypatch.setenv("ENVIRONMENT", "production")
+    redis = None if redis_state == "disabled" else _FakeRedis(fail=True)
+    _patch_container(monkeypatch, _make_container(pool=_FakePool(), redis=redis))
+
+    resp = _new_response()
+    result = await health.deep_readiness_probe(resp)
+
+    assert result["redis"] == redis_state
+    assert result["ready"] is False
+    assert resp.status_code == 503
+
+
+async def test_development_without_redis_stays_ready(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    _patch_container(monkeypatch, _make_container(pool=_FakePool(), redis=None))
+
+    resp = _new_response()
+    result = await health.deep_readiness_probe(resp)
+
+    assert result["ready"] is True
+    assert resp.status_code != 503

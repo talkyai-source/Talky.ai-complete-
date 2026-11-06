@@ -138,12 +138,53 @@ async def test_start_campaign_delegates_to_domain_service_and_reports_enqueued_j
         db_client=db,
         campaign_id="out-1",
         conversation_id="conversation-1",
+        confirm=True,
     )
 
     assert result["success"] is True
     assert result["jobs_enqueued"] == 2
     assert service.start_calls == [("out-1", "tenant-1")]
     assert db.updates == [], "the assistant must not bypass CampaignService with a direct status update"
+
+
+@pytest.mark.asyncio
+async def test_start_campaign_without_apply_previews_and_dials_nobody(monkeypatch):
+    campaign = {
+        "id": "out-1",
+        "tenant_id": "tenant-1",
+        "name": "Outbound",
+        "status": "draft",
+        "direction": "outbound",
+    }
+    db = _Db(campaign)
+    service = _CampaignService(campaign)
+    monkeypatch.setattr(campaign_tools, "_get_campaign_service", lambda _db: service, raising=False)
+
+    result = await campaign_tools.start_campaign(
+        tenant_id="tenant-1",
+        db_client=db,
+        campaign_id="out-1",
+        conversation_id="conversation-1",
+    )
+
+    assert result["preview"] is True
+    assert {"field": "Campaign", "before": None, "after": "Outbound"} in result["changes"]
+    assert result["_apply_args"] == {"campaign_id": "out-1"}
+    assert service.start_calls == []
+    assert db.updates == []
+
+
+@pytest.mark.asyncio
+async def test_applied_plan_step_starts_the_campaign_it_previewed(monkeypatch):
+    from unittest.mock import AsyncMock
+    from app.services.assistant_plan_steps import execute_action
+
+    effect = AsyncMock(return_value={"success": True})
+    monkeypatch.setattr("app.infrastructure.assistant.tools.start_campaign", effect)
+    await execute_action(object(), "start_campaign", "tenant-1", {"campaign_id": "out-1"}, {})
+
+    assert effect.await_args.kwargs["campaign_id"] == "out-1"
+    assert effect.await_args.kwargs["confirm"] is True
 
 
 @pytest.mark.asyncio

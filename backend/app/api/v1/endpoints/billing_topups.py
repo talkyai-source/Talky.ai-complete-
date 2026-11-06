@@ -43,6 +43,7 @@ from app.api.v1.dependencies import (
 )
 from app.core.container import get_container
 from app.core.db_utils import acquire_with_tenant
+from app.utils.csv_safe import csv_safe
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.billing_catalog import _EXPONENTS
 from app.domain.services.billing_checkout import CheckoutError, billing_return_urls
@@ -50,6 +51,7 @@ from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.billing_service import BillingService
 from app.domain.services.minutes_quota import compute_minutes_status
 from app.domain.services.payg import PurchaseRefused, tenant_purchase_audience
+from app.domain.services.telephony.call_authority import CallAuthorityUnavailable
 from app.domain.services.topup_service import TopupError, TopupService, public_ledger_entry
 from app.domain.services.topup_usage import topup_minutes_left
 
@@ -72,11 +74,18 @@ async def _purchase_audience(tenant_id: str) -> str:
     """Which bundles this account may buy: ``subscriber`` top-ups for a paid
     plan in good standing, ``payg`` bundles for any other account that may
     place calls (owner decision 2026-10-31). Refused accounts get a 409."""
-    async with acquire_with_tenant(get_container().db_pool, tenant_id) as conn:
+    # The formal parent/hold rows belong to other tenants: use the service
+    # read with an explicit bound tenant predicate, as the call guard does.
+    async with acquire_with_tenant(get_container().db_pool, None) as conn:
         try:
             return await tenant_purchase_audience(conn, tenant_id)
         except PurchaseRefused as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
+        except CallAuthorityUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Your account could not be checked just now. Please try again.",
+            ) from exc
 
 
 def _service() -> TopupService:
@@ -440,7 +449,9 @@ async def reconciliation(
                                       "provider_event_id", "provider_payment_id",
                                       "order_status", "note"])
         writer.writeheader()
-        writer.writerows(records)
+        # Business names and notes are tenant text; a leading = + - @ must
+        # not run as a formula in the reader's spreadsheet (QA F14-01).
+        writer.writerows({key: csv_safe(value) for key, value in rec.items()} for rec in records)
         return StreamingResponse(
             iter([buf.getvalue()]),
             media_type="text/csv",
