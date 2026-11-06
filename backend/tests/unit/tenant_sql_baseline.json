@@ -66,7 +66,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "0265b841bb081f42920ded083454f77109f95f3e6822a866036b124366357d30",
+      "id": "2d8a79cd53306bec9bf82a8add623b4f2b9e29c52721c863550cc79554da4298",
       "file": "app/api/v1/endpoints/security_events.py",
       "function": "get_open_alerts",
       "line": 438,
@@ -1819,7 +1819,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3a70fd1157fa52b1cc13e6d28a0e750bf66fe3ad5165126b6f7d3bc2e046904d",
+      "id": "ccce735c942ef4c3fba99ff2322a8aa5edeb50960283879d5a5dbdfe0941077b",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "get_abuse_statistics",
       "line": 436,
@@ -1835,7 +1835,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3b5fef1f2dc17c6888bdc9c0c51120c19ff94adf6050fc2ac8295576abcf9f09",
+      "id": "3626903d9964b894b0b92874d25c1270f87be7a67c1130bb30b01f82626b5712",
       "file": "app/api/v1/endpoints/security_events.py",
       "function": "resolve_security_event",
       "line": 396,
@@ -1867,7 +1867,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3bcdcc096da13cb5bb22d5f873fb864a747a9f8dcea8b4cd120c30371f99a3ca",
+      "id": "37c461d6ec8cc184f49078d6e14ae085013bba85bac3b6cccd4a0dc1820eff9d",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "get_abuse_statistics",
       "line": 414,
@@ -1899,7 +1899,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3c481dce762ae49fd9962e3e30e73e074e6a8422aff84eab9a39f5da5da6d11f",
+      "id": "7ce71ba6c314bbc085fb68a652843d9acb4c33c24a82f22a603c2d718d92feb5",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "get_abuse_statistics",
       "line": 404,
@@ -2076,10 +2076,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3f93ac5d411996463ce7f0899145fe5fcc8b59e425655ef12388bb9dcbf04d28",
+      "id": "82d30796c7c3180903b20c9fd8471e2bf79432bb51caa3bbb06315b4db3f8701",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1168,
+      "line": 1169,
       "method": "fetch",
       "tables": [
         "calls",
@@ -2418,7 +2418,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4828c95fec7b04b55a547386e765e3b8e919cc69f2f36fe121e4840a63e02151",
+      "id": "271770d97992e6e9cdbc9be1f3c94594b04be83476318cedaadc28d146b1ed71",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "get_abuse_statistics",
       "line": 448,
@@ -2643,10 +2643,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4e8820f0c8b6aff0d86a47de3630fe7ba89bef94cdc4ae2da418b5c9c092be2f",
+      "id": "30ca91a513a44b65aae31133125ceb3669ca20e6d1521a3a46c340c0cd4cb1dd",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
-      "line": 351,
+      "line": 352,
       "method": "fetch",
       "tables": [
         "calls",
@@ -3455,7 +3455,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "65580efb8a981fd598412fdf786e0c2efa11caeec414464c981806e0a0ed8e77",
+      "id": "26cd2dcf8ef4e45110c1fcad2ad67f4d1f25fbe6b9810a3c341d0ad34d5c7ae9",
       "file": "app/api/v1/endpoints/security_events.py",
       "function": "update_security_event",
       "line": 349,
@@ -3553,7 +3553,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6745daf3d305b4203566026b86524843b627d160f0131ff93ba716b852d679e4",
+      "id": "1704e09e738a86aa004420ac5e6f21a821b631413dc174a2a29ccb34775f7c16",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "get_abuse_statistics",
       "line": 425,
@@ -3921,7 +3921,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6f12c7264c1d44180650eebe7fe944dcfae622d4c343679ddd0e78f869951014",
+      "id": "2d61381e6a1487795c7b9a43d6554c7c270b792c2152def1fe971d7d21a33095",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "list_abuse_events",
       "line": 205,
@@ -4129,7 +4129,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "74a3d19fbea10a69c70d7df0dd0bc1b9be67c4a66d6620995dd6ec3a922715ca",
+      "id": "aa5f23866bc66521df59b81001b4e7d2ecac4a79e867692e66b4ffe3409c3976",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "get_abuse_alerts",
       "line": 789,
@@ -5601,10 +5601,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "9bcb5c78634652ca5e7f9ab49e3f42766b1d9b7496ba88a3dd073108eef5242b",
+      "id": "e36ef6e1139fbc434300f4d72d73a6a7053ad35354cf4ffdce64bd734792133d",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 924,
+      "line": 926,
       "method": "fetchval",
       "tables": [
         "assistant_actions"
@@ -5617,7 +5617,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "9c837878620236aeccf415cf13da337f12bfa7db60609a98b5b6efeae4780f07",
+      "id": "f55c21f5257265db0f417321e1a9512794542107900d0cabb6e13db899726aff",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "list_abuse_rules",
       "line": 510,
@@ -6598,7 +6598,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b1a71da2b99f7ee23ff8bbde10931d6111595549fe4716574eaade2281b865e0",
+      "id": "198db28e366211c37062418c5dcb28379a8885d8661e688b82b6b408e7f2338b",
       "file": "app/api/v1/endpoints/security_events.py",
       "function": "list_security_events",
       "line": 215,
@@ -7189,10 +7189,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c2a95031f0ee36cfec1ef0b10023b3274bde1aa248fbdcf7e87c9cce81330987",
+      "id": "122f74486eb246c6ec362ba84a0b226beb58605ff7c761008aa630c07e2dd3fa",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
-      "line": 1041,
+      "line": 1042,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7660,10 +7660,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "cb2fb23d49f0c3d3e29bafd3b0c802c6c3ff62dde9462763d48ae757e865a417",
+      "id": "5f11c254817903808e79162db5c480212a099d2a7fa05a1aa4f89452db854c66",
       "file": "app/api/v1/endpoints/assistant_ws.py",
       "function": "list_actions",
-      "line": 925,
+      "line": 927,
       "method": "fetch",
       "tables": [
         "assistant_actions"
@@ -8156,7 +8156,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d8f8fb3c3d9aefb3a0be473626f20e07e79edf6b2bbf2102a78966c8446ff738",
+      "id": "a70917121950d3697fca773b08392224898bce90392c13be6be4bbc3741763f7",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "_primary_membership_review",
       "line": 338,
@@ -8457,10 +8457,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e42a81435ebbf46457f6ecd9f2c9fbc26cd60db71d8c1590f518c304c199bc02",
+      "id": "7987e18825ffcdad9365c84a9cca2c816a2927bcd41232a32da0a0999be4400f",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
-      "line": 436,
+      "line": 437,
       "method": "fetch",
       "tables": [
         "calls",
@@ -8663,10 +8663,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ed18b3f2eab15af78f4716c16696fd7a530056f0da03bb5eeac84f5bc54dfb36",
+      "id": "4534bdad3c225f519e506e0cca6a2bf895137b98df20f02e7d65b9a2b70f489e",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "_has_active_compliance_hold",
-      "line": 827,
+      "line": 828,
       "method": "fetchval",
       "tables": [],
       "sql": "SELECT {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='$1'))])}",
@@ -9011,7 +9011,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f4992a0f3c594047ccee689f1638f80895bdfd9b51d34945eda8151a316bed7c",
+      "id": "c7ae0a5bb753de95d34db6471d206d0d411bcb0739c9014d340ab93cdea4d89f",
       "file": "app/api/v1/endpoints/security_events.py",
       "function": "get_overdue_alerts",
       "line": 473,
@@ -9073,10 +9073,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f53496029223e67c8365a874fecb8e22c92b1870efb276c33617218a73c2850a",
+      "id": "cecc3a092c8b81732b04a983cf8b8e7398dc8a15a12065765ce1b80f43e1ca91",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
-      "line": 385,
+      "line": 386,
       "method": "fetchval",
       "tables": [
         "recordings_s3"
@@ -9386,10 +9386,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ff0c070ea30e587ca3baa86ae1651d356661a38aa3871c976c35580899f60917",
+      "id": "5cefd76a5f141cd4c0e4c162844fdcaf3374f2a5cba7a3d31aea6e1ec40604b7",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
-      "line": 896,
+      "line": 897,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -9553,7 +9553,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Resolves one platform request UUID for the session owner check (endpoint:146–151) or details path (235–246), which restricts response to requestor/recorded approver/admin condition. Current HTTP entry also has platform-only permission admission described above. Query does not fetch tenant business data."
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Resolves one platform request UUID for the session owner check (endpoint:146\u2013151) or details path (235\u2013246), which restricts response to requestor/recorded approver/admin condition. Current HTTP entry also has platform-only permission admission described above. Query does not fetch tenant business data."
     },
     {
       "id": "08507902eaa7f1f9141d7a3042e8600bd1d805f15314fcfe4316397a7c6aef28",
@@ -9768,7 +9768,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Platform emergency approver endpoint:114–123 denies one UUID request and records the authenticated denier. A platform operator may deny another operator's request; no tenant table is touched."
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Platform emergency approver endpoint:114\u2013123 denies one UUID request and records the authenticated denier. A platform operator may deny another operator's request; no tenant table is touched."
     },
     {
       "id": "11055157f7e985b3d3795aa1f9e40be69fa8ecd650b0ccf793237cc59f43ce55",
@@ -9833,10 +9833,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "13bf4262a7d5a6a174cd85989801338f1603356e5c830c2001121f631ba7778c",
+      "id": "7d544433cfa1d87bda418eafa0cf0a4927e2749b1a7900c8797bf5c44691ebea",
       "file": "app/api/v1/endpoints/admin/connectors.py",
       "function": "list_admin_connectors",
-      "line": 139,
+      "line": 141,
       "method": "fetch",
       "tables": [
         "connector_accounts",
@@ -9868,10 +9868,10 @@
       "category": "operator_billing_reconciliation"
     },
     {
-      "id": "1721740ac9d58ebf533bbdec2ecf157a40ef4abb92ec2df7e197efc4ccda4a75",
+      "id": "9a292aa3b51e0b5a33abe016cd63f194e049cd41a54392ba51074d0e5ba16712",
       "file": "app/api/v1/endpoints/admin/partners.py",
       "function": "list_partners",
-      "line": 69,
+      "line": 71,
       "method": "fetchval",
       "tables": [
         "white_label_partners"
@@ -9885,10 +9885,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "1775c9db43235ab5e3063376d1cee2cab27d672d7c66152f8cfa94a8673f9c39",
+      "id": "c81acd6ee9fd6479a71f4fc2d9b36be8aec9fbd46614ef3a0b2647918de09609",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_recordings",
-      "line": 477,
+      "line": 478,
       "method": "fetchval",
       "tables": [
         "calls",
@@ -9938,10 +9938,10 @@
       "category": "system_partner_aggregate"
     },
     {
-      "id": "18e8c322da1dd1ef797c70e7a54e77eb9641d57debde188f5edf5a9e016f4870",
+      "id": "4bab50813e9ffb6645d342b14eee3d00798e3c527b9e276a2dbb8c193f386dcb",
       "file": "app/api/v1/endpoints/admin/connectors.py",
       "function": "list_admin_connectors",
-      "line": 138,
+      "line": 140,
       "method": "fetchval",
       "tables": [
         "connectors"
@@ -10061,7 +10061,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "20fe120a603aa0996681b328d9e87a9dc39968d94294f6d47f40a87760b42ddb",
+      "id": "20981dddeea62df6eab5a5327184a09930fb14952a20526289a19765ea7c4bd0",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
       "line": 503,
@@ -10345,7 +10345,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Intentional global pending/unexpired platform recovery queue, exposed only by emergency admin endpoint:202–207. Tenant filtering would hide other platform operators' incidents."
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Intentional global pending/unexpired platform recovery queue, exposed only by emergency admin endpoint:202\u2013207. Tenant filtering would hide other platform operators' incidents."
     },
     {
       "id": "2ce8fcde516e6856dc67a26eb91f91c1d208a274af7afee32437e9d09cd55782",
@@ -10403,7 +10403,7 @@
       "line": 691,
       "method": "_Step",
       "tables": [],
-      "sql": "Set up and loaded — waiting for the provider to answer the phone system's checks.",
+      "sql": "Set up and loaded \u2014 waiting for the provider to answer the phone system's checks.",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -10548,10 +10548,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "383e5d86151aa791ffa63071d35c0b59489f935907304187efd165c4f319d781",
+      "id": "e2e1f87a9b0c8586ebef2a41df1275367227d7b85119b79a0359965139bb63ed",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_feedback",
-      "line": 578,
+      "line": 579,
       "method": "fetchval",
       "tables": [
         "call_feedback",
@@ -10598,7 +10598,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "3b34646d6344459ce14b40a7306840910b5f73d1ccce0e77a48e588ca74ed82e",
+      "id": "a091c7092580069c8c7b04abb790c34ca2287481e60a8a20133e808f6fe72a9e",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "list_users",
       "line": 409,
@@ -10729,10 +10729,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "41e5fb7fe592f632596b982ca9fe48c1a26ecdace9c5b2eef185621f59a742f7",
+      "id": "85d6d0727fd4a27e7af86386b16bd6e951ee43836f1007bbc48a0241054034d5",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
-      "line": 1051,
+      "line": 1053,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign pacing",
@@ -10878,10 +10878,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "4907bcbb3d5296f4e830794a90b9b9aaf1ab7c91b5b7b9c9c7965b834211170e",
+      "id": "4b5784092513add0ff47721a3553c4eb8df437938dc5f14de5f41cbd87cd3702",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "get_admin_media_deletion",
-      "line": 278,
+      "line": 279,
       "method": "_read_media_deletions",
       "tables": [
         "admin_media_deletion_intents"
@@ -10895,10 +10895,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "4a321a2ce48bcb795e577113935858f91946d93d76729665d4781e78521e1bec",
+      "id": "19bdf7476b0973fd343d1b3d378dca17e7ae5cdc335b6a212e50cdae76d34b04",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
-      "line": 683,
+      "line": 684,
       "method": "_pinned_tts_provider",
       "tables": [],
       "sql": "create",
@@ -11080,7 +11080,7 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "507299b38fe713ceb7a9408e986c3139bbde5f6054806be3ffa4a23b6144706c",
+      "id": "92acdde41e673a8ed8127a15c1c1490979a219cb5e5d83686057abfe6a85d9bf",
       "file": "app/api/v1/endpoints/security_events.py",
       "function": "escalate_event",
       "line": 510,
@@ -11215,10 +11215,10 @@
       "category": "platform_catalog"
     },
     {
-      "id": "55d5fa06cd0cbd1468cccda6f9b5ff0a2d362233324f3ce888af942a6485c62b",
+      "id": "26cc03180001c6462f9e384688b64930a89f43e4a160219c87363bfc0b557bb2",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_feedback",
-      "line": 582,
+      "line": 583,
       "method": "fetch",
       "tables": [
         "call_feedback",
@@ -11303,10 +11303,10 @@
       "category": "system_audit"
     },
     {
-      "id": "5a497081fb387692963be38a432e0a8f031a0afa71a3de08393da72f474e30c4",
+      "id": "3f1eaf71f674ec1a86f636144934e3874dce57d7a01c4a3d1cc427cce21b3f0a",
       "file": "app/api/v1/endpoints/admin/health/incidents.py",
       "function": "_transition",
-      "line": 74,
+      "line": 76,
       "method": "fetchrow",
       "tables": [],
       "sql": "{branch}",
@@ -11367,7 +11367,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "5ad0942b66a6963983eaadfd638b5913dc8d5f8e9b88de1dcf2596b040dee00d",
+      "id": "ff38a572f97ae831fba5d789dde3147def2864f9beb3368fece961694e246202",
       "file": "app/api/v1/endpoints/call_limits.py",
       "function": "list_dnc_entries",
       "line": 512,
@@ -11382,10 +11382,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "5b87609b2ac8c89f58ae358649f78a99e4f6233080015159f81be96ff33a6798",
+      "id": "e178cdda86a336c3d29f121b1c6525d08e172e50d2112ef43bf53c7fdf2158a7",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "_read_media_deletions",
-      "line": 225,
+      "line": 226,
       "method": "fetch",
       "tables": [],
       "sql": "{query}",
@@ -11497,10 +11497,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "64946807a7388b1f4514e5505d6e131161861cd69efcb044e579f72e06d28f10",
+      "id": "a17f83e070e86dc18291bc664f2184b7424beee626b4214864bf8905ff41142a",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
-      "line": 1416,
+      "line": 1418,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "delete campaign",
@@ -11679,7 +11679,7 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "6dbcf4f36f07481d75bff362bd24906b91c9e9011c088d79d41c1b92f8d3257f",
+      "id": "74d8683bb342ffb5ab200627ef9f707aebcaa1472140a69e123b4ce745e65c7d",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
       "line": 493,
@@ -11841,10 +11841,10 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "74cc0a87729d5735e10f34b35a58a8551f94044b6984147e1bdd446011a64775",
+      "id": "4ebeeed9bed9785904c851980c2eaf7bc13f67a2df131f738f382dc4720d86fc",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2058,
+      "line": 2060,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -12012,10 +12012,10 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "7bc4242f4757b4e99b71931ed2c8d50ceb34750d37a15058c43bbb3ddbc8f275",
+      "id": "3a00bcd0d6176db410e4af4ef64c508cdbea7c3af6fb18acec01f5c2ccf4d7ac",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
-      "line": 882,
+      "line": 883,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign",
@@ -12110,10 +12110,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "81b138c367a37ee902fe590ceab28b6371c29f4711a5cf72871d8518b0f9ce67",
+      "id": "b285c43a17c361abb104f3c51cc5c051ec504f20be90100880588f099deb612d",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 1922,
+      "line": 1924,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
@@ -12191,10 +12191,10 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "87aa819d91a2f705804638e5ab678562dbd5fda0108646256837d2ecae9627ad",
+      "id": "0d9138672bc09956ac88d4e0395624d83a086909910eaad39fdcb7b8d09d5572",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_recordings",
-      "line": 481,
+      "line": 482,
       "method": "fetch",
       "tables": [
         "calls",
@@ -12294,10 +12294,10 @@
       "category": "platform_account_enforcement"
     },
     {
-      "id": "89e0d49b06370a8979173d82cf1ff244e53077a37879eaa5e58e7be93835a11a",
+      "id": "8d6f174a6ca3bfe3f4d726ec9cffec3fbe09b0666a5d954f9a51e7a14a0b5bb8",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_media_deletions",
-      "line": 262,
+      "line": 263,
       "method": "_read_media_deletions",
       "tables": [
         "admin_media_deletion_intents"
@@ -12324,7 +12324,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current endpoint:277–285 requires emergency admin, resolved as platform-admin admission; stores post-incident review for one platform request. Reviewer may differ from requestor by design."
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current endpoint:277\u2013285 requires emergency admin, resolved as platform-admin admission; stores post-incident review for one platform request. Reviewer may differ from requestor by design."
     },
     {
       "id": "8b306ca2296c4b569131c5edd05350f56861b9a089bded22612486c62f03df3a",
@@ -12440,7 +12440,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "9197a8a6aebee69a5b112b7248248013a64ff137f779f19325177601e99dae2e",
+      "id": "dea0d6ada27d272e9331eff5cddd667906c35855a2755796d9b95821b1ef999a",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "update_user",
       "line": 769,
@@ -12491,7 +12491,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "92c05343e247a8351e8cf357bcf32d38085962a79eed5d6769ccab24b882716d",
+      "id": "c2c14a53e54d7ccf0a012d4f037ee02bb186be20d1a914ae917a141208d9c172",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "update_user",
       "line": 683,
@@ -12523,7 +12523,7 @@
       "category": "operator_seed"
     },
     {
-      "id": "94628baa125ceabb0c8e0ca25eb4adac014ac230e4a3dd14d10582c942fcb34e",
+      "id": "9ad8502903bac1ecd97a2f33aeff1ae7a96f0721deaae4def96d2ba70476573d",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "create_user",
       "line": 589,
@@ -12716,7 +12716,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current sole app caller endpoint:140–153 first loads the request and requires requestor_id equal authenticated user ID. Service fetches that platform request, checks approved/unexpired/not-created state. Identity ownership, not tenant ownership, governs issuance."
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current sole app caller endpoint:140\u2013153 first loads the request and requires requestor_id equal authenticated user ID. Service fetches that platform request, checks approved/unexpired/not-created state. Identity ownership, not tenant ownership, governs issuance."
     },
     {
       "id": "9d65d3ce773f369fc343cd8bd7e35b2bc3e26ccf57b23eef12fabe6fca2babe2",
@@ -12803,10 +12803,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "a192c04985881171dad11badf42840de3f728b5bc45071d140be467fdbe10309",
+      "id": "3f6658510c8b1ee2f88cb98cbb917a618f80598023525e225e93edf6cdd683bd",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1406,
+      "line": 1407,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -12854,7 +12854,7 @@
       "reason": "Bounded platform maintenance discovery of stale refresh claims across tenants; joins connector and account tenant identity, returns only identifiers, then rechecks and writes inside that tenant transaction with audit. No provider call or credential value in this discovery."
     },
     {
-      "id": "a8b7383370fc24489f21d61008d229f58149ac60bc4ac2da097d93c564bd3936",
+      "id": "6ea0292acde622fe84dce2478330beddb3e5fe7ba1cdd70d97aa3ef4f36e76bc",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "delete_user",
       "line": 825,
@@ -13239,10 +13239,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "bb8180caf2bf818f9b9223380101f2c872672689a5666a3e5a4443ae384e9b38",
+      "id": "e4a668a95cd8036d885fc30cdcc2df12c77f3d64cde6c17700ac6f6ce7ef78e4",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "_feedback_storage_row",
-      "line": 616,
+      "line": 617,
       "method": "fetchrow",
       "tables": [
         "call_feedback",
@@ -13664,7 +13664,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current HTTP caller endpoint:176–185 is platform-admin admitted; revokes one platform request/session and records the terminating identity. Deliberate platform revocation across requestors, not tenant row access."
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current HTTP caller endpoint:176\u2013185 is platform-admin admitted; revokes one platform request/session and records the terminating identity. Deliberate platform revocation across requestors, not tenant row access."
     },
     {
       "id": "d67624825fa5e26422d83fc0e90c487d10e7b867b5d7521b74761bcbcc9f6791",
@@ -13718,10 +13718,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "d7f6c806e0fdd4a6cd6d964e810dd5a6efa48c89112b2668a4ac2183fb262f9b",
+      "id": "ab0c8a0fe9e91edc387bb5c66822c6ee1e3d9d419a1323e296148075ee40ccbc",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1361,
+      "line": 1362,
       "method": "fetch",
       "tables": [
         "call_feedback",
@@ -13859,7 +13859,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "e510e085b26878624556cc85209d9d854e6e3a99dd173212c726f5ba08b6ef22",
+      "id": "d3ebe87ae1a5f95cf2d6265636eb442ee3d03b91d3d2c6fb49466581f1834489",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "create_user",
       "line": 579,
@@ -13973,7 +13973,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Creates one new platform emergency request for the authenticated requestor supplied by endpoint:54–59. Platform account/recovery object; no tenant column or tenant business data."
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Creates one new platform emergency request for the authenticated requestor supplied by endpoint:54\u201359. Platform account/recovery object; no tenant column or tenant business data."
     },
     {
       "id": "ede3e2aa555c68bb23cac84719c7d42633b5a585fe7fc11d74f0880fa341b26b",
@@ -14008,10 +14008,10 @@
       "category": "system_bootstrap"
     },
     {
-      "id": "efb6a34a0f4b1e1de7f0966b8879150cf4e3a486998a28fafb9f451208e3b2d0",
+      "id": "d890061865b48fc037a4d82c9880b04e545a064b3882892bdf72701d22013842",
       "file": "app/api/v1/endpoints/admin/partners.py",
       "function": "list_partners",
-      "line": 70,
+      "line": 72,
       "method": "fetch",
       "tables": [
         "white_label_partners"

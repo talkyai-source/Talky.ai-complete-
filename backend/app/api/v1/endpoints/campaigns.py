@@ -9,6 +9,7 @@ Day 9 Additions:
 Refactored: Business logic delegates to CampaignService.
 """
 from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID, pagination_offset
 import logging
 import os
 import uuid
@@ -764,7 +765,7 @@ async def apply_tts_config(
 
 @router.get("/{campaign_id}")
 async def get_campaign(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     # Phase 3.3 — read-only; routes to replica pool when configured.
@@ -803,7 +804,7 @@ async def get_campaign(
 
 @router.put("/{campaign_id}", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def update_campaign(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     campaign_data: CampaignUpdateRequest,
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
@@ -897,9 +898,9 @@ async def update_campaign(
 
 @router.get("/{campaign_id}/calls")
 async def list_campaign_calls_with_transcripts(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     request: Request,
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -908,6 +909,7 @@ async def list_campaign_calls_with_transcripts(
 
     Powers the Script Card on the campaign detail page.
     """
+    pagination_offset(page, page_size)
     if not current_user.tenant_id:
         raise HTTPException(status_code=400, detail="User is not associated with a tenant")
 
@@ -963,7 +965,7 @@ async def get_campaign_readiness(
 
 @router.post("/{campaign_id}/start", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def start_campaign(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     request: Request,
     start_request: Optional[CampaignStartRequest] = None,
     current_user: CurrentUser = Depends(get_current_user),
@@ -1170,7 +1172,7 @@ async def start_campaign(
 
 @router.post("/{campaign_id}/pause", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def pause_campaign(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
@@ -1257,7 +1259,7 @@ async def pause_campaign(
 
 @router.post("/{campaign_id}/stop", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def stop_campaign(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     clear_queue: bool = Query(False, description="Clear pending jobs from queue"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
@@ -1354,7 +1356,7 @@ async def stop_campaign(
 
 @router.delete("/{campaign_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_DELETE))])
 async def delete_campaign(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1445,9 +1447,9 @@ async def delete_campaign(
 
 @router.get("/{campaign_id}/jobs")
 async def get_campaign_jobs(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     status: Optional[str] = Query(None, description="Filter by job status"),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
@@ -1458,6 +1460,7 @@ async def get_campaign_jobs(
     context is set on the connection; without it the SELECT returns
     zero rows. Same fix as the sibling stats / contacts endpoints.
     """
+    offset = pagination_offset(page, page_size)
     try:
         # RLS now scopes to the current tenant automatically. If
         # current_user has no tenant_id, return empty rather than 500.
@@ -1473,7 +1476,6 @@ async def get_campaign_jobs(
         if status:
             query = query.eq("status", status)
         
-        offset = (page - 1) * page_size
         response = query.order("created_at", desc=True).range(offset, offset + page_size - 1).execute()
         
         return {
@@ -1606,7 +1608,7 @@ _STATS_STRING_SUMMARY_SQL = """
 
 @router.get("/{campaign_id}/stats")
 async def get_campaign_stats(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
@@ -1792,7 +1794,7 @@ def _contact_response(row: dict) -> dict:
 
 @router.post("/{campaign_id}/contacts", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def add_contact_to_campaign(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     contact: ContactCreate,
     current_user: CurrentUser = Depends(get_current_user),
     supabase: Client = Depends(get_db_client)
@@ -1937,8 +1939,8 @@ async def add_contact_to_campaign(
 
 @router.patch("/{campaign_id}/contacts/{contact_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def update_contact_in_campaign(
-    campaign_id: str,
-    contact_id: str,
+    campaign_id: ResourceUUID,
+    contact_id: ResourceUUID,
     contact: ContactUpdate,
     current_user: CurrentUser = Depends(get_current_user),
     supabase: Client = Depends(get_db_client),
@@ -2068,8 +2070,8 @@ async def update_contact_in_campaign(
 
 @router.get("/{campaign_id}/contacts")
 async def list_campaign_contacts(
-    campaign_id: str,
-    page: int = Query(1, ge=1, description="Page number (1-indexed)"),
+    campaign_id: ResourceUUID,
+    page: int = Query(1, ge=1, le=10001, description="Page number (1-indexed)"),
     page_size: int = Query(50, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status (pending, called, completed, dnc)"),
     last_call_result: Optional[str] = Query(None, description="Filter by last call result"),
@@ -2098,6 +2100,7 @@ async def list_campaign_contacts(
     Returns:
         Paginated list of contacts with their call status
     """
+    offset = pagination_offset(page, page_size)
     try:
         # 1. Validate campaign exists. RLS scopes to the current tenant
         # automatically now that get_current_user is in the chain.
@@ -2133,7 +2136,6 @@ async def list_campaign_contacts(
             query = query.ilike("phone_number", f"%{search}%")
 
         # 3. Apply pagination
-        offset = (page - 1) * page_size
         response = query.order(
             "created_at", desc=True
         ).range(
@@ -2156,8 +2158,8 @@ async def list_campaign_contacts(
 
 @router.delete("/{campaign_id}/contacts/{contact_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
 async def remove_contact_from_campaign(
-    campaign_id: str,
-    contact_id: str,
+    campaign_id: ResourceUUID,
+    contact_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):

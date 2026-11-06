@@ -10,6 +10,7 @@ Day 9 Enhancements:
 - Detailed error reporting per row
 """
 from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID
 import csv
 import io
 import logging
@@ -194,7 +195,7 @@ async def download_import_template(
     dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
 )
 async def upload_campaign_contacts(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     file: UploadFile = File(..., description="CSV file with contacts"),
     skip_duplicates: bool = Query(True, description="Skip duplicate phone numbers within campaign"),
     current_user: CurrentUser = Depends(get_current_user),
@@ -459,7 +460,7 @@ async def upload_campaign_contacts(
     dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
 )
 async def paste_campaign_contacts(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     body: BulkPasteRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),

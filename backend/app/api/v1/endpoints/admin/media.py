@@ -26,6 +26,7 @@ from app.api.v1.dependencies import (
     require_platform_admin,
 )
 from app.api.v1.endpoints.recordings import _ranged_file_response
+from app.api.v1.validation import pagination_offset
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.platform_admin_guard import require_platform_admin_mutation
@@ -423,7 +424,7 @@ async def _safe_audit(audit_logger: AuditLogger, **kwargs) -> None:
 
 @router.get("/recordings", response_model=AdminRecordingListResponse)
 async def list_admin_recordings(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None, max_length=200),
     status: str | None = Query(None, max_length=32),
@@ -436,6 +437,7 @@ async def list_admin_recordings(
     db_client: Client = Depends(get_db_client),
 ) -> AdminRecordingListResponse:
     """List recording metadata across tenants with operational filters."""
+    offset = pagination_offset(page, page_size)
     conditions: list[str] = []
     params: list[Any] = []
 
@@ -472,7 +474,6 @@ async def list_admin_recordings(
         LEFT JOIN tenants t ON t.id = r.tenant_id
         LEFT JOIN campaigns cp ON cp.id = r.campaign_id
     """
-    offset = (page - 1) * page_size
     async with acquire_with_tenant(db_client.pool, None) as conn:
         total = await conn.fetchval(
             f"SELECT COUNT(*) {joins} {where}",
@@ -530,7 +531,7 @@ _FEEDBACK_SELECT = f"""
 
 @router.get("/feedback", response_model=AdminFeedbackListResponse)
 async def list_admin_feedback(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None, max_length=200),
     transcript_status: str | None = Query(None, max_length=16),
@@ -543,6 +544,7 @@ async def list_admin_feedback(
     db_client: Client = Depends(get_db_client),
 ) -> AdminFeedbackListResponse:
     """List reviewer voice notes and transcription state across tenants."""
+    offset = pagination_offset(page, page_size)
     conditions: list[str] = []
     params: list[Any] = []
 
@@ -573,7 +575,6 @@ async def list_admin_feedback(
         add("f.created_at < ${index}", end)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    offset = (page - 1) * page_size
     async with acquire_with_tenant(db_client.pool, None) as conn:
         total = await conn.fetchval(
             f"SELECT COUNT(*) {_FEEDBACK_JOINS} {where}",

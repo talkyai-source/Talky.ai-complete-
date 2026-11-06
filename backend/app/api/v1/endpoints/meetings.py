@@ -5,6 +5,7 @@ FastAPI endpoints for meeting booking and management.
 Day 25: Meeting Booking Feature
 """
 from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID
 import logging
 from typing import Optional, List
 from datetime import datetime, time as dt_time, timezone as dt_timezone
@@ -258,7 +259,7 @@ async def list_meetings(
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
 async def get_meeting(
-    meeting_id: str,
+    meeting_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ) -> MeetingResponse:
@@ -292,7 +293,7 @@ async def get_meeting(
 
 @router.put("/{meeting_id}", dependencies=[Depends(_require_calendar_manage)])
 async def update_meeting(
-    meeting_id: str,
+    meeting_id: ResourceUUID,
     request: UpdateMeetingRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
@@ -333,7 +334,7 @@ async def update_meeting(
 
 @router.delete("/{meeting_id}", dependencies=[Depends(_require_calendar_manage)])
 async def cancel_meeting(
-    meeting_id: str,
+    meeting_id: ResourceUUID,
     request: Optional[CancelMeetingRequest] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)

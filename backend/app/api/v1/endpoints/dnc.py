@@ -124,7 +124,7 @@ def _to_response(entry: DNCEntry) -> DNCEntryResponse:
 @router.get("/", response_model=List[DNCEntryResponse])
 async def list_dnc_entries(
     include_global: bool = Query(default=False, description="Include cross-tenant DNC entries."),
-    limit: int = Query(default=200, ge=1, le=1000),
+    limit: int = Query(default=200, ge=1, le=200),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> List[DNCEntryResponse]:

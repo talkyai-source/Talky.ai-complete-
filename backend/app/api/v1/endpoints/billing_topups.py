@@ -29,9 +29,9 @@ import csv
 import io
 import logging
 import os
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -355,7 +355,7 @@ async def create_topup_checkout(
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def list_orders(
-    limit: int = 25,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     rows = await _service().history(_tenant(current_user), min(max(limit, 1), 100))
@@ -382,7 +382,7 @@ async def list_orders(
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def list_ledger(
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Signed movements. A refund shows as its own negative line rather than

@@ -161,7 +161,7 @@ async def list_abuse_events(
     severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
     unresolved_only: bool = Query(False),
     hours: int = Query(24, ge=1, le=720),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=200),
     db_pool=Depends(get_db_pool),
 ):
     """List abuse events with filtering."""

@@ -22,6 +22,7 @@ from app.services.connector_resolver import resolve_active_connector, verify_rev
 from app.infrastructure.connectors.base import ConnectorProviderError
 
 from app.api.v1.dependencies import get_db_client, require_admin, require_platform_admin, CurrentUser
+from app.api.v1.validation import pagination_offset
 from ._serialization import AdminResponseModel
 
 router = APIRouter()
@@ -314,7 +315,7 @@ class ActionDetail(AdminResponseModel):
 
 @router.get("/actions", response_model=ActionListResponse)
 async def get_admin_actions(
-    page: int = Query(1, ge=1, description="Page number"),
+    page: int = Query(1, ge=1, le=10001, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status"),
     type: Optional[str] = Query(None, description="Filter by action type"),
@@ -329,12 +330,11 @@ async def get_admin_actions(
     List all assistant actions with pagination and filters.
     Platform admins may view all tenants; tenant and partner admins stay scoped.
     """
+    offset = pagination_offset(page, page_size)
     try:
         scope = _admin_tenant(admin_user)
         if scope and tenant_id and str(tenant_id) != scope:
             raise HTTPException(status_code=403, detail="Cannot access another tenant's action receipts")
-        offset = (page - 1) * page_size
-        
         # Build query with joins
         query = db_client.table("assistant_actions").select(
             "*, tenants!inner(business_name), leads(first_name, last_name, phone_number)",

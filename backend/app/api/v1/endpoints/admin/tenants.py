@@ -451,8 +451,8 @@ async def list_tenants(
     include_archived: bool = Query(
         False, description="Include archived (cancelled) tenants"
     ),
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=10000),
     sort_by: Literal["name", "minutes_used"] = "name",
 ):
     """

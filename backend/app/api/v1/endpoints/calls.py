@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from typing import Any, List, Literal, Optional
 from app.core.postgres_adapter import Client
+from app.api.v1.validation import ResourceUUID, pagination_offset
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.core.db import DatabasePoolTimeoutError
@@ -566,7 +567,7 @@ _LIVE_MAX_AGE_MINUTES = 30
     "/{call_id}/hangup", dependencies=[Depends(require_permission(Permission.CALLS_DELETE))]
 )
 async def hangup_live_call(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -949,7 +950,7 @@ async def list_live_calls(
     dependencies=[Depends(_require_calls_read)],
 )
 async def list_rejected_inbound_calls(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(50, ge=1, le=100),
     campaign_id: Optional[UUID] = Query(None),
     current_user: CurrentUser = Depends(get_current_user),
@@ -962,7 +963,7 @@ async def list_rejected_inbound_calls(
     after-hours hangup path do have a calls row. The explicit union prevents
     "who called while we were closed?" from silently returning an empty list.
     """
-
+    offset = pagination_offset(page, page_size)
     if not current_user.tenant_id:
         return RejectedInboundCallsResponse(
             items=[],
@@ -978,7 +979,7 @@ async def list_rejected_inbound_calls(
     if campaign_id is not None:
         params.append(campaign_id)
         campaign_filter = f"WHERE rejected.campaign_id = ${len(params)}"
-    params.extend([page_size, (page - 1) * page_size])
+    params.extend([page_size, offset])
     limit_index = len(params) - 1
     offset_index = len(params)
 
@@ -1273,7 +1274,7 @@ async def list_call_issues(
     dependencies=[Depends(_require_calls_read)],
 )
 async def list_calls(
-    page: int = Query(1, ge=1, description="Page number"),
+    page: int = Query(1, ge=1, le=10001, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status"),
     direction: Optional[Literal["inbound", "outbound"]] = Query(
@@ -1300,6 +1301,7 @@ async def list_calls(
         - from: Start date filter
         - to: End date filter
     """
+    offset = pagination_offset(page, page_size)
     # asyncpg will not coerce strings for a timestamptz parameter, so parse the
     # dates here (a bad value is the caller's error, not a 500).
     from_bound: Optional[datetime] = None
@@ -1322,7 +1324,6 @@ async def list_calls(
         import uuid as _uuid
 
         tenant_uuid = _uuid.UUID(str(current_user.tenant_id))
-        offset = (page - 1) * page_size
 
         conditions = ["c.tenant_id = $1"]
         params: list = [tenant_uuid]
@@ -1556,7 +1557,7 @@ async def redial_call(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1740,7 +1741,7 @@ async def get_call(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_transcript(
-    call_id: str,
+    call_id: ResourceUUID,
     format: str = Query("json", description="Format: 'json' or 'text'"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -1812,7 +1813,7 @@ async def get_call_transcript(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_summary(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1843,8 +1844,8 @@ async def get_call_summary(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_events(
-    call_id: str,
-    limit: int = Query(100, ge=1, le=500),
+    call_id: ResourceUUID,
+    limit: int = Query(100, ge=1, le=200),
     event_type: Optional[str] = Query(None, description="Filter by event type"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -1856,7 +1857,7 @@ async def get_call_events(
     transcripts, LLM calls, TTS, webhooks, etc.
 
     Query params:
-        - limit: Max events to return (default 100, max 500)
+        - limit: Max events to return (default 100, max 200)
         - event_type: Filter by type (state_change, transcript, etc.)
     """
     try:
@@ -1890,7 +1891,7 @@ async def get_call_events(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_legs(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):

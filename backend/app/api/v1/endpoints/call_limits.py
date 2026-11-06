@@ -482,7 +482,7 @@ async def add_dnc_entry(
 async def list_dnc_entries(
     tenant_id: Optional[UUID] = Query(None),
     phone_number: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=200),
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):

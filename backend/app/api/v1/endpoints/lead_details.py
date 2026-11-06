@@ -18,6 +18,7 @@ dialling a column of postcodes.
 """
 from __future__ import annotations
 from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID
 
 import csv
 import io
@@ -194,7 +195,7 @@ class LeadFieldIn(BaseModel):
     "/campaigns/{campaign_id}/lead-fields",
     dependencies=[Depends(require_permission(Permission.CALLS_READ))],
 )
-async def get_lead_fields(campaign_id: str, current_user=Depends(get_current_user)):
+async def get_lead_fields(campaign_id: ResourceUUID, current_user=Depends(get_current_user)):
     return {"fields": await _service().fields_for_campaign(_tenant(current_user), campaign_id)}
 
 
@@ -203,7 +204,7 @@ async def get_lead_fields(campaign_id: str, current_user=Depends(get_current_use
     dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
 )
 async def set_lead_fields(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     fields: list[LeadFieldIn],
     current_user=Depends(get_current_user),
 ):
@@ -328,7 +329,7 @@ async def set_lead_fields(
     dependencies=[Depends(require_permission(Permission.CALLS_READ))],
 )
 async def get_lead_details(
-    call_id: str, campaign_id: Optional[str] = None, current_user=Depends(get_current_user),
+    call_id: ResourceUUID, campaign_id: Optional[str] = None, current_user=Depends(get_current_user),
 ):
     """Captured values plus which required fields are still missing.
 
@@ -349,7 +350,7 @@ async def get_lead_details(
 
 
 @router.get("/contacts/{lead_id}/lead-details", dependencies=[Depends(require_permission(Permission.CALLS_READ))])
-async def get_contact_lead_details(lead_id: str, current_user=Depends(get_current_user)):
+async def get_contact_lead_details(lead_id: ResourceUUID, current_user=Depends(get_current_user)):
     tenant_id = _tenant(current_user)
     svc = _service()
     return {"details": await svc.details_for_lead(tenant_id, lead_id), "missing_required": [],
@@ -369,7 +370,7 @@ class ManualEdit(BaseModel):
     dependencies=[Depends(require_permission(Permission.CALLS_CREATE))],
 )
 async def correct_lead_detail(
-    call_id: str, field_key: str, body: ManualEdit,
+    call_id: ResourceUUID, field_key: str, body: ManualEdit,
     current_user=Depends(get_current_user),
 ):
     """A human correcting a captured value.

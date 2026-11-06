@@ -17,6 +17,7 @@ from app.api.v1.dependencies import (
     require_admin_tenant,
 )
 from app.core.postgres_adapter import Client
+from app.api.v1.validation import pagination_offset
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.conversation_review_service import (
     REVIEW_TAGS,
@@ -256,13 +257,14 @@ async def list_reviews(
     rating_min: Optional[int] = Query(None, ge=1, le=5),
     rating_max: Optional[int] = Query(None, ge=1, le=5),
     tag: Optional[str] = Query(None, description=f"One of: {', '.join(REVIEW_TAGS)}"),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(25, ge=1, le=200),
     current_user: CurrentUser = Depends(require_admin_tenant),
     service: ConversationReviewService = Depends(get_review_service),
 ) -> ReviewListResponse:
     """Every review in the tenant, filtered by campaign, prompt version, rating
     and tag — the four axes goals.md §3 names."""
+    pagination_offset(page, page_size)
     try:
         result = await service.list_reviews(
             tenant_id=str(current_user.tenant_id),

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import MAX_OFFSET, MAX_PAGE_SIZE, ResourceUUID, pagination_offset
 
 import asyncio
 import json
@@ -9,10 +10,10 @@ import logging
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, List, Literal, Mapping, Optional
+from typing import Annotated, Any, List, Literal, Mapping, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
@@ -491,8 +492,8 @@ async def get_live_calls(
 async def get_call_history(
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
-    page: int = 1,
-    page_size: int = 20,
+    page: Annotated[int, Query(ge=1, le=MAX_OFFSET + 1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 20,
     search: Optional[str] = None,
     status: Optional[str] = None,
     tenant_id: Optional[str] = None,
@@ -505,13 +506,14 @@ async def get_call_history(
 
     Query params:
         - page: Page number (1-indexed)
-        - page_size: Items per page (max 100)
+        - page_size: Items per page (max 200); maximum offset 10000
         - search: Search by phone number
         - status: Filter by call status
         - tenant_id: Filter by tenant
         - from_date: Start date (YYYY-MM-DD)
         - to_date: End date (YYYY-MM-DD)
     """
+    offset = pagination_offset(page, page_size)
     try:
         # Build query
         query = db_client.table("calls").select(
@@ -542,13 +544,10 @@ async def get_call_history(
         if to_date:
             query = query.lte("created_at", to_date + "T23:59:59Z")
 
-        # Calculate offset
-        offset = (page - 1) * min(page_size, 100)
-
         # Execute with pagination
         response = (
             query.order("created_at", desc=True)
-            .range(offset, offset + min(page_size, 100) - 1)
+            .range(offset, offset + page_size - 1)
             .execute()
         )
         if getattr(response, "error", None):
@@ -673,7 +672,7 @@ async def get_call_history(
 
 @router.get("/calls/{call_id}", response_model=AdminCallDetail)
 async def get_admin_call_detail(
-    call_id: str,
+    call_id: ResourceUUID,
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
@@ -951,7 +950,7 @@ async def inspect_admin_crm_delivery(
 
 @router.post("/calls/{call_id}/terminate")
 async def terminate_call(
-    call_id: str,
+    call_id: ResourceUUID,
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),

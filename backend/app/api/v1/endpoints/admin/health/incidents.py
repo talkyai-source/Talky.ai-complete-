@@ -6,6 +6,7 @@ from typing import Literal
 from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query
 from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform_admin
+from app.api.v1.validation import pagination_offset
 from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.platform_admin_guard import require_platform_admin_mutation
@@ -17,10 +18,11 @@ router = APIRouter()
 async def list_incidents(
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
-    page: int = Query(1, ge=1), page_size: int = Query(20, ge=1, le=100),
+    page: int = Query(1, ge=1, le=10001), page_size: int = Query(20, ge=1, le=100),
     status: Literal["open", "acknowledged", "resolved"] | None = None,
     severity: Literal["critical", "warning", "info"] | None = None,
 ):
+    offset = pagination_offset(page, page_size)
     try:
         async with acquire_with_tenant(db_client.pool, None, timeout=3.0) as conn:
             row = await asyncio.wait_for(conn.fetchrow("""
@@ -34,7 +36,7 @@ async def list_incidents(
                        (SELECT COUNT(*) FROM filtered) AS total,
                        (SELECT COUNT(*) FROM incidents WHERE status='open') AS open_count,
                        (SELECT COUNT(*) FROM incidents WHERE status='open' AND severity='critical') AS critical_count
-            """, status, severity, page_size, (page-1)*page_size), timeout=3.0)
+            """, status, severity, page_size, offset), timeout=3.0)
         if row is None:
             raise RuntimeError("Missing incident observation")
         items = json.loads(row["items"]) if isinstance(row["items"], str) else row["items"]

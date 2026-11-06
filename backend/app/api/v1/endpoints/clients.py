@@ -3,6 +3,7 @@ Clients Endpoints
 CRUD operations for client/contact management
 """
 from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
@@ -152,7 +153,7 @@ async def create_client(
 
 @router.get("/{client_id}", response_model=ClientResponse)
 async def get_client(
-    client_id: str,
+    client_id: ResourceUUID,
     current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_READ)),
     db_client: Client = Depends(get_db_client)
 ):
@@ -194,7 +195,7 @@ async def get_client(
 
 @router.delete("/{client_id}")
 async def delete_client(
-    client_id: str,
+    client_id: ResourceUUID,
     current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_UPDATE)),
     db_client: Client = Depends(get_db_client)
 ):

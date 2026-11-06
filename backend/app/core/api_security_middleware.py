@@ -19,6 +19,7 @@ import re
 from typing import Optional, Any
 
 from fastapi import Request, status
+from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
 
@@ -241,11 +242,32 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
         if scope["type"] != "http":
             return await super().__call__(scope, receive, send)
 
+        request = Request(scope)
+        auth_path = _API_VERSION_PREFIX_RE.sub("", request.url.path, count=1).rstrip("/")
+        private_request = bool(
+            request.headers.get("authorization")
+            or request.headers.get("x-internal-service-token")
+            or any(name in request.cookies for name in ("talky_sid", "talky_at", "talky_rt"))
+            or auth_path == "/auth" or auth_path.startswith("/auth/")
+        )
+        original_send = send
+
+        async def send_private_response(message):
+            if message["type"] == "http.response.start":
+                state = scope.get("state") or {}
+                headers = MutableHeaders(scope=message)
+                if (private_request or state.get("authenticated_user_id") or state.get("user_id")
+                        or "set-cookie" in headers):
+                    headers["Cache-Control"] = "no-store"
+            await original_send(message)
+
+        # This includes auth/exempt dispatch paths, early rejections and streams.
+        send = send_private_response
+
         # Enforce the cap before any handler or body parser runs, including
         # auth and other paths exempt from the unrelated checks in dispatch.
         # Content-Length is only an early rejection hint: count actual ASGI
         # body bytes as well, so chunking or a false length cannot bypass it.
-        request = Request(scope)
         if len(request.headers.getlist("content-length")) > 1:
             response = JSONResponse(status_code=400, content={"detail": "Ambiguous Content-Length"})
             return await response(scope, receive, send)

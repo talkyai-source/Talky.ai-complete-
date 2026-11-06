@@ -377,8 +377,8 @@ async def list_users(
     db_client: Client = Depends(get_db_client),
     search: Optional[str] = Query(None, description="Match email or name"),
     role: Optional[str] = Query(None, description="Filter by current effective role"),
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=10000),
 ):
     """List users with role, tenant, status, MFA and timestamps (admin only)."""
     conditions: list[str] = []

@@ -217,6 +217,7 @@ async def unhandled_exception_handler(
     database_error = _database_capacity_cause(exc)
     if database_error is not None:
         response = await db_pool_timeout_exception_handler(request, database_error)
+        response.headers["Cache-Control"] = "no-store"
         request.state._talky_unhandled_error = (exc, response)
         return response
     # Never leak internal error details to clients. Operators get the full
@@ -224,6 +225,9 @@ async def unhandled_exception_handler(
     logger.exception("Unhandled exception in request handler")
     response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        # The outer ServerErrorMiddleware may render after inner middleware has
+        # unwound. Its response still must not cache an authenticated failure.
+        headers={"Cache-Control": "no-store"},
         content=_envelope(
             code="internal_error",
             message="An unexpected error occurred. Reference the request_id when reporting.",

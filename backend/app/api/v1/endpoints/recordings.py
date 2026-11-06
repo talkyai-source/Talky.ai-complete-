@@ -24,6 +24,7 @@ from app.api.v1.dependencies import (
     require_admin_tenant,
 )
 from app.core.db_utils import acquire_with_tenant
+from app.api.v1.validation import pagination_offset
 from app.core.security.rbac import (
     ROLE_DEFAULT_PERMISSIONS,
     Permission,
@@ -325,14 +326,14 @@ async def put_recording_policy(
 @router.get("/", response_model=RecordingListResponse)
 async def list_recordings(
     call_id: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     current_user: CurrentUser = Depends(_require_recording_permission(Permission.RECORDINGS_READ)),
     db_client: Client = Depends(get_db_client),
 ):
     """List recordings for the current tenant, optionally filtered by call."""
+    offset = pagination_offset(page, page_size)
     tenant_id = _tenant_id(current_user)
-    offset = (page - 1) * page_size
 
     # Only list playable recordings — 'failed'/'deleted'/'uploading' rows would
     # render a row + play button that 404s on click.

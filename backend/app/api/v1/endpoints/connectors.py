@@ -5,6 +5,7 @@ OAuth flows and connector management.
 Day 24: Unified Connector System
 """
 from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID
 import asyncio
 import os
 import logging
@@ -951,7 +952,7 @@ async def oauth_callback(
 # route is declared above.
 @router.get("/{connector_id}", response_model=ConnectorResponse)
 async def get_connector(
-    connector_id: str,
+    connector_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
@@ -988,7 +989,7 @@ async def get_connector(
 
 @router.delete("/{connector_id}", dependencies=[Depends(require_permission(Permission.CONNECTORS_DELETE))])
 async def delete_connector(
-    connector_id: str,
+    connector_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     *,
@@ -1018,7 +1019,7 @@ async def delete_connector(
 
 @router.post("/{connector_id}/refresh", dependencies=[Depends(require_permission(Permission.CONNECTORS_UPDATE))])
 async def refresh_connector_tokens(
-    connector_id: str,
+    connector_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     *,

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 import pytz
+from datetime import timedelta
 from typing import Dict, List, Literal, Optional
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -191,10 +192,10 @@ class CampaignCreateRequest(CampaignVoiceSelection):
     """
 
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    system_prompt: str = Field(default="")
+    description: Optional[str] = Field(default=None, max_length=10_000)
+    system_prompt: str = Field(default="", max_length=100_000)
     voice_id: str = Field(default="", max_length=100)
-    goal: Optional[str] = None
+    goal: Optional[str] = Field(default=None, max_length=5_000)
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
     agent_name_genders: Optional[Dict[str, str]] = Field(
@@ -205,7 +206,7 @@ class CampaignCreateRequest(CampaignVoiceSelection):
             "without an entry are treated as unknown gender."
         ),
     )
-    company_name: str = Field(..., min_length=1)
+    company_name: str = Field(..., min_length=1, max_length=255)
     campaign_slots: dict = Field(default_factory=dict)
     campaign_brief: Optional[CampaignBriefInput] = Field(
         default=None,
@@ -271,11 +272,22 @@ class CampaignUpdateRequest(CampaignVoiceSelection):
     expected_updated_at: Optional[AwareDatetime] = Field(
         None, description="Version read by the editor; a stale version returns 409 with current values.",
     )
+
+    @field_validator("expected_updated_at")
+    @classmethod
+    def _version_can_advance(cls, value):
+        if value is not None:
+            try:
+                value + timedelta(microseconds=1)
+            except OverflowError as exc:
+                raise ValueError("Version timestamp cannot be advanced.") from exc
+        return value
+
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    system_prompt: str = Field(default="")
+    description: Optional[str] = Field(default=None, max_length=10_000)
+    system_prompt: str = Field(default="", max_length=100_000)
     voice_id: str = Field(default="", max_length=100)
-    goal: Optional[str] = None
+    goal: Optional[str] = Field(default=None, max_length=5_000)
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
     agent_name_genders: Optional[Dict[str, str]] = Field(
@@ -286,7 +298,7 @@ class CampaignUpdateRequest(CampaignVoiceSelection):
             "without an entry are treated as unknown gender."
         ),
     )
-    company_name: str = Field(..., min_length=1)
+    company_name: str = Field(..., min_length=1, max_length=255)
     campaign_slots: dict = Field(default_factory=dict)
     campaign_brief: Optional[CampaignBriefInput] = Field(
         default=None,
@@ -344,7 +356,7 @@ class CampaignPromptPreviewRequest(CampaignVoiceSelection):
     """
 
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
-    company_name: str = Field(..., min_length=1)
+    company_name: str = Field(..., min_length=1, max_length=255)
     agent_name: str = Field(
         ...,
         min_length=1,
@@ -355,7 +367,7 @@ class CampaignPromptPreviewRequest(CampaignVoiceSelection):
     )
     campaign_slots: dict = Field(default_factory=dict)
     campaign_brief: Optional[CampaignBriefInput] = None
-    additional_instructions: Optional[str] = None
+    additional_instructions: Optional[str] = Field(default=None, max_length=100_000)
     direction: Literal["outbound", "inbound"] = "outbound"
     opening_mode: Optional[Literal["agent_first", "callee_first"]] = Field(
         None,
