@@ -39,7 +39,22 @@ end
 if counts[1] >= tonumber(ARGV[2]) or counts[2] >= tonumber(ARGV[3]) then
   return 0
 end
-if ARGV[4] == '1' then
+local failed = ARGV[4] == '1'
+if ARGV[4] == 'compare' then
+  if not ARGV[5] or not ARGV[6] or #ARGV[5] ~= 64 or #ARGV[6] ~= 64 then
+    return redis.error_reply('Invalid reset digest')
+  end
+  local difference = 0
+  for i = 1, 64 do
+    local delta = string.byte(ARGV[5], i) - string.byte(ARGV[6], i)
+    difference = difference + delta * delta
+  end
+  if difference == 0 then return 2 end
+  failed = true
+elseif ARGV[4] ~= '0' and ARGV[4] ~= '1' then
+  return redis.error_reply('Invalid reset decision mode')
+end
+if failed then
   for i = 1, 2 do
     redis.call('INCR', KEYS[i])
     if redis.call('TTL', KEYS[i]) < 0 then
@@ -75,21 +90,16 @@ async def enforce_budget(redis, scope: str, identifier: str, *, limit: int, seco
                             headers={"Retry-After": str(seconds)})
 
 
-async def enforce_reset_failure_budget(redis, email: str, address: str, *, failed: bool) -> None:
-    """Atomically admit a reset outcome, counting failures only across workers.
-
-    Call with failed=True before returning an invalid-code result, and with
-    failed=False before accepting a matching code. A separate precheck alone
-    cannot enforce the global cap against concurrent verification outcomes.
-    """
+async def _reset_failure_decision(redis, email: str, address: str, mode, *digests) -> int:
     email = email.strip().lower()
     keys = (
         budget_key("reset-failed-email-ip-day", f"{email}\0{address.strip()}"),
         budget_key("reset-failed-email-day", email),
     )
     try:
-        admitted = int(await redis.eval(_RESET_FAILURE_WINDOW, 2, *keys, 86400, 20, 100, int(failed)))
-        if admitted not in (0, 1):
+        admitted = await redis.eval(_RESET_FAILURE_WINDOW, 2, *keys, 86400, 20, 100, mode, *digests)
+        allowed = (0, 1, 2) if mode == "compare" else (0, 1)
+        if type(admitted) is not int or admitted not in allowed:
             raise ValueError("Invalid reset budget result")
     except Exception as exc:
         logger.warning("auth_reset_failure_budget_unavailable error=%s", type(exc).__name__)
@@ -97,6 +107,28 @@ async def enforce_reset_failure_budget(redis, email: str, address: str, *, faile
     if not admitted:
         raise HTTPException(429, "Too many attempts. Please try again later.",
                             headers={"Retry-After": "86400"})
+    return admitted
+
+
+async def enforce_reset_failure_budget(redis, email: str, address: str, *, failed: bool) -> None:
+    """Admit an invalid-record outcome or check budget before a password write."""
+    await _reset_failure_decision(redis, email, address, int(failed))
+
+
+async def compare_reset_code_with_budget(
+    redis, email: str, address: str, candidate_hash: str, expected_hash,
+) -> bool:
+    """Compare and charge a wrong guess atomically, before another can compare.
+
+    A match consumes no failed budget. Malformed server-stored digests retain
+    the ordinary invalid-code outcome without entering a digest comparison.
+    """
+    if not isinstance(expected_hash, str) or len(expected_hash) != 64 or not expected_hash.isascii():
+        await enforce_reset_failure_budget(redis, email, address, failed=True)
+        return False
+    return await _reset_failure_decision(
+        redis, email, address, "compare", candidate_hash, expected_hash,
+    ) == 2
 
 
 def reject_disposable_signup_email(email: str) -> None:

@@ -125,6 +125,106 @@ async def test_concurrent_clients_share_exactly_one_hundred_failure_outcomes(flo
     assert flow.updates == 0
 
 
+async def test_matching_candidate_cannot_overtake_inflight_wrong_guesses_at_daily_cap(flow, monkeypatch):
+    # Reachable within one day: nineteen codes with five wrong guesses each
+    # plus four wrong guesses on a twentieth code = 99. Across at least seven
+    # hourly issuance windows this respects three codes/hour. Five historical
+    # addresses can distribute those failures as 20/20/20/20/19; the current
+    # five addresses below have unused address/minute budgets. Old per-code
+    # keys may expire before this fresh twenty-first code is issued.
+    global_key = budget_key("reset-failed-email-day", EMAIL)
+    await flow.redis.setex(global_key, 12 * 3600, 99)
+    for n, count in enumerate((20, 20, 20, 20, 19), start=1):
+        old_address = f"198.51.100.{n}"
+        await flow.redis.setex(
+            budget_key("reset-failed-email-ip-day", f"{EMAIL}\0{old_address}"),
+            12 * 3600, count,
+        )
+    await issue(flow, "424242")
+    await flow.redis.setex(reset._reset_rate_limit_key(EMAIL), 3600, 1)
+
+    addresses = [f"203.0.113.{n}" for n in range(101, 105)]
+    ready = {address: asyncio.Event() for address in addresses}
+    release_failures = asyncio.Event()
+    real_reject = reset._reject_reset_code
+
+    async def delayed_reject(redis, email, address, **kwargs):
+        if address in ready:
+            # On the old route, reaching this point means this wrong code
+            # already compared, but its failure has not reached Redis yet.
+            ready[address].set()
+            await release_failures.wait()
+        await real_reject(redis, email, address, **kwargs)
+
+    async def wrong_candidate(address, code):
+        try:
+            return await outcome(address, code)
+        finally:
+            # An atomic fix can reject excess candidates before _reject.
+            # Such a completed denial must not leave this test waiting.
+            ready[address].set()
+
+    monkeypatch.setattr(reset, "_reject_reset_code", delayed_reject)
+    wrong_tasks = [
+        asyncio.create_task(wrong_candidate(address, f"{n:06d}"))
+        for n, address in enumerate(addresses, start=1)
+    ]
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*(event.wait() for event in ready.values())), timeout=5,
+        )
+        matching_result = await asyncio.wait_for(
+            outcome("203.0.113.105", "424242"), timeout=5,
+        )
+        writes_before_release = flow.updates
+    finally:
+        release_failures.set()
+        wrong_results = await asyncio.wait_for(
+            asyncio.gather(*wrong_tasks, return_exceptions=True), timeout=5,
+        )
+
+    assert matching_result == 429, (
+        f"Matching candidate after 99 prior failures and four in-flight wrong "
+        f"candidates returned {matching_result}; password_updates={writes_before_release}"
+    )
+    assert writes_before_release == flow.updates == 0
+    assert wrong_results.count(400) == 1
+    assert wrong_results.count(429) == 3
+    assert int(await flow.redis.get(global_key)) == 100
+
+
+async def test_matching_code_at_ninety_nine_failures_preserves_both_budgets(flow):
+    address = "203.0.113.106"
+    global_key = budget_key("reset-failed-email-day", EMAIL)
+    pair_key = budget_key("reset-failed-email-ip-day", f"{EMAIL}\0{address}")
+    await flow.redis.setex(global_key, 12 * 3600, 99)
+    await flow.redis.setex(pair_key, 12 * 3600, 19)
+    await issue(flow)
+
+    assert await outcome(address, "424242") == 200
+    assert flow.updates == 1
+    assert int(await flow.redis.get(global_key)) == 99
+    assert int(await flow.redis.get(pair_key)) == 19
+
+
+async def test_last_wrong_candidate_charges_pair_and_global_budgets_once(flow):
+    address = "203.0.113.107"
+    global_key = budget_key("reset-failed-email-day", EMAIL)
+    pair_key = budget_key("reset-failed-email-ip-day", f"{EMAIL}\0{address}")
+    await flow.redis.setex(global_key, 12 * 3600, 99)
+    await flow.redis.setex(pair_key, 12 * 3600, 19)
+    await issue(flow)
+
+    assert await outcome(address, "000001") == 400
+    assert int(await flow.redis.get(global_key)) == 100
+    assert int(await flow.redis.get(pair_key)) == 20
+    assert await outcome(address, "424242") == 429
+    assert await outcome("203.0.113.108", "424242") == 429
+    assert flow.updates == 0
+    assert int(await flow.redis.get(global_key)) == 100
+    assert int(await flow.redis.get(pair_key)) == 20
+
+
 @pytest.mark.parametrize("interruption", ["global_cap", "redis_outage"])
 async def test_matching_code_cannot_use_a_stale_precheck_to_write_password(flow, monkeypatch, interruption):
     await issue(flow)

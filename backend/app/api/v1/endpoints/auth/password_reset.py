@@ -41,7 +41,8 @@ from app.core.security.password import (
 )
 from app.core.security.lockout import record_login_attempt
 from app.core.security.auth_abuse import (
-    claim_budget, enforce_budget, enforce_reset_failure_budget, verify_turnstile,
+    claim_budget, compare_reset_code_with_budget, enforce_budget,
+    enforce_reset_failure_budget, verify_turnstile,
 )
 from app.core.security.refresh_tokens import revoke_all_user_refresh_tokens
 from app.core.security.sessions import revoke_all_user_sessions
@@ -410,9 +411,9 @@ async def reset_password(
     redis = _get_redis_or_503()
     address = get_client_ip(request)
     await enforce_budget(redis, "reset-ip", address, limit=5, seconds=60)
-    # Reject exhausted budgets early. Each failure and the final successful
-    # verification must also pass the atomic gate below; this precheck alone
-    # cannot bound concurrent requests. Success consumes no failed budget.
+    # Reject exhausted budgets early. The actual code comparison and failure
+    # charge are one Redis decision below; this precheck alone cannot bound
+    # concurrent guesses. Success consumes no failed budget.
     await enforce_reset_failure_budget(redis, email, address, failed=False)
     try:
         raw = await redis.get(_reset_redis_key(email))
@@ -434,9 +435,11 @@ async def reset_password(
         await _reject_reset_code(redis, email, address)
     if not await _claim_reset_attempt(redis, email, raw, pending):
         await _reject_reset_code(redis, email, address, request_new=True)
-    if not secrets.compare_digest(_hash_reset_code(code).encode("ascii"),
-                                  str(pending.get("code_hash") or "").encode("utf-8")):
-        await _reject_reset_code(redis, email, address)
+    if not await compare_reset_code_with_budget(
+        redis, email, address, _hash_reset_code(code), pending.get("code_hash"),
+    ):
+        # The atomic comparison already charged this failure exactly once.
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset code.")
 
     user_id = pending.get("user_id")
     if not user_id:
