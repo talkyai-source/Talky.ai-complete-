@@ -3,6 +3,7 @@ import asyncio
 from datetime import datetime, timezone
 
 import pytest
+from fastapi import HTTPException
 
 from app.api.v1.endpoints.analytics import (
     get_best_time_to_call,
@@ -17,7 +18,7 @@ class _Resp:
 
 
 class _Query:
-    """Chainable fake supporting select/gte/lt/eq/order/in_/execute."""
+    """Chainable fake supporting select/gte/lt/eq/order/in_/limit/execute."""
     def __init__(self, rows):
         self._rows = rows
     def select(self, *_a, **_k):
@@ -32,6 +33,8 @@ class _Query:
         return self
     def order(self, *_a, **_k):
         return self
+    def limit(self, *_a, **_k):
+        return self
     def execute(self):
         return _Resp(self._rows)
 
@@ -40,6 +43,8 @@ class _DB:
     def __init__(self, rows):
         self._rows = rows
     def table(self, _name):
+        if _name == "tenants":
+            return _Query([{"id": "t1", "calling_rules": {"timezone": "UTC"}}])
         return _Query(self._rows)
 
 
@@ -81,13 +86,14 @@ def test_best_time_ignores_low_volume_for_best_hour():
     assert res.best_hour is None
 
 
-def test_best_time_bad_tz_falls_back_to_utc():
+def test_best_time_bad_explicit_tz_is_rejected():
     rows = [{"created_at": _iso(2026, 6, 1, 10), "outcome": "answered"}]
-    res = asyncio.run(get_best_time_to_call(
-        from_date="2026-06-01", to_date="2026-06-01", tz="Not/AZone",
-        current_user=_User(), db_client=_DB(rows),
-    ))
-    assert res.timezone == "UTC"
+    with pytest.raises(HTTPException) as caught:
+        asyncio.run(get_best_time_to_call(
+            from_date="2026-06-01", to_date="2026-06-01", tz="Not/AZone",
+            current_user=_User(), db_client=_DB(rows),
+        ))
+    assert caught.value.status_code == 400
 
 
 # ── retry-effectiveness ───────────────────────────────────────────

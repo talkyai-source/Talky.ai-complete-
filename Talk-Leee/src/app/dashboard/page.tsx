@@ -29,6 +29,7 @@ import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
+import { calendarBucketBounds, formatCalendarDate, reportingDateRange } from "@/lib/reporting-time";
 
 function Counter({ value }: { value: number }) {
     const nodeRef = useRef<HTMLSpanElement>(null);
@@ -80,14 +81,6 @@ function statusVariantLowerBetter(value: number, thresholds: { green: number; ye
     if (value <= thresholds.green) return "green" as const;
     if (value <= thresholds.yellow) return "yellow" as const;
     return "red" as const;
-}
-
-function currentUtcMonthRange(now = new Date()): { from: string; to: string } {
-    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    return {
-        from: from.toISOString().slice(0, 10),
-        to: now.toISOString().slice(0, 10),
-    };
 }
 
 function KpiCard({
@@ -181,7 +174,7 @@ function KpiCard({
 // Pulls real call-volume buckets from /analytics/calls and shapes them into
 // LiveTimeBucket[] for the dashboard charts. Polls every 30s; when no data is
 // returned the chart shows an empty state rather than fake numbers.
-function useLiveBuckets() {
+function useLiveBuckets(timeZone?: string) {
     const [state, setState] = useState<{
         loading: boolean;
         error: string;
@@ -190,6 +183,7 @@ function useLiveBuckets() {
     }>({ loading: true, error: "", lastUpdatedMs: 0, buckets: [] });
 
     useEffect(() => {
+        if (!timeZone) return;
         let cancelled = false;
 
         const seriesToBuckets = (series: CallSeriesItem[]): LiveTimeBucket[] => {
@@ -197,14 +191,13 @@ function useLiveBuckets() {
             // bucket window. Time-of-day breakdowns require a per-minute
             // endpoint that doesn't exist yet (tracked in
             // API_CONNECTIVITY_GAP_ANALYSIS.md §2.1).
-            const DAY_MS = 24 * 60 * 60 * 1000;
             const out: LiveTimeBucket[] = [];
             for (const s of series) {
-                const startMs = Date.parse(s.date);
+                const { startMs, endMs } = calendarBucketBounds(s.date, timeZone);
                 if (!Number.isFinite(startMs)) continue;
                 out.push({
                     startMs,
-                    endMs: startMs + DAY_MS,
+                    endMs,
                     total: s.total_calls ?? 0,
                     answered: s.answered ?? 0,
                     failed: s.failed ?? 0,
@@ -217,13 +210,14 @@ function useLiveBuckets() {
 
         const fetchOnce = async () => {
             try {
-                const month = currentUtcMonthRange();
+                const month = reportingDateRange(timeZone, "month");
                 const resp = await extendedApi.getCallAnalytics(
                     month.from,
                     month.to,
                     "day",
                     "outbound",
                     false,
+                    timeZone,
                 );
                 if (cancelled) return;
                 const buckets = seriesToBuckets(resp?.series ?? []);
@@ -250,7 +244,7 @@ function useLiveBuckets() {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, []);
+    }, [timeZone]);
 
     return state;
 }
@@ -729,7 +723,7 @@ export default function DashboardPage() {
     const [activeBucket, setActiveBucket] = useState<LiveTimeBucket | null>(null);
     const [callStatsView, setCallStatsView] = useState<"status" | "campaigns" | "outcomes">("status");
 
-    const sim = useLiveBuckets();
+    const sim = useLiveBuckets(summary?.timezone);
 
     const activeRange = useMemo(() => {
         const end = callRangeMode === "custom" ? (customEndMs ?? sim.lastUpdatedMs) : sim.lastUpdatedMs;
@@ -1002,13 +996,14 @@ export default function DashboardPage() {
         try {
             setLoading(true);
             setError("");
-            const month = currentUtcMonthRange();
-            const [summaryData, campaignsData, analytics, hourly, byCampaign] = await Promise.all([
-                dashboardApi.getDashboardSummary(),
+            const summaryData = await dashboardApi.getDashboardSummary();
+            if (!summaryData.timezone) throw new Error("Reporting timezone unavailable");
+            const month = reportingDateRange(summaryData.timezone, "month");
+            const [campaignsData, analytics, hourly, byCampaign] = await Promise.all([
                 dashboardApi.listCampaigns(),
-                extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false),
-                extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false),
-                extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false),
+                extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false, summaryData.timezone),
+                extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false, summaryData.timezone),
+                extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false, summaryData.timezone),
             ]);
             setSummary(summaryData);
             setLiveSummary(summaryData);
@@ -1262,7 +1257,7 @@ export default function DashboardPage() {
             if (inFlight) return; // skip if the previous poll hasn't resolved yet
             inFlight = true;
             try {
-                const summaryData = await dashboardApi.getDashboardSummary();
+                const summaryData = await dashboardApi.getDashboardSummary(summary?.timezone);
                 if (cancelled) return;
                 setLiveSummary(summaryData);
             } catch {
@@ -1277,7 +1272,7 @@ export default function DashboardPage() {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, [streamStatus]);
+    }, [streamStatus, summary?.timezone]);
 
     const effectiveSummary = liveSummary ?? summary;
 
@@ -1349,14 +1344,15 @@ export default function DashboardPage() {
 
     const safeSeries = series ?? [];
     const stackedPoints: DualSeriesPoint[] = safeSeries.map((s) => ({
-        label: new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" }),
+        label: formatCalendarDate(s.date),
         a: s.answered,
         b: s.failed,
     }));
 
     const heatRows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const heatCols = ["0–3", "3–6", "6–9", "9–12", "12–15", "15–18", "18–21", "21–24"];
-    // Real time-of-day grid from hourly buckets (date = "YYYY-MM-DDTHH:00", UTC).
+    // Hour labels are already calendar wall time in the API's reporting zone.
+    // Parse their fields as UTC only to retain the labeled weekday/hour.
     // Row = weekday (Mon..Sun), col = 3-hour band. No more even-spread estimate.
     const heatValues = heatRows.map(() => heatCols.map(() => 0));
     for (const h of hourSeries) {
@@ -1436,7 +1432,7 @@ export default function DashboardPage() {
         .map((s) => {
             const rate = s.total_calls > 0 ? s.failed / s.total_calls : 0;
             const severity: TimelineItem["severity"] = rate > 0.18 ? "error" : rate > 0.12 ? "warn" : "info";
-            const dateLabel = new Date(s.date).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            const dateLabel = formatCalendarDate(s.date);
             return {
                 id: `fail-${s.date}`,
                 title: severity === "error" ? "High failure rate" : severity === "warn" ? "Elevated failures" : "Stable delivery",
@@ -1448,7 +1444,7 @@ export default function DashboardPage() {
         .reverse();
 
     return (
-        <DashboardLayout title="Dashboard" description="Outbound campaign performance and shared voice usage">
+        <DashboardLayout title="Dashboard" description={`Outbound campaign performance and shared voice usage${summary?.timezone ? ` · Reporting: ${summary.timezone}` : ""}`}>
             <FirstCallSetup />
             <CallIssuesBanner />
             {loading ? (
@@ -1574,6 +1570,7 @@ export default function DashboardPage() {
                             ) : (
                                 <LiveCallsTimeSeriesChart
                                     buckets={liveBuckets}
+                                    timeZone={summary?.timezone}
                                     markers={markers}
                                     anomalies={anomalies}
                                     maintenanceWindows={maintenanceWindows}

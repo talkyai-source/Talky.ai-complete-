@@ -8,8 +8,8 @@ Supports hour/day/week/month buckets and a per-campaign breakdown.
 from app.core.error_handlers import safe_exception_message
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
-from typing import Dict, List, Literal, Optional
-from datetime import date, datetime, time, timedelta, timezone
+from typing import Annotated, Dict, List, Literal, Optional
+from datetime import datetime, timedelta, timezone
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
@@ -19,6 +19,9 @@ from app.domain.services.call_outcomes import (
     ANSWERED_OUTCOMES,
     FAILED_OUTCOMES,
     GOAL_OUTCOMES,
+)
+from app.domain.services.reporting_time import (
+    ReportingTimeUnavailable, calendar_range, resolve_reporting_zone,
 )
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -51,12 +54,14 @@ class CampaignSeries(BaseModel):
 
 class CallAnalyticsResponse(BaseModel):
     series: List[CallSeriesItem]
+    timezone: str = "UTC"
     direction: Literal["outbound", "inbound", "all"] = "outbound"
     include_tests: bool = False
 
 
 class CampaignAnalyticsResponse(BaseModel):
     campaigns: List[CampaignSeries]
+    timezone: str = "UTC"
     direction: Literal["outbound", "inbound", "all"] = "outbound"
     include_tests: bool = False
 
@@ -97,14 +102,8 @@ def _classify(outcome: Optional[str], bucket: dict) -> None:
         bucket["goal"] += 1
 
 
-def _resolve_range(from_date: Optional[str], to_date: Optional[str], default_days: int = 30):
-    end_date = date.fromisoformat(to_date) if to_date else datetime.now(timezone.utc).date()
-    start_date = date.fromisoformat(from_date) if from_date else end_date - timedelta(days=default_days)
-    if start_date > end_date:
-        raise HTTPException(status_code=400, detail="'from' date cannot be later than 'to' date")
-    start_dt = datetime.combine(start_date, time.min, tzinfo=timezone.utc)
-    end_dt_excl = datetime.combine(end_date + timedelta(days=1), time.min, tzinfo=timezone.utc)
-    return start_dt, end_dt_excl
+def _resolve_range(from_date: Optional[str], to_date: Optional[str], default_days: int = 30, *, zone=None):
+    return calendar_range(from_date, to_date, zone=zone, default_days=default_days)
 
 
 def _to_series(buckets: Dict[str, dict]) -> List[CallSeriesItem]:
@@ -167,6 +166,7 @@ class AttemptStat(BaseModel):
 
 class RetryEffectivenessResponse(BaseModel):
     attempts: List[AttemptStat]
+    timezone: str = "UTC"
 
 
 # Minimum calls in an hour before it's eligible to be the "best hour" — keeps
@@ -186,7 +186,7 @@ def _rate(numerator: int, denominator: int) -> float:
 async def get_best_time_to_call(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
-    tz: str = Query("UTC", description="IANA timezone the hours are reported in"),
+    tz: Annotated[Optional[str], Query(description="IANA reporting timezone; defaults to the account setting, then UTC")] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -196,14 +196,9 @@ async def get_best_time_to_call(
     requested timezone; we report total/answered/goal and the rates, plus
     the single best hour (highest answer rate among hours with enough
     volume to be trustworthy)."""
-    import pytz
     try:
-        zone = pytz.timezone(tz)
-    except Exception:
-        zone = pytz.UTC
-
-    try:
-        start_dt, end_dt_excl = _resolve_range(from_date, to_date)
+        zone = resolve_reporting_zone(db_client, current_user.tenant_id, requested=tz)
+        start_dt, end_dt_excl = _resolve_range(from_date, to_date, zone=zone)
         query = db_client.table("calls").select("created_at, outcome")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
         query = _apply_call_population(
@@ -240,6 +235,8 @@ async def get_best_time_to_call(
         return BestTimeResponse(timezone=str(zone), hours=hours, best_hour=best_hour)
     except HTTPException:
         raise
+    except ReportingTimeUnavailable:
+        raise HTTPException(status_code=503, detail="Reporting timezone unavailable.", headers={"Retry-After": "10"})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:
@@ -254,6 +251,7 @@ async def get_best_time_to_call(
 async def get_retry_effectiveness(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    tz: Annotated[Optional[str], Query(description="IANA reporting timezone; defaults to the account setting, then UTC")] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -264,7 +262,8 @@ async def get_retry_effectiveness(
     drop after attempt 1 tells you the retries aren't converting; a flat
     line says they are."""
     try:
-        start_dt, end_dt_excl = _resolve_range(from_date, to_date)
+        zone = resolve_reporting_zone(db_client, current_user.tenant_id, requested=tz)
+        start_dt, end_dt_excl = _resolve_range(from_date, to_date, zone=zone)
         query = db_client.table("calls").select("lead_id, created_at, outcome")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
         query = _apply_call_population(
@@ -305,9 +304,11 @@ async def get_retry_effectiveness(
             )
             for n, g in sorted(attempts.items())
         ]
-        return RetryEffectivenessResponse(attempts=result)
+        return RetryEffectivenessResponse(attempts=result, timezone=str(zone))
     except HTTPException:
         raise
+    except ReportingTimeUnavailable:
+        raise HTTPException(status_code=503, detail="Reporting timezone unavailable.", headers={"Retry-After": "10"})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:
@@ -322,6 +323,7 @@ async def get_retry_effectiveness(
 async def get_call_analytics(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    tz: Annotated[Optional[str], Query(description="IANA reporting timezone; defaults to the account setting, then UTC")] = None,
     group_by: str = Query("day", description="Grouping: hour, day, week, month"),
     direction: Literal["outbound", "inbound", "all"] = Query(
         "outbound", description="Call direction population"
@@ -338,7 +340,8 @@ async def get_call_analytics(
             detail=f"Invalid group_by. Must be one of: {', '.join(sorted(_VALID_GROUP_BY))}",
         )
     try:
-        start_dt, end_dt_excl = _resolve_range(from_date, to_date)
+        zone = resolve_reporting_zone(db_client, current_user.tenant_id, requested=tz)
+        start_dt, end_dt_excl = _resolve_range(from_date, to_date, zone=zone)
         query = db_client.table("calls").select("created_at, outcome")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
         query = _apply_call_population(
@@ -355,18 +358,21 @@ async def get_call_analytics(
             if dt is None:
                 continue
             bucket = groups.setdefault(
-                _bucket_key(dt, group_by),
+                _bucket_key(dt.astimezone(zone), group_by),
                 {"total": 0, "answered": 0, "failed": 0, "goal": 0},
             )
             _classify(call.get("outcome"), bucket)
 
         return CallAnalyticsResponse(
             series=_to_series(groups),
+            timezone=str(zone),
             direction=direction,
             include_tests=include_tests,
         )
     except HTTPException:
         raise
+    except ReportingTimeUnavailable:
+        raise HTTPException(status_code=503, detail="Reporting timezone unavailable.", headers={"Retry-After": "10"})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:
@@ -381,6 +387,7 @@ async def get_call_analytics(
 async def get_call_analytics_by_campaign(
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    tz: Annotated[Optional[str], Query(description="IANA reporting timezone; defaults to the account setting, then UTC")] = None,
     group_by: str = Query("day", description="Grouping: hour, day, week, month"),
     direction: Literal["outbound", "inbound", "all"] = Query(
         "outbound", description="Call direction population"
@@ -397,7 +404,8 @@ async def get_call_analytics_by_campaign(
             detail=f"Invalid group_by. Must be one of: {', '.join(sorted(_VALID_GROUP_BY))}",
         )
     try:
-        start_dt, end_dt_excl = _resolve_range(from_date, to_date)
+        zone = resolve_reporting_zone(db_client, current_user.tenant_id, requested=tz)
+        start_dt, end_dt_excl = _resolve_range(from_date, to_date, zone=zone)
         query = db_client.table("calls").select("created_at, outcome, campaign_id")
         query = query.gte("created_at", start_dt).lt("created_at", end_dt_excl)
         query = _apply_call_population(
@@ -419,7 +427,7 @@ async def get_call_analytics_by_campaign(
                 continue
             buckets = per_campaign.setdefault(str(cid), {})
             bucket = buckets.setdefault(
-                _bucket_key(dt, group_by),
+                _bucket_key(dt.astimezone(zone), group_by),
                 {"total": 0, "answered": 0, "failed": 0, "goal": 0},
             )
             _classify(call.get("outcome"), bucket)
@@ -448,11 +456,14 @@ async def get_call_analytics_by_campaign(
         campaigns.sort(key=lambda c: sum(s.total_calls for s in c.series), reverse=True)
         return CampaignAnalyticsResponse(
             campaigns=campaigns,
+            timezone=str(zone),
             direction=direction,
             include_tests=include_tests,
         )
     except HTTPException:
         raise
+    except ReportingTimeUnavailable:
+        raise HTTPException(status_code=503, detail="Reporting timezone unavailable.", headers={"Retry-After": "10"})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:

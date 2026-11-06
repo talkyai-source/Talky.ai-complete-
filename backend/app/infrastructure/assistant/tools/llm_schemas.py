@@ -9,7 +9,7 @@ the 6 campaign-admin tools added in feat/assistant-campaign-tools.
 from copy import deepcopy
 
 from app.services.scripts.knowledge.sections import SECTION_TOOL_PARAMETERS
-from app.infrastructure.assistant.tools.date_ranges import SINCE_DESCRIPTION, UNTIL_DESCRIPTION
+from app.infrastructure.assistant.tools.date_ranges import SINCE_DESCRIPTION, TZ_DESCRIPTION, UNTIL_DESCRIPTION
 
 _CAMPAIGN_SECTION_PARAMETERS = deepcopy(SECTION_TOOL_PARAMETERS)
 _CAMPAIGN_SECTION_PARAMETERS["properties"]["campaign_id"] = {"type": "string", "description": "Campaign UUID"}
@@ -20,11 +20,12 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_dashboard_stats",
-            "description": "Call statistics for an explicit since/until range or one UTC day (default today). Pass campaign_id for one campaign. Call metrics use applied_range; active_campaigns is the current account snapshot, not a historical count.",
+            "description": "Call statistics for an explicit since/until range or one local day (default today in the effective timezone). Pass campaign_id for one campaign. Call metrics use applied_range; active_campaigns is the current account snapshot, not a historical count.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "date_str": {"type": "string", "description": "Date in YYYY-MM-DD format, defaults to today"},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
                     "since": {"type": "string", "description": SINCE_DESCRIPTION + " Do not combine with date_str."},
                     "until": {"type": "string", "description": UNTIL_DESCRIPTION + " Do not combine with date_str."},
                     "campaign_id": {"type": "string", "description": "Only this campaign's calls (id from get_campaigns)"}
@@ -55,6 +56,7 @@ GROQ_TOOL_SCHEMAS = [
                 "properties": {
                     "campaign_id": {"type": "string", "description": "Filter by campaign ID"},
                     "status": {"type": "string", "description": "Filter by status"},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
                     "since": {"type": "string", "description": SINCE_DESCRIPTION},
                     "until": {"type": "string", "description": UNTIL_DESCRIPTION},
                     "only_leads": {"type": ["boolean", "string"], "description": "Only return contacts flagged as qualified leads", "default": False},
@@ -89,6 +91,7 @@ GROQ_TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "campaign_id": {"type": "string", "description": "Optional: only leads from this campaign"},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
                     "since": {"type": "string", "description": SINCE_DESCRIPTION},
                     "until": {"type": "string", "description": UNTIL_DESCRIPTION},
                     "limit": {"type": "integer", "description": "Max leads to return (default 10)"}
@@ -198,7 +201,8 @@ GROQ_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "today_only": {"type": ["boolean", "string"], "description": "Only show today's UTC calls when since/until are absent; an explicit bound overrides this default", "default": True},
+                    "today_only": {"type": ["boolean", "string"], "description": "Only show today's local calls in the effective timezone when since/until are absent; an explicit bound overrides this default", "default": True},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
                     "since": {"type": "string", "description": SINCE_DESCRIPTION},
                     "until": {"type": "string", "description": UNTIL_DESCRIPTION},
                     "limit": {"type": "integer", "default": 10},

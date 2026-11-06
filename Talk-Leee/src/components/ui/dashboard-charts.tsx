@@ -1631,9 +1631,9 @@ export type LiveWindow = {
   label?: string;
 };
 
-function formatHhMm(ms: number) {
+function formatHhMm(ms: number, timeZone?: string) {
   const d = new Date(ms);
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", ...(timeZone ? { timeZone } : {}) });
 }
 
 function formatMmSs(seconds: number) {
@@ -1660,6 +1660,7 @@ function buildSegmentedPath(points: Array<{ x: number; y: number; valid: boolean
 
 export function LiveCallsTimeSeriesChart({
   buckets,
+  timeZone,
   height = 320,
   markers = [],
   anomalies = [],
@@ -1670,6 +1671,7 @@ export function LiveCallsTimeSeriesChart({
   onActiveBucketChange,
 }: {
   buckets: LiveTimeBucket[];
+  timeZone?: string;
   height?: number;
   markers?: LiveChartMarker[];
   anomalies?: LiveAnomaly[];
@@ -1779,8 +1781,8 @@ export function LiveCallsTimeSeriesChart({
     if (n === 0) return [];
     const indices = Array.from(new Set([0, Math.floor((n - 1) / 3), Math.floor(((n - 1) * 2) / 3), n - 1]));
     const fallbackMs = visible.items[0]?.startMs ?? 0;
-    return indices.map((i) => ({ i, x: scale.xFor(i), label: formatHhMm(visible.items[i]?.startMs ?? fallbackMs) }));
-  }, [scale, visible.items]);
+    return indices.map((i) => ({ i, x: scale.xFor(i), label: formatHhMm(visible.items[i]?.startMs ?? fallbackMs, timeZone) }));
+  }, [scale, visible.items, timeZone]);
 
   const markerInView = useMemo(() => {
     if (visible.items.length === 0) return { startMs: 0, endMs: 0, inView: [] as LiveChartMarker[] };
@@ -1823,7 +1825,7 @@ export function LiveCallsTimeSeriesChart({
     const content = (
       <div className="space-y-2">
         <div className="text-sm font-black text-gray-900">
-          {formatHhMm(b.startMs)}–{formatHhMm(b.endMs)}
+          {formatHhMm(b.startMs, timeZone)}–{formatHhMm(b.endMs, timeZone)}
         </div>
         {total === null ? (
           <div className="text-xs font-semibold text-gray-600">Data gap</div>

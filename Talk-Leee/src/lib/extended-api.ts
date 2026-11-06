@@ -77,6 +77,7 @@ export interface CallSeriesItem {
 
 export interface CallAnalyticsResponse {
     series: CallSeriesItem[];
+    timezone: string;
     direction: "outbound" | "inbound" | "all";
     include_tests: boolean;
 }
@@ -211,6 +212,7 @@ class ExtendedApi {
     }
 
     async getRetryEffectiveness(): Promise<{
+        timezone: string;
         attempts: Array<{ attempt: number; total: number; answered: number; answer_rate: number; goal_achieved: number; goal_rate: number }>;
     }> {
         return this.client.request({ path: "/analytics/retry-effectiveness", method: "GET" });
@@ -223,6 +225,7 @@ class ExtendedApi {
         groupBy: "hour" | "day" | "week" | "month" = "day",
         direction: "outbound" | "inbound" | "all" = "outbound",
         includeTests: boolean = false,
+        tz?: string,
     ): Promise<CallAnalyticsResponse> {
         const params: Record<string, string> = {
             group_by: groupBy,
@@ -231,6 +234,7 @@ class ExtendedApi {
         };
         if (fromDate) params.from = fromDate;
         if (toDate) params.to = toDate;
+        if (tz) params.tz = tz;
 
         return this.client.request({
             path: "/analytics/calls",
@@ -246,7 +250,8 @@ class ExtendedApi {
         groupBy: "hour" | "day" | "week" | "month" = "day",
         direction: "outbound" | "inbound" | "all" = "outbound",
         includeTests: boolean = false,
-    ): Promise<{ campaigns: Array<{ campaign_id: string; name: string; series: Array<{ date: string; total_calls: number; answered: number; failed: number; goal_achieved?: number }> }>; direction: "outbound" | "inbound" | "all"; include_tests: boolean }> {
+        tz?: string,
+    ): Promise<{ timezone: string; campaigns: Array<{ campaign_id: string; name: string; series: Array<{ date: string; total_calls: number; answered: number; failed: number; goal_achieved?: number }> }>; direction: "outbound" | "inbound" | "all"; include_tests: boolean }> {
         const params: Record<string, string> = {
             group_by: groupBy,
             direction,
@@ -254,6 +259,7 @@ class ExtendedApi {
         };
         if (fromDate) params.from = fromDate;
         if (toDate) params.to = toDate;
+        if (tz) params.tz = tz;
 
         return this.client.request({
             path: "/analytics/calls/by-campaign",

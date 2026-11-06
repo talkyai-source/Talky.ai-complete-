@@ -8,12 +8,10 @@ import { motion } from "framer-motion";
 import { Select } from "@/components/ui/select";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
+import { formatCalendarDate, reportingDateRange } from "@/lib/reporting-time";
 
 function formatDate(dateStr: string) {
-    return new Date(dateStr).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-    });
+    return formatCalendarDate(dateStr);
 }
 
 function GlassStatCard({
@@ -66,6 +64,8 @@ export default function AnalyticsPage() {
     const [groupBy, setGroupBy] = useState<"day" | "week" | "month">("day");
     const [direction, setDirection] = useState<"outbound" | "inbound" | "all">("outbound");
     const [dateRange, setDateRange] = useState(30);
+    const [reportingZone, setReportingZone] = useState("");
+    const reportingZoneRef = useRef("");
     const [barTooltip, setBarTooltip] = useState<{ index: number; x: number; y: number } | null>(null);
     const barsWrapRef = useRef<HTMLDivElement>(null);
 
@@ -75,19 +75,23 @@ export default function AnalyticsPage() {
         async function loadAnalytics() {
             try {
                 setLoading(true);
-                const toDate = new Date().toISOString().split("T")[0];
-                const fromDate = new Date(Date.now() - dateRange * 24 * 60 * 60 * 1000)
-                    .toISOString()
-                    .split("T")[0];
-
-                const response = await extendedApi.getCallAnalytics(
-                    fromDate,
-                    toDate,
-                    groupBy,
-                    direction,
-                    false,
+                let zone = reportingZoneRef.current;
+                // No browser/UTC guess while resolving the account's stored zone.
+                let response = zone ? null : await extendedApi.getCallAnalytics(
+                    undefined, undefined, groupBy, direction, false,
                 );
                 if (cancelled) return;
+                if (response) zone = response.timezone;
+                if (!zone) throw new Error("Reporting timezone unavailable");
+                if (!response || dateRange !== 30) {
+                    const range = reportingDateRange(zone, dateRange);
+                    response = await extendedApi.getCallAnalytics(
+                        range.from, range.to, groupBy, direction, false, zone,
+                    );
+                }
+                if (cancelled) return;
+                reportingZoneRef.current = response.timezone;
+                setReportingZone(response.timezone);
                 setError("");
                 setData(response.series);
             } catch (err) {
@@ -123,7 +127,7 @@ export default function AnalyticsPage() {
     return (
         <DashboardLayout
             title="Analytics"
-            description={`${direction === "all" ? "All real" : `Real ${direction}`} call performance over time`}
+            description={`${direction === "all" ? "All real" : `Real ${direction}`} call performance over time${reportingZone ? ` · ${reportingZone}` : ""}`}
         >
             {/* Filters */}
             <motion.div

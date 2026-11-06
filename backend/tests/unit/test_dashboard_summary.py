@@ -56,6 +56,14 @@ class _FakeBuilder:
         self.calls.append(("gte", args, kwargs))
         return self
 
+    def lt(self, *args, **kwargs):
+        self.calls.append(("lt", args, kwargs))
+        return self
+
+    def limit(self, *args, **kwargs):
+        self.calls.append(("limit", args, kwargs))
+        return self
+
     def execute(self):
         return SimpleNamespace(count=self._count, data=self._data, error=None)
 

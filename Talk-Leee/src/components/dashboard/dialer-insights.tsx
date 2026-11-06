@@ -34,11 +34,10 @@ export function DialerInsights() {
 
     useEffect(() => {
         let alive = true;
-        const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
         (async () => {
             try {
                 const [bt, re] = await Promise.all([
-                    extendedApi.getBestTimeToCall(browserTz),
+                    extendedApi.getBestTimeToCall(),
                     extendedApi.getRetryEffectiveness(),
                 ]);
                 if (!alive) return;

@@ -3,12 +3,13 @@ Dashboard and usage tools for the assistant agent.
 """
 import logging
 from typing import Optional, Dict, Any
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 from app.infrastructure.assistant.tools.campaigns import campaign_names
 from app.infrastructure.assistant.tools.date_ranges import (
-    SINCE_DESCRIPTION, UNTIL_DESCRIPTION, apply_range, normalize_range, utc_day_range,
+    SINCE_DESCRIPTION, TZ_DESCRIPTION, UNTIL_DESCRIPTION, apply_range, local_day_range,
+    normalize_range, resolve_reporting_zone, validate_range,
 )
 
 logger = logging.getLogger(__name__)
@@ -20,6 +21,7 @@ class GetDashboardStatsInput(BaseModel):
     campaign_id: Optional[str] = Field(None, description="Only this campaign's calls")
     since: Optional[str] = Field(None, description=SINCE_DESCRIPTION)
     until: Optional[str] = Field(None, description=UNTIL_DESCRIPTION)
+    tz: Optional[str] = Field(None, description=TZ_DESCRIPTION)
 
 
 async def get_dashboard_stats(
@@ -29,6 +31,7 @@ async def get_dashboard_stats(
     campaign_id: Optional[str] = None,
     since: Optional[str] = None,
     until: Optional[str] = None,
+    tz: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get dashboard statistics for the tenant, or for one of its campaigns.
@@ -44,11 +47,13 @@ async def get_dashboard_stats(
     try:
         if date_str is not None and (since is not None or until is not None):
             return {"error": "Use either date_str or since/until, not both."}
-        start, end = normalize_range(since, until)
+        validate_range(since, until)
+        zone = resolve_reporting_zone(db_client, tenant_id, campaign_id=campaign_id, requested=tz)
+        start, end = normalize_range(since, until, zone=zone)
         target_date = None
         if since is None and until is None:
-            start, end = utc_day_range(date_str)
-            target_date = start[:10]
+            start, end = local_day_range(date_str, zone=zone)
+            target_date = datetime.fromisoformat(start).astimezone(zone).date().isoformat()
 
         campaign_name = None
         if campaign_id:
@@ -82,6 +87,7 @@ async def get_dashboard_stats(
 
         stats = {
             "date": target_date,
+            "timezone": str(zone),
             "scope": "campaign" if campaign_id else "all_campaigns",
             "total_calls": total_calls,
             "completed": completed,

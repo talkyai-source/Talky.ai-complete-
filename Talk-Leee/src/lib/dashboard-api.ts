@@ -5,6 +5,7 @@ import type { CampaignBrief } from "@/lib/campaign-brief";
 
 // Dashboard Types
 export interface DashboardSummary {
+    timezone?: string;
     total_calls: number;
     answered_calls: number;
     failed_calls: number;
@@ -469,10 +470,11 @@ class DashboardApi {
     private get client() { return sharedHttpClient(); }
 
     // Dashboard
-    async getDashboardSummary(): Promise<DashboardSummary> {
+    async getDashboardSummary(tz?: string): Promise<DashboardSummary> {
         return this.client.request({
             path: "/dashboard/summary",
             method: "GET",
+            params: tz ? { tz } : undefined,
         });
     }
 

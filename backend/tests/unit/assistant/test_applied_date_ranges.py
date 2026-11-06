@@ -122,6 +122,7 @@ class Client:
                          "status": "completed", "outcome": "answered", "is_lead": True,
                          "goal_achieved": key == "late", "phone_number": "+15550001000"})
         self.tables = {
+            "tenants": [{"id": TENANT, "calling_rules": {"timezone": "UTC"}}],
             "calls": [dict(row) for row in rows], "leads": [dict(row) for row in rows],
             "campaigns": [
                 {"id": CAMPAIGN, "tenant_id": TENANT, "name": "Scoped", "status": "running"},
@@ -174,7 +175,7 @@ async def test_invalid_range_returns_error_without_querying_or_claiming_applicat
     assert client.executed == []
 
 
-@pytest.mark.parametrize("bound", ["2026-10-01", "2026-10-01T00:00:00", "not-a-date", 17, "2026-10-01T00:00:00Z\n"])
+@pytest.mark.parametrize("bound", ["2026-10-01Z", "2026-10-01T00:00:00", "not-a-date", 17, "2026-10-01T00:00:00Z\n"])
 async def test_naive_malformed_and_nonstring_bounds_are_refused(bound):
     client = Client()
     result = await get_recent_calls(TENANT, client, since=bound, until=UNTIL)
