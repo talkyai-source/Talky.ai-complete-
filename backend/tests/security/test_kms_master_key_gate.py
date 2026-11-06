@@ -51,6 +51,8 @@ def _clean_env(monkeypatch):
     monkeypatch.setenv("VOICE_GATEWAY_AUTH_TOKEN", "gateway_" + "b" * 32)
     monkeypatch.setenv("VOICE_GATEWAY_CALLBACK_HOST", "127.0.0.1")
     monkeypatch.setenv("BACKEND_INTERNAL_URL", "http://127.0.0.1:8000")
+    # Satisfy the independent sender-domain gate; no email is sent by these tests.
+    monkeypatch.setenv("FROM_EMAIL", "qa-fixture@talkleeai.com")
     monkeypatch.setenv("STRIPE_BILLING_DISABLED", "1")
     monkeypatch.delenv("STRIPE_SECRET_KEY", raising=False)
     monkeypatch.setenv("ASTERISK_ARI_PASSWORD", "a-strong-ari-password")
