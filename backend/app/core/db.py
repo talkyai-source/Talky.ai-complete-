@@ -91,6 +91,15 @@ class DatabasePoolTimeoutError(asyncio.TimeoutError, RuntimeError):
     """
 
 
+# Preserve these types across the legacy adapter and HTTP error boundary.
+# Deliberately exclude broad OSError: missing local files are not DB outages.
+DATABASE_RETRYABLE_ERRORS = (
+    DatabasePoolTimeoutError, asyncpg.QueryCanceledError, asyncpg.LockNotAvailableError,
+    asyncpg.ConnectionDoesNotExistError, asyncpg.CannotConnectNowError,
+    asyncpg.TooManyConnectionsError, ConnectionRefusedError, ConnectionResetError,
+)
+
+
 _pool: Optional[asyncpg.Pool] = None
 # Phase 2.3 — optional read-replica pool. Populated when
 # READ_DATABASE_URL is set; falls back to the primary pool when unset

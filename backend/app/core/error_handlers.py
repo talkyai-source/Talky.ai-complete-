@@ -18,7 +18,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-import asyncpg
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -26,13 +25,11 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.request_id_middleware import get_request_id
-from app.core.db import DatabasePoolTimeoutError
+from app.core.db import DATABASE_RETRYABLE_ERRORS
 
 logger = logging.getLogger(__name__)
 
-_DATABASE_CAPACITY_ERRORS = (
-    DatabasePoolTimeoutError, asyncpg.QueryCanceledError, asyncpg.LockNotAvailableError,
-)
+_DATABASE_CAPACITY_ERRORS = DATABASE_RETRYABLE_ERRORS
 
 
 def _database_capacity_cause(exc: BaseException) -> BaseException | None:
@@ -174,7 +171,7 @@ async def db_pool_timeout_exception_handler(
     # Pool exhaustion / DB unresponsive — this is a transient capacity
     # problem, not a client error or a code bug, so 503 (not 500) is the
     # correct signal for clients/load-balancers to back off and retry.
-    logger.error("DB capacity timeout: %s", type(exc).__name__)
+    logger.error("DB temporarily unavailable: %s", type(exc).__name__)
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content=_envelope(
@@ -195,6 +192,11 @@ async def unhandled_exception_handler(
     cached = getattr(request.state, "_talky_unhandled_error", None)
     if cached is not None and cached[0] is exc:
         return cached[1]
+    database_error = _database_capacity_cause(exc)
+    if database_error is not None:
+        response = await db_pool_timeout_exception_handler(request, database_error)
+        request.state._talky_unhandled_error = (exc, response)
+        return response
     # Never leak internal error details to clients. Operators get the full
     # traceback in logs (tagged with request_id) and Sentry.
     logger.exception("Unhandled exception in request handler")

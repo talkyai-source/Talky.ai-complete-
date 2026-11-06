@@ -28,6 +28,7 @@ import asyncpg
 import jwt
 
 from app.core.config import get_settings
+from app.core.db import DATABASE_RETRYABLE_ERRORS
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +268,8 @@ class QueryBuilder:
                 return await self._execute_with_conn(conn)
         except Exception as e:
             logger.error("PostgresAdapter query error: %s", e, exc_info=True)
+            if isinstance(e, DATABASE_RETRYABLE_ERRORS):
+                raise
             return PostgrestResponse(error=str(e))
         finally:
             if conn:
@@ -871,6 +874,8 @@ class RpcBuilder:
                 return await self._execute_with_conn(conn)
         except Exception as e:
             logger.error("PostgresAdapter RPC error (%s): %s", self.name, e, exc_info=True)
+            if isinstance(e, DATABASE_RETRYABLE_ERRORS):
+                raise
             return PostgrestResponse(error=str(e))
         finally:
             if conn:
