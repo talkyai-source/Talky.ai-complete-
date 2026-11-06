@@ -10729,7 +10729,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "85d6d0727fd4a27e7af86386b16bd6e951ee43836f1007bbc48a0241054034d5",
+      "id": "f1323b7c52e9cd444f01f41028373a2bac66815b29cb594cd1767b98574b0986",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
       "line": 1053,
@@ -10895,7 +10895,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "19bdf7476b0973fd343d1b3d378dca17e7ae5cdc335b6a212e50cdae76d34b04",
+      "id": "b71c623fc9c4ff790a8cc9ec991e41d88dbb91f3f16cdd1d9cb52b087e3c10cf",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
       "line": 684,
@@ -11497,7 +11497,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "a17f83e070e86dc18291bc664f2184b7424beee626b4214864bf8905ff41142a",
+      "id": "e21a3e8a084e03081f3f77b1922b829af81e227e01c2380724c6c5abbe3ac3f6",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
       "line": 1418,
@@ -11841,7 +11841,7 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "4ebeeed9bed9785904c851980c2eaf7bc13f67a2df131f738f382dc4720d86fc",
+      "id": "6203f12841ef1b363a474817fe7e7ca6387e7fb5cf2b422fa144593a0a5d9b07",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
       "line": 2060,
@@ -12012,7 +12012,7 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "3a00bcd0d6176db410e4af4ef64c508cdbea7c3af6fb18acec01f5c2ccf4d7ac",
+      "id": "49b036f73b8a61597a3a0882171c24cdfb7905a2c28609c77c6c5eee4eeab339",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
       "line": 883,
@@ -12110,7 +12110,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "b285c43a17c361abb104f3c51cc5c051ec504f20be90100880588f099deb612d",
+      "id": "24797327c67274d03b4447be2656b996d0264e18ae48ecb84e08a12ebc98f8a5",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
       "line": 1924,

@@ -114,10 +114,19 @@ def _predicate_scope(sql, protected_tables, tenant_tables):
     tables = sorted({table for table, _alias in relations})
     if not tables:
         return tables, False
+    # COALESCE in an UPDATE value does not weaken its WHERE predicate. Keep
+    # refusing it in filters (where it can turn UNKNOWN into true), and retain
+    # the independent subquery/boolean checks below for the entire statement.
+    coalesce_scope = clean
+    if re.match(r"\s*UPDATE\b", clean, re.I):
+        where = re.search(r"\bWHERE\b", clean, re.I)
+        if where:
+            coalesce_scope = clean[where.start():]
     # Refuse to infer SQL boolean/scope semantics beyond a single simple DML
     # statement. These forms stay visible as debt rather than being waved through.
     if (any(table not in tenant_tables for table in tables)
-            or re.search(r"\b(?:OR|UNION|INTERSECT|EXCEPT|EXISTS|NOT|CASE|COALESCE|NULLIF|LEFT|RIGHT|FULL|OUTER)\b", clean, re.I)
+            or re.search(r"\b(?:OR|UNION|INTERSECT|EXCEPT|EXISTS|NOT|CASE|NULLIF|LEFT|RIGHT|FULL|OUTER)\b", clean, re.I)
+            or re.search(r"\bCOALESCE\b", coalesce_scope, re.I)
             or len(re.findall(r"\bSELECT\b", clean, re.I)) > 1
             or (not re.match(r"\s*SELECT\b", clean, re.I) and re.search(r"\bSELECT\b", clean, re.I))
             or re.search(r"\)\s*(?:=|<>|!=)|\bIS\s+(?:FALSE|UNKNOWN|DISTINCT\s+FROM)\b|=\s*FALSE\b", clean, re.I)

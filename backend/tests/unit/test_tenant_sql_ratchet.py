@@ -117,6 +117,20 @@ def test_actual_tenant_predicates_are_scoped(scanner, sql):
     assert scanner["audit_findings"](findings, debt_for([])) == []
 
 
+@pytest.mark.parametrize("sql,scoped", [
+    ("UPDATE calls SET snapshot = jsonb_set(COALESCE(snapshot, '{}'::jsonb), "
+     "'{speaker}', to_jsonb($2::text), true) WHERE tenant_id = $1::uuid AND id = $3::uuid RETURNING id", True),
+    ("UPDATE calls SET snapshot = COALESCE(snapshot, '{}'::jsonb) WHERE COALESCE(tenant_id = $1, true)", False),
+    ("UPDATE calls SET snapshot = COALESCE(snapshot, '{}'::jsonb) WHERE tenant_id = $1 OR true", False),
+    ("UPDATE calls SET snapshot = COALESCE(snapshot, '{}'::jsonb)", False),
+    ("UPDATE calls SET snapshot = (SELECT snapshot FROM calls WHERE tenant_id = $1) WHERE id = $2", False),
+])
+def test_update_value_functions_do_not_change_predicate_scope(scanner, sql, scoped):
+    findings = scan(scanner, reader(sql))
+    assert len(findings) == 1
+    assert findings[0]["scoped"] is scoped
+
+
 @pytest.mark.parametrize("sql", [
     "SELECT tenant_id, id FROM calls",
     "SELECT id FROM calls -- WHERE tenant_id = $1\n",
