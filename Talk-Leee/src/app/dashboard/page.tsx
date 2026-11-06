@@ -1072,9 +1072,9 @@ export default function DashboardPage() {
 
         const getWsUrl = () => {
             const envUrl = process.env.NEXT_PUBLIC_DASHBOARD_WS_URL;
-            if (envUrl && envUrl.trim().length > 0) return envUrl.trim();
-            const proto = window.location.protocol === "https:" ? "wss" : "ws";
-            return `${proto}://${window.location.host}/ws`;
+            // The frontend host has no dashboard socket. REST polling remains
+            // available when a stream endpoint has not been configured.
+            return envUrl?.trim() ?? "";
         };
 
         let ws: WebSocket | null = null;
@@ -1153,6 +1153,10 @@ export default function DashboardPage() {
             try {
                 url = getWsUrl();
             } catch {
+                setStreamStatus("offline");
+                return;
+            }
+            if (!url) {
                 setStreamStatus("offline");
                 return;
             }
