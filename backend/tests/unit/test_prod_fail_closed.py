@@ -35,6 +35,8 @@ def _prod_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """Baseline prod env where the gate should pass. Tests that want to
     prove a specific violation override ONE of these from this baseline."""
     monkeypatch.setenv("ENVIRONMENT", "production")
+    # Synthetic sender only; the gate test never sends mail.
+    monkeypatch.setenv("FROM_EMAIL", "qa-fixture@talkleeai.com")
     # No dev bypass flags
     monkeypatch.delenv("TELEPHONY_DEV_BYPASS_GUARD_ERRORS", raising=False)
     monkeypatch.delenv("TELEPHONY_LOCAL_DEV", raising=False)
