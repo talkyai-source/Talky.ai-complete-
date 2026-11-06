@@ -298,6 +298,21 @@ async def get_current_user(
         async with acquire_with_tenant(client.pool, None) as conn:
             row = await load_current_principal(conn, user_id,
                 tenant_id=payload.get("tenant_id") if payload else None)
+        from app.core.security.platform_admin_mfa import (
+            denial_detail, policy_enabled, requires_verified_mfa,
+        )
+        mfa_required = policy_enabled()
+        if mfa_required and normalize_role(row["role"]) == UserRole.PLATFORM_ADMIN:
+            if payload is None:
+                # Legacy middleware/cookie validation does not carry factor
+                # evidence. Reload this exact active user/session, never trust
+                # an enrollment flag or a cached request-state MFA hint.
+                async with acquire_with_tenant(client.pool, None) as conn:
+                    session = await get_session_by_id(conn, str(session["id"]), user_id=user_id)
+                if not session:
+                    raise HTTPException(status_code=401, detail="Your login session has ended. Please sign in again.")
+            if requires_verified_mfa(row, session, enabled=mfa_required):
+                raise HTTPException(status_code=403, detail=denial_detail())
     except HTTPException:
         raise
     except PrincipalUnavailable as exc:

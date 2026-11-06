@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     kms_provider: str = "local"
     jwt_secret: str | None = None
     secret_key: str | None = None
+    # Enable only after administrators enrol and complete a fresh MFA login.
+    platform_admin_mfa_required: bool = False
     # Dedicated write-only Alertmanager ingestion credential; not user/internal auth.
     alertmanager_ingest_token: SecretStr | None = None
     alertmanager_source_id: str = "platform-alertmanager"

@@ -102,9 +102,16 @@ async def load_session_principal(conn, claims):
         session_id = str(UUID(str(claims.get("sid"))))
     except (TypeError, ValueError, AttributeError) as exc:
         raise PrincipalUnavailable("session_required") from exc
-    if not await get_session_by_id(conn, session_id, user_id=user_id):
+    session = await get_session_by_id(conn, session_id, user_id=user_id)
+    if not session:
         raise PrincipalUnavailable("session_ended")
-    return await load_current_principal(conn, user_id, tenant_id=claims.get("tenant_id"))
+    principal = await load_current_principal(conn, user_id, tenant_id=claims.get("tenant_id"))
+    from app.core.security.platform_admin_mfa import (
+        MFA_REQUIRED_CODE, policy_enabled, requires_verified_mfa,
+    )
+    if requires_verified_mfa(principal, session, enabled=policy_enabled()):
+        raise PrincipalUnavailable(MFA_REQUIRED_CODE)
+    return principal
 
 
 # Server-only context propagated to existing assistant tool tasks. No model or

@@ -546,7 +546,8 @@ Verify public contact submission produces a committed receipt, then use normal p
 - [ ] Secrets strong, generated, and **not** committed — `python -c "import secrets; print(secrets.token_urlsafe(48))"`
 - [ ] `.env` and `backend/.env` ignored: `git check-ignore .env backend/.env`
 - [ ] `ENVIRONMENT=production` so `prod_gate` enforces strict config validation and HSTS is emitted
-- [ ] CORS `allowed_origins` restricted to the real domains
+- [ ] CORS `allowed_origins` restricted to the real domains, including `https://admin.talkleeai.com` while preserving the complete existing approved origin list
+- [ ] [Admin DNS/CORS and platform-admin MFA rollout](../backend/docs/platform_admin_mfa.md) rehearsed; `PLATFORM_ADMIN_MFA_REQUIRED` remains false until administrators complete enrolment and a fresh second-factor login
 - [ ] DB backup taken and a restore rehearsed — see [RUNBOOK.md → Backups](./RUNBOOK.md#backups)
 - [ ] `talky-migrate.service` succeeds on a copy of prod data before it runs on prod
 - [ ] [RUNBOOK.md](./RUNBOOK.md) read by whoever is on call
