@@ -9,7 +9,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
-from typing import Any, List, Literal, Optional
+from typing import Annotated, Any, List, Literal, Optional
 from app.core.postgres_adapter import Client
 from app.api.v1.validation import ResourceUUID, pagination_offset
 
@@ -27,6 +27,7 @@ from app.domain.services.telephony.termination import (
 from app.utils.tenant_filter import verify_tenant_access
 from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
 from app.domain.services.caller_identity import caller_identity_projection
+from app.domain.services.call_history_cursor import history_scope, encode_history_cursor, decode_history_cursor
 
 logger = logging.getLogger(__name__)
 
@@ -343,7 +344,8 @@ class CallListResponse(BaseModel):
     items: List[CallListItem]
     page: int
     page_size: int
-    total: int
+    total: Optional[int]
+    next_cursor: Optional[str] = None
 
 
 class CallIssueItem(BaseModel):
@@ -1290,6 +1292,9 @@ async def list_calls(
     ),
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    search: Annotated[Optional[str], Query(max_length=200, description="Literal phone, DID or campaign text")] = None,
+    pagination: Annotated[Literal["offset", "cursor"], Query(description="Cursor mode omits the expensive total count")] = "offset",
+    cursor: Annotated[Optional[str], Query(max_length=1024, description="Continue the same tenant and filters")] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1305,7 +1310,21 @@ async def list_calls(
         - from: Start date filter
         - to: End date filter
     """
+    cursor_mode = pagination == "cursor" or cursor is not None
+    if cursor_mode and page != 1:
+        raise HTTPException(422, "Cursor pagination cannot be combined with a page number")
+    if search is not None and (len(search) > 200 or any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xD800 <= ord(c) <= 0xDFFF for c in search)):
+        raise HTTPException(422, "Invalid call history search")
+    search = search.strip() if search else None
     offset = pagination_offset(page, page_size)
+    scope = history_scope(str(current_user.tenant_id), {
+        "status": status, "direction": direction, "inbound_campaign_id": str(inbound_campaign_id) if inbound_campaign_id else None,
+        "from": from_date, "to": to_date, "search": search,
+    })
+    try:
+        boundary = decode_history_cursor(cursor, scope) if cursor is not None else None
+    except ValueError:
+        raise HTTPException(422, "Invalid call history cursor for these filters") from None
     # asyncpg will not coerce strings for a timestamptz parameter, so parse the
     # dates here (a bad value is the caller's error, not a 500).
     from_bound: Optional[datetime] = None
@@ -1358,8 +1377,33 @@ async def list_calls(
             params.append(to_bound)
             idx += 1
 
+        if search:
+            conditions.append(
+                f"(c.phone_number ILIKE ${idx} ESCAPE '\\' OR c.caller_ani ILIKE ${idx} ESCAPE '\\' "
+                f"OR c.called_did ILIKE ${idx} ESCAPE '\\' OR EXISTS (SELECT 1 FROM campaigns searched "
+                f"WHERE searched.id = c.campaign_id AND searched.tenant_id = c.tenant_id "
+                f"AND searched.name ILIKE ${idx} ESCAPE '\\'))"
+            )
+            params.append("%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+            idx += 1
+
+        if boundary is not None:
+            if boundary[0] is None:
+                # DESC NULLS FIRST: finish undated ID ties, then dated rows.
+                conditions.append(
+                    f"((c.created_at IS NULL AND c.id < ${idx}) OR c.created_at IS NOT NULL)"
+                )
+                params.append(boundary[1])
+                idx += 1
+            else:
+                conditions.append(f"(c.created_at, c.id) < (${idx}, ${idx + 1})")
+                params.extend(boundary)
+                idx += 2
+
         where = " AND ".join(conditions)
 
+        window = f"LIMIT ${idx}" if cursor_mode else f"LIMIT ${idx} OFFSET ${idx + 1}"
+        window_params = [page_size + 1] if cursor_mode else [page_size, offset]
         async with acquire_connection(db_client.pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
@@ -1401,18 +1445,21 @@ async def list_calls(
                     FROM calls c
                     LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id
                     WHERE {where}
-                    ORDER BY c.created_at DESC
-                    LIMIT ${idx} OFFSET ${idx + 1}
+                    ORDER BY c.created_at DESC NULLS FIRST, c.id DESC
+                    {window}
                     """,
                     *params,
-                    page_size,
-                    offset,
+                    *window_params,
                 )
-                total = await conn.fetchval(
+                total = None if cursor_mode else await conn.fetchval(
                     f"SELECT COUNT(*) FROM calls c WHERE {where}",
                     *params,
                 )
 
+        next_cursor = None
+        if cursor_mode and len(rows) > page_size:
+            rows = rows[:page_size]
+            next_cursor = encode_history_cursor(rows[-1]["id"], rows[-1]["created_at"], scope)
         items = []
         for row in rows:
             contacts = _display_captured_contacts(row)
@@ -1476,7 +1523,8 @@ async def list_calls(
             items=items,
             page=page,
             page_size=page_size,
-            total=total or 0,
+            total=None if cursor_mode else total or 0,
+            next_cursor=next_cursor,
         )
 
     except DatabasePoolTimeoutError:

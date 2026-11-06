@@ -13,6 +13,9 @@ from app.api.v1.validation import ResourceUUID, pagination_offset
 import logging
 import os
 import uuid
+from collections import OrderedDict
+from copy import deepcopy
+from time import monotonic as _stats_now
 from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
@@ -61,6 +64,12 @@ from app.api.v1.schemas.campaigns import (
 from app.api.v1.endpoints._outbound_campaign import require_owned_outbound_campaign
 
 load_dotenv()
+
+# Aggregate snapshots only; authorization, campaign status and the live dialer
+# blocking reason are read on every request. Keep this per-process cache small.
+_campaign_stats_cache = OrderedDict()
+_CAMPAIGN_STATS_TTL = 10.0
+_CAMPAIGN_STATS_MAX = 128
 
 
 def _require_contact_write(response, campaign_id: str, operation: str) -> dict:
@@ -1654,9 +1663,12 @@ async def get_campaign_stats(
     keep stats / contacts / jobs in sync.
     """
     try:
+        if not current_user.tenant_id:
+            raise HTTPException(404, "Campaign not found")
         # Get campaign — RLS scopes to the current tenant automatically
         # once get_current_user is in the dependency chain.
-        campaign_response = db_client.table("campaigns").select("*").eq("id", campaign_id).execute()
+        campaign_response = (db_client.table("campaigns").select("*")
+                             .eq("id", campaign_id).eq("tenant_id", current_user.tenant_id).execute())
         if not campaign_response.data:
             raise HTTPException(status_code=404, detail="Campaign not found")
 
@@ -1676,51 +1688,69 @@ async def get_campaign_stats(
         if not scope_tenant:
             raise HTTPException(status_code=404, detail="Campaign not found")
 
-        # "goals_achieved" = the live resolver flag OR the post-call AI verdict
-        # reading as a success (qualified/callback). The goal_achieved flag alone
-        # is currently never set on the call path, so the AI summary verdict is
-        # the real success signal — without this the card sticks at 0 even when
-        # calls clearly qualified leads.
-        import json as _json
-        async with acquire_with_tenant(db_client.pool, scope_tenant) as conn:
-            job_rows = await conn.fetch(_STATS_JOBS_SQL, campaign_id, scope_tenant)
-            call_rows = await conn.fetch(_STATS_CALLS_SQL, campaign_id, scope_tenant)
-            # A summary_json stored as a JSON *string* (double-encoded) cannot
-            # be read with ->> ; the handful of such rows are parsed here.
-            string_rows = await conn.fetch(_STATS_STRING_SUMMARY_SQL, campaign_id, scope_tenant)
+        cache_key = (db_client.pool, scope_tenant, str(campaign_id), campaign.get("updated_at"))
+        cached = _campaign_stats_cache.get(cache_key)
+        if cached is not None and cached[0] > _stats_now():
+            snapshot = deepcopy(cached[1])
+            status_counts = snapshot["job_status_counts"]
+            outcome_counts = snapshot["call_outcome_counts"]
+            goals_achieved = snapshot["goals_achieved"]
+            total_leads = snapshot["total_leads"]
+            qualified_leads = snapshot["qualified_leads"]
+        else:
+            # "goals_achieved" = the live resolver flag OR the post-call AI verdict
+            # reading as a success (qualified/callback). The goal_achieved flag alone
+            # is currently never set on the call path, so the AI summary verdict is
+            # the real success signal — without this the card sticks at 0 even when
+            # calls clearly qualified leads.
+            import json as _json
+            async with acquire_with_tenant(db_client.pool, scope_tenant) as conn:
+                job_rows = await conn.fetch(_STATS_JOBS_SQL, campaign_id, scope_tenant)
+                call_rows = await conn.fetch(_STATS_CALLS_SQL, campaign_id, scope_tenant)
+                # A summary_json stored as a JSON *string* (double-encoded) cannot
+                # be read with ->> ; the handful of such rows are parsed here.
+                string_rows = await conn.fetch(_STATS_STRING_SUMMARY_SQL, campaign_id, scope_tenant)
 
-        status_counts = {}
-        for row in job_rows:
-            status = row["status"]
-            status_counts[status] = status_counts.get(status, 0) + int(row["n"])
+            status_counts = {}
+            for row in job_rows:
+                status = row["status"]
+                status_counts[status] = status_counts.get(status, 0) + int(row["n"])
 
-        outcome_counts = {}
-        goals_achieved = 0
-        for row in call_rows:
-            outcome = row["outcome"]
-            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + int(row["n"])
-            goals_achieved += int(row["goals"])
-        for row in string_rows:
-            try:
-                sj = _json.loads(row["raw"])
-            except Exception:
-                sj = None
-            verdict = str((sj or {}).get("outcome") or "").strip().lower() if isinstance(sj, dict) else ""
-            if verdict.startswith("qualified") or verdict.startswith("callback"):
-                goals_achieved += 1
+            outcome_counts = {}
+            goals_achieved = 0
+            for row in call_rows:
+                outcome = row["outcome"]
+                outcome_counts[outcome] = outcome_counts.get(outcome, 0) + int(row["n"])
+                goals_achieved += int(row["goals"])
+            for row in string_rows:
+                try:
+                    sj = _json.loads(row["raw"])
+                except Exception:
+                    sj = None
+                verdict = str((sj or {}).get("outcome") or "").strip().lower() if isinstance(sj, dict) else ""
+                if verdict.startswith("qualified") or verdict.startswith("callback"):
+                    goals_achieved += 1
 
-        # Real contact + qualified-lead counts. The campaigns.total_leads column
-        # drifts (set at create, not updated on bulk contact upload — it showed 1
-        # while 5 contacts existed), so count the leads table directly.
-        total_leads = (
-            db_client.table("leads").select("id", count="exact")
-            .eq("campaign_id", campaign_id).neq("status", "deleted").execute().count or 0
-        )
-        qualified_leads = (
-            db_client.table("leads").select("id", count="exact")
-            .eq("campaign_id", campaign_id).eq("is_lead", True)
-            .neq("status", "deleted").execute().count or 0
-        )
+            # Real contact + qualified-lead counts. The campaigns.total_leads column
+            # drifts (set at create, not updated on bulk contact upload — it showed 1
+            # while 5 contacts existed), so count the leads table directly.
+            total_leads = (
+                db_client.table("leads").select("id", count="exact")
+                .eq("campaign_id", campaign_id).eq("tenant_id", scope_tenant).neq("status", "deleted").execute().count or 0
+            )
+            qualified_leads = (
+                db_client.table("leads").select("id", count="exact")
+                .eq("campaign_id", campaign_id).eq("tenant_id", scope_tenant).eq("is_lead", True)
+                .neq("status", "deleted").execute().count or 0
+            )
+
+            _campaign_stats_cache.pop(cache_key, None)
+            while len(_campaign_stats_cache) >= _CAMPAIGN_STATS_MAX:
+                _campaign_stats_cache.popitem(last=False)
+            _campaign_stats_cache[cache_key] = (_stats_now() + _CAMPAIGN_STATS_TTL, deepcopy({
+                "job_status_counts": status_counts, "call_outcome_counts": outcome_counts,
+                "goals_achieved": goals_achieved, "total_leads": total_leads, "qualified_leads": qualified_leads,
+            }))
 
         # Why isn't this campaign dialling right now? The dialer publishes its
         # current structured block reason per campaign (Redis, written by

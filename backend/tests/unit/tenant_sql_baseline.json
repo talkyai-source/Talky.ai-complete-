@@ -1640,10 +1640,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "23bff64d09c8e6dffef090d07a29f18432c9854ce1d7f4ba63e3e16f5ce92feb",
+      "id": "d149ec631c113c46e5402630c1b573b1ecabb0104a6c4df00e7888c328860217",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1173,
+      "line": 1175,
       "method": "fetch",
       "tables": [
         "calls",
@@ -5916,10 +5916,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ee0ca03351b7cc09c77d503f5aff8fb2b090db9e10d652a80fa0f9464c0d2924",
+      "id": "bdacda1bf35e5a5f93b68df19c59dd8ee5cbf0d9245024930fe059fc9d60c9ce",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
-      "line": 1046,
+      "line": 1048,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7056,10 +7056,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ba8b53106c66dd34fcc4d19f1d615aa52923396bd27739b51672a3871f26c071",
+      "id": "8e26d031d002f8d6108cdcd3f9a2505c302d711ebb3b6d43706fdac938d6011e",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
-      "line": 441,
+      "line": 443,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7744,10 +7744,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "0f24cb4f992282c79f97c9c03b7cf8015fa41f0bc0f984cb5c6a748891cc9893",
+      "id": "20f6efb6a1338db8d8edebb46acffbe86d7e6eb0080fba69259f22cc164d8a83",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
-      "line": 901,
+      "line": 903,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -9087,10 +9087,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "5f12a3bf8d033509144fcfd834139b391c727fb45fe809c76bc05d9925d61ad9",
+      "id": "51ff028d971cbf55b7f687c732eb604f2e4771a340b1e9ec3dfe049ec8f6615f",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
-      "line": 1085,
+      "line": 1094,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign pacing",
@@ -9253,10 +9253,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "c5dff183a137f50be775df5a4c344b561a9bb97abe8636bf7c931b5efbb5ed0b",
+      "id": "e64995bdb48dfe424ff71cfa525c2d882bcd794e988f2210fb2a85f6f9410718",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
-      "line": 688,
+      "line": 697,
       "method": "_pinned_tts_provider",
       "tables": [],
       "sql": "create",
@@ -9821,10 +9821,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "e5c2b966e9db60fd63c5afbbae1f291d6a39f03a3446d711871a0cd9c10c6746",
+      "id": "b7ee9ebc585e1e56d99d235d6ff9296d3e896189cec965622d56631bd0f61473",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
-      "line": 1450,
+      "line": 1459,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "delete campaign",
@@ -10148,10 +10148,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "4c4b50d44cb5c8ecfacb42a527b7d59d9180b239c3d280d262fc1e3f848f95da",
+      "id": "c88de6d08d1996c50b434b6bd685e4e932b3a9b358edefdea5f1108bb791200b",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2092,
+      "line": 2122,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10319,10 +10319,10 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "c096675f549ff86a6348e2387a84c241c1e4c57dce178400c8e919a97c566b81",
+      "id": "be249c37088c374b1d7241673299b5c3556c90291ad372805337b6bb9284313c",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
-      "line": 915,
+      "line": 924,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign",
@@ -10417,10 +10417,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "b0cef836b58f1ef7c82f1d8dc5a86df90b113b56e5ecbb6c15306493602b91cb",
+      "id": "613e9146e3baca897e0a07b879acbe50f369daf45a6e998d54ef3339e163564f",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 1956,
+      "line": 1986,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
@@ -11043,10 +11043,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "0f22ab345f6ee72ca7bfd189277ce6f39a6d8671ec6b1c1369e4ddecf425118c",
+      "id": "e5c84a40dce3d88dd06cc9eabd5903e47000cb2cfd2cdacd488fb270360eb125",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1411,
+      "line": 1454,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -11907,10 +11907,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "124ce7938d05c68a179d1a26a5ce6b3b33e8283a2cd6eeb84544df52035f1b5d",
+      "id": "9771a8e43c4a1615a601818fbb59cce427cd110ae364f3825f0d6f3e047c0bd6",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1366,
+      "line": 1410,
       "method": "fetch",
       "tables": [
         "call_feedback",
@@ -11920,7 +11920,7 @@
         "recordings_s3",
         "transcripts"
       ],
-      "sql": "SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number, c.status, c.duration_seconds, c.outcome, c.campaign_id, c.summary, c.transcript_save_state, c.transcript_json, to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, c.assignment_id, c.route_version, c.config_version, c.route_snapshot, c.admission_status, c.admission_reason, c.consent_status, c.processing_status, c.billing_status, c.billing_hold_reason, camp.name AS campaign_name, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, (SELECT r.id FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '') OR EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id = c.id AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '')) AS has_transcript, EXISTS (SELECT 1 FROM call_feedback f WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback, {Call(func=Name(id='_captured_contact_rows_sql', ctx=Load()), args=[], keywords=[])} AS captured_contact_rows FROM calls c LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])} ORDER BY c.created_at DESC LIMIT ${branch} OFFSET ${branch}{Constant(value=1)}",
+      "sql": "SELECT c.id, c.talklee_call_id, c.created_at, c.phone_number, c.status, c.duration_seconds, c.outcome, c.campaign_id, c.summary, c.transcript_save_state, c.transcript_json, to_jsonb(c)->'summary_json'->>'outcome' AS lead_outcome, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, c.assignment_id, c.route_version, c.config_version, c.route_snapshot, c.admission_status, c.admission_reason, c.consent_status, c.processing_status, c.billing_status, c.billing_hold_reason, camp.name AS campaign_name, (SELECT leg.from_number FROM call_legs leg WHERE leg.call_id = c.id AND leg.direction = 'outbound' AND NULLIF(BTRIM(leg.from_number), '') IS NOT NULL ORDER BY leg.created_at, leg.id LIMIT 1) AS outbound_from_number, (SELECT r.id FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id AND r.status = 'uploaded' ORDER BY r.created_at DESC LIMIT 1) AS recording_id, (SELECT r.status FROM recordings_s3 r WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id ORDER BY r.created_at DESC LIMIT 1) AS recording_status, ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '') OR EXISTS (SELECT 1 FROM transcripts tr WHERE tr.call_id = c.id AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL) AND COALESCE(tr.full_text, '') <> '')) AS has_transcript, EXISTS (SELECT 1 FROM call_feedback f WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback, {Call(func=Name(id='_captured_contact_rows_sql', ctx=Load()), args=[], keywords=[])} AS captured_contact_rows FROM calls c LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])} ORDER BY c.created_at DESC NULLS FIRST, c.id DESC {IfExp(test=Name(id='cursor_mode', ctx=Load()), body=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1)]), orelse=JoinedStr(values=[Constant(value='LIMIT $'), FormattedValue(value=Name(id='idx', ctx=Load()), conversion=-1), Constant(value=' OFFSET $'), FormattedValue(value=BinOp(left=Name(id='idx', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]))}",
       "scoped": false,
       "unresolved": true,
       "bypass": true,
