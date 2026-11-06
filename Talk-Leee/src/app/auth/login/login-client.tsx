@@ -302,8 +302,8 @@ export default function LoginClientPage() {
                 // to /auth/login — making it look like the login never worked.
                 // Destination. A visitor sent here by the homepage Ask AI button
                 // (per-tab session flag, never a URL parameter) goes back to the
-                // homepage to start the call themselves; everyone else opens
-                // their dashboard. Read the flag BEFORE clearing it — the notice
+                // homepage to start the call themselves; otherwise use a safe
+                // original page or the role dashboard. Read the flag BEFORE clearing it — the notice
                 // must not survive a successful login, and the flag is the only
                 // record of the arrival. A white-label admin always gets their
                 // own dashboard; the proxy would redirect them off "/" anyway.
@@ -312,7 +312,7 @@ export default function LoginClientPage() {
                 const destination =
                     fromAskAi && tokens.role !== "white_label_admin"
                         ? "/"
-                        : postAuthDashboard(tokens.role);
+                        : postAuthDashboard(tokens.role, searchParams?.get("next"));
 
                 // Use a hard navigation instead of router.push. A soft navigation
                 // races the auth cookie commit: the destination's first protected
@@ -337,7 +337,7 @@ export default function LoginClientPage() {
                 }
             }
         },
-        [router, rememberMe, applyLoginResult],
+        [router, rememberMe, applyLoginResult, searchParams],
     );
 
     // ─── Step navigation ─────────────────────────────────────────────
