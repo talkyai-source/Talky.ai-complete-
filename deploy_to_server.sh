@@ -388,6 +388,8 @@ ssh -t -i "$KEY" "$PROD" "
         echo '!! One or more required services are not active.' >&2
         exit 1
     fi
+    echo '--> verifying every repository timer (including retired timer policy)'
+    sudo bash backend/deploy/verify-service-timers.sh
     retry_probe() {
         probe_name=\"\$1\"
         shift
