@@ -36,6 +36,12 @@ for unit in "$SCRIPT_DIR"/*.service "$SCRIPT_DIR"/*.target "$SCRIPT_DIR"/*.timer
   ln -sf "$unit" "$SYSTEMD_DIR/$name"
 done
 
+# The selected recovery tool remains in scripts/database. Install only its
+# read-only health pair; physical/PITR schedules require separate owner setup.
+for name in talklee-db-backup-health.service talklee-db-backup-health.timer; do
+  ln -sf "$SCRIPT_DIR/../../scripts/database/systemd/$name" "$SYSTEMD_DIR/$name"
+done
+
 # The compatibility definition keeps old symlinks resolvable during checkout.
 # Disable the previous timer after linking it, before reloading definitions.
 # Only the service's own loop will refresh runtime evidence after this release.
@@ -83,6 +89,7 @@ systemctl enable talky-healthwatch.timer   # activates bounded operational check
 systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 10 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky-db-backup.timer  # nightly verified pg_dump (deploy/db-backup.sh)
+systemctl enable talklee-db-backup-health.timer --now  # actual local/remote integrity + age; unconfigured offhost alerts
 systemctl enable talky-support-jobs.timer  # support deadlines every 15 min + hourly housekeeping (no-op while SUPPORT_ENABLED=false)
 systemctl enable --now talky-asterisk-reconcile.timer # applies website line/number/inbound changes to Asterisk, every minute, only on drift
 systemctl enable talky.target

@@ -91,6 +91,68 @@ def write_json_new(path: Path, payload: dict) -> None:
         os.fsync(stream.fileno())
 
 
+class Gpg:
+    """Selected a0bd0353 AES256/iterated-S2K primitive, with bounded child cleanup.
+
+    A private, throwaway keyring never touches the operator's GPG configuration.
+    No key value appears in argv, errors or receipts.
+    """
+
+    ENCRYPT = ("--symmetric", "--cipher-algo", "AES256", "--s2k-mode", "3",
+               "--s2k-digest-algo", "SHA512", "--s2k-count", "65011712", "--compress-algo", "none")
+
+    def __init__(self, passphrase_file: Path, executable: str | None = None, timeout: int = 7200):
+        self.passphrase = private_file(passphrase_file)
+        if self.passphrase.stat().st_size > 4096 or len(self.passphrase.read_text(encoding="utf-8").strip()) < 24:
+            raise RecoveryError("the replica passphrase must have 24 or more characters and fit within 4096 bytes")
+        self.executable = executable or shutil.which("gpg")
+        if not self.executable or not Path(self.executable).is_file():
+            raise RecoveryError("gpg is required for an encrypted replica")
+        if not isinstance(timeout, int) or not 1 <= timeout <= 7200:
+            raise RecoveryError("GPG timeout must be between 1 and 7200 seconds")
+        self.timeout = timeout
+
+    def _start(self, args: list[str], work: Path, **kwargs) -> subprocess.Popen:
+        (work / "gnupg").mkdir(mode=0o700)
+        flags = {"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}
+        command = [self.executable, "--batch", "--quiet", "--no-tty", "--no-autostart", "--homedir", "gnupg",
+                   "--pinentry-mode", "loopback", "--passphrase-file", self.passphrase.as_posix(), *args]
+        return subprocess.Popen(command, cwd=work, stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags, **kwargs)
+
+    def _run(self, args: list[str], failure: str, *, stdout=subprocess.DEVNULL) -> None:
+        work = Path(tempfile.mkdtemp(prefix="talklee-gpg-"))
+        process = None
+        try:
+            process = self._start(args, work, stdout=stdout)
+            if process.wait(timeout=self.timeout):
+                raise RecoveryError(failure)
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            raise RecoveryError(failure) from exc
+        finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.wait(timeout=15)
+            shutil.rmtree(work, ignore_errors=True)
+
+    def encrypt(self, source: Path, target: Path) -> None:
+        self._run([*self.ENCRYPT, "--output", target.absolute().as_posix(), source.absolute().as_posix()],
+                  "gpg could not encrypt the archive")
+
+    def decrypt(self, source: Path, target: Path) -> None:
+        self._run(["--decrypt", "--output", target.absolute().as_posix(), source.absolute().as_posix()],
+                  "the encrypted archive did not decrypt or failed its integrity check")
+
+    def decrypted_digest(self, source: Path) -> tuple[str, int]:
+        # A private auto-unlinked descriptor avoids an unbounded blocking pipe
+        # read; child wait has the same real timeout as encrypt/decrypt.
+        with tempfile.TemporaryFile() as stream:
+            self._run(["--decrypt", source.absolute().as_posix()],
+                      "the encrypted archive did not decrypt or failed its integrity check", stdout=stream)
+            size = stream.tell()
+            stream.seek(0)
+            return hashlib.file_digest(stream, "sha256").hexdigest(), size
+
+
 class Service:
     def __init__(self, file: Path, name: str, allow_local_plaintext: bool = False):
         if not NAME.fullmatch(name):

@@ -102,6 +102,12 @@ printf '%s  %s\n' "$digest" "$dump" > "${checksum_file}"
 sha256sum --check --quiet "${checksum_file}"
 trap - EXIT INT TERM HUP
 
+# Preserve snapshot/principal verification and the flat artifacts. A configured
+# encrypted off-host DB+recordings copy must verify before local retention.
+if [[ -n "${TALKY_OFFHOST_ROOT:-}" ]]; then
+    python3 "${script_dir}/../../scripts/database/offhost.py" publish --dump "${dump}"
+fi
+
 # --- retention ----------------------------------------------------------------
 find "${backup_dir}" -maxdepth 1 -type f \( -name 'talky-*.dump' -o -name 'talky-*.dump.sha256' \) \
     -mtime "+${keep_days}" -delete
