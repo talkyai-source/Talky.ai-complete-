@@ -132,6 +132,7 @@ class Settings(BaseSettings):
 
     # JWT Configuration
     jwt_expiry_hours: int = 24  # Default 24-hour token expiry
+    auth_short_lived_tokens_required: bool = False  # Opt-in 15-minute body/JWT cutover.
     jwt_algorithm: str = "HS256"  # HMAC SHA-256 (OWASP recommended)
     jwt_issuer: str | None = None  # Optional issuer claim (iss)
     jwt_audience: str | None = None  # Optional audience claim (aud)
