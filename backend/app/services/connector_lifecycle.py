@@ -1,8 +1,8 @@
 """The transactional boundary for canonical connector authorization writers.
 
 Lock parent rows before accounts. Never hold a transaction over provider I/O.
-Refresh ownership is durable *before* dispatch; an unknown result requires new
-authorization, never a timed takeover or a rollback to old provider credentials.
+Refresh ownership is durable *before* dispatch. Unknown outcomes permit one
+fenced recovery only for explicitly reusable Google/HubSpot refresh grants.
 """
 from __future__ import annotations
 
@@ -11,6 +11,7 @@ import json
 import logging
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from types import SimpleNamespace
 from uuid import UUID, uuid4
 from urllib.parse import quote
 
@@ -26,6 +27,63 @@ from app.infrastructure.connectors.base import ConnectorFactory, ConnectorProvid
 from app.infrastructure.connectors.encryption import get_encryption_service
 
 logger = logging.getLogger(__name__)
+
+_REUSABLE_REFRESH_PROVIDERS = frozenset({"gmail", "google_calendar", "google_drive", "hubspot"})
+_RECOVERABLE_REFRESH_OUTCOMES = frozenset({
+    "stale_claim", "provider_timeout", "refresh_cancelled", "refresh_outcome_unknown",
+})
+_REFRESH_STALE_SECONDS = 60
+
+
+def _claim_is_stale(account, now):
+    if account.get("refresh_state") != "in_flight" or not account.get("refresh_claim_id"):
+        return False
+    try:
+        return (now - account["refresh_claimed_at"]).total_seconds() > _REFRESH_STALE_SECONDS
+    except (KeyError, TypeError, ValueError, OverflowError):
+        return False
+
+
+async def sweep_stale_refresh_claims(pool, *, limit=100):
+    """Bounded system discovery; every stale transition is tenant-bound/audited.
+
+    This does not contact a provider or reset a consumed safe-retry marker.
+    Normal connector use can subsequently make the one eligible recovery.
+    """
+    if type(limit) is not int or not 1 <= limit <= 1000:
+        raise ValueError("Connector refresh sweep limit must be between 1 and 1000")
+    changed = 0
+    async with asyncio.timeout(30):
+        async with acquire_with_tenant(pool, None) as conn:
+            # System maintenance directory scan, intentionally across tenants.
+            # Candidate identifiers are rechecked under their tenant's locks.
+            candidates = await conn.fetch("""SELECT a.tenant_id, a.connector_id,
+                    a.id AS account_id, a.refresh_claim_id
+                FROM connector_accounts AS a JOIN connectors AS c
+                  ON c.id=a.connector_id AND c.tenant_id=a.tenant_id
+                WHERE a.refresh_state='in_flight' AND a.refresh_claim_id IS NOT NULL
+                  AND a.refresh_claimed_at < clock_timestamp()-INTERVAL '60 seconds'
+                  AND a.status IN ('active','expired') AND c.status IN ('active','expired','error')
+                ORDER BY a.refresh_claimed_at, a.id LIMIT $1""", limit)
+        service = ConnectorLifecycle(SimpleNamespace(pool=pool),
+            actor=ConnectorActor.system("stale_refresh_sweep"))
+        for candidate in candidates:
+            tenant_id, connector_id = str(candidate["tenant_id"]), str(candidate["connector_id"])
+            try:
+                async with acquire_with_tenant(pool, tenant_id) as conn:
+                    actor = await service._begin(conn, tenant_id)
+                    parent, accounts = await lock_connector(conn, tenant_id, connector_id)
+                    current = next((row for row in accounts if row["id"] == candidate["account_id"]), None)
+                    if (parent["status"] not in {"active", "expired", "error"}
+                            or current is None or current["status"] not in {"active", "expired"}
+                            or current["refresh_claim_id"] != candidate["refresh_claim_id"]):
+                        continue
+                    expired = await service._expire_stale_claim(conn, tenant_id, connector_id, current, actor)
+                changed += int(expired)
+            except Exception as exc:
+                logger.warning("Stale connector refresh sweep refused connector=%s type=%s",
+                               connector_id, type(exc).__name__)
+    return changed
 
 
 async def revoke_token_at_provider(provider, token, *, tenant_id, connector_id):
@@ -102,6 +160,7 @@ class RefreshClaim:
     claim_id: UUID
     generation: int
     refresh_token: str
+    safe_retry: bool = False
 
 
 @dataclass(frozen=True)
@@ -313,11 +372,16 @@ class ConnectorLifecycle:
             if newer:
                 raise ConnectorLifecycleError("A newer authorization is connected. Reload the current connection.")
             account = _current_account(accounts, account_id, allow_expired=allow_expired)
-            if account["refresh_state"] != "idle":
+            if account["refresh_state"] == "in_flight":
+                await self._expire_stale_claim(conn, tenant_id, connector_id, account, actor)
+            safe_retry = (parent["provider"] in _REUSABLE_REFRESH_PROVIDERS
+                          and account["refresh_state"] == "uncertain"
+                          and account.get("refresh_error") in _RECOVERABLE_REFRESH_OUTCOMES)
+            if account["refresh_state"] != "idle" and not safe_retry:
                 message = ("A token refresh is already in progress; no second request was sent. "
                            "If it does not complete, reauthorize the connector.")
                 if account["refresh_state"] == "uncertain":
-                    message = "The previous refresh outcome is unknown. Reauthorize the connector; do not retry token rotation."
+                    message = "The previous refresh outcome is unknown or its safe retry is exhausted. Reauthorize the connector."
                 raise ConnectorLifecycleError(message)
             if not account.get("refresh_token_encrypted"):
                 raise ConnectorLifecycleError("No refresh token is available. Reauthorize the connector.")
@@ -331,16 +395,18 @@ class ConnectorLifecycle:
                 raise ConnectorLifecycleError("Connector provider changed. Reauthorize the connector.")
             connector.apply_config(config_dict(parent.get("config")))
             claim = RefreshClaim(str(tenant_id), str(connector_id), str(account["id"]), uuid4(),
-                                 account["credential_generation"], token)
+                                 account["credential_generation"], token, safe_retry)
             await conn.execute("""UPDATE connector_accounts SET refresh_state='in_flight',
-                refresh_claim_id=$2, refresh_claimed_at=NOW(), refresh_error=NULL WHERE id=$1""",
-                UUID(claim.account_id), claim.claim_id)
+                refresh_claim_id=$2, refresh_claimed_at=NOW(), refresh_error=$3
+                WHERE id=$1 AND tenant_id=$4 AND connector_id=$5""",
+                UUID(claim.account_id), claim.claim_id, "safe_retry_in_flight" if safe_retry else None,
+                UUID(claim.tenant_id), UUID(claim.connector_id))
             await self._record(conn, tenant_id, connector_id, actor, "connector.refresh_intent",
                 operation_id=claim.claim_id, account_id=claim.account_id, generation=claim.generation,
-                provider=parent["provider"], refresh_state="in_flight")
+                provider=parent["provider"], refresh_state="in_flight", safe_retry=safe_retry)
 
         # Everything after this boundary is potentially provider-visible. A
-        # timeout, cancellation or save error must never release this claim.
+        # timeout, cancellation or save error must never reset retry ownership.
         try:
             tokens = await connector.refresh_tokens(claim.refresh_token)
             if not getattr(tokens, "access_token", None):
@@ -363,13 +429,14 @@ class ConnectorLifecycle:
                     last_refreshed_at=NOW(), token_last_rotated_at=NOW(), rotation_count=COALESCE(rotation_count,0)+1,
                     credential_generation=credential_generation+1, status='active',
                     refresh_state='idle', refresh_claim_id=NULL, refresh_claimed_at=NULL, refresh_error=NULL
-                    WHERE id=$1 RETURNING *""", UUID(claim.account_id), access_encrypted,
-                    refresh_encrypted, tokens.expires_at)
+                    WHERE id=$1 AND tenant_id=$5 AND connector_id=$6 RETURNING *""",
+                    UUID(claim.account_id), access_encrypted, refresh_encrypted, tokens.expires_at,
+                    UUID(claim.tenant_id), UUID(claim.connector_id))
                 config = config_dict(parent.get("config"))
                 if isinstance(extra_config, dict):
                     config.update(extra_config)
-                await conn.execute("UPDATE connectors SET status='active',config=$2::jsonb WHERE id=$1",
-                                   UUID(claim.connector_id), json.dumps(config))
+                await conn.execute("UPDATE connectors SET status='active',config=$2::jsonb WHERE id=$1 AND tenant_id=$3",
+                                   UUID(claim.connector_id), json.dumps(config), UUID(claim.tenant_id))
                 audit_id = await self._record(conn, claim.tenant_id, claim.connector_id, actor,
                     "connector.refresh_installed", operation_id=claim.claim_id,
                     event=AuditEvent.SECRET_ROTATED, account_id=claim.account_id,
@@ -377,25 +444,55 @@ class ConnectorLifecycle:
                     refresh_state="idle")
             return tokens, {**dict(row), "audit_event_id": str(audit_id), "operation_id": str(claim.claim_id)}
         except BaseException as exc:
-            # Best effort records the uncertain outcome; durable in_flight is
-            # equally non-retryable if the database/process is unavailable.
+            if isinstance(exc, asyncio.CancelledError):
+                reason = "refresh_cancelled"
+            elif isinstance(exc, (TimeoutError, httpx.TimeoutException)):
+                reason = "provider_timeout"
+            elif isinstance(exc, ConnectorProviderError):
+                reason = "provider_configuration" if exc.category == "configuration" else "provider_rejected"
+            else:
+                reason = "refresh_outcome_unknown"
+            # The retry marker is durable before dispatch, so another process
+            # cannot grant a third attempt if this best-effort write fails.
             try:
-                await asyncio.shield(self._uncertain(claim, "provider_rejected" if
-                    isinstance(exc, ConnectorProviderError) and exc.category == "authentication"
-                    else "refresh_outcome_unknown", actor))
+                await asyncio.shield(self._uncertain(claim, reason, actor))
             except Exception:
                 logger.warning("Could not record refresh outcome connector=%s", claim.connector_id)
             raise
+
+    async def _expire_stale_claim(self, conn, tenant_id, connector_id, account, actor):
+        # Compare against the database clock that originally stamped the claim.
+        if not _claim_is_stale(account, await conn.fetchval("SELECT clock_timestamp()")):
+            return False
+        previous = account.get("refresh_error")
+        reason = ("safe_retry_stale" if isinstance(previous, str) and previous.startswith("safe_retry_")
+                  else "stale_claim" if previous is None else "unrecognized_outcome")
+        saved = await conn.execute("""UPDATE connector_accounts SET refresh_state='uncertain', refresh_error=$2
+            WHERE id=$1 AND tenant_id=$3 AND connector_id=$4 AND refresh_claim_id=$5""",
+            account["id"], reason, UUID(str(tenant_id)), UUID(str(connector_id)), account["refresh_claim_id"])
+        if saved != "UPDATE 1":
+            raise ConnectorLifecycleError("Refresh ownership changed; reload the connector.")
+        await self._record(conn, tenant_id, connector_id, actor,
+            "connector.refresh_uncertain", operation_id=account["refresh_claim_id"],
+            account_id=str(account["id"]), generation=account["credential_generation"],
+            reason=reason, refresh_state="uncertain")
+        account.update(refresh_state="uncertain", refresh_error=reason)
+        return True
 
     async def _uncertain(self, claim, reason, actor):
         async with acquire_with_tenant(self.pool, claim.tenant_id) as conn:
             await self._begin(conn, claim.tenant_id)
             parent, accounts = await lock_connector(conn, claim.tenant_id, claim.connector_id)
             current = next((row for row in accounts if str(row["id"]) == claim.account_id), None)
-            if current is None or current["refresh_claim_id"] != claim.claim_id:
+            if (current is None or current["refresh_claim_id"] != claim.claim_id
+                    or current["credential_generation"] != claim.generation
+                    or current["refresh_state"] != "in_flight"):
                 return
+            if claim.safe_retry:
+                reason = "safe_retry_" + reason
             await conn.execute("""UPDATE connector_accounts SET refresh_state='uncertain', refresh_error=$2
-                WHERE id=$1""", UUID(claim.account_id), reason)
+                WHERE id=$1 AND tenant_id=$3 AND connector_id=$4""",
+                UUID(claim.account_id), reason, UUID(claim.tenant_id), UUID(claim.connector_id))
             await self._record(conn, claim.tenant_id, claim.connector_id, actor,
                 "connector.refresh_uncertain", operation_id=claim.claim_id,
                 account_id=claim.account_id, generation=claim.generation, reason=reason,

@@ -1419,22 +1419,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2e9f0c7c711e73bb08d78edb8af4660211cb0f5b64096a495be7863b90b0cb05",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle.refresh",
-      "line": 371,
-      "method": "execute",
-      "tables": [
-        "connectors"
-      ],
-      "sql": "UPDATE connectors SET status='active',config=$2::jsonb WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "2ea35a05b2c8e6827d981921eb06942de851eaaabdcb9dbf62e981652e75a44c",
       "file": "app/domain/services/support/bot/runner.py",
       "function": "_tool_loop",
@@ -8218,22 +8202,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "dac00f1e28c090611d303c793fc31a99a9b6e21cf8e03bfed2535f9c548a6905",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle.refresh",
-      "line": 361,
-      "method": "fetchrow",
-      "tables": [
-        "connector_accounts"
-      ],
-      "sql": "UPDATE connector_accounts SET access_token_encrypted=$2, refresh_token_encrypted=$3, token_expires_at=$4, last_refreshed_at=NOW(), token_last_rotated_at=NOW(), rotation_count=COALESCE(rotation_count,0)+1, credential_generation=credential_generation+1, status='active', refresh_state='idle', refresh_claim_id=NULL, refresh_claimed_at=NULL, refresh_error=NULL WHERE id=$1 RETURNING *",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "dbdb7256ffd27d5ed7c172d7f926775ca113e8f9ea64bfe3a409a168772e9b68",
       "file": "app/domain/services/topup_usage.py",
       "function": "_closed_windows",
@@ -8260,22 +8228,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "dca78f0091a4c4cd1ecf280d7787c048871a5bfda0cda5125faa71dd3eb0c309",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle._uncertain",
-      "line": 397,
-      "method": "execute",
-      "tables": [
-        "connector_accounts"
-      ],
-      "sql": "UPDATE connector_accounts SET refresh_state='uncertain', refresh_error=$2 WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -9468,22 +9420,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ff4fd52f966610ce77b3b50ec070f4eae694843500a82e24567cebbe2cc6fe65",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle.refresh",
-      "line": 335,
-      "method": "execute",
-      "tables": [
-        "connector_accounts"
-      ],
-      "sql": "UPDATE connector_accounts SET refresh_state='in_flight', refresh_claim_id=$2, refresh_claimed_at=NOW(), refresh_error=NULL WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "ff749197939d64be32589c62c5c4d44ff0503a326511abf40dbf207fe5ff3090",
       "file": "app/domain/services/telephony/termination.py",
       "function": "fetch_active_provider_leg_ids",
@@ -9703,6 +9639,21 @@
       "category": "not_database_sql"
     },
     {
+      "id": "0970fc767e06025543ac0c72cd35171b774c541de519894a176ab93778ad8a52",
+      "file": "app/infrastructure/connectors/drive/google_drive.py",
+      "function": "GoogleDriveConnector.create_folder",
+      "line": 316,
+      "method": "ValueError",
+      "tables": [],
+      "sql": "Create folder failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: ValueError; app/infrastructure/connectors/drive/google_drive.py:312.",
+      "category": "not_database_sql"
+    },
+    {
       "id": "09b295c6c8839f3155c9973785810263c4bef52aac2e12edffbc76eea9365631",
       "file": "app/domain/services/support/article_admin.py",
       "function": "list_articles",
@@ -9735,6 +9686,21 @@
       "count": 1,
       "reason": "Documentation import synchronizes only shared docs-source knowledge-base articles. It preserves staff-source edits and has no tenant-specific data to filter. Exact reviewed operation: fetchrow; app/domain/services/support/articles.py:243.",
       "category": "platform_catalog"
+    },
+    {
+      "id": "0a6dce74d350ce3af920e5fe5c038f4f8db0f0ead1944eec6ebf5587ba4f1230",
+      "file": "app/infrastructure/connectors/crm/hubspot.py",
+      "function": "HubSpotConnector.create_note",
+      "line": 365,
+      "method": "ValueError",
+      "tables": [],
+      "sql": "Create note failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: ValueError; app/infrastructure/connectors/crm/hubspot.py:351.",
+      "category": "not_database_sql"
     },
     {
       "id": "0aaff390542c99a220c0f2a4b5e334cbc8dbf05ded262c364eef5703792a5556",
@@ -10477,21 +10443,6 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "366ddc3bfb307450af610cb52c2490f847057d303e4ec420d2dd596767fb372c",
-      "file": "app/infrastructure/connectors/crm/hubspot.py",
-      "function": "HubSpotConnector.create_note",
-      "line": 351,
-      "method": "ValueError",
-      "tables": [],
-      "sql": "Create note failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: ValueError; app/infrastructure/connectors/crm/hubspot.py:351.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "36b7c287015e82f1a52ceb08aa85de37921b6f31a863c61da02526c1e8628e62",
       "file": "app/api/v1/endpoints/admin/health/incidents.py",
       "function": "get_incident",
@@ -10944,21 +10895,6 @@
       "category": "external_query"
     },
     {
-      "id": "4d9bc0c529c1e13d846d08a8735a33cbf0a0bf9ed2407bfc3932dcec5558c591",
-      "file": "app/infrastructure/connectors/calendar/google_calendar.py",
-      "function": "GoogleCalendarConnector.create_event",
-      "line": 246,
-      "method": "ValueError",
-      "tables": [],
-      "sql": "Create event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 2,
-      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: error; app/infrastructure/connectors/calendar/google_calendar.py:245.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "4e07d1cc5d192f5763f31a993d1f51fc4c54c7759bfb3564c5cbbee6e03af716",
       "file": "app/api/v1/endpoints/auth/profile.py",
       "function": "get_me",
@@ -11277,6 +11213,21 @@
       "count": 1,
       "reason": "Platform media deletion locks the administrator-selected recording/feedback and its persistent idempotency claim; admin entrypoints require platform-admin authorization. Claims preserve actor/request/resource identity across retries. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/media.py:1069.",
       "category": "platform_admin"
+    },
+    {
+      "id": "5a8b822d0c25b238833029e0147e1176f3dfe0b220194342837be6226c7953f1",
+      "file": "app/infrastructure/connectors/calendar/google_calendar.py",
+      "function": "GoogleCalendarConnector.create_event",
+      "line": 254,
+      "method": "ValueError",
+      "tables": [],
+      "sql": "Create event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 2,
+      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: error; app/infrastructure/connectors/calendar/google_calendar.py:245.",
+      "category": "not_database_sql"
     },
     {
       "id": "5c6cb519e4186896b0ae5a19212e763fa308dd5e8a049e346ff6685067b1be58",
@@ -12099,6 +12050,22 @@
       "category": "system_discovery"
     },
     {
+      "id": "887d0029fed156610c8d39b2a1f7fbcceea5c5f285f0e39ac8e0ed420f691d35",
+      "file": "app/services/connector_lifecycle.py",
+      "function": "ConnectorLifecycle.refresh",
+      "line": 427,
+      "method": "fetchrow",
+      "tables": [
+        "connector_accounts"
+      ],
+      "sql": "UPDATE connector_accounts SET access_token_encrypted=$2, refresh_token_encrypted=$3, token_expires_at=$4, last_refreshed_at=NOW(), token_last_rotated_at=NOW(), rotation_count=COALESCE(rotation_count,0)+1, credential_generation=credential_generation+1, status='active', refresh_state='idle', refresh_claim_id=NULL, refresh_claimed_at=NULL, refresh_error=NULL WHERE id=$1 AND tenant_id=$5 AND connector_id=$6 RETURNING *",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "Reviewed explicit tenant-scoped UPDATE: WHERE id=$1 AND tenant_id=$5 AND connector_id=$6; parameters are the previously locked RefreshClaim identity. Conservative scanner cannot prove this SET expression/RETURNING form; transactional refresh tests verify ownership and race fencing."
+    },
+    {
       "id": "88809681b365480b48ced008f9b37a6fb78e18c27ba9774f096c39460ee90370",
       "file": "app/api/v1/endpoints/auth/signup.py",
       "function": "signup_start",
@@ -12411,6 +12378,21 @@
       "category": "system_support_scheduler"
     },
     {
+      "id": "96bae69742c063ac5083b6c33a3abd2e6a327906e1766fe4c7f5e6de80391514",
+      "file": "app/infrastructure/connectors/calendar/google_calendar.py",
+      "function": "GoogleCalendarConnector.update_event",
+      "line": 346,
+      "method": "ValueError",
+      "tables": [],
+      "sql": "Update event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: ValueError; app/infrastructure/connectors/calendar/google_calendar.py:337.",
+      "category": "not_database_sql"
+    },
+    {
       "id": "96bb012622a1c36e0b587671fe5b039f7b3b80a452e2af3cf9b3aa2f87306ae7",
       "file": "app/domain/services/support/attachments.py",
       "function": "fetch_for_signed_download",
@@ -12629,6 +12611,23 @@
       "category": "platform_admin"
     },
     {
+      "id": "a5d1a34bf5a9604cfe7710405fbe812cbff8b1e923a619ffd7bf539e0d90dfc9",
+      "file": "app/services/connector_lifecycle.py",
+      "function": "sweep_stale_refresh_claims",
+      "line": 60,
+      "method": "fetch",
+      "tables": [
+        "connector_accounts",
+        "connectors"
+      ],
+      "sql": "SELECT a.tenant_id, a.connector_id, a.id AS account_id, a.refresh_claim_id FROM connector_accounts AS a JOIN connectors AS c ON c.id=a.connector_id AND c.tenant_id=a.tenant_id WHERE a.refresh_state='in_flight' AND a.refresh_claim_id IS NOT NULL AND a.refresh_claimed_at < clock_timestamp()-INTERVAL '60 seconds' AND a.status IN ('active','expired') AND c.status IN ('active','expired','error') ORDER BY a.refresh_claimed_at, a.id LIMIT $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Bounded platform maintenance discovery of stale refresh claims across tenants; joins connector and account tenant identity, returns only identifiers, then rechecks and writes inside that tenant transaction with audit. No provider call or credential value in this discovery."
+    },
+    {
       "id": "a8b7383370fc24489f21d61008d229f58149ac60bc4ac2da097d93c564bd3936",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "delete_user",
@@ -12776,21 +12775,6 @@
       "count": 1,
       "reason": "Pre-auth password recovery must discover the global account before a tenant is known. It selects one normalized email after request budgets and bot checks, retains the password generation internally, and returns the same generic response for unknown users. Source: auth/password_reset.py:292-325. Exact reviewed operation: fetchrow; app/api/v1/endpoints/auth/password_reset.py:309.",
       "category": "individually_reviewed"
-    },
-    {
-      "id": "b1bcf116d8965510e8b0c1999a36ceb7834e69cf0777e98ad3580bd6a2d8d125",
-      "file": "app/infrastructure/connectors/drive/google_drive.py",
-      "function": "GoogleDriveConnector.create_folder",
-      "line": 312,
-      "method": "ValueError",
-      "tables": [],
-      "sql": "Create folder failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: ValueError; app/infrastructure/connectors/drive/google_drive.py:312.",
-      "category": "not_database_sql"
     },
     {
       "id": "b1f575ab99355ac1d6773165109003d4b0ca7186313b2e5b0b1a14e5c4ad27e3",
@@ -13795,21 +13779,6 @@
       "count": 1,
       "reason": "Platform partner directory and counts are guarded by require_platform_admin at line 44; partner identities are platform resources, not owned by the requesting tenant. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/partners.py:70.",
       "category": "platform_admin"
-    },
-    {
-      "id": "f0094aaef071892276af404ae3b72f1d43f11d0dd11ff53e573f85001bb5640c",
-      "file": "app/infrastructure/connectors/calendar/google_calendar.py",
-      "function": "GoogleCalendarConnector.update_event",
-      "line": 337,
-      "method": "ValueError",
-      "tables": [],
-      "sql": "Update event failed: {Attribute(value=Name(id='response', ctx=Load()), attr='text', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: ValueError; app/infrastructure/connectors/calendar/google_calendar.py:337.",
-      "category": "not_database_sql"
     },
     {
       "id": "f0663e2f1dc12645885bb3e02324807c29b0de94bc6f014efd0dd909a5dabfee",

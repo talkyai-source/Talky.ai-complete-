@@ -135,6 +135,7 @@ class ReminderWorker:
         callback_task = asyncio.create_task(self._voice_callback_loop())
         billing_task = asyncio.create_task(self._billing_delivery_loop())
         topup_usage_task = asyncio.create_task(self._topup_usage_loop())
+        connector_refresh_task = asyncio.create_task(self._connector_refresh_loop())
 
         try:
             while self.running:
@@ -171,6 +172,11 @@ class ReminderWorker:
 
                     await asyncio.sleep(min(5 * consecutive_errors, 60))
         finally:
+            connector_refresh_task.cancel()
+            try:
+                await connector_refresh_task
+            except (asyncio.CancelledError, Exception):
+                pass
             topup_usage_task.cancel()
             try:
                 await topup_usage_task
@@ -198,6 +204,16 @@ class ReminderWorker:
                 pass
 
         await self.shutdown()
+
+    async def _connector_refresh_loop(self):
+        """Retire abandoned refresh claims without delaying reminder delivery."""
+        from app.services.connector_lifecycle import sweep_stale_refresh_claims
+        while self.running:
+            try:
+                await sweep_stale_refresh_claims(self._db_pool, limit=100)
+            except Exception as exc:
+                logger.warning("Connector refresh sweep failed: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
 
     async def _billing_delivery_loop(self):
         """Billing email delivery is independent of financial webhook retries."""
