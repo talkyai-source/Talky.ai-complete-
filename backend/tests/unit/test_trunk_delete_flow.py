@@ -48,6 +48,8 @@ class FakeDB:
         self.tenants = {TENANT: {}, OTHER: {}}
         self.assignments, self.calls = [], []
         self.configs, self.audit = {}, []
+        self.privileged_audit = []
+        self.active_connection = None
         self.log = []          # (sql, args) of every statement, in order
         self.bypass = "unset"  # current app.bypass_rls
 
@@ -79,13 +81,41 @@ class FakeDB:
         return config, campaign
 
 
-class Conn:
+class Audit:
     def __init__(self, db: FakeDB):
         self.db = db
 
+    async def lock_transaction(self, conn):
+        assert conn is self.db.active_connection and conn.transaction_depth == 1
+        assert conn.tenant_id == TENANT
+        conn.audit_locked = True
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.db.active_connection and conn.transaction_depth == 2
+        assert conn.audit_locked
+        assert event["tenant_id"] == conn.tenant_id == TENANT
+        assert event["actor_id"] == conn.actor_id and event["actor_role"] == "admin"
+        assert event["action"] == "sip.trunk.delete"
+        assert str(event["before_state"]["id"]) == str(event["resource_id"])
+        assert event["before_state"]["tenant_id"] == TENANT
+        assert event["before_state"]["auth_password_encrypted"] in (None, "[configured]")
+        assert event["after_state"] == {"deleted": True, "is_active": False}
+        self.db.privileged_audit.append(copy.deepcopy(event))
+
+
+class Conn:
+    def __init__(self, db: FakeDB):
+        self.db = db
+        self.transaction_depth = 0
+        self.audit_locked = False
+
     @asynccontextmanager
     async def transaction(self):
-        yield self
+        self.transaction_depth += 1
+        try:
+            yield self
+        finally:
+            self.transaction_depth -= 1
 
     def _record(self, sql, args):
         sql = " ".join(sql.split())
@@ -208,17 +238,28 @@ def env(monkeypatch):
     async def acquire(_pool, tenant_id, **_kwargs):
         assert str(tenant_id) == TENANT
         snapshot["state"] = copy.deepcopy(
-            (db.trunks, db.campaigns, db.policies, db.tenants, db.assignments, db.configs, db.audit))
+            (db.trunks, db.campaigns, db.policies, db.tenants, db.assignments, db.configs,
+             db.audit, db.privileged_audit))
+        conn = Conn(db)
+        conn.tenant_id, conn.actor_id = str(tenant_id), _kwargs["user_id"]
+        assert db.active_connection is None
+        db.active_connection = conn
         try:
-            yield Conn(db)
+            async with conn.transaction():
+                yield conn
         except BaseException:
-            # The real connection rolls the whole transaction back on an exception.
+            # The receipt and domain mutations roll back together.
             (db.trunks, db.campaigns, db.policies, db.tenants, db.assignments,
-             db.configs, db.audit) = snapshot["state"]
+             db.configs, db.audit, db.privileged_audit) = snapshot["state"]
             raise
+        finally:
+            assert conn.transaction_depth == 0 and db.active_connection is conn
+            db.active_connection = None
 
     remove = AsyncMock()
     stored = AsyncMock()
+    audit = Audit(db)
+    monkeypatch.setattr(trunks, "get_audit_logger", AsyncMock(return_value=audit))
     monkeypatch.setattr(trunks, "acquire_with_tenant", acquire)
     monkeypatch.setattr(trunks, "_claim_idempotency", AsyncMock(return_value=("new", None, None)))
     monkeypatch.setattr(trunks, "_store_idempotency_result", stored)
@@ -231,9 +272,11 @@ def env(monkeypatch):
 
 async def delete(trunk_id, key="delete-key"):
     request = Request({"type": "http", "method": "DELETE", "path": f"/trunks/{trunk_id}", "headers": []})
-    user = SimpleNamespace(tenant_id=TENANT, id=str(uuid4()))
+    user = SimpleNamespace(tenant_id=TENANT, id=str(uuid4()), role="admin")
     try:
-        return await trunks.delete_sip_trunk(trunk_id, request, key, user, object())
+        return await trunks.delete_sip_trunk(
+            trunk_id, request, key, user, object(), audit_logger=await trunks.get_audit_logger(),
+        )
     except HTTPException as exc:
         return exc
 
@@ -254,6 +297,9 @@ async def test_unused_inactive_line_is_removed_outright(env):
     env.remove.assert_awaited_once()
     # The stored receipt is the response the caller got, so a replay says the same.
     assert env.stored.await_args.kwargs["response_body"] == result
+    assert len(env.db.privileged_audit) == 1
+    assert env.db.privileged_audit[0]["resource_id"] == trunk
+    assert env.db.active_connection is None
 
 
 @pytest.mark.asyncio
