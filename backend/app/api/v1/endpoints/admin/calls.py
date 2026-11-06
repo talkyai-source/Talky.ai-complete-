@@ -28,6 +28,7 @@ from app.core.db_utils import acquire_with_tenant
 from ._serialization import AdminResponseModel
 from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
 from app.domain.services.call_status import CallOutcome
+from app.domain.services.caller_identity import caller_identity_projection
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.infrastructure.connectors.crm.base import AmbiguousCRMCallReference, valid_crm_activity_id
 from app.services.connector_resolver import resolve_active_connector, verify_reviewed_connector
@@ -326,6 +327,9 @@ def _admin_crm_projection(row: dict) -> AdminCRMReceipt:
 
 class AdminCallDetail(AdminResponseModel):
     """Full call detail for admin view"""
+
+    caller_id_verified: bool = False
+    caller_id_attestation: Optional[Literal["A", "B", "C"]] = None
 
     id: str
     tenant_id: str
@@ -824,6 +828,7 @@ async def get_admin_call_detail(
             crm_deliveries = []
 
         return AdminCallDetail(
+            **caller_identity_projection(call),
             **_admin_termination_projection(db_client, call),
             id=call["id"],
             tenant_id=call.get("tenant_id", ""),

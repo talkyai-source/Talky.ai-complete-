@@ -3566,6 +3566,8 @@ class AsteriskAdapter(CallControlAdapter):
                 len(args),
             )
 
+        from app.domain.services.caller_identity import extract_caller_identity_headers
+
         return {
             "called_did": called_did,
             "context": context,
@@ -3574,6 +3576,7 @@ class AsteriskAdapter(CallControlAdapter):
             "ingress": "asterisk",
             "ingress_endpoint": ingress_endpoint,
             "linked_id": channel.get("linkedid"),
+            "caller_identity_headers": extract_caller_identity_headers(args),
         }
 
     def get_inbound_call_meta(self, channel_id: str) -> Optional[Dict[str, Any]]:

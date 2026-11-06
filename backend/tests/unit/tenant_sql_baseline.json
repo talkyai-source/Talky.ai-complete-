@@ -2060,10 +2060,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "82d30796c7c3180903b20c9fd8471e2bf79432bb51caa3bbb06315b4db3f8701",
+      "id": "23bff64d09c8e6dffef090d07a29f18432c9854ce1d7f4ba63e3e16f5ce92feb",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1169,
+      "line": 1173,
       "method": "fetch",
       "tables": [
         "calls",
@@ -2994,7 +2994,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "590919db3e7fa79c894bd12a69bb6e0b1fcd500a5d12b681a14ec7194b1960bb",
+      "id": "27f8718cdd0ed66a6bf218e871fb50c72a96ee7b2217b6e723b56a56db334aa3",
       "file": "app/domain/services/lead_capture_service.py",
       "function": "LeadCaptureService.fields_for_campaign",
       "line": 208,
@@ -7173,10 +7173,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "122f74486eb246c6ec362ba84a0b226beb58605ff7c761008aa630c07e2dd3fa",
+      "id": "ee0ca03351b7cc09c77d503f5aff8fb2b090db9e10d652a80fa0f9464c0d2924",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
-      "line": 1042,
+      "line": 1046,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7287,10 +7287,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c47c957c53c6331ab93c577251b00b7a65a9fb326846e3f95209d1347b744351",
+      "id": "b41e3511a638e2bcb09997390a800709fbecaa1280db8fd9968a5efaff009036",
       "file": "app/services/action_execution.py",
       "function": "find_owned_action_receipt",
-      "line": 132,
+      "line": 133,
       "method": "fetchrow",
       "tables": [
         "assistant_actions"
@@ -8425,10 +8425,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "7987e18825ffcdad9365c84a9cca2c816a2927bcd41232a32da0a0999be4400f",
+      "id": "ba8b53106c66dd34fcc4d19f1d615aa52923396bd27739b51672a3871f26c071",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
-      "line": 437,
+      "line": 441,
       "method": "fetch",
       "tables": [
         "calls",
@@ -9322,10 +9322,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5cefd76a5f141cd4c0e4c162844fdcaf3374f2a5cba7a3d31aea6e1ec40604b7",
+      "id": "0f24cb4f992282c79f97c9c03b7cf8015fa41f0bc0f984cb5c6a748891cc9893",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
-      "line": 897,
+      "line": 901,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -9754,10 +9754,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "131f55e7c95d24952b502667832c898ac36d46114609e7bd423ed310872f3bc4",
+      "id": "34cb0b7c014013dc350a2c715ebbcdad390cf3fbd93b43ec5ed4a2201d542238",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._attempt_bound_inbound_setup_cleanup",
-      "line": 4126,
+      "line": 4129,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -10301,10 +10301,10 @@
       "category": "platform_catalog"
     },
     {
-      "id": "2df1a6860943ad303e666508814c601192e8da3c703a97a95fe06bf903035ef3",
+      "id": "8dbb8fcc3d274e3c3ab429d1be156ac2959c97db44e97c446624983398bf82fe",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_pending_outbound",
-      "line": 5027,
+      "line": 5030,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -10519,7 +10519,7 @@
       "category": "platform_account_enforcement"
     },
     {
-      "id": "39d2e0766699d8573e586c0ddf1d10e7f56a64d006e6d9bc0fe436fd0ae07669",
+      "id": "2128115a41434c569043d3c5186066fbe7b771e839df055caadd04832c3ca9e2",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
       "line": 3120,
@@ -12592,10 +12592,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "9a38aea258f91431f2761bf8a2a5810912adfe399c44b5909d26aeec7c6c7899",
+      "id": "c95488704f86e92a894f422d20ed6d53e8631e56a60851bbecf93c6bb04c444e",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_stasis_end",
-      "line": 5219,
+      "line": 5222,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",
@@ -12739,10 +12739,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "3f6658510c8b1ee2f88cb98cbb917a618f80598023525e225e93edf6cdd683bd",
+      "id": "0f22ab345f6ee72ca7bfd189277ce6f39a6d8671ec6b1c1369e4ddecf425118c",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1407,
+      "line": 1411,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -13555,7 +13555,7 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "d3cbc08d64d49d6cec8a30328de0c402e96c20c72569d154cbbe8733ad016141",
+      "id": "28ae9e3c56405cd8bbb569b9d68d2e37069598f70798342bab476821452e6281",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._cleanup_failed_outbound_setup",
       "line": 3484,
@@ -13654,10 +13654,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "ab0c8a0fe9e91edc387bb5c66822c6ee1e3d9d419a1323e296148075ee40ccbc",
+      "id": "124ce7938d05c68a179d1a26a5ce6b3b33e8283a2cd6eeb84544df52035f1b5d",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1362,
+      "line": 1366,
       "method": "fetch",
       "tables": [
         "call_feedback",
@@ -13912,10 +13912,10 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Creates one new platform emergency request for the authenticated requestor supplied by endpoint:54\u201359. Platform account/recovery object; no tenant column or tenant business data."
     },
     {
-      "id": "ede3e2aa555c68bb23cac84719c7d42633b5a585fe7fc11d74f0880fa341b26b",
+      "id": "8851d24ac85a1eb3d9a8d59306ecb1d175aff0b61ed26c3cd19de5dcb3ce5269",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._delete_channel_with_reason_fallback",
-      "line": 5931,
+      "line": 5934,
       "method": "_ari",
       "tables": [],
       "sql": "DELETE",

@@ -1098,6 +1098,11 @@ class InboundAdmissionService:
                     },
                 }
                 from app.domain.services.telephony.control_backend_identity import valid_control_backend
+                from app.domain.services.caller_identity import caller_identity_from_metadata
+                snapshot["caller_identity"] = caller_identity_from_metadata(
+                    request.metadata if provider == "asterisk" and ingress == "asterisk" else {},
+                    caller_ani=caller_ani, ingress_endpoint=ingress_endpoint,
+                )
                 snapshot["control_backend"] = valid_control_backend(request.control_backend)
                 call_uuid = str(uuid.uuid4())
                 talklee_call_id = "IN" + uuid.uuid4().hex[:18]

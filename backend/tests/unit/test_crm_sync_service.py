@@ -355,11 +355,19 @@ def test_summary_pass_amends_only_its_provider_receipt(harness):
 
 
 def test_summary_pass_creates_the_log_when_settlement_never_ran(harness):
-    """Inbound calls settle inside the inbound lifecycle (no CRM hook); the
+    """Verified inbound calls settle inside the inbound lifecycle (no CRM hook); the
     summary hook must therefore create, not amend."""
     conn = FakeConnector(found={"id": "003c"})
     harness["connectors"]["salesforce"] = conn
-    harness["call"] = _call_row(direction="inbound", crm_call_id=None, summary_json={"headline": "Booked", "outcome": "qualified"})
+    harness["call"] = _call_row(
+        direction="inbound", crm_call_id=None,
+        summary_json={"headline": "Booked", "outcome": "qualified"},
+        caller_ani_private=False,
+        route_snapshot={"caller_identity": {
+            "version": 1, "caller_id_verified": True, "attestation": "A",
+            "verstat": "TN-Validation-Passed", "source": "trusted_carrier",
+        }},
+    )
     out = _run(harness["service"].sync_call(TENANT, CALL, reason="summary"))
     assert out.success and out.crm_call_id == "00Ttask"
     log = [c for c in conn.calls if c[0] == "log"][0]

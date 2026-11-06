@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     # Operational systemd notifications; presence does not certify delivery.
     talky_alert_webhook_url: SecretStr | None = None
     talky_alert_email_to: str | None = None
+    # Empty until the operator verifies carrier source and assertion rewriting.
+    inbound_caller_id_trusted_endpoints: str = Field(
+        default="", validation_alias="TALKY_CALLER_ID_TRUSTED_ENDPOINTS"
+    )
     # AH-Phase-C: previous signing key during graceful rotation.
     # When the operator rotates `JWT_SECRET`, the previous value is
     # moved into `JWT_SECRET_PREVIOUS` for one window of (access TTL

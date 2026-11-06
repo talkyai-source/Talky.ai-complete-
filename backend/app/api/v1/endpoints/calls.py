@@ -26,6 +26,7 @@ from app.domain.services.telephony.termination import (
 )
 from app.utils.tenant_filter import verify_tenant_access
 from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
+from app.domain.services.caller_identity import caller_identity_projection
 
 logger = logging.getLogger(__name__)
 
@@ -286,6 +287,9 @@ class CallListItem(BaseModel):
 
 class CallDetail(BaseModel):
     """Full call details"""
+
+    caller_id_verified: bool = False
+    caller_id_attestation: Optional[Literal["A", "B", "C"]] = None
 
     id: str
     talklee_call_id: Optional[str] = None
@@ -1673,6 +1677,7 @@ async def get_call(
 
         created_at = call.get("created_at", "")
         return CallDetail(
+            **caller_identity_projection(call),
             id=str(call["id"]),
             talklee_call_id=call.get("talklee_call_id"),
             timestamp=(

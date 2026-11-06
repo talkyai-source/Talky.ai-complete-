@@ -579,7 +579,9 @@ def render_inbound_dialplan(
             [
                 f"exten => {route.account},1,NoOp(Inbound mapped carrier account)",
                 " same => n,Ringing()",
-                f" same => n,Stasis(talky_ai,inbound,{route.did},${{CONTEXT}})",
+                f" same => n,Stasis(talky_ai,inbound,{route.did},${{CONTEXT}},"
+                "cid_pai_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Asserted-Identity)})},"
+                "cid_attestation_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Attestation-Indicator)})})",
                 " same => n,Hangup()",
                 "",
             ]

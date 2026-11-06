@@ -176,6 +176,11 @@ class _RecordingConn:
         return None
 
     async def fetchrow(self, _sql, *args):
+        if "SELECT direction, route_snapshot, caller_ani_private FROM calls" in _sql:
+            assert "WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE" in _sql
+            assert args == ("11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222")
+            # These existing capture fixtures exercise an outbound campaign call.
+            return {"direction": "outbound", "route_snapshot": {}, "caller_ani_private": False}
         self.args = args
         return {"id": "row"}
 

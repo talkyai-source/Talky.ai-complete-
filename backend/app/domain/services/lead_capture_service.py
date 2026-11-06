@@ -377,6 +377,11 @@ class LeadCaptureService:
         from app.core.db_utils import acquire_with_tenant
 
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            if source != "manual_edit" and (is_contact or identity):
+                from app.domain.services.caller_identity import automatic_identity_change_allowed, load_call_identity
+                call = await load_call_identity(conn, tenant_id, call_id)
+                if not automatic_identity_change_allowed(call):
+                    return False
             row = await conn.fetchrow(
                 """
                 INSERT INTO call_lead_details

@@ -14,6 +14,7 @@ from datetime import datetime
 from uuid import UUID
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.caller_identity import automatic_identity_change_allowed, load_call_identity
 
 
 def _json(value):
@@ -164,6 +165,11 @@ class DurableActionExecutor:
         digest = hashlib.sha256(encoded.encode()).hexdigest()
         recorded_input = json.dumps({"request_hash": digest, "parameters": payload}, default=str)
         async with acquire_with_tenant(self.pool, tenant_id) as conn:
+            if triggered_by == "voice" and action == "schedule_callback":
+                call = await load_call_identity(conn, tenant_id, call_id) if call_id else None
+                if not automatic_identity_change_allowed(call):
+                    return {**unknown_result(action, status="caller_id_unverified"),
+                            "message": "Caller identity is unverified; manual review is required."}
             row = await conn.fetchrow(
                 """
                 INSERT INTO assistant_actions

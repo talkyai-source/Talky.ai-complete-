@@ -81,6 +81,13 @@ class _FakeConn:
             raise self._fetchrow_exc
         if "SELECT is_test" in sql:
             return {"is_test": self._is_test} if self._call_row_exists else None
+        if "SELECT direction, route_snapshot, caller_ani_private FROM calls" in sql:
+            assert "WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE" in sql
+            assert args == (TENANT, CALL)
+            # Supply the durable outbound authority for these campaign-call
+            # fixtures; the separate inbound tests exercise failed verification.
+            return ({"direction": "outbound", "route_snapshot": {}, "caller_ani_private": False}
+                    if self._call_row_exists else None)
         return {"id": str(uuid.uuid4())}
 
     # -- convenience --------------------------------------------------------

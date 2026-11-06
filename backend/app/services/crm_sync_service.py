@@ -44,6 +44,7 @@ from app.core import config
 from app.services.crm_delivery_store import CRMDeliveryStore, MAX_ATTEMPTS
 from app.domain.services.call_summary.business_details import transcript_revision
 from app.domain.services.lead_capture_service import LeadCaptureService
+from app.domain.services.caller_identity import automatic_identity_change_allowed, caller_identity_projection
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.call_status import CallOutcome
 from app.infrastructure.connectors.base import ConnectorProviderError
@@ -175,6 +176,10 @@ def build_call_body(call: Dict[str, Any], summary: Optional[dict], *, campaign_n
         lines.append(f"When: {started if isinstance(started, str) else started.isoformat()}")
     if call.get("phone_number"):
         lines.append(f"Number: {call['phone_number']}")
+    if direction == "inbound":
+        identity = caller_identity_projection(call)
+        lines.append("Caller ID verification: " + ("verified" if identity["caller_id_verified"] else "unverified"))
+        lines.append("Caller ID attestation: " + (identity["caller_id_attestation"] or "unknown"))
 
     if isinstance(summary, dict) and summary.get("headline"):
         lines.append("")
@@ -515,6 +520,8 @@ class CRMSyncService:
         current_call = await self._load_call(tenant_id, str(call["id"]))
         if current_call is None or current_call.get("source_revision") != call.get("source_revision"):
             raise CRMDestinationMismatch("CRM call source changed before the write; review required")
+        if expected_create is not None and not automatic_identity_change_allowed(current_call):
+            raise CRMDestinationMismatch("Unverified inbound caller identity requires manual contact review")
         current = await self._recipient_lead(tenant_id, current_call,
             await self._load_lead(tenant_id, current_call.get("lead_id")))
         if (self._recipient_identity(current_call, current) != self._recipient_identity(call, lead)
@@ -647,6 +654,10 @@ class CRMSyncService:
                 and isinstance(saved, dict) and saved.get('account_id') == connector.external_account_id
                 and saved.get('contact_id')):
             return str(saved['contact_id'])
+        if not automatic_identity_change_allowed(call):
+            # Do not associate an unverified number with another person's CRM
+            # record, create a contact, or change the local contact link.
+            return None
         # Provider-only/legacy IDs carry no account proof. Resolve the contact
         # in the verified current account instead of attaching an old ID.
 
@@ -723,7 +734,7 @@ class CRMSyncService:
                 SELECT xmin::text AS source_revision, id, tenant_id, campaign_id, lead_id, phone_number, direction,
                        status, outcome, duration_seconds, transcript, summary,
                        summary_json, transcript_json, action_results, summary_transcript_hash,
-                       recording_url, crm_call_id, crm_synced_at,
+                       recording_url, crm_call_id, crm_synced_at, route_snapshot, caller_ani_private,
                        started_at, answered_at, ended_at, created_at, is_test
                   FROM calls
                  WHERE id = $1::uuid AND tenant_id = $2::uuid
