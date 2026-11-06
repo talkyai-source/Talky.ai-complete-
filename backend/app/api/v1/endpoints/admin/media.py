@@ -31,6 +31,7 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services import media_privacy
 from app.domain.services.call_feedback_service import (
     CallFeedbackService,
     FeedbackAudioStorage,
@@ -302,29 +303,7 @@ class _DeletionClaim:
         )
 
 
-_ACTIVE_COMPLIANCE_HOLD_SQL = """
-    EXISTS (
-        SELECT 1
-        FROM suspension_events se
-        WHERE se.suspension_type = 'COMPLIANCE'
-          AND se.is_active = TRUE
-          AND se.restored_at IS NULL
-          AND (se.suspended_until IS NULL OR se.suspended_until > NOW())
-          AND (
-              (se.target_type = 'tenant'
-               AND se.target_id = {tenant_expression})
-              OR (
-                  se.target_type = 'partner'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM tenants held_tenant
-                      WHERE held_tenant.id = {tenant_expression}
-                        AND held_tenant.white_label_partner_id = se.target_id
-                  )
-              )
-          )
-    )
-"""
+_ACTIVE_COMPLIANCE_HOLD_SQL = media_privacy.ACTIVE_COMPLIANCE_HOLD_SQL
 
 
 def _date_bounds(
@@ -636,17 +615,10 @@ async def _feedback_storage_row(db_client: Client, feedback_id: UUID):
 
 
 def _validated_recording_path(raw_path: str) -> str:
-    root = os.path.realpath(
-        os.path.abspath(os.getenv("LOCAL_RECORDINGS_DIR", "./recordings"))
-    )
-    path = os.path.realpath(os.path.abspath(raw_path))
     try:
-        inside = os.path.commonpath((root, path)) == root
-    except ValueError:
-        inside = False
-    if not inside:
-        raise HTTPException(status_code=500, detail="Recording path is outside storage root")
-    return path
+        return media_privacy.validated_recording_path(raw_path)
+    except media_privacy.RecordingPathOutsideRoot as exc:
+        raise HTTPException(status_code=500, detail="Recording path is outside storage root") from exc
 
 
 @router.get("/recordings/{recording_id}/audio")
@@ -824,12 +796,7 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 
 async def _has_active_compliance_hold(conn: Any, tenant_id: Any) -> bool:
-    return bool(
-        await conn.fetchval(
-            "SELECT " + _ACTIVE_COMPLIANCE_HOLD_SQL.format(tenant_expression="$1"),
-            tenant_id,
-        )
-    )
+    return await media_privacy.has_active_compliance_hold(conn, tenant_id)
 
 
 def _claim_from_row(row: Any, attempt_actor_id: UUID | None = None) -> _DeletionClaim:

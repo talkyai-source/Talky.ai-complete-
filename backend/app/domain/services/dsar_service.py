@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, field_validator, model_validator
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.services.audit_logger import AuditEvent
+from app.domain.services import media_privacy
 from app.domain.services.phone_number_normalizer import normalize_phone_for_capture
 
 
@@ -142,9 +143,7 @@ class DsarArtifactReader:
                 storage._local_dir = os.path.abspath(os.getenv("LOCAL_FEEDBACK_DIR", "./feedback_audio"))
                 path = storage._validated_local_path(key)
             else:
-                from app.api.v1.endpoints.recordings import _validated_recording_path
-
-                path = _validated_recording_path(key)
+                path = media_privacy.validated_recording_path(key)
             flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
             with os.fdopen(os.open(path, flags), "rb") as source:
                 if os.fstat(source.fileno()).st_size > max_bytes:
@@ -291,9 +290,7 @@ class DsarService:
             if not present[table]:
                 manifest["missing_tables"].append(table)
         if present["suspension_events"]:
-            from app.api.v1.endpoints.admin.media import _has_active_compliance_hold
-
-            manifest["legal_hold"] = await _has_active_compliance_hold(conn, scope.tenant_id)
+            manifest["legal_hold"] = await media_privacy.has_active_compliance_hold(conn, scope.tenant_id)
         else:
             manifest["issues"].append({"code": "hold_status_unavailable"})
 

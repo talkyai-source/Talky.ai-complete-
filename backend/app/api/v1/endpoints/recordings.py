@@ -35,6 +35,7 @@ from app.core.security.rbac import (
     rbac_data_is_seeded,
 )
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services import media_privacy
 from app.domain.services.recording_service import S3Client
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
@@ -534,22 +535,11 @@ def _ranged_file_response(
 
 def _validated_recording_path(raw_path: str) -> str:
     """Resolve a local object key only inside the configured recording root."""
-
-    # abspath/commonpath alone is vulnerable to an in-root symlink or Windows
-    # junction whose target is outside the storage directory. Resolve both the
-    # configured root and candidate through the filesystem before comparing.
-    root = os.path.realpath(
-        os.path.abspath(os.getenv("LOCAL_RECORDINGS_DIR", "./recordings"))
-    )
-    path = os.path.realpath(os.path.abspath(raw_path))
     try:
-        inside = os.path.commonpath((root, path)) == root
-    except ValueError:
-        inside = False
-    if not inside:
+        return media_privacy.validated_recording_path(raw_path)
+    except media_privacy.RecordingPathOutsideRoot as exc:
         logger.error("recording_path_outside_root")
-        raise HTTPException(status_code=500, detail={"code": "recording_storage_invalid"})
-    return path
+        raise HTTPException(status_code=500, detail={"code": "recording_storage_invalid"}) from exc
 
 
 async def _recording_storage_row(

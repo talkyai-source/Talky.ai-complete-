@@ -2175,7 +2175,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "30ca91a513a44b65aae31133125ceb3669ca20e6d1521a3a46c340c0cd4cb1dd",
+      "id": "9de64c7348dfec3201bfd1d9e3344ae01b9803b9421bd9b488a3d1fb39e71ec3",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
       "line": 352,
@@ -7181,13 +7181,13 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4534bdad3c225f519e506e0cca6a2bf895137b98df20f02e7d65b9a2b70f489e",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "_has_active_compliance_hold",
+      "id": "5e6130cfa4c63c3f5b6858571b159dc887466b00de40f4c9e133cdca0fc5b44f",
+      "file": "app/domain/services/media_privacy.py",
+      "function": "has_active_compliance_hold",
       "line": 828,
       "method": "fetchval",
       "tables": [],
-      "sql": "SELECT {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='$1'))])}",
+      "sql": "SELECT {Call(func=Attribute(value=Name(id='ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='$1'))])}",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -7511,7 +7511,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "cecc3a092c8b81732b04a983cf8b8e7398dc8a15a12065765ce1b80f43e1ca91",
+      "id": "75998af2ab2abe6e2641451f19269eb24425ba195b3b9ceddf0515efbb0506db",
       "file": "app/api/v1/endpoints/recordings.py",
       "function": "list_recordings",
       "line": 386,
@@ -8243,7 +8243,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "c81acd6ee9fd6479a71f4fc2d9b36be8aec9fbd46614ef3a0b2647918de09609",
+      "id": "1846025583512433d09ef99f948578dace84585b45124423beb174ff69b90cb5",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_recordings",
       "line": 478,
@@ -8906,7 +8906,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "e2e1f87a9b0c8586ebef2a41df1275367227d7b85119b79a0359965139bb63ed",
+      "id": "9113b1b90e54c92dd954ccd8b28da52a7b787510267226961d7a62a74492537f",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_feedback",
       "line": 579,
@@ -9236,7 +9236,7 @@
       "category": "not_database_sql"
     },
     {
-      "id": "4b5784092513add0ff47721a3553c4eb8df437938dc5f14de5f41cbd87cd3702",
+      "id": "fe260635880af32c8b99fd2b7a6c03fc4431a9cf331cb6a2d778ef6535b7d97a",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "get_admin_media_deletion",
       "line": 279,
@@ -9556,7 +9556,7 @@
       "category": "platform_catalog"
     },
     {
-      "id": "26cc03180001c6462f9e384688b64930a89f43e4a160219c87363bfc0b557bb2",
+      "id": "94aa9a6f251d85ff80d69277674bfbacfc2c02ed24c312e831940b853a2faae8",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_feedback",
       "line": 583,
@@ -9706,7 +9706,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "e178cdda86a336c3d29f121b1c6525d08e172e50d2112ef43bf53c7fdf2158a7",
+      "id": "72335dcb0fbb18063105cfba4ac977e3eb62a40a98383765aebaddbb3f37cf29",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "_read_media_deletions",
       "line": 226,
@@ -10498,7 +10498,7 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "0d9138672bc09956ac88d4e0395624d83a086909910eaad39fdcb7b8d09d5572",
+      "id": "c9cfd955735495c04d69c2cb05ef068514ed07e5583cbd94a9c11032678f2a6c",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_recordings",
       "line": 482,
@@ -10568,7 +10568,7 @@
       "category": "platform_account_enforcement"
     },
     {
-      "id": "8d6f174a6ca3bfe3f4d726ec9cffec3fbe09b0666a5d954f9a51e7a14a0b5bb8",
+      "id": "6670a7c010849bbcea3695333bc1e9e7e4a8a168d84ca5bebd84dd4ee8d9f269",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_media_deletions",
       "line": 263,
@@ -11462,7 +11462,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "e4a668a95cd8036d885fc30cdcc2df12c77f3d64cde6c17700ac6f6ce7ef78e4",
+      "id": "7821744ade393b1b644eb2c4620b1805cd80f31ff7c17853d3ec6f4b8218547b",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "_feedback_storage_row",
       "line": 617,
@@ -11676,7 +11676,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "754ec68681432d5f5b955da5f4f50e5d01cb9fbfdb750ed586c029916708977c",
+      "id": "8c6f9b701d0c9a073041d268f5aea160b17f38b7921a44db7bff1b081216f72d",
       "file": "app/domain/services/dsar_service.py",
       "function": "DsarService._collect.read",
       "line": 321,
