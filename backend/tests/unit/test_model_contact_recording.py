@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -21,6 +21,7 @@ class SQLPort:
     def __init__(self, *, fail=False, conflict=False, is_test=False):
         self.fail, self.conflict, self.is_test = fail, conflict, is_test
         self.writes = []
+        self.identity_reads = []
         self.entered = asyncio.Event()
         self.release = None
 
@@ -38,7 +39,19 @@ class SQLPort:
     async def fetchrow(self, sql, *args):
         if "SELECT is_test" in sql:
             return {"is_test": self.is_test}
+        if sql == (
+            "SELECT direction, route_snapshot, caller_ani_private FROM calls "
+            "WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE"
+        ):
+            assert len(args) == 2
+            assert all(isinstance(value, str) and str(UUID(value)) == value for value in args)
+            self.identity_reads.append(args)
+            # Existing contact-model fixtures represent a saved outbound call.
+            return {"direction": "outbound", "route_snapshot": {}, "caller_ani_private": False}
         assert "call_lead_details" in sql
+        if sql.lstrip().startswith("INSERT INTO call_lead_details"):
+            assert self.identity_reads, "Automatic contact writes require saved call authority"
+            assert args[:2] == self.identity_reads[-1]
         self.entered.set()
         if self.release is not None:
             await self.release.wait()
@@ -234,7 +247,7 @@ async def test_revision_during_write_never_returns_current_save_claim():
     pool.release = asyncio.Event()
     old = caller(s, "alex@example.com", 1, "source")
     task = asyncio.create_task(record_contact(s, args("alex@example.com"), turn=old, pool=pool))
-    await pool.entered.wait()
+    await asyncio.wait_for(pool.entered.wait(), timeout=5)
     caller(s, "Not my address", 1, "source")
     pool.release.set()
     result = await task
