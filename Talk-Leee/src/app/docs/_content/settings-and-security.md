@@ -101,46 +101,8 @@ A campaign cannot place calls while its telephone route is not ready. If a campa
 
 Your plan sets how many calls can run at once. Campaigns queue beyond that limit rather than failing. The pricing page lists the concurrency allowance for each plan.
 
-## Security Center and Developer Hub
+## Administrative controls
 
-These areas are available only to authorized administrative roles.
+Administrative screens depend on your role and the deployed release. Some listed screens remain unavailable; they are not customer self-service instructions. Ask your account owner which operational controls are enabled before planning a webhook, API-key or account-wide security workflow.
 
-![Tenant-wide security, listing audit activity, access review, API keys and voice security](/docs/security-04-tenant-wide.webp)
-
-### Security Center may include
-
-- **Audit logs** — a record of who did what and when
-- **Voice security** — listed, but not available in the application today
-- **Abuse detection** — monitoring for misuse
-
-### Developer Hub may include
-
-- **API keys** — listed, but not available in the application today
-- **Webhooks** — register endpoints to receive events
-- **Rate limiting** — review and adjust request limits
-- **Secrets** — manage stored credentials
-
-### Administrative billing
-
-Administrators may also see account-wide billing and per-tenant billing views.
-
-### Administrative reviews
-
-Administrators may see a separate reviews area covering conversations across the whole account, including prompt versions, rather than only their own campaigns.
-
-These areas should normally be managed by administrators or technical teams rather than everyday campaign operators.
-
-#### API keys and voice security
-
-API keys and voice security are listed in the navigation but are not available in the application today. No key management API is served.
-
-#### Working with webhooks
-
-Webhooks are available where your account provides them.
-
-1. Open **Developer Hub → Webhooks**.
-2. Register the endpoint that should receive events.
-3. Select the events you want delivered.
-4. Verify that your endpoint responds successfully.
-
-Your endpoint should verify that each request genuinely came from Talk-Lee before acting on it.
+Use the account Security and Settings controls described above for your own account. Changes affecting other users, tenant-wide access or production calling belong with an authorized administrator following the deployment's reviewed procedures.

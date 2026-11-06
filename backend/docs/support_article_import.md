@@ -49,3 +49,39 @@ Do not reset a fresh failure to make a release gate appear green. The retired
 trunk-status timer is handled by its installer policy, not re-enabled here.
 Import, production count, support search and failed-unit clearance are owner
 steps; none has been performed against production by this work.
+
+## Release checklist: docs reviewed against enabled features
+
+- [ ] The owner has compared the published help against the enabled release,
+  including paid subscription/pay-as-you-go choices and actual carrier-service
+  arrangements. Help text must not promise a free trial or an automated billing
+  workflow that has not been verified.
+- [ ] `SUPPORT_ENABLED`, tenant eligibility, staff readiness and ticket/mail
+  delivery have been checked on the intended deployment before publishing a
+  support workflow. The default remains disabled; no production flag was read
+  or changed during this remediation.
+- [ ] White-label workflows have been demonstrated in the deployed UI before
+  publishing the partner guide. The current unavailable screens are not an
+  enabled feature. The safe content correction replaces `support.md` and
+  `partners.md` workflows with availability notices in both public help and the
+  backend bundle; it does not withdraw those published routes.
+- [ ] Resolve the remaining publication withdrawal with the owner/Hisham.
+  `public-routes.ts` and its exact-sitemap test were changed by Hisham in
+  `078a6ad3` on 4 Nov and remain protected. Hiding the guides requires a coordinated
+  review of the shared public catalog, sitemap expectation, docs registry and
+  any footer links. The prepared withdrawal patch and original tests are kept
+  in `tmp/qa-round3-20261106/H-F17-01-blocked-publication/`; they are not shipped.
+- [ ] Run the existing bundle parity tests and importer `--dry-run` on the exact
+  reviewed release; record the section count and approve `--apply` separately.
+  Verify that public links and imported search results match the current text.
+- [ ] Review existing database articles independently. This source change has
+  not removed, unpublished or deleted any deployed database row. A later approved
+  full import marks missing `source='docs'` slugs unpublished; it does not delete
+  them and preserves staff-owned articles. Check for old support/partner claims,
+  staff-authored copies and cached results, and disable any remaining stale
+  articles through the reviewed owner workflow before enabling support.
+
+Replacing either availability notice with workflow instructions requires the
+same owner review and fresh parity/import evidence. Publication withdrawal is
+still unfinished. These content checks do not prove production support delivery
+or commercial terms.

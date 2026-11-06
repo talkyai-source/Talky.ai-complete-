@@ -25,7 +25,7 @@ Notes:
 
 ### Pricing
 
-The public **Pricing** page lists the available subscription plans.
+The public **Pricing** page lists subscription plans and pay-as-you-go AI-minute options. Review the current prices and included features before choosing an option.
 
 ![The pricing page with the Annual option selected and the two plan cards below it](/docs/getting-started-03-pricing-annual.webp)
 
@@ -37,7 +37,7 @@ The public **Pricing** page lists the available subscription plans.
 
 The pricing page shows plan limits, included AI minutes, concurrent call limits, campaign limits, recording storage and retention, support hours, connector availability, and which voice providers are included.
 
-Telephone/PSTN/SIP carrier minutes are billed separately from Talk-Lee AI platform minutes.
+AI-minute purchases cover Talk-Lee platform usage. Confirm any telephone carrier service and charges with your account owner or provider before calling; this guide does not promise a separate carrier-billing workflow.
 
 ### Other public pages
 
@@ -56,7 +56,7 @@ Corporate networks that block real-time audio may prevent in-browser calling. If
 
 ### Create an account
 
-1. Open the Talk-Lee website and select **Start Free Trial**, **Get Started**, or **Register**.
+1. Open the Talk-Lee website and select **Get Started** or **Register**.
 2. Enter your name, business name, and email address, then continue.
 
    ![The first registration step, asking for name, business name and email](/docs/getting-started-04-register-details.webp)
@@ -75,7 +75,7 @@ After registration, Talk-Lee signs you in and opens your dashboard. If you arriv
 1. Open the Talk-Lee web application.
 2. Enter your registered email address and password.
 3. Complete MFA if it is enabled for your account.
-4. After a successful sign-in, Talk-Lee opens the **Dashboard**.
+4. After a successful sign-in, Talk-Lee returns to the original page you requested when it is a safe application link. Otherwise it opens the **Dashboard**. The Ask AI homepage return and partner-role dashboard routing keep their existing priority.
 
 ![The sign-in page, with fields for email and password](/docs/getting-started-07-login.webp)
 
@@ -111,7 +111,7 @@ The left sidebar provides access to the main Talk-Lee areas, in this order:
 - **Settings** — profile, device, telephony, and recording settings
 - **Logout** — sign out of Talk-Lee
 
-Depending on your plan and role you may also see **Assistant**, **Meetings**, **Reminders**, **Email**, **Reviews**, **Notifications**, **Security Center**, **Developer Hub**, or white-label partner areas.
+Depending on your plan and role you may also see **Assistant**, **Meetings**, **Reminders**, **Email**, **Reviews**, or **Notifications**. Use the controls available to your account; a listed or unavailable screen is not a promise that an administrative workflow is enabled.
 
 Selecting the **Talk-Lee** name at the top of the sidebar returns you to the public home page.
 

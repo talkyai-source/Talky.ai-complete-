@@ -74,13 +74,13 @@ export const docsPages: DocsPage[] = [
     slug: "settings-and-security",
     title: "Settings and Security",
     description:
-      "Your account security, profile and telephony settings, and the administrative Security Center and Developer Hub.",
+      "Your account security, profile and telephony settings, with availability guidance for administrative controls.",
     file: "settings-and-security.md",
   },
   {
     slug: "partners",
     title: "White-Label and Partner Administration",
-    description: "Manage your own customers from the partner area: tenants, analytics, billing and branding.",
+    description: "Availability notice for white-label and partner administration, which are not available in this release.",
     file: "partners.md",
   },
   {
@@ -98,7 +98,7 @@ export const docsPages: DocsPage[] = [
   {
     slug: "support",
     title: "Getting Support",
-    description: "How the support assistant works, when it creates a ticket for a person, and how to follow up on a ticket.",
+    description: "Support availability and how to contact your account owner when in-app support is not enabled.",
     file: "support.md",
   },
   {

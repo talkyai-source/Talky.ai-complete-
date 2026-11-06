@@ -67,11 +67,7 @@ Confirm your role still has access, and that the page has not moved. Use the sid
 
 ## Getting Help
 
-Select the **Help** button at the bottom right of any page. The support assistant answers first, from the help articles and read-only checks of your own account, and hands over to a person when it cannot solve the problem, when you ask for one with **Talk to a person**, or when the topic always needs a person (billing disputes, data deletion, account ownership, legal matters, security reports). The hand-over creates a support ticket with the conversation already filled in; the ticket number appears once it is saved.
-
-Follow up under **Support** in the sidebar: read replies, add messages and files, mark a ticket resolved or reopen it within seven days, and rate the help you received. The team also replies by email. [Getting Support](/docs/support) describes the whole flow.
-
-If the Help button and the Support entry are not shown, support is not switched on for your account yet. Use the contact details you already have, or the contact form on the website.
+Use the contact details supplied by your account owner, or the contact form on the website. The in-app support assistant and ticket desk are optional deployment features and are not promised by this guide. If your account shows a working Help control, follow its on-screen instructions; otherwise use the contact fallback. Do not assume a ticket was created until you receive confirmation.
 
 Before contacting support, have the following ready:
 
