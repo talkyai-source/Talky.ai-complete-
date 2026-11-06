@@ -2,11 +2,13 @@
 
 import { normalizeMinutesAllowance, type MinutesState } from "@/lib/minutes-allowance";
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
 import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
 import { notificationsStore } from "@/lib/notifications";
 import { emailAuditStore } from "@/lib/email-audit";
+import { isPublicRoute } from "@/lib/public-routes";
 
 // Contains no token or account data. Cookie-only sessions also need an explicit
 // cross-tab boundary because removing an absent bearer key emits no event.
@@ -80,6 +82,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+    const publicPage = isPublicRoute(usePathname() ?? "");
     const emailHistorySyncAvailable = useRef(false);
     const [user, setUserState] = useState<MeResponse | null>(null);
     const setUser = useCallback((next: MeResponse | null) => {
@@ -314,16 +317,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A failed logout has an unknown server outcome. Do not replay a timestamp
     // against current cookies: they may now belong to a different session.
 
-    // Verify the session on mount using existing cookies and any saved bearer.
-    // A missing bearer says nothing about the HttpOnly cookie. getMe suppresses
-    // the global expiry redirect; an anonymous response settles this provider.
+    // Public marketing pages defer cookie-only discovery until protected
+    // navigation or explicit refresh. A saved bearer still gets verified.
+    // The category dependency also verifies cookies when leaving those pages;
+    // private-to-private navigation does not restart bootstrap.
     // Token changes stay outside the dependency list so rotation cannot restart
     // bootstrap. The HTTP client reads the live token ref when needed.
     useEffect(() => {
         let cancelled = false;
-        const epoch = identityEpoch.current;
-        const read = ++profileRead.current;
-        const current = () => !cancelled && identityEpoch.current === epoch && profileRead.current === read;
         try {
             if (window.localStorage.getItem("talky.logout.pending")) {
                 logoutIntent.current = true;
@@ -334,6 +335,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return;
             }
         } catch { /* Continue the usual bootstrap when storage is unavailable. */ }
+        const skipBootstrap = logoutIntent.current || !profileReadsAllowed.current
+            || (publicPage && !accessTokenRef.current);
+        // Settle a deferred public bootstrap, or mark protected discovery in
+        // flight. Navigation must never reopen a logout/identity boundary.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setLoading(!skipBootstrap);
+        if (skipBootstrap) return;
+        const epoch = identityEpoch.current;
+        const read = ++profileRead.current;
+        const current = () => !cancelled && identityEpoch.current === epoch && profileRead.current === read;
         // Retain the existing single retry during fresh-login grace. Current
         // ownership checks reject reads superseded by logout or another login.
         async function loadMe(attempt: number): Promise<void> {
@@ -368,7 +379,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
         void loadMe(0);
         return () => { cancelled = true; };
-    }, [setUser]);
+    }, [publicPage, setUser]);
 
     // The ONE writer that touches the persisted token + the reactive state.
     // Every other action (login, logout, setToken, applyLoginResult)
