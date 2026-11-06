@@ -122,6 +122,25 @@ class _FakeConn:
 
     async def fetchrow(self, query: str, *args: Any):
         q = " ".join(query.split())
+        if q.startswith("UPDATE calls SET campaign_alert_processed_at=now()"):
+            assert "WHERE id=$1 AND tenant_id=$2::uuid" in q
+            assert "campaign_alert_processed_at IS NULL" in q
+            assert "status='completed' AND direction='outbound' AND is_test IS NOT TRUE" in q
+            assert "p.id=calls.campaign_id AND p.tenant_id=$2::uuid" in q
+            assert q.endswith("RETURNING campaign_id,outcome")
+            call_id, tenant_id = args
+            row = self.calls_row
+            campaign = self.campaigns_row
+            if (
+                row["id"] != call_id or row["tenant_id"] != tenant_id
+                or row.get("campaign_alert_processed_at") is not None
+                or row["status"] != "completed" or row.get("direction") != "outbound"
+                or row.get("is_test") is True or row.get("campaign_id") is None
+                or campaign.get("id") != row["campaign_id"]
+                or campaign.get("tenant_id") != tenant_id
+            ):
+                return None
+            raise AssertionError("Eligible alert calls require an explicit alert-state fixture")
         if q.startswith("UPDATE calls"):
             if self.calls_row["id"] != args[0]:
                 return None
