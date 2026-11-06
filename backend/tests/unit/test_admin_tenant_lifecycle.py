@@ -467,7 +467,7 @@ def test_list_row_shape_is_unchanged():
 def test_list_query_count_is_bounded_regardless_of_tenant_count(n):
     """Before: 1 + 2N queries (401 at N=200). After: a constant 2."""
     client, conn, _ = make_client(list_responder(total=n))
-    r = client.get("/api/v1/admin/tenants", params={"limit": 1000})
+    r = client.get("/api/v1/admin/tenants", params={"limit": 200})
     assert r.status_code == 200, r.text
     assert len(r.json()) == n
     assert len([q for q in conn.queries if not q[1].startswith("SET LOCAL")]) == 2, (
@@ -478,7 +478,9 @@ def test_list_query_count_is_bounded_regardless_of_tenant_count(n):
 
 def test_list_does_not_issue_per_tenant_count_queries():
     client, conn, _ = make_client(list_responder(total=200))
-    client.get("/api/v1/admin/tenants", params={"limit": 1000})
+    response = client.get("/api/v1/admin/tenants", params={"limit": 200})
+    assert response.status_code == 200, response.text
+    assert len(response.json()) == 200
     # the old shape: one `select id from user_profiles where tenant_id = ..`
     # and one for campaigns, per tenant.
     per_tenant = [
