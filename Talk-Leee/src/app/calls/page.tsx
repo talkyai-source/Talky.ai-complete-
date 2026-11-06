@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallTimestamp } from "@/components/calls/call-timestamp";
 import { DialAgainButton } from "@/components/calls/dial-again-button";
@@ -26,14 +26,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { getRecordingCapabilities } from "@/lib/media-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 import { useAuth } from "@/lib/auth-context";
+import { useCallHistoryWorkflow, type CallWorkflowPatch } from "@/lib/use-call-history-workflow";
 import {
     defaultCallHistoryWorkflow,
     callHasCapturedContact,
     capturedContactParts,
     classifyCall,
     isActiveCallStatus,
-    readCallHistoryWorkflow,
-    writeCallHistoryWorkflow,
     type CallHistoryWorkflowEntry,
     type CallHistoryWorkflowMap,
 } from "@/lib/call-history-workflow";
@@ -167,8 +166,6 @@ function CallParties({ call }: { call: Call }) {
     }
     return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
 }
-
-type CallWorkflowPatch = Partial<Omit<CallHistoryWorkflowEntry, "updatedAt">>;
 
 // The per-call "best time to call" the panel shows. The `Call` type and the
 // list mapper do not carry this field yet, so today it is always null and the
@@ -869,41 +866,8 @@ export default function CallsPage() {
     const [filter, setFilter] = useState<"all" | "leads" | "issues">("all");
     const [direction, setDirection] = useState<"all" | "inbound" | "outbound">("all");
     const [inboundCampaignId, setInboundCampaignId] = useState<string | undefined>();
-    const [workflow, setWorkflow] = useState<CallHistoryWorkflowMap>({});
-    const [loadedWorkflowScope, setLoadedWorkflowScope] = useState("");
     const [reviewCall, setReviewCall] = useState<Call | null>(null);
     const previousStatusesRef = useRef<Map<string, string> | null>(null);
-    const workflowScope = user?.tenant_id || user?.id || "";
-
-    useEffect(() => {
-        if (!workflowScope) return;
-        // Browser-only, identity-scoped workflow metadata cannot be part of the
-        // server render. Hydrate it once auth has resolved.
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage hydration after the client/auth boundary
-        setWorkflow(readCallHistoryWorkflow(workflowScope));
-        setLoadedWorkflowScope(workflowScope);
-    }, [workflowScope]);
-
-    useEffect(() => {
-        if (!workflowScope || loadedWorkflowScope !== workflowScope) return;
-        writeCallHistoryWorkflow(workflowScope, workflow);
-    }, [loadedWorkflowScope, workflow, workflowScope]);
-
-    const updateWorkflow = useCallback((call: Call, patch: CallWorkflowPatch) => {
-        const updatedAt = new Date().toISOString();
-        setWorkflow((current) => {
-            const existing = current[call.id] ?? defaultCallHistoryWorkflow(call);
-            return {
-                ...current,
-                [call.id]: {
-                    ...existing,
-                    ...patch,
-                    form: patch.form ?? existing.form,
-                    updatedAt,
-                },
-            };
-        });
-    }, []);
     const [selectedDid, setSelectedDid] = useState<string | undefined>();
 
     useEffect(() => {
@@ -918,6 +882,8 @@ export default function CallsPage() {
 
     const q = useCalls(page, pageSize, { direction: direction === "all" ? undefined : direction, inboundCampaignId });
     const allCalls = useMemo(() => q.data?.calls ?? [], [q.data]);
+    const workflowSync = useCallHistoryWorkflow(allCalls, user?.tenant_id, user?.id);
+    const { workflow, update: updateWorkflow } = workflowSync;
 
     useEffect(() => {
         const current = new Map(allCalls.map((call) => [call.id, call.status]));
@@ -960,6 +926,15 @@ export default function CallsPage() {
     return (
         <DashboardLayout title="Call History" description="Review calls, classify leads, capture notes, and complete follow-up forms">
             <CallIssuesBanner />
+            {workflowSync.failed ? (
+                <div role="alert" className="mb-4 rounded-lg border border-border p-3 text-sm">
+                    Call details are not saved or could not load. Retry to sync your pending changes.
+                    <button type="button" className="ml-2 font-semibold underline" onClick={workflowSync.retry}>Retry sync</button>
+                </div>
+            ) : workflowSync.busy ? <p role="status" className="mb-2 text-sm text-muted-foreground">Syncing call details…</p> : null}
+            {workflowSync.backupUnavailable ? (
+                <p role="alert" className="mb-4 text-sm">Browser backup is unavailable. Keep this page open until your changes save.</p>
+            ) : null}
             {q.isLoading ? (
                 <div role="status" aria-label="Loading call history" className="flex h-64 items-center justify-center">
                     <div aria-hidden className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />

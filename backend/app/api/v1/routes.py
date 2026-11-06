@@ -27,6 +27,7 @@ from app.api.v1.endpoints.billing_topups import (
     router as billing_topups_router,
 )
 from app.api.v1.endpoints.calls import router as calls_router
+from app.api.v1.endpoints.call_workflow import router as call_workflow_router
 from app.api.v1.endpoints.call_feedback import router as call_feedback_router
 from app.api.v1.endpoints.lead_details import router as lead_details_router
 from app.api.v1.endpoints.conversation_reviews import (
@@ -93,6 +94,7 @@ api_router.include_router(contact_enquiries_router)
 api_router.include_router(support_router)
 api_router.include_router(support_admin_router, tags=["support-admin"])
 api_router.include_router(calls_router)
+api_router.include_router(call_workflow_router)
 api_router.include_router(call_feedback_router)
 # Before calls_router: this one owns literal paths under /calls (e.g.
 # /calls/reviews/options) and FastAPI matches in registration order, so a

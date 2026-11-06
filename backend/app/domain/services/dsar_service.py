@@ -30,13 +30,13 @@ from app.domain.services.phone_number_normalizer import normalize_phone_for_capt
 
 _TABLES = (
     "leads", "calls", "call_lead_details", "transcripts", "conversations",
-    "recordings_s3", "recordings", "call_feedback", "conversation_reviews",
+    "recordings_s3", "recordings", "call_feedback", "conversation_reviews", "call_workflows",
     "crm_deliveries", "dnc_entries", "call_guard_decisions", "call_events",
     "call_legs", "stream_events", "dialer_jobs", "assistant_actions", "meetings", "reminders",
 )
 _CALL_ONLY = {
     "transcripts", "conversations", "recordings_s3", "recordings", "call_feedback",
-    "conversation_reviews", "crm_deliveries", "call_events", "call_legs",
+    "conversation_reviews", "crm_deliveries", "call_events", "call_legs", "call_workflows",
 }
 _ROW_BYTES = 65536
 _ALL_ROW_BYTES = 16 * 1024 * 1024

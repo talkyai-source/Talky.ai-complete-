@@ -9654,6 +9654,23 @@
       "category": "system_provider_receipt"
     },
     {
+      "id": "0879435a5900d69e746d59f5953c489fd2157a4e83b636ba6711cb4f796186c6",
+      "file": "app/domain/services/call_workflow_service.py",
+      "function": "CallWorkflowService._require_call",
+      "line": 53,
+      "method": "fetchrow",
+      "tables": [
+        "calls"
+      ],
+      "sql": "SELECT id FROM calls WHERE tenant_id = $1 AND id = $2{IfExp(test=Name(id='lock', ctx=Load()), body=Constant(value=' FOR UPDATE'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "category": "reviewed_tenant_scoped",
+      "reason": "CallWorkflowService._require_call always binds tenant_id=$1 and call id=$2 before either read or save. The sole optional SQL fragment is FOR UPDATE; it cannot remove the tenant predicate. Both mounted routes obtain tenant from authenticated CurrentUser and refuse missing context. Exact reviewed operation: fetchrow; app/domain/services/call_workflow_service.py:53."
+    },
+    {
       "id": "08f4b80b53c99cb2cd56615bc3b8d26e61dffd839bdc74e61bf93797afc307b0",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "list_admin_media_deletions",
@@ -12509,21 +12526,6 @@
       "category": "platform_supplier_evidence"
     },
     {
-      "id": "9cab6281b720735b5ea768ad59eb73f806daf154d30939075302806dba832e84",
-      "file": "app/domain/services/dsar_service.py",
-      "function": "DsarService._collect.read",
-      "line": 298,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_sql', ctx=Load()), args=[Name(id='table', ctx=Load())], keywords=[keyword(arg='identity', value=Name(id='identity', ctx=Load()))])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "The same-module _sql builder accepts only the fixed _TABLES registry and binds scope.tenant_id as $1. Every tenant-bearing table has an explicit r.tenant_id predicate; tenantless call_events/call_legs require owned calls; nullable legacy media additionally rejects conflicting non-NULL ownership. DNC/guard/reminder subqueries independently bind the parent tenant. Module AST pins this registry/builder with the executor. Exact reviewed operation: fetch; app/domain/services/dsar_service.py:298.",
-      "category": "reviewed_tenant_scoped"
-    },
-    {
       "id": "9d666e1e6354ac0a7a7fe4d1762d520eb496ea9ea45730bce92cd0c8a6e3f56f",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
@@ -13242,6 +13244,21 @@
       "count": 1,
       "reason": "The provider/external-ID OR is parenthesized before AND tenant_id=$2 from the authenticated ownership check. A newer foreign match cannot displace the owned row. Parent exercised the actual selection SQL. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_bridge.py:2693.",
       "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "cc14ddfec79a1ddb66cf0fbd4a26f74a278966407d153359151d450c45315119",
+      "file": "app/domain/services/dsar_service.py",
+      "function": "DsarService._collect.read",
+      "line": 298,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_sql', ctx=Load()), args=[Name(id='table', ctx=Load())], keywords=[keyword(arg='identity', value=Name(id='identity', ctx=Load()))])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "category": "reviewed_tenant_scoped",
+      "reason": "The same-module _sql builder accepts only the fixed _TABLES registry and binds scope.tenant_id as $1. Every tenant-bearing table has an explicit r.tenant_id predicate; tenantless call_events/call_legs require owned calls; nullable legacy media additionally rejects conflicting non-NULL ownership. DNC/guard/reminder subqueries independently bind the parent tenant. Module AST pins this registry/builder with the executor. Exact reviewed operation: fetch; app/domain/services/dsar_service.py:298. Item6 registry review: call_workflows is a fixed call-only table and uses the unchanged explicit r.tenant_id=$1 ownership branch; only the module AST identity changes."
     },
     {
       "id": "ce8e37d3b91065127df1a0f183de82253a2eac9b3ba47f5c3e7168dbaf8e07a5",

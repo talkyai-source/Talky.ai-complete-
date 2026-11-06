@@ -35,7 +35,7 @@ def module():
 def data():
     rows = {name: [] for name in (
         "leads", "calls", "call_lead_details", "transcripts", "conversations",
-        "recordings_s3", "recordings", "call_feedback", "conversation_reviews",
+        "recordings_s3", "recordings", "call_feedback", "conversation_reviews", "call_workflows",
         "crm_deliveries", "dnc_entries", "call_guard_decisions", "call_events",
         "call_legs", "stream_events", "dialer_jobs", "assistant_actions", "meetings",
         "reminders",
