@@ -6,6 +6,7 @@ import { api } from "@/lib/api";
 import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
 import { notificationsStore } from "@/lib/notifications";
+import { emailAuditStore } from "@/lib/email-audit";
 
 // Contains no token or account data. Cookie-only sessions also need an explicit
 // cross-tab boundary because removing an absent bearer key emits no event.
@@ -79,12 +80,22 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+    const emailHistorySyncAvailable = useRef(false);
     const [user, setUserState] = useState<MeResponse | null>(null);
     const setUser = useCallback((next: MeResponse | null) => {
         // Optimistic legacy login payloads can omit tenant identity. Only /me
         // may complete that scope; a platform administrator can be tenantless.
         setRequestIdentity(next && (next.tenant_id || next.role === "platform_admin")
             ? { userId: next.id, tenantId: next.tenant_id } : null);
+        if (emailHistorySyncAvailable.current && next?.tenant_id && next.id) {
+            emailAuditStore.setIdentity({ tenantId: next.tenant_id, userId: next.id });
+        } else if (next) {
+            // A verified identity without an eligible tenant is a new owner,
+            // not a pending recheck of the previous user's retained scope.
+            emailAuditStore.setIdentity(null);
+        } else {
+            emailAuditStore.suspendIdentity();
+        }
         setUserState(next);
     }, []);
     const [loading, setLoading] = useState(true);
@@ -93,6 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const broadcastIdentityChange = useCallback((kind: "changed" | "logout") => {
         if (!publishIdentityChange(kind, identityChannel.current)) {
             notificationsStore.setIdentity(null);
+            emailHistorySyncAvailable.current = false;
+            emailAuditStore.suspendIdentity();
             setNotificationSyncAvailable(false);
         }
     }, []);
@@ -159,6 +172,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         identityEpoch.current += 1;
         profileRead.current += 1;
         notificationsStore.setIdentity(null);
+        emailAuditStore.suspendIdentity();
         return identityEpoch.current;
     }, []);
 
@@ -175,6 +189,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setAccessTokenState(token);
         });
         return () => {
+            emailHistorySyncAvailable.current = false;
+            emailAuditStore.suspendIdentity();
             profileReadsAllowed.current = false;
             identityEpoch.current += 1;
             profileRead.current += 1;
@@ -191,6 +207,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (typeof window === "undefined") return;
         const seen = new Set<string>();
         function handleIdentityChange(kind: "changed" | "logout") {
+            if (kind === "logout") emailAuditStore.clearForLogout();
+            else emailAuditStore.suspendIdentity();
             invalidateRequestIdentity();
             setUser(null);
             const epoch = ++identityEpoch.current;
@@ -278,6 +296,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         } catch { /* The existing foreign storage marker remains the fallback. */ }
         identityChannel.current = channel;
+        emailHistorySyncAvailable.current = storageAvailable || !!channel;
+        if (!emailHistorySyncAvailable.current) emailAuditStore.suspendIdentity();
         // Capability depends on successfully opening browser transports, which
         // must happen after mount rather than during render or on the server.
         // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -398,6 +418,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const logout = useCallback(async () => {
         const expectedIdentity = user ? { userId: user.id, tenantId: user.tenant_id } : undefined;
+        emailAuditStore.clearForLogout();
         logoutIntent.current = true;
         // Persist before a cross-app hint can retire this operation's epoch.
         // A failed write still leaves the mounted provider fenced in memory.

@@ -326,16 +326,17 @@ export function useSendEmail() {
     return useNotificationMutation({
         mutationFn: backendApi.email.send,
         onMutate: async (input) => {
-            const auditId = emailAuditStore.createAttempt({ to: input.to, templateId: input.templateId, subject: input.subject });
-            return { auditId };
+            const audit = emailAuditStore.capture();
+            const auditId = audit.createAttempt({ to: input.to, templateId: input.templateId, subject: input.subject });
+            return { auditId, audit };
         },
         onError: (err, _input, ctx) => {
             const msg = err instanceof Error ? err.message : "Could not send email.";
-            if (ctx?.auditId) emailAuditStore.markFailed(ctx.auditId, { errorMessage: msg });
+            if (ctx?.auditId) ctx.audit.markFailed(ctx.auditId, { errorMessage: msg });
             notificationsStore.create({ type: "error", title: "Send failed", message: msg });
         },
         onSuccess: (res, _input, ctx) => {
-            if (ctx?.auditId) emailAuditStore.markSuccess(ctx.auditId, { messageId: res.messageId, providerStatus: res.status });
+            if (ctx?.auditId) ctx.audit.markSuccess(ctx.auditId, { messageId: res.messageId, providerStatus: res.status });
             notificationsStore.create({ type: "success", title: "Email sent", message: res.messageId ? `Message ID: ${res.messageId}` : "Delivery request accepted." });
         },
     });
