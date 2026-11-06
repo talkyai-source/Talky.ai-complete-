@@ -184,6 +184,40 @@ jobs:
         env:
           PGPASSWORD: testpassword
 
+      - name: Compare clean and preserved bootstrap schemas
+        id: schema-parity
+        # The existing PostgreSQL service is disposable. Keep the snapshot's
+        # client guards and compare both dumps with the same pinned client.
+        run: |
+          client_dir="$RUNNER_TEMP/schema-parity-client"
+          mkdir -p "$client_dir"
+          cat > "$client_dir/psql" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host \
+            -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -e PGCONNECT_TIMEOUT \
+            -v "$PARITY_BACKEND_ROOT:$PARITY_BACKEND_ROOT:ro" -w "$PARITY_BACKEND_ROOT" \
+            postgres:16.14-alpine "$(basename "$0")" "$@"
+          SH
+          cp "$client_dir/psql" "$client_dir/pg_dump"
+          chmod +x "$client_dir/psql" "$client_dir/pg_dump"
+          export PARITY_BACKEND_ROOT="$PWD"
+          python scripts/verify_schema_parity.py \
+            --psql "$client_dir/psql" --pg-dump "$client_dir/pg_dump" \
+            --output-dir test-artifacts/schema-parity
+          pytest tests/integration/test_bootstrap_manual_parity.py -q
+        env:
+          SCHEMA_PARITY_ADMIN_DSN: postgresql://talky:testpassword@127.0.0.1:5432/talky_test
+          TEST_DATABASE_URL: postgresql://talky:testpassword@127.0.0.1:5432/talky_test
+
+      - name: Retain schema parity evidence
+        if: always() && steps.schema-parity.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-parity
+          path: backend/test-artifacts/schema-parity/
+          if-no-files-found: warn
+
       - name: Legacy false-stamp repair and inbound migration round-trip
         # Reproduce the historic false 0021 marker, exercise the 0022 rollback
         # guard only within its supported boundary, then converge to head.

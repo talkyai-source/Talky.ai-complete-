@@ -3,8 +3,9 @@
 **Alembic is the single source of truth for schema changes.** As of
 2026-06-02 the project had drifted into two parallel systems — Alembic
 (`Alembic/versions/`) *and* hand-applied raw SQL (`database/migrations/`).
-The raw-SQL system is now **frozen and archived** (see
-`database/migrations/_archive/`). Do not add or run files there.
+The raw-SQL system is **superseded**. Both the archived files and the later
+June–July files are retained only for provenance. See the exact disposition in
+[`migrations/README.md`](migrations/README.md); do not add or run manual files.
 
 ## Standing up a fresh database
 
@@ -20,7 +21,7 @@ The maintained and CI-tested bootstrap path is:
 
 ```bash
 # 1. Load the maintained historical schema floor.
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/complete_schema.sql
+psql -X -v ON_ERROR_STOP=1 -f database/complete_schema.sql
 
 # 2. Record the conservative proven floor, then execute every newer migration.
 alembic stamp 0008_tenant_voice_tuning
@@ -31,7 +32,7 @@ The preserved 2026-06-02 production snapshot is also supported for recovery at
 the same conservative `0008_tenant_voice_tuning` boundary:
 
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f database/schema/baseline_2026-06-02.sql
+psql -X -v ON_ERROR_STOP=1 -f database/schema/baseline_2026-06-02.sql
 alembic stamp 0008_tenant_voice_tuning
 alembic upgrade head
 ```
@@ -50,16 +51,16 @@ though it had previously been stamped at 0021. Migration 0033 repairs databases
 already stamped past that gap. New databases must run the full 0009-to-head
 chain and must never restore the old 0021 stamp shortcut.
 
-The current sole head is `0035_user_profiles_role_widen`. It widens the
-`user_profiles.role` constraint to the complete application `UserRole` set,
-discovers either historical constraint name from the PostgreSQL catalog, and
-refuses upgrade or downgrade when existing rows would be rejected by the
-target constraint. Its predecessor, `0034_inbound_billing_four_eye`, adds the
-durable pending/approved record required for two distinct platform
-administrators to finalize a manual inbound billing hold and forward-repairs
-pre-existing `0033` databases so `billing_ledger` is append-only under tenant,
-service-bypass, and owner contexts. Downgrade from `0034` refuses while
-approval evidence exists and never removes the append-only ledger boundary.
+The current sole head is `0087_bootstrap_manual_parity`, after
+`0086_call_workflows` and `0085_legal_acceptance`. It fills the documented
+bootstrap/manual gaps, using the current post-0065/0067 table contracts. It
+adopts compatible existing objects without replacing them, and refuses
+incompatible columns, defaults, constraints, indexes or tenant security.
+
+For the `psql` commands above, privately configure libpq's `PGHOST`, `PGPORT`,
+`PGUSER`, `PGDATABASE` and authentication environment/password file. Configure
+Alembic's `MIGRATION_DATABASE_URL` separately in the process environment. Never
+paste a password-bearing DSN into a command argument or share its value.
 
 When a snapshot is regenerated, record and test its proven floor here. Reserve
 an **exact revision boundary** for a generated dump whose schema has been
@@ -76,9 +77,89 @@ alembic upgrade head                      # apply locally
 ```
 
 Then deploy and run `alembic upgrade head` on the target. Writing the
-DDL idempotently means re-running a revision (or running one that was
-already applied by hand) is a safe no-op — this is how the repo recovers
-from the historical drift.
+DDL idempotently avoids recreating compatible objects. `IF NOT EXISTS` alone
+does not prove an existing object has the correct shape: use guarded metadata
+checks and behavioral PostgreSQL tests for adopted manual objects.
+
+## 0087 preflight, application and rollback
+
+This is additive schema repair, not permission to rewrite unknown production
+objects. Before applying, rehearse both bootstrap routes on disposable
+PostgreSQL and retain the schema diff described below. An authorized owner
+must take the normal database backup and use a maintenance window: 0087 uses
+transactional locks (5-second lock timeout; 120-second statement timeout),
+including ACCESS EXCLUSIVE metadata validation. It cannot use CONCURRENTLY in
+the repository's single migration transaction.
+
+Run the count-only preflight with the authorized maintenance connection. It
+prints no row values and makes no writes. `row_security=off` deliberately
+refuses a role whose observation would be filtered. Every reported rejection
+or duplicate count must be zero; unexpected schema/permission errors require
+review, not a bypass or automatic data cleanup.
+
+```bash
+psql -X -v ON_ERROR_STOP=1 -f scripts/check_manual_parity_constraints.sql
+alembic current
+alembic upgrade head
+alembic current
+alembic heads
+```
+
+The refresh-reason and tenant-provider CHECKs are added NOT VALID when absent
+or known-old, then validated only after zero-invalid-row checks. An already
+current refresh CHECK retains its identity and validation state. Existing
+credential history, worker counters, event rows, index identities, policies
+and compatible table definitions are retained. The migration never replays the
+old job-cancellation UPDATE. Unknown definitions cause the whole transaction
+to roll back; do not widen the guard without a separate reviewed repair.
+
+0087 is **forward-only**: it may adopt objects that existed before Alembic, and
+the database contains no reliable provenance proving which objects a downgrade
+could drop. `alembic downgrade 0086_call_workflows` therefore refuses before
+issuing DDL. Keep this additive schema for an approved compatible application
+rollback. Any schema compensation requires a separately reviewed migration;
+do not drop tables or restore a database backup over live writes merely to
+reverse a code release.
+
+## Two-bootstrap schema parity gate
+
+`scripts/verify_schema_parity.py` creates two unique disposable databases,
+restores each supported snapshot unchanged, stamps 0008, upgrades each to
+head, then compares `pg_dump --schema-only --no-owner` from the same client.
+It normalizes only dump client/version comments and random paired restrict
+tokens in the **comparison output**; the original restore guards remain intact.
+Columns, defaults, functions and their literal whitespace, constraints, indexes,
+comments, grants, policies and FORCE RLS differences remain visible. The owner
+name is the sole explicit metadata exclusion; there is no structural allowlist.
+
+Privately set `SCHEMA_PARITY_ADMIN_DSN` (or `TEST_DATABASE_URL`) to a loopback,
+test-named PostgreSQL provisioning database with CREATE DATABASE permission.
+Routing query overrides, remote hosts and production-named databases are
+refused before a subprocess starts. The environment must already contain the
+snapshot's required `authenticated` role. Use psql 16.14+ for its guarded
+snapshot and the same compatible pg_dump executable for both routes.
+
+```bash
+python scripts/verify_schema_parity.py --output-dir tmp/schema-parity
+pytest tests/integration/test_bootstrap_manual_parity.py -q
+```
+
+Exit 0 means the two dumped schemas matched, 1 means the retained `schema.diff`
+is nonempty, and 2 means provisioning, migration, dump or cleanup failed. Every
+subprocess is bounded at 300 seconds and does not receive credentials in argv.
+`invocation.json` lists only generated database names; raw schema dumps,
+`schema.diff` and `result.json` are retained on successful execution. Cleanup
+drops only names successfully created by that invocation, without FORCE or
+terminating other sessions. If cleanup fails, the owner can inspect the named
+disposable databases and remove them after verifying their identity.
+
+CI has PostgreSQL and runs this as a blocking gate, using the pinned 16.14
+client container already used for the preserved snapshot, and uploads the
+artifact directory even on failure. Unit subprocess doubles verify orchestration
+only. The four opt-in PostgreSQL tests verify the late repair, idempotence,
+constraint preservation and atomic refusal; they do not replace the full dump
+comparison. Until the actual PostgreSQL run is recorded, report **not run on
+PostgreSQL**, not schema parity or a production no-op proven by unit tests.
 
 ## Historical production state (2026-06-02)
 

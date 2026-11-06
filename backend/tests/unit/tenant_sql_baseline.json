@@ -9555,6 +9555,22 @@
       "category": "platform_admin"
     },
     {
+      "id": "06a60e970bfacd95d2f19eb6dde05a89439c6bf29a9d3bf4c33309d2de0de517",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.get_request",
+      "line": 529,
+      "method": "fetchrow",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "SELECT * FROM emergency_access_requests WHERE request_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Resolves one platform request UUID for the session owner check (endpoint:146–151) or details path (235–246), which restricts response to requestor/recorded approver/admin condition. Current HTTP entry also has platform-only permission admission described above. Query does not fetch tenant business data."
+    },
+    {
       "id": "08507902eaa7f1f9141d7a3042e8600bd1d805f15314fcfe4316397a7c6aef28",
       "file": "app/domain/services/support/staff_service.py",
       "function": "list_tickets",
@@ -9769,6 +9785,22 @@
       "count": 1,
       "reason": "Platform-admin account deletion/deactivation (line 809) locks the selected global identity and removes its memberships across tenants; tenant filtering would leave orphan memberships. Exact reviewed operation: execute; app/api/v1/endpoints/admin/users.py:872.",
       "category": "platform_admin"
+    },
+    {
+      "id": "0e1d79878c5ef16e51d2252b3ce62ab1a2d0e1275d5be463f4163e3d7461b688",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.deny",
+      "line": 314,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET status = $1, reviewed_by = $2, reviewed_at = $3, review_notes = $4 WHERE request_id = $5",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Platform emergency approver endpoint:114–123 denies one UUID request and records the authenticated denier. A platform operator may deny another operator's request; no tenant table is touched."
     },
     {
       "id": "11055157f7e985b3d3795aa1f9e40be69fa8ecd650b0ccf793237cc59f43ce55",
@@ -9987,6 +10019,22 @@
       "count": 1,
       "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetchrow; app/api/v1/endpoints/calls.py:1582.",
       "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "1f43c1a53c4c42719bbbb52514746cb61aeac50211a72896dd185ae023cd6749",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.approve",
+      "line": 215,
+      "method": "fetchrow",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "SELECT * FROM emergency_access_requests WHERE request_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Fetches one platform request by UUID for an authenticated emergency approver. Current HTTP caller is platform-admin admitted at endpoint:85; service checks allowed status, expiry and rejects self/duplicate approval. It must allow a different operator to approve recovery."
     },
     {
       "id": "203fbfee3b0a1915121ebee146cddd8f72061591d72450487921b3ac1ded76e4",
@@ -10307,6 +10355,22 @@
       "count": 1,
       "reason": "Supplier statements/reconciliation belong to the platform supplier account. The corresponding endpoint requires require_platform_admin (lines 70/93/104/148/159/205), and operates on a selected immutable statement or request ID. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/supplier_evidence.py:96.",
       "category": "platform_supplier_evidence"
+    },
+    {
+      "id": "2bd59c1bd9aa9866402e41b0d32c2c0a92ffb1d90a95f3def3eae637bc271f13",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.get_pending_requests",
+      "line": 510,
+      "method": "fetch",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "SELECT * FROM emergency_access_requests WHERE status = $1 AND expires_at > NOW() ORDER BY created_at DESC",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Intentional global pending/unexpired platform recovery queue, exposed only by emergency admin endpoint:202–207. Tenant filtering would hide other platform operators' incidents."
     },
     {
       "id": "2ce8fcde516e6856dc67a26eb91f91c1d208a274af7afee32437e9d09cd55782",
@@ -10674,6 +10738,22 @@
       "category": "platform_admin"
     },
     {
+      "id": "430f4373303ded6e842f7cace3deec4b9a4b0c9ecb2809ea53b30b20ad304bbc",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.validate_session",
+      "line": 404,
+      "method": "fetchrow",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "SELECT * FROM emergency_access_requests WHERE session_token_hash = $1 AND status = $2 AND expires_at > NOW() AND session_terminated_at IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Looks up the platform recovery capability by SHA-256 token hash plus used/unexpired/unterminated conditions, before a tenant would be known. No application caller of this EmergencyAccess method was found; ordinary login uses the separate security.sessions validator. Preserve this narrow capability lookup classification; do not treat UUID-only lookup as equivalent."
+    },
+    {
       "id": "44fb491e38ab59292cc1e46e1d49d906a9b9281b39a2679a08b7aad6da15bb76",
       "file": "app/domain/services/support/staff_service.py",
       "function": "metrics_summary",
@@ -11030,6 +11110,22 @@
       "count": 1,
       "reason": "Supplier statements/reconciliation belong to the platform supplier account. The corresponding endpoint requires require_platform_admin (lines 70/93/104/148/159/205), and operates on a selected immutable statement or request ID. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/supplier_evidence.py:115.",
       "category": "platform_supplier_evidence"
+    },
+    {
+      "id": "5379abd8b5f000174586eb8f6fc4b6e30d22da009cba20167219c947b6d68308",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.create_session",
+      "line": 364,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET session_created_at = $1, session_token_hash = $2, status = $3 WHERE request_id = $4",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Writes the generated session-token hash and used state for the same request after the above caller/approval checks. No tenant business-data access is performed by this query."
     },
     {
       "id": "5397fa2ec76ca061907685ef0d434f01df8caefd18e65997c11d85cef3834ab7",
@@ -11416,6 +11512,22 @@
       "category": "platform_admin"
     },
     {
+      "id": "69211fc2ffc8f3f313f8145647bb03f7484c7cc320a7d31404496d4ea830d5d0",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.approve",
+      "line": 268,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET approvals = $1, status = $2, approved_at = $3, expires_at = $4 WHERE request_id = $5",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Updates the single platform request selected above after distinct approver/status checks and threshold calculation. Cross-operator approval is deliberate; this does not mutate tenant data."
+    },
+    {
       "id": "6a802953cd73fe67cb6fa2f82fd5f5656eec169d56dbb4137b0947ea7401bc54",
       "file": "app/domain/services/support/staff_service.py",
       "function": "metrics_summary",
@@ -11431,6 +11543,22 @@
       "count": 1,
       "reason": "Platform support metrics call require_current_platform_admin (line278) before cross-tenant aggregates; no customer record body is returned. Exact reviewed operation: fetchval; app/domain/services/support/staff_service.py:293.",
       "category": "platform_admin"
+    },
+    {
+      "id": "6af0ec5f45b34209079224ffdbdc838f7182879b2d27bdf3126b80ab76243a05",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.approve",
+      "line": 278,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET approvals = $1 WHERE request_id = $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Persists the approval list for that exact platform request under the same current approver boundary, without assigning it to the approver's tenant."
     },
     {
       "id": "6b0c4e38729167cb509822718910d3b6838721705cd8af0c976e46eb45f86a3c",
@@ -12100,6 +12228,22 @@
       "category": "platform_account_enforcement"
     },
     {
+      "id": "8afe61a291468b2ed6b0eec01736f6840e5fa367fa5d6b72c045574680751c29",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.complete_review",
+      "line": 494,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET reviewed_at = $1, reviewed_by = $2, review_notes = $3 WHERE request_id = $4",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current endpoint:277–285 requires emergency admin, resolved as platform-admin admission; stores post-incident review for one platform request. Reviewer may differ from requestor by design."
+    },
+    {
       "id": "8b306ca2296c4b569131c5edd05350f56861b9a089bded22612486c62f03df3a",
       "file": "app/domain/services/suspension_service.py",
       "function": "SuspensionService._suspend_account",
@@ -12378,6 +12522,22 @@
       "category": "system_support_scheduler"
     },
     {
+      "id": "95b2b6a913e83c3f6ad1522d4fa196a6fe1e9fdd18a5ef08b12171266d740b80",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.log_action",
+      "line": 472,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET actions_taken = actions_taken || $1::jsonb WHERE request_id = $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Appends audit actions to one platform emergency request UUID. No application caller of this service method was found; it is an internal unused audit helper, not an unauthenticated mounted route. Future integration must supply the validated session/request boundary."
+    },
+    {
       "id": "96bae69742c063ac5083b6c33a3abd2e6a327906e1766fe4c7f5e6de80391514",
       "file": "app/infrastructure/connectors/calendar/google_calendar.py",
       "function": "GoogleCalendarConnector.update_event",
@@ -12491,6 +12651,22 @@
       "count": 1,
       "reason": "Supplier statements/reconciliation belong to the platform supplier account. The corresponding endpoint requires require_platform_admin (lines 70/93/104/148/159/205), and operates on a selected immutable statement or request ID. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/supplier_evidence.py:175.",
       "category": "platform_supplier_evidence"
+    },
+    {
+      "id": "9cca8b1bfd022f8d80b5e80e3f4c18e39eafab6ecdc52c0cb4db737931eead34",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.create_session",
+      "line": 342,
+      "method": "fetchrow",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "SELECT * FROM emergency_access_requests WHERE request_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current sole app caller endpoint:140–153 first loads the request and requires requestor_id equal authenticated user ID. Service fetches that platform request, checks approved/unexpired/not-created state. Identity ownership, not tenant ownership, governs issuance."
     },
     {
       "id": "9d65d3ce773f369fc343cd8bd7e35b2bc3e26ccf57b23eef12fabe6fca2babe2",
@@ -12790,6 +12966,22 @@
       "count": 1,
       "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: ValueError; app/infrastructure/connectors/calendar/outlook_calendar.py:341.",
       "category": "not_database_sql"
+    },
+    {
+      "id": "b21c6a901a415cf3229519f3d2645628d8305fff89dce92b5be8b4b373dcb7e5",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.approve",
+      "line": 227,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET status = $1 WHERE request_id = $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Marks the exact previously fetched platform request expired under the same approver path. Request UUID bound; tenant ownership is not the domain boundary."
     },
     {
       "id": "b2cf7bbb1348514563e80572f7b215a192036713c9d3656c06a77d2df1194061",
@@ -13424,6 +13616,22 @@
       "category": "operator_billing_reconciliation"
     },
     {
+      "id": "d568125b94e71f8885ecf5524e94a6037b7cd74d57b4d930a01f3e4ab48bc837",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.terminate_session",
+      "line": 438,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "UPDATE emergency_access_requests SET session_terminated_at = $1, actions_taken = actions_taken || $2::jsonb WHERE request_id = $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current HTTP caller endpoint:176–185 is platform-admin admitted; revokes one platform request/session and records the terminating identity. Deliberate platform revocation across requestors, not tenant row access."
+    },
+    {
       "id": "d67624825fa5e26422d83fc0e90c487d10e7b867b5d7521b74761bcbcc9f6791",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "delete_user",
@@ -13715,6 +13923,22 @@
       "count": 1,
       "reason": "The unscoped SELECT reads only the authenticated staff actor name after _begin_staff_write validates current administrator authority. Platform staff identity need not belong to the customer tenant. Exact reviewed operation: fetchval; app/domain/services/support/staff_service.py:264.",
       "category": "account_identity_boundary"
+    },
+    {
+      "id": "ed4d8c22f0143080645488cc16a5124576d94942d2972e710b90486b333a551c",
+      "file": "app/core/security/emergency_access.py",
+      "function": "EmergencyAccess.request",
+      "line": 159,
+      "method": "execute",
+      "tables": [
+        "emergency_access_requests"
+      ],
+      "sql": "INSERT INTO emergency_access_requests ( request_id, created_at, requestor_id, scenario, justification, requested_access, approvers_required, approvals, status, expires_at, actions_taken ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Creates one new platform emergency request for the authenticated requestor supplied by endpoint:54–59. Platform account/recovery object; no tenant column or tenant business data."
     },
     {
       "id": "ede3e2aa555c68bb23cac84719c7d42633b5a585fe7fc11d74f0880fa341b26b",
