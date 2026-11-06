@@ -8,6 +8,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import asyncpg
+from alembic.script import ScriptDirectory
 import pytest
 
 from tests.helpers.support_db import require_test_dsn
@@ -17,6 +18,16 @@ BACKEND = Path(__file__).resolve().parents[2]
 SUPPORT_TABLES = ("support_tickets", "support_conversations", "support_conversation_messages",
                   "support_ticket_messages", "support_ticket_attachments", "support_ticket_events",
                   "support_ticket_reads", "support_kb_articles", "support_request_receipts")
+
+
+def _repository_head() -> str:
+    scripts = ScriptDirectory(str(BACKEND / "Alembic"))
+    heads = scripts.get_heads()
+    assert len(heads) == 1, f"Expected exactly one migration head, got {heads}"
+    head = heads[0]
+    ancestry = {revision.revision for revision in scripts.walk_revisions(base="base", head=head)}
+    assert "0084_call_failure_lead_signals" in ancestry, "Current head lost the released 0084 chain"
+    return head
 
 
 def _alembic(dsn: str, *args: str) -> subprocess.CompletedProcess:
@@ -41,7 +52,7 @@ async def test_downgrade_then_upgrade_round_trips_and_refuses_with_records():
         if await conn.fetchval("SELECT EXISTS (SELECT 1 FROM support_tickets) OR "
                                "EXISTS (SELECT 1 FROM support_conversations)"):
             pytest.skip("Support records exist in this test database; the round trip needs empty support tables")
-        assert await conn.fetchval("SELECT version_num FROM alembic_version") == "0084_call_failure_lead_signals"
+        assert await conn.fetchval("SELECT version_num FROM alembic_version") == _repository_head()
     finally:
         await conn.close()
 
@@ -72,8 +83,10 @@ async def test_downgrade_then_upgrade_round_trips_and_refuses_with_records():
 
 
 def test_repository_has_exactly_one_head():
+    expected_head = _repository_head()
     result = subprocess.run([sys.executable, "-m", "alembic", "heads"], cwd=BACKEND, capture_output=True, text=True,
                             timeout=120, env={**os.environ, "DATABASE_URL": os.getenv("TEST_DATABASE_URL") or
                                               "postgresql://unused@127.0.0.1:1/unused_test"})
+    assert result.returncode == 0, result.stdout + result.stderr
     heads = [line for line in result.stdout.splitlines() if line.strip()]
-    assert heads == ["0084_call_failure_lead_signals (head)"], result.stdout + result.stderr
+    assert heads == [f"{expected_head} (head)"], result.stdout + result.stderr
