@@ -58,14 +58,14 @@ def harness(monkeypatch):
     monkeypatch.setattr(reset, "revoke_all_user_sessions", AsyncMock(return_value=0))
     monkeypatch.setattr(reset, "revoke_all_user_refresh_tokens", AsyncMock(return_value=0))
     monkeypatch.setattr(reset, "hash_password", lambda _: "new-hash")
-    monkeypatch.setattr(reset, "get_client_ip", lambda _: "203.0.113.9")
+    monkeypatch.setattr(reset, "get_client_ip", lambda request: request.test_ip)
     monkeypatch.setattr(reset, "get_user_agent", lambda _: "synthetic")
     return redis, conn
 
 
-async def _attempt(code):
+async def _attempt(code, ip="203.0.113.9"):
     return await reset.reset_password(
-        None, reset.ResetPasswordRequest(email=EMAIL, code=code, new_password="Synthetic#Passw0rd-2026"),
+        SimpleNamespace(test_ip=ip), reset.ResetPasswordRequest(email=EMAIL, code=code, new_password="Synthetic#Passw0rd-2026"),
         SimpleNamespace(pool=None), SimpleNamespace(log=AsyncMock()))
 
 
@@ -76,13 +76,15 @@ async def test_the_code_is_burned_after_five_wrong_guesses(harness):
         with pytest.raises(HTTPException):
             await _attempt(guess)
     with pytest.raises(HTTPException) as exc:
-        await _attempt("424242")  # the right code, one guess too late
+        # Use another source so this specifically tests the code cap, rather
+        # than the independent per-IP limit added for QA-SEC-003.
+        await _attempt("424242", "203.0.113.10")  # the right code, one guess too late
     assert exc.value.status_code == 400
     assert await redis.get(reset._reset_redis_key(EMAIL)) is None
     conn.execute.assert_not_awaited()
 
     await _issue(redis, "515151")  # a newly issued code starts its own count
-    assert "reset" in (await _attempt("515151"))["message"]
+    assert "reset" in (await _attempt("515151", "203.0.113.11"))["message"]
 
 
 async def test_parallel_guesses_cannot_exceed_the_cap(harness):
@@ -97,7 +99,7 @@ async def test_parallel_guesses_cannot_exceed_the_cap(harness):
 
     reset._hash_reset_code = counting_hash
     try:
-        await asyncio.gather(*(_attempt(f"{n:06d}") for n in range(40)), return_exceptions=True)
+        await asyncio.gather(*(_attempt(f"{n:06d}", f"203.0.113.{n+1}") for n in range(40)), return_exceptions=True)
     finally:
         reset._hash_reset_code = real_hash
     assert len(compared) <= 5

@@ -825,7 +825,7 @@ Categories and what to fill (names only; the full list is in 12.1):
 |---|---|---|
 | Mode | `ENVIRONMENT`, `DEBUG`, `LOG_LEVEL` | `ENVIRONMENT=production` turns on the production gate |
 | URLs | `FRONTEND_URL`, `API_BASE_URL`, `CORS_ORIGINS` | Must match real hostnames |
-| Database | `DATABASE_URL`, `PG_POOL_ACQUIRE_TIMEOUT` | Units set `PG_POOL_MIN_SIZE` and `PG_POOL_MAX_SIZE` themselves |
+| Database | `DATABASE_URL`, `PG_POOL_ACQUIRE_TIMEOUT`, `PG_STATEMENT_TIMEOUT_MS`, `PG_LOCK_TIMEOUT_MS` | Units set `PG_POOL_MIN_SIZE` and `PG_POOL_MAX_SIZE` themselves |
 | Redis | `REDIS_URL` | |
 | Auth | `JWT_SECRET`, `SECRET_KEY`, `MASTER_KEY`, `SESSION_LIFETIME_HOURS` | The example calls `SECRET_KEY` legacy |
 | Encryption | `SECRETS_MASTER_KEY`, `CONNECTOR_ENCRYPTION_KEY`, `CONNECTOR_ENCRYPTION_KEYS_OLD` | Back these up off the machine |
@@ -836,6 +836,21 @@ Categories and what to fill (names only; the full list is in 12.1):
 | Billing | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_BILLING_DISABLED` | Read by `prod_gate.py` |
 | Email | `EMAIL_USER`, `EMAIL_PASS` (and `SMTP_*` in the installer template) | |
 | Support | `SUPPORT_*` | Section 6 |
+
+Database timeout settings:
+
+| Setting | Default | Scope |
+|---|---|---|
+| `PG_POOL_ACQUIRE_TIMEOUT` | `10` seconds | Positive finite wait for a pooled connection; expiry returns a retryable failure. |
+| `PG_STATEMENT_TIMEOUT_MS` | `60000` milliseconds | Positive transaction-local PostgreSQL statement limit in the shared transaction helpers. |
+| `PG_LOCK_TIMEOUT_MS` | `10000` milliseconds | Positive transaction-local PostgreSQL lock wait limit in the same helpers. |
+
+Both asyncpg pools already used `command_timeout=60`; the new operational limits
+are the ten-second pool wait and lock wait. The transaction-local settings do not
+change direct connections. Before applying matching `ALTER ROLE` defaults, test
+Stop during a 20,000-lead campaign start and a 50,000-row contact import: both
+use direct connections under the app role and would receive those role limits
+for the first time. Review any migration/maintenance use of that role separately.
 
 Generate secrets with the commands in the example file, for instance
 `python -c "import secrets; print(secrets.token_hex(32))"`.

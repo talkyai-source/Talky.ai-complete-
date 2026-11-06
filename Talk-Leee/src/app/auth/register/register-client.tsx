@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
 import { api } from "@/lib/api";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { useAuth } from "@/lib/auth-context";
 import { markFreshLogin } from "@/lib/http-client";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
@@ -113,6 +114,10 @@ export default function RegisterClientPage() {
         setError("");
         setMessage("");
 
+        if (password.length < MIN_PASSWORD_LENGTH) {
+            setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+            return;
+        }
         if (password !== confirmPassword) {
             setError("Passwords do not match.");
             return;
@@ -440,12 +445,12 @@ export default function RegisterClientPage() {
                                         <Input
                                             id="password"
                                             type="password"
-                                            placeholder="At least 8 characters"
+                                            placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                             autoComplete="new-password"
                                             ref={passwordInputRef}
@@ -467,7 +472,7 @@ export default function RegisterClientPage() {
                                             onChange={(e) => setConfirmPassword(e.target.value)}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                             autoComplete="new-password"
                                         />
@@ -485,7 +490,7 @@ export default function RegisterClientPage() {
                                 <Button
                                     type="submit"
                                     className="w-full"
-                                    disabled={loading || password.length < 8 || confirmPassword.length < 8}
+                                    disabled={loading || password.length < MIN_PASSWORD_LENGTH || confirmPassword.length < MIN_PASSWORD_LENGTH}
                                 >
                                     {loading ? (
                                         <>

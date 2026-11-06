@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 
 const emailSchema = z.string().email("Please enter a valid email address");
 
@@ -92,8 +93,8 @@ function ForgotPasswordInner() {
             setError("Enter the 6-digit code from your email.");
             return;
         }
-        if (newPassword.length < 8) {
-            setError("Password must be at least 8 characters.");
+        if (newPassword.length < MIN_PASSWORD_LENGTH) {
+            setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
             return;
         }
         if (newPassword !== confirmPassword) {
@@ -226,7 +227,7 @@ function ForgotPasswordInner() {
                                         <Input
                                             id="reset-new-password"
                                             type="password"
-                                            placeholder="At least 8 characters"
+                                            placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                                             value={newPassword}
                                             onChange={(e) => {
                                                 setNewPassword(e.target.value);
@@ -234,7 +235,7 @@ function ForgotPasswordInner() {
                                             }}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                         />
                                     </div>
@@ -257,7 +258,7 @@ function ForgotPasswordInner() {
                                             }}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                         />
                                     </div>

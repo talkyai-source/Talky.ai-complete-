@@ -31,11 +31,14 @@ plus a nil-UUID sentinel — the same pattern the dialer already uses.
 from __future__ import annotations
 
 import logging
+import asyncio
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import AsyncIterator, Optional
 
 import asyncpg
+
+from app.core import db
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +58,35 @@ def _validate_uuid(value: str) -> str:
     """
     uuid.UUID(value)  # raises ValueError for non-UUIDs
     return value
+
+
+@asynccontextmanager
+async def acquire_connection(
+    pool: asyncpg.Pool,
+    *,
+    timeout: Optional[float] = None,
+) -> AsyncIterator[asyncpg.Connection]:
+    """Bound acquisition and release the lease; set no transaction/RLS context.
+
+    Omitted/None uses PG_POOL_ACQUIRE_TIMEOUT. Only acquisition expiry is
+    translated to DatabasePoolTimeoutError; caller errors and cancellation
+    retain their identity. Callers own their existing transaction policy.
+    """
+    acquire_timeout = db._ACQUIRE_TIMEOUT_S if timeout is None else timeout
+    async with AsyncExitStack() as stack:
+        try:
+            # Enter asyncpg's own context so its cancellation/release protocol
+            # remains intact. Do not make a short acquisition budget become
+            # the connection reset/release budget as pool.acquire(timeout=...)
+            # otherwise does. ExitStack releases after the caller below.
+            async with asyncio.timeout(acquire_timeout):
+                conn = await stack.enter_async_context(pool.acquire())
+        except asyncio.TimeoutError:
+            logger.warning("db_pool_acquire_timeout pool=shared timeout_s=%.3f", acquire_timeout)
+            raise db.DatabasePoolTimeoutError(
+                f"Timed out after {acquire_timeout}s waiting for a DB connection"
+            ) from None
+        yield conn
 
 
 @asynccontextmanager
@@ -79,20 +111,17 @@ async def acquire_with_tenant(
     dropped when the connection is returned to the pool, so a later
     consumer of the same connection never inherits stale tenant context.
 
-    ``timeout`` (2026-07-08): optional bounded wait for a pool slot,
-    mirroring ``app.core.db.get_db()``'s acquire timeout. Defaults to
-    ``None`` (asyncpg's own default — wait indefinitely), so existing
-    callers are unaffected. Raises ``asyncio.TimeoutError`` on expiry —
-    callers that want the saturated-pool case to degrade gracefully
-    (e.g. a request/teardown path) should catch it and fail soft rather
-    than propagate a hang.
+    ``timeout`` bounds only pool acquisition; omitted/None uses
+    PG_POOL_ACQUIRE_TIMEOUT (10 seconds by default). Expiry raises
+    DatabasePoolTimeoutError, also an asyncio.TimeoutError, for the existing
+    HTTP 503 handler and short-budget callers. The caller's transaction and
+    connection cleanup are outside that acquisition deadline. Transaction-
+    local statement/lock limits are applied before yielding the connection.
     """
-    # Only pass `timeout` through when the caller asked for one — several
-    # unit-test fake pools implement a bare `acquire()` with no kwargs, and
-    # asyncpg's own default (wait indefinitely) is unaffected by omitting it.
-    acquire_cm = pool.acquire(timeout=timeout) if timeout is not None else pool.acquire()
-    async with acquire_cm as conn:
+    limits = db._transaction_timeout_settings()
+    async with acquire_connection(pool, timeout=timeout) as conn:
         async with conn.transaction():
+            await db._apply_transaction_timeouts(conn, limits)
             if tenant_id is not None:
                 _validate_uuid(str(tenant_id))
                 await conn.execute(

@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from copy import deepcopy
 from datetime import datetime, timezone
 import json
+import re
 import socket
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
@@ -81,6 +82,12 @@ class Rows:
 
     async def execute(self, sql, *args):
         sql = " ".join(sql.split())
+        timeout_setting = re.fullmatch(
+            r"SET LOCAL (?:statement_timeout|lock_timeout) = '([1-9][0-9]*)ms'", sql,
+        )
+        if timeout_setting:
+            assert not args and int(timeout_setting.group(1)) <= 2147483647
+            return "SET"
         if sql.startswith("SET LOCAL app.current_tenant_id"):
             return "SET"
         if sql.startswith("UPDATE assistant_actions SET status=$3"):

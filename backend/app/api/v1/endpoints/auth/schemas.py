@@ -1,16 +1,26 @@
 """Request / response Pydantic models for /auth endpoints."""
 from __future__ import annotations
 
-from typing import Literal, Optional
+from typing import Annotated, Literal, Optional
+import unicodedata
 
-from pydantic import BaseModel, EmailStr
+from pydantic import AfterValidator, BaseModel, EmailStr, Field
+
+
+def _validate_account_name(value: str) -> str:
+    if any(unicodedata.category(char) == "Cc" for char in value):
+        raise ValueError("Names must not contain control characters.")
+    return value
+
+
+AccountName = Annotated[str, Field(max_length=100), AfterValidator(_validate_account_name)]
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     password: str
-    business_name: str
-    name: Optional[str] = None
+    business_name: AccountName
+    name: Optional[AccountName] = None
     # NOTE: plan_id is NOT a user-controlled field. The frontend signup
     # form has been observed sending the user's first-name string
     # (or other adjacent field values) into a `plan_id` slot by mistake.
@@ -23,6 +33,7 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     email: EmailStr
     password: str
+    turnstile_token: Optional[str] = Field(default=None, min_length=1, max_length=2048)
 
 
 class AuthTokenResponse(BaseModel):
@@ -85,8 +96,8 @@ class MeResponse(BaseModel):
 
 
 class UpdateMeRequest(BaseModel):
-    name: Optional[str] = None
-    business_name: Optional[str] = None
+    name: Optional[AccountName] = None
+    business_name: Optional[AccountName] = None
 
 
 class ChangePasswordRequest(BaseModel):
@@ -104,9 +115,10 @@ class VerifyEmailResponse(BaseModel):
 
 
 class SignupStartRequest(BaseModel):
-    name: str
-    business_name: str
+    name: AccountName
+    business_name: AccountName
     email: EmailStr
+    turnstile_token: Optional[str] = Field(default=None, min_length=1, max_length=2048)
     # Strict — refuse any extra fields. Frontend MUST NOT send password,
     # plan_id, or anything else here. The point of step 1 is to verify
     # the email BEFORE collecting the password.

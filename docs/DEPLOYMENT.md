@@ -21,8 +21,9 @@ One Hetzner bare-metal box, `admins@144.76.17.150`, running a **hybrid**:
 
 `/opt/talky` is a git checkout of `origin/main` with a **sparse-checkout that
 excludes `Talk-Leee/` and `Admin/`** — the frontends deploy to Vercel from git,
-not to the backend box. Every backend service except the C++ gateway runs as
-**root**; the gateway runs as `admins`.
+not to the backend box. The documented pre-cutover baseline runs the backend
+services as **root** and the C++ gateway as `admins`. This release changes the
+application units to `talky` as described below; the gateway stays `admins`.
 
 There is no Kubernetes, no Prometheus/Grafana, and no FreeSWITCH / OpenSIPS /
 Kamailio / rtpengine in production, despite configuration for them existing
@@ -52,6 +53,11 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
 ./deploy_to_server.sh
 ```
 
+Record the controller's `git rev-parse HEAD` alongside `TALKY_DEPLOY_SHA` before
+launch, especially when selecting an older candidate. Keep that reviewed
+controller SHA available for manual recovery; temporary verifier copies are
+removed when the deployment exits.
+
 `deploy_to_server.sh` SSHes to prod and, in order:
 
 1. refuses a dirty local release tree, resolves one full candidate SHA,
@@ -67,14 +73,15 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
    and executes the complete C++ gateway CTest suite, runs
    `reconcile_asterisk_release.sh --check-only` to reject ambiguous
    account-to-DID inventory, and validates the mandatory carrier-hairpin
-   synthetic configuration
+   synthetic configuration and the read-only service-user prerequisites
 5. only after those candidate proofs and the zero-session check, saves the exact
    `/etc/systemd/system/talky-api-web.service` file or symlink using `cp -a` in a
    root-private directory under `/var/backups/talky/deploy-unit-recovery`, then checks out the frozen SHA with
    `git checkout --detach <full-sha>` and verifies `HEAD` and the clean tree; it
    never deploys a moving branch tip
 6. proves the existing gateway has zero sessions, atomically publishes the
-   tested binary outside the git checkout, then reconciles systemd; the
+   tested binary outside the git checkout, records and stops the active
+   application units/timers, applies service-user ownership, then reconciles systemd; the
    installer installs `talky-migrate.service`, `talky-inbound-synthetic.service`
    and the other repository units, enables `talky-inbound-synthetic.timer` and
    every persistent service/timer; the deploy then verifies the required units
@@ -88,8 +95,8 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
    host, port, or caller-audio path falls outside that pinned origin
 8. starts `talky-migrate.service`, verifies `alembic current == heads`, and runs
    the Admin runtime database privilege gate against the application's configured
-   connection. Both checks run with sudo because the production environment file
-   is root-owned mode `0600`; inherited database URL overrides are cleared.
+   connection. Both checks run with sudo; the cutover makes the environment file
+   `root:talky` mode `0640`, and inherited database URL overrides are cleared.
    Failures block the backend restart. It then applies the repository-owned Asterisk
    configuration through `reconcile_asterisk_release.sh`, which requires zero
    active Asterisk channels and atomically applies, reloads, verifies, or rolls
@@ -106,14 +113,69 @@ export TALKY_DEPLOY_DRAIN_MANIFEST_SHA256='<64-lowercase-hex-sha256-of-exact-fil
     exact `APP_VERSION` without printing its environment; any failure keeps the
     deploy command non-zero
 
-An abort before a successful migration restores the previous checkout and runs
-its unit installer, then restores the saved API-web file or symlink with
-`cp -a --remove-destination` and reloads systemd. This preserves an independently
-pinned maintenance web unit that the old installer alone would overwrite. The
-rollback does not restart services, and retains the private unit backup for
-recovery. Once migration succeeds, failures require code-forward recovery or a
-separately approved compatible restore; the deploy does not roll code backward
-under the migrated schema.
+The release containing the security-edge branch is the non-root/loopback cutover:
+its next deploy automatically runs `prepare-service-user.sh` and installs units
+with `User=talky`; the API binds to `127.0.0.1`. These are not optional follow-up
+owner commands. Before approving that release, the owner must check every client
+that reaches the public API address directly, the nginx upstream's loopback
+destination, ownership/readability of default and custom state directories, and
+the Asterisk group and CLI/configuration permissions. The deploy runs the
+read-only service-user check before stopping writers; custom paths still need
+owner-reviewed unit drop-ins. Firewall application remains a separate owner step.
+
+Before moving the checkout, the deploy retains the rollback verifier from the
+clean, reviewed **controller** commit running this script. That commit must
+also be reachable from the fetched deployment branch. The controller can be
+newer than the selected deployment SHA; an older candidate is never allowed to
+supply or remove its own safety check. The verifier reads the configured primary
+database using `MIGRATION_DATABASE_URL`, falling back to `DATABASE_URL`, with
+bounded connection/query timeouts. It performs no billing writes. Missing or
+ambiguous schema, unreadable pre-PAYG all-tenant state, unavailable database or
+an unknown target refuses the operation. The recognized PAYG schema already
+blocks all legacy targets, so that path needs no customer-row scan and works
+with a restricted runtime role. Do not add privileged migration credentials to
+the runtime environment to satisfy this check. See the PAYG boundary below.
+
+An abort **before migration is started** rechecks that same compatibility guard
+for the previous SHA before restoring the checkout and its unit installer. Only
+after a permitted checkout does it restore the saved API-web file or symlink
+with `cp -a --remove-destination` and reload systemd. This preserves an
+independently pinned maintenance web unit that the old installer alone would
+overwrite. A refused fallback leaves the candidate selected and reports the
+failure; it never silently bypasses the guard. Only after the guard, checkout,
+unit installation and exact web-unit restoration all succeed does rollback
+start the previously active units/timers this deploy stopped. It reports the
+recovery and retains the private unit backup. A failed recovery or refused
+fallback prints the exact stopped-unit restart command for operator review.
+
+Rollback is disarmed **before** starting `talky-migrate.service`. An interrupted
+or failed client response cannot prove whether the database committed. From
+that point, failures require inspection and a compatible code-forward recovery
+or separately approved restore; the deploy does not guess that a non-zero
+`systemctl` result means old code is safe. It prints the exact stopped-unit
+restart command without starting those units automatically. Keep ingress and
+origination frozen throughout recovery.
+
+### Interrupted deployment and durable logs
+
+The remote shell authenticates sudo before mutation, then writes directly to a
+unique private log under `/home/admins/backups/talky-deploy/`. It prints that
+exact path before redirecting output. HUP and PIPE are ignored, stdin is closed,
+and subsequent sudo calls use non-interactive cached authorization. A closed
+SSH output stream cannot break a `tee` pipeline because there is no such
+pipeline. Expired sudo authorization fails visibly rather than waiting for a
+password from a disconnected terminal. INT/TERM enter the once-only exit
+handler; after migration starts they retain the candidate for investigation.
+
+Reconnect through the approved host-access procedure and inspect the printed
+log path. Its final `DEPLOY_RESULT` records status, exit code, phase and exact
+candidate and controller commits. A disconnected local SSH command is not proof
+that the deployment
+stopped or succeeded. An absent final result is **unknown**, not success: keep
+traffic frozen and inspect the migration service, installed versions and unit
+state before attempting recovery. Do not rerun a consumed drain manifest or
+reopen traffic merely because a shell completed. Host/process loss still needs
+the incident procedure; signal handling is not a detached service supervisor.
 
 Asterisk configuration is generated and reconciled from the repository:
 `setup-asterisk.sh` provisions the managed includes, and deploys use
@@ -321,6 +383,29 @@ publish and prove a rollback-compatible release (or approve code-forward / a
 verified backup restore); do not combine an old backend client with the new
 gateway or resurrect the unauthenticated callback path.
 
+The rollback target must also support the current billing schema. The PAYG
+support boundary is commit `290b15c1f341a326775732da376256279b3a56a4` (migration
+`0083_pay_as_you_go`). The retained verifier refuses a target before that commit
+when the database has the PAYG schema, **even if there are currently no PAYG
+tenants or active bundles**. An origination freeze does not lock billing
+webhooks, so an empty-row snapshot cannot prove that an old release will stay
+safe. It accepts an older target only for the recognized pre-PAYG schema with
+no PAYG state; unknown or mixed schema is refused. This is a PAYG boundary
+check, not proof of every gateway, migration or frontend compatibility rule.
+
+PAYG state is determined from the billing columns. Newer database heads are
+accepted only when the immutable current or target release's migration graph
+proves they descend from `0083_pay_as_you_go`; uncommitted migration files and
+unknown heads are refused. Migration metadata is parsed without executing it.
+Transient primary connection failures receive at most three bounded attempts,
+with 0.25/0.5-second backoff; schema/query/authentication failures are not retried.
+
+Use the reviewed guard from a current compatible release for manual rollback,
+before checkout. Never take it from the older rollback target, delete it to
+proceed, or automatically clear customer plans/deactivate packages. Keep the
+database unchanged and select a compatible release or a reviewed code-forward
+repair. Migration 0083's database-downgrade guard remains a separate control.
+
 ```bash
 set -Eeuo pipefail
 # 1. Freeze and durably disable new inbound attempts using the command approved
@@ -341,15 +426,35 @@ test "${active_calls_proof}" = 'ACTIVE_CALLS_ZERO'
 
 # 3. Only after steps 1-2, select the previously proven application SHA.
 rollback_sha='<full-known-good-sha>'
+guard_sha='<full-reviewed-guard-containing-sha>'
 [[ "${rollback_sha}" =~ ^[0-9a-f]{40,64}$ ]]
+[[ "${guard_sha}" =~ ^[0-9a-f]{40,64}$ ]]
 ssh -t -i ~/.ssh/id_rsa_openssh admins@144.76.17.150 \
-  bash -s -- "${rollback_sha}" <<'REMOTE'
+  bash -s -- "${rollback_sha}" "${guard_sha}" <<'REMOTE'
 set -Eeuo pipefail
 rollback_sha="$1"
+guard_sha="$2"
 [[ "${rollback_sha}" =~ ^[0-9a-f]{40,64}$ ]]
+[[ "${guard_sha}" =~ ^[0-9a-f]{40,64}$ ]]
 cd /opt/talky
 test -z "$(git status --porcelain)"
+git fetch origin main
+git merge-base --is-ancestor "${guard_sha}" FETCH_HEAD
 git cat-file -e "${rollback_sha}^{commit}"
+guard_dir="$(mktemp -d /tmp/talky-code-rollback.XXXXXX)"
+cleanup_guard() {
+    rm -f -- "${guard_dir}/verify_code_rollback.py"
+    rmdir -- "${guard_dir}"
+}
+trap cleanup_guard EXIT
+git show "${guard_sha}:backend/scripts/verify_code_rollback.py" \
+  > "${guard_dir}/verify_code_rollback.py"
+sudo env -u DATABASE_URL -u READ_DATABASE_URL -u MIGRATION_DATABASE_URL \
+  backend/venv/bin/python "${guard_dir}/verify_code_rollback.py" \
+  --repo /opt/talky --target-sha "${rollback_sha}" \
+  --env-file /opt/talky/backend/.env
+cleanup_guard
+trap - EXIT
 git checkout --detach "${rollback_sha}"
 test "$(git rev-parse HEAD)" = "${rollback_sha}"
 test -z "$(git status --porcelain)"

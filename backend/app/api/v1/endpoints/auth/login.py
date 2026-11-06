@@ -18,6 +18,7 @@ from app.core.security.lockout import (
     seconds_until_unlocked,
 )
 from app.core.security.password import rehash_if_needed, verify_password
+from app.core.security.auth_abuse import verify_turnstile
 from app.core.security.sessions import create_session
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
@@ -78,6 +79,7 @@ async def login(
     ip = get_client_ip(request)
     ua = get_user_agent(request)
     normalised_email = body.email.lower()
+    await verify_turnstile(body.turnstile_token, ip, "login")
 
     # Authentication starts with an email, before a tenant identity is known.
     async with _login_transaction(db_client.pool) as conn:

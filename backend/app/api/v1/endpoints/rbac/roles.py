@@ -21,6 +21,7 @@ from app.api.v1.dependencies import (
     require_role,
 )
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_connection
 
 from .schemas import PermissionResponse, RolePermissionResponse, RoleResponse
 
@@ -35,7 +36,7 @@ async def list_roles(
     db_client: Client = Depends(get_db_client),
 ) -> List[RoleResponse]:
     """List all available roles."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         rows = await conn.fetch(
             """
             SELECT id, name, description, level, is_system_role, tenant_scoped
@@ -64,7 +65,7 @@ async def get_role(
     db_client: Client = Depends(get_db_client),
 ) -> RoleResponse:
     """Get a specific role by ID."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         row = await conn.fetchrow(
             """
             SELECT id, name, description, level, is_system_role, tenant_scoped
@@ -97,7 +98,7 @@ async def get_role_permissions(
     db_client: Client = Depends(get_db_client),
 ) -> RolePermissionResponse:
     """Get all permissions assigned to a role."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         # Get role name
         role_row = await conn.fetchrow(
             "SELECT id, name FROM roles WHERE id = $1",
@@ -152,7 +153,7 @@ async def add_permission_to_role(
 
     **Requires platform_admin role.**
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         # Verify role exists
         role_row = await conn.fetchrow(
             "SELECT id, is_system_role FROM roles WHERE id = $1",
@@ -210,7 +211,7 @@ async def remove_permission_from_role(
 
     **Requires platform_admin role.**
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         result = await conn.execute(
             """
             DELETE FROM role_permissions

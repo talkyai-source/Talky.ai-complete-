@@ -96,7 +96,7 @@ async def test_bearer_auth_bypasses_csrf(middleware):
     "/api/v1/auth/signup/complete",
     "/api/v1/auth/refresh",
     "/api/v1/auth/forgot-password",
-    "/api/v1/auth/passkey/authenticate/start",
+    "/api/v1/auth/passkeys/login/begin",
 ])
 async def test_auth_paths_exempt(middleware, path):
     req = _build_request(method="POST", path=path)

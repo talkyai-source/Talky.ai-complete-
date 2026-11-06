@@ -16,7 +16,7 @@ async def test_forgot_password_does_not_claim_email_was_sent(monkeypatch, exists
             'id': '00000000-0000-4000-8000-000000000001',
             'password_hash': 'synthetic-stored-generation',
         } if exists else None))
-    redis = SimpleNamespace(incr=AsyncMock(return_value=1), expire=AsyncMock(), setex=AsyncMock())
+    redis = SimpleNamespace(eval=AsyncMock(return_value=1), setex=AsyncMock())
     sender = SimpleNamespace(send_password_reset_email=AsyncMock(return_value=sent))
     audit = SimpleNamespace(log=AsyncMock())
     monkeypatch.setattr(reset, 'acquire_with_tenant', connection)

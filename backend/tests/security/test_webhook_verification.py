@@ -101,17 +101,17 @@ class TestComputeSignatureWithTimestamp:
 class TestVerifySignature:
     """verify_signature() tests."""
 
-    def test_valid_simple_signature(self):
+    def test_simple_signature_rejected_without_replay_protection(self):
         payload = b'{"event": "test"}'
         secret = "my-secret"
         sig = compute_signature(payload, secret)
         valid, error = verify_signature(payload, sig, secret)
-        assert valid is True
-        assert error is None
+        assert valid is False
+        assert error == "Missing timestamp header"
 
     def test_invalid_signature(self):
         payload = b'{"event": "test"}'
-        valid, error = verify_signature(payload, "invalid-sig", "secret")
+        valid, error = verify_signature(payload, "invalid-sig", "secret", str(int(time.time())))
         assert valid is False
         assert error == "Invalid signature"
 
@@ -150,7 +150,7 @@ class TestVerifySignature:
     def test_timestamp_in_future(self):
         payload = b'{"event": "test"}'
         secret = "my-secret"
-        future_ts = int(time.time()) + 100
+        future_ts = int(time.time()) + MAX_TIMESTAMP_AGE_SECONDS + 10
         sig = compute_signature_with_timestamp(payload, secret, future_ts)
         valid, error = verify_signature(
             payload, sig, secret, timestamp_header=str(future_ts)
@@ -168,9 +168,10 @@ class TestVerifySignature:
     def test_tampered_payload_detected(self):
         payload = b'{"amount": 100}'
         secret = "my-secret"
-        sig = compute_signature(payload, secret)
+        timestamp = int(time.time())
+        sig = compute_signature_with_timestamp(payload, secret, timestamp)
         tampered = b'{"amount": 999}'
-        valid, error = verify_signature(tampered, sig, secret)
+        valid, error = verify_signature(tampered, sig, secret, str(timestamp))
         assert valid is False
 
 
