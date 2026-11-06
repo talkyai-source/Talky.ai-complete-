@@ -10,6 +10,7 @@ const RAW = "Synthetic private diagnostic: SELECT internal_row FROM unavailable_
 const REQUEST = "qa-read-reference-7";
 const campaign: Campaign = { id: "aabbccdd-1234-4abc-8def-0123456789ab", name: "Last loaded campaign",
     direction: "outbound", status: "draft", total_leads: 7, calls_completed: 3, calls_failed: 1,
+    system_prompt: "Synthetic campaign instructions", voice_id: "synthetic-voice", max_concurrent_calls: 1,
     created_at: "2026-11-06T12:00:00Z" };
 const analytics = { timezone: "Asia/Karachi", series: [
     { date: "2026-11-01", total_calls: 7, answered: 5, failed: 2, goal_achieved: 2 },
@@ -163,7 +164,7 @@ for (const [kind, Page] of [["analytics", AnalyticsPage], ["campaigns", Campaign
         await loaded(kind);
         fail(kind);
         if (kind === "campaigns") await act(async () => { await refreshCampaigns(); });
-        else fireEvent.click(screen.getByRole("button", { name: "Week", exact: true }));
+        else fireEvent.click(screen.getByRole("button", { name: "Week" }));
         const alert = await screen.findByRole("alert");
         assert.match(alert.textContent ?? "", /last loaded data/i);
         await loaded(kind);
