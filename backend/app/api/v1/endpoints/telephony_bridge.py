@@ -130,7 +130,7 @@ async def _require_telephony_control(
     request: Request,
     current_user: Optional[CurrentUser] = Depends(get_optional_user),
 ) -> None:
-    """Authorize process-wide adapter start/stop controls.
+    """Authorize process-wide adapter controls and diagnostics.
 
     These routes affect every tenant and every live call, so ordinary tenant
     authentication is insufficient. They are limited to the internal service
@@ -602,7 +602,7 @@ async def stop_telephony(
     )
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(_require_telephony_control)])
 async def telephony_status():
     """Return health and active call information for the current adapter."""
     if not _adapter:

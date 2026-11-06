@@ -20,7 +20,6 @@ from fastapi import APIRouter, Request, HTTPException, Depends, Header, status
 
 from app.core.security.webhook_verification import (
     verify_webhook_request,
-    create_webhook_signature_headers,
     generate_webhook_secret,
     encrypt_webhook_secret,
     WebhookSecretEncryptionUnavailable,
@@ -433,38 +432,3 @@ async def configure_webhook(
         raise HTTPException(status_code=500, detail="Failed to configure webhook")
 
 
-# =============================================================================
-# Utility Endpoints
-# =============================================================================
-
-@router.get(
-    "/verify-test",
-    summary="Test webhook signature verification",
-    description="Endpoint to test webhook signature generation/verification",
-)
-async def verify_test(request: Request):
-    """
-    Test endpoint for webhook signature verification.
-
-    Returns instructions for testing signature verification.
-    """
-    import json
-
-    test_secret = "whsec_test_secret_for_development_only"
-    test_payload = b'{"test": "data", "timestamp": 1234567890}'
-
-    # Generate test signature
-    headers = create_webhook_signature_headers(test_payload, test_secret)
-
-    return {
-        "message": "Webhook signature test",
-        "test_secret": test_secret,
-        "test_payload": test_payload.decode(),
-        "generated_headers": headers,
-        "instructions": {
-            "1": "Send POST request to this endpoint with the test payload",
-            "2": f"Include header X-Webhook-Signature: {headers['X-Webhook-Signature']}",
-            "3": f"Include header X-Webhook-Timestamp: {headers['X-Webhook-Timestamp']}",
-            "4": "The endpoint will verify the signature and return success",
-        }
-    }

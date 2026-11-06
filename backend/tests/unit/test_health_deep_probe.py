@@ -18,7 +18,7 @@ import asyncio
 from types import SimpleNamespace
 
 import pytest
-from fastapi import Response
+from fastapi import Request, Response
 
 from app.api.v1.endpoints import health
 
@@ -63,12 +63,18 @@ def _new_response() -> Response:
     return Response()
 
 
+def _internal_request(monkeypatch) -> Request:
+    token = "synthetic-health-test-token"
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", token)
+    return Request({"type": "http", "headers": [(b"x-internal-service-token", token.encode())]})
+
+
 async def test_deep_probe_ready_when_both_ok(monkeypatch):
     container = _make_container(pool=_FakePool(), redis=_FakeRedis())
     _patch_container(monkeypatch, container)
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is True
     assert result["db"] == "ok"
@@ -81,7 +87,7 @@ async def test_deep_probe_not_ready_when_db_ping_fails(monkeypatch):
     _patch_container(monkeypatch, container)
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is False
     assert result["db"] == "down"
@@ -94,7 +100,7 @@ async def test_deep_probe_not_ready_when_db_ping_times_out(monkeypatch):
     _patch_container(monkeypatch, container)
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is False
     assert result["db"] == "down"
@@ -107,7 +113,7 @@ async def test_deep_probe_redis_down_stays_ready(monkeypatch):
     _patch_container(monkeypatch, container)
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is True
     assert result["db"] == "ok"
@@ -120,7 +126,7 @@ async def test_deep_probe_redis_timeout_stays_ready(monkeypatch):
     _patch_container(monkeypatch, container)
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is True
     assert result["redis"] == "down"
@@ -131,7 +137,7 @@ async def test_deep_probe_redis_disabled_reports_disabled(monkeypatch):
     _patch_container(monkeypatch, container)
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is True
     assert result["redis"] == "disabled"
@@ -143,7 +149,7 @@ async def test_deep_probe_not_ready_when_container_uninitialized(monkeypatch):
     _patch_container(monkeypatch, container)
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is False
     assert result["db"] == "not_initialized"
@@ -161,7 +167,7 @@ async def test_production_without_redis_is_not_ready(monkeypatch, redis_state):
     _patch_container(monkeypatch, _make_container(pool=_FakePool(), redis=redis))
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["redis"] == redis_state
     assert result["ready"] is False
@@ -173,7 +179,7 @@ async def test_development_without_redis_stays_ready(monkeypatch):
     _patch_container(monkeypatch, _make_container(pool=_FakePool(), redis=None))
 
     resp = _new_response()
-    result = await health.deep_readiness_probe(resp)
+    result = await health.deep_readiness_probe(resp, _internal_request(monkeypatch))
 
     assert result["ready"] is True
     assert resp.status_code != 503

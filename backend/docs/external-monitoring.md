@@ -9,7 +9,7 @@ Run these checks from infrastructure outside the Talklee application host and
 its failure domain. A timer or curl command on the application server cannot
 report that the server itself has disappeared. The owner must select and
 configure the external monitoring account and the on-call destination. Item 16's
-alert destination remains pending; checks without a confirmed recipient do not
+alert delivery remains unverified; checks without a confirmed recipient do not
 close this finding.
 
 ## Exact checks
@@ -27,8 +27,8 @@ redirect following.
 |---|---|---|---|
 | Public website | `https://talkleeai.com/` | HTTP 200 and a nonempty page body | 2 consecutive failures |
 | API liveness | `https://api.talkleeai.com/health` | HTTP 200; JSON `status == "healthy"` | 2 consecutive failures |
-| API dependency readiness | `https://api.talkleeai.com/api/v1/healthz/deep` | HTTP 200; JSON `ready == true`, `db == "ok"`, `redis == "ok"` | 2 consecutive failures |
-| Worker heartbeats | `https://api.talkleeai.com/api/v1/healthz/workers` | HTTP 200; JSON `healthy == true`; registered `dialer`, `voice`, `reminder` entries all healthy, with numeric `0 <= age_seconds < 180` | 1 failure; the endpoint already allows a 180-second heartbeat age |
+| API dependency readiness | `https://api.talkleeai.com/api/v1/healthz/deep` | HTTP 200; JSON `ready == true`; retain the public `alerting` state separately | 2 consecutive failures |
+| Worker heartbeats | `https://api.talkleeai.com/api/v1/healthz/workers` | HTTP 200; JSON `healthy == true` | 1 failure; the endpoint already allows a 180-second heartbeat age |
 
 Send a recovery notification after 2 consecutive successful checks. Deduplicate
 ongoing alerts by check and retain acknowledgement, first failure, delivery and
@@ -63,13 +63,11 @@ checks:
   - name: talklee-api-dependencies
     url: https://api.talkleeai.com/api/v1/healthz/deep
     failure_threshold: 2
-    json_equals: {ready: true, db: ok, redis: ok}
+    json_equals: {ready: true}
   - name: talklee-workers
     url: https://api.talkleeai.com/api/v1/healthz/workers
     failure_threshold: 1
     json_equals: {healthy: true}
-    required_workers: [dialer, voice, reminder]
-    each_worker: {healthy: true, age_seconds_min: 0, age_seconds_exclusive_max: 180}
 alert_destination: OWNER_TO_CONFIGURE_AND_TEST
 ```
 
@@ -86,19 +84,31 @@ The source contract is in [operational.py](../app/api/operational.py) and
   An uninitialized container or failed database probe returns `ready: false`
   and HTTP 503. Redis failure/disabled Redis also causes HTTP 503 when
   `ENVIRONMENT=production`. Outside production the code permits that Redis
-  fallback, so the external production monitor also requires `redis: "ok"`.
+  fallback; the owner must verify the deployed environment is production.
+  Anonymous callers receive only `ready` and `alerting`. Dependency fields
+  require a valid `X-Internal-Service-Token` header and are not needed by the
+  external monitor.
   The deep route does not currently incorporate the separate drain/capacity
   snapshot used by `/healthz/ready`.
 - `/healthz/workers` performs bounded concurrent reads of the three registered
   Redis heartbeat keys. Missing, invalid, future-dated or stale timestamps, and
   Redis read failures, produce an unhealthy result and HTTP 503. Exactly 180
   seconds old is stale. This is role-heartbeat evidence, not proof that every
-  worker instance or individual job is progressing. Reconcile monitor body
-  predicates when the registry changes.
-- Current deep readiness has no `alerting` field. Item 16 requires exposing
-  `alerting: "unconfigured"` when no alert destination is configured. Reconcile
-  that field and its notification policy when item 16 lands; an absent field or
-  a green liveness response is not proof that alerts can be delivered.
+  worker instance or individual job is progressing. Reconcile operational
+  coverage when the registry changes. Public callers receive only
+  `healthy`; names, timestamps, ages and reasons require the internal token.
+- Deep readiness exposes `alerting: "unconfigured"` when no item 16 destination
+  is configured (`configured` or `unavailable` otherwise). This does not change
+  readiness. Record a separate configuration warning for an unconfigured or
+  unavailable state. `configured` means a destination was supplied, not that
+  delivery succeeded.
+- `/api/v1/health/detailed` requires the internal token, even for a loopback or
+  platform-admin request. The health namespace's rate-limit exemption never
+  substitutes for this authentication. Diagnostic responses use `no-store`.
+- Global SIP status requires an internal service or platform administrator;
+  voice-prefetch status requires an authenticated user. The unused public
+  `/api/v1/webhooks/secure/verify-test` demo is removed in all environments;
+  signature generation remains available to local tests through its helper.
 
 Treat readiness 503 as a failed check even when `/health` remains 200. All four
 checks being green does not establish carrier registration, provider quality,
@@ -141,18 +151,16 @@ probe 'https://talkleeai.com/' nonempty || failed=1
 probe 'https://api.talkleeai.com/health' \
   '.status == "healthy"' || failed=1
 probe 'https://api.talkleeai.com/api/v1/healthz/deep' \
-  '.ready == true and .db == "ok" and .redis == "ok"' || failed=1
+  '.ready == true' || failed=1
 probe 'https://api.talkleeai.com/api/v1/healthz/workers' \
-  '.healthy == true and
-   ([.workers[].name] | sort) == ["dialer", "reminder", "voice"] and
-   all(.workers[]; .healthy == true and
-     (.age_seconds | type) == "number" and
-     .age_seconds >= 0 and .age_seconds < 180)' || failed=1
+  '.healthy == true' || failed=1
 exit "$failed"
 ```
 
-For a failed deep check, retain its timestamp, status and dependency fields. For
-a failed worker check, retain the worker name, age and reason. Do not turn a 503
+For a failed check, retain its timestamp, status and public JSON. Authorized
+operators can retrieve diagnostic details using the internal token through
+their protected operations tooling; do not put that secret into external
+monitor URLs, exported reports or shell history. Do not turn a 503
 into success merely because the process still answers HTTP. If only the public
 site fails, investigate its DNS/TLS/frontend path separately from the API. If
 liveness succeeds and deep readiness fails, inspect startup/dependency state;

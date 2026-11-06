@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from types import SimpleNamespace
 
-from fastapi import Response
+from fastapi import Request, Response
 
 from app.api.v1.endpoints import health
 
@@ -33,6 +33,12 @@ def _patch_container(monkeypatch, container):
     monkeypatch.setattr("app.core.container.get_container", lambda: container)
 
 
+def _internal_request(monkeypatch) -> Request:
+    token = "synthetic-health-test-token"
+    monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", token)
+    return Request({"type": "http", "headers": [(b"x-internal-service-token", token.encode())]})
+
+
 async def test_workers_healthy_when_heartbeat_fresh(monkeypatch):
     # The registry now covers all three workers (dialer/voice/reminder), so
     # "healthy" requires a fresh heartbeat from each — see
@@ -47,7 +53,7 @@ async def test_workers_healthy_when_heartbeat_fresh(monkeypatch):
     _patch_container(monkeypatch, _make_container(redis=_FakeRedisKV(store)))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is True
     assert resp.status_code != 503
@@ -61,7 +67,7 @@ async def test_workers_unhealthy_when_heartbeat_stale(monkeypatch):
     _patch_container(monkeypatch, _make_container(redis=_FakeRedisKV(store)))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is False
     assert resp.status_code == 503
@@ -73,7 +79,7 @@ async def test_workers_unhealthy_when_heartbeat_missing(monkeypatch):
     _patch_container(monkeypatch, _make_container(redis=_FakeRedisKV({})))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is False
     assert resp.status_code == 503
@@ -86,7 +92,7 @@ async def test_workers_unhealthy_when_redis_errors(monkeypatch):
     _patch_container(monkeypatch, _make_container(redis=_FakeRedisKV(fail=True)))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is False
     assert resp.status_code == 503
@@ -105,7 +111,7 @@ async def test_workers_accepts_bytes_heartbeat_value(monkeypatch):
     _patch_container(monkeypatch, _make_container(redis=_FakeRedisKV(store)))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is True
 
@@ -114,7 +120,7 @@ async def test_workers_unhealthy_when_container_uninitialized(monkeypatch):
     _patch_container(monkeypatch, _make_container(initialized=False, redis=None))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is False
     assert resp.status_code == 503
@@ -145,7 +151,7 @@ async def test_all_three_workers_healthy_returns_200(monkeypatch):
     _patch_container(monkeypatch, _make_container(redis=_FakeRedisKV(store)))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is True
     assert resp.status_code != 503
@@ -164,7 +170,7 @@ async def test_one_stale_worker_flags_503_and_names_it(monkeypatch):
     _patch_container(monkeypatch, _make_container(redis=_FakeRedisKV(store)))
 
     resp = Response()
-    result = await health.workers_health_probe(resp)
+    result = await health.workers_health_probe(resp, _internal_request(monkeypatch))
 
     assert result["healthy"] is False
     assert resp.status_code == 503

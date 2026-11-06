@@ -13,7 +13,7 @@ from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock
 
 import pytest
-from fastapi import Response
+from fastapi import Request, Response
 from pydantic import SecretStr
 
 
@@ -176,7 +176,7 @@ async def test_real_deep_health_exposes_destination_state_without_echoing_destin
         is_initialized=initialized, db_pool=NS(fetchval=AsyncMock(return_value=1)),
         redis=NS(ping=AsyncMock(return_value=True))))
     response = Response()
-    result = await health.deep_readiness_probe(response)
+    result = await health.deep_readiness_probe(response, Request({"type": "http", "headers": []}))
     assert result["alerting"] == ("configured" if configured else "unconfigured")
     assert result["ready"] is initialized
     assert WEBHOOK not in json.dumps(result)

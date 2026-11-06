@@ -119,7 +119,7 @@ SUSPICIOUS_UAS = [
 # Against the routes that actually exist that exempted only /api/v1/health and
 # /api/v1/healthz/ready, and silently missed /api/v1/healthz/live,
 # /api/v1/healthz/deep, /api/v1/healthz/workers and /api/v1/health/detailed —
-# all of them unauthenticated probes meant to be polled by monitoring. A suffix
+# all of them probes meant to be polled by monitoring. A suffix
 # test is exactly the wrong shape here: it can only ever cover the literal leaf
 # names someone remembered to list, so every new health sub-route re-opens the
 # same hole.
@@ -129,6 +129,8 @@ SUSPICIOUS_UAS = [
 # A path is a monitoring probe iff it is rooted at a probe namespace
 # (/healthz/..., /health/...). Everything under such a root is covered
 # automatically, so adding GET /healthz/whatever tomorrow needs no change here.
+# This is a rate-limit exemption, not authentication: health handlers still
+# require the internal-service token before returning diagnostic details.
 #
 # WHY THIS DOES NOT OVER-EXEMPT
 # Anchoring at the root segment (rather than a substring or suffix test) is what
@@ -187,7 +189,7 @@ _API_VERSION_PREFIX_RE = re.compile(r"^/api/v\d+(?=/|$)")
 
 # First path segment (after the optional version prefix) that marks a genuine
 # liveness/readiness/monitoring namespace. Add a name here ONLY if the whole
-# subtree under it is a cheap, unauthenticated probe.
+# subtree under it is a cheap probe with its own response/authentication policy.
 MONITORING_ROOT_SEGMENTS = frozenset(
     {
         "health",      # /api/v1/health, /api/v1/health/detailed

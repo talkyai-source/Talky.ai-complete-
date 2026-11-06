@@ -66,7 +66,11 @@ def _valid_internal_token(request: Request) -> bool:
     presented = request.headers.get(_INTERNAL_TOKEN_HEADER, "")
     if not presented:
         return False
-    return secrets.compare_digest(presented, configured)
+    try:
+        return secrets.compare_digest(presented, configured)
+    except TypeError:
+        # HTTP headers can contain non-ASCII bytes; these are not valid tokens.
+        return False
 
 
 def is_internal_service_request(request: Request) -> bool:

@@ -299,7 +299,7 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
 
 
 
-@router.get("/voices/prefetch-status")
+@router.get("/voices/prefetch-status", dependencies=[Depends(get_current_user)])
 async def get_prefetch_status():
     """
     Return how many voice preview samples are cached on disk, plus whether
