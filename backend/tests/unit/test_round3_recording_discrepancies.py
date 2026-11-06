@@ -80,8 +80,11 @@ async def test_report_detects_both_directions_without_reading_audio_or_deleting(
     orphan.write_bytes(b"more-private-audio")
     missing = root / "missing.wav"
     conn = Conn([row(present), row(missing, 2)])
-    monkeypatch.setattr(Path, "open", lambda *a, **k: pytest.fail("Report opened audio contents"))
-    result = await script.report_discrepancies(conn, root, page_size=1)
+    # Keep the complete no-open invariant while the report runs, then
+    # restore pathlib before pytest-asyncio creates its cleanup loop.
+    with monkeypatch.context() as report_guard:
+        report_guard.setattr(Path, "open", lambda *a, **k: pytest.fail("Report opened audio contents"))
+        result = await script.report_discrepancies(conn, root, page_size=1)
     assert result["complete"] and result["read_only"]
     assert result["counts"]["files_without_rows"] == 1
     assert result["counts"]["rows_without_files"] == 1
@@ -170,8 +173,11 @@ async def test_symlink_directory_is_not_followed_or_treated_as_owned_audio(scrip
 async def test_unreadable_directory_is_reported_incomplete(script, tmp_path, monkeypatch):
     def unavailable(*args, **kwargs):
         raise PermissionError("sensitive-local-path")
-    monkeypatch.setattr(script.os, "scandir", unavailable)
-    result = await script.report_discrepancies(Conn([]), tmp_path)
+    # script.os is the shared os module; scope the outage to reporting
+    # so owned-socket registry lookups work during async cleanup.
+    with monkeypatch.context() as report_guard:
+        report_guard.setattr(script.os, "scandir", unavailable)
+        result = await script.report_discrepancies(Conn([]), tmp_path)
     assert not result["complete"] and "directory_scan_failed:PermissionError" in result["issues"]
     assert "sensitive-local-path" not in str(result)
 
