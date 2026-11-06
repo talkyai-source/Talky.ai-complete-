@@ -93,8 +93,8 @@ async def change_password(
 
         if not verify_password(old_password, row["password_hash"]):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Current password is incorrect.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "current_password_invalid", "message": "Current password is incorrect."},
             )
 
         new_hash = hash_password(new_password)

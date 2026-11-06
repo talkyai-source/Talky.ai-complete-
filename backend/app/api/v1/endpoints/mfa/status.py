@@ -86,8 +86,8 @@ async def disable_mfa(
 
         if not verify_password(body.password, pw_row["password_hash"]):
             raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Current password is incorrect.",
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"code": "current_password_invalid", "message": "Current password is incorrect."},
             )
 
         locked = await lock_authenticated_credential_change(conn, request, current_user)
