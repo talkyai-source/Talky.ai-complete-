@@ -23,6 +23,9 @@ from app.domain.services.queue_service import DialerQueueService
 
 logger = logging.getLogger(__name__)
 
+# Jobs dispatched between re-reads of the campaign's status (QA F6-04).
+_DISPATCH_STATUS_CHECK_EVERY = 100
+
 
 @dataclass
 class StartCampaignResult:
@@ -1298,10 +1301,32 @@ class CampaignService:
         queue_service,
         jobs: List[DialerJob],
     ) -> int:
-        """Dispatch pending rows at least once and expose partial truth."""
+        """Dispatch pending rows at least once and expose partial truth.
+
+        Every ``_DISPATCH_STATUS_CHECK_EVERY`` jobs the campaign is re-read,
+        and dispatch stops once it is no longer running (QA F6-04: a 20,000-lead
+        start kept pushing cancelled jobs for minutes after Stop). The rest stay
+        pending, which Stop cancels. An unreadable status keeps dispatching:
+        the dialer re-checks the campaign before every call.
+        """
         redis_accepted = 0
         db_acknowledged = 0
-        for job in jobs:
+        for index, job in enumerate(jobs):
+            if index and index % _DISPATCH_STATUS_CHECK_EVERY == 0:
+                try:
+                    running = await self._campaign_still_running(job.campaign_id, job.tenant_id)
+                except Exception as exc:
+                    logger.warning(
+                        "campaign_dispatch_status_unreadable campaign=%s err=%s — continuing",
+                        job.campaign_id, type(exc).__name__,
+                    )
+                    running = True
+                if not running:
+                    logger.info(
+                        "campaign_dispatch_stopped campaign=%s dispatched=%d left_pending=%d",
+                        job.campaign_id, redis_accepted, len(jobs) - index,
+                    )
+                    break
             try:
                 accepted = await queue_service.enqueue_job(job)
             except Exception as exc:
@@ -1331,6 +1356,20 @@ class CampaignService:
                 ) from exc
             db_acknowledged += 1
         return redis_accepted
+
+    async def _campaign_still_running(self, campaign_id: str, tenant_id: str) -> bool:
+        """Whether a campaign being dispatched is still running (QA F6-04)."""
+        response = (
+            self.db_client.table("campaigns")
+            .select("status")
+            .eq("id", str(campaign_id))
+            .eq("tenant_id", str(tenant_id))
+            .execute()
+        )
+        if getattr(response, "error", None):
+            raise RuntimeError("campaign status unavailable")
+        rows = getattr(response, "data", None) or []
+        return bool(rows) and rows[0].get("status") == "running"
 
     async def _update_campaign_status(
         self,
