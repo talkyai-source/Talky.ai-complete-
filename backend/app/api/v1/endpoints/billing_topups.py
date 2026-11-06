@@ -43,6 +43,7 @@ from app.api.v1.dependencies import (
 )
 from app.core.container import get_container
 from app.core.db_utils import acquire_with_tenant
+from app.utils.csv_safe import csv_safe
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.billing_catalog import _EXPONENTS
 from app.domain.services.billing_checkout import CheckoutError, billing_return_urls
@@ -448,7 +449,9 @@ async def reconciliation(
                                       "provider_event_id", "provider_payment_id",
                                       "order_status", "note"])
         writer.writeheader()
-        writer.writerows(records)
+        # Business names and notes are tenant text; a leading = + - @ must
+        # not run as a formula in the reader's spreadsheet (QA F14-01).
+        writer.writerows({key: csv_safe(value) for key, value in rec.items()} for rec in records)
         return StreamingResponse(
             iter([buf.getvalue()]),
             media_type="text/csv",
