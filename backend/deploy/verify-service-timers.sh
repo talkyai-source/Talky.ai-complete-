@@ -19,7 +19,7 @@ for path in "${timers[@]}"; do
     valid=0
     if [ "$unit" = talky-trunk-status.timer ]; then
         # Retained only so old installation symlinks can be disabled safely.
-        if [[ "$load_state" = loaded || "$load_state" = not-found ]] \
+        if [[ "$load_state" = loaded || "$load_state" = masked || "$load_state" = not-found ]] \
             && [[ "$enabled_state" = disabled || "$enabled_state" = masked || "$enabled_state" = not-found ]] \
             && [ "$active_state" = inactive ]; then
             valid=1

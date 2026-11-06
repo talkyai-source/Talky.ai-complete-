@@ -21,7 +21,7 @@ TIMERS = sorted(path.name for path in (ROOT / "backend/systemd").glob("*.timer")
 ACTIVE_TIMERS = [name for name in TIMERS if name != RETIRED]
 
 
-def _run_helper(tmp_path, *, bad_unit="", bad_property="", bad_value="", extra=False, empty=False):
+def _run_helper(tmp_path, *, bad_unit="", bad_property="", bad_value="", extra=False, empty=False, masked_retired=False):
     assert HELPER.is_file(), "F2-15 is missing the read-only complete timer verifier"
     fake = tmp_path / "backend"
     units = fake / "systemd"
@@ -47,6 +47,9 @@ esac
 unit="$2"
 if [ "$unit" = talky-trunk-status.timer ]; then
   case "$property" in enabled) value=disabled ;; active) value=inactive ;; esac
+  if [ "${MASKED_RETIRED:-0}" = 1 ]; then
+    case "$property" in load|enabled) value=masked ;; esac
+  fi
 fi
 if [ "$unit" = "${BAD_UNIT:-}" ] && [ "$property" = "${BAD_PROPERTY:-}" ]; then value="$BAD_VALUE"; fi
 printf '%s\n' "$value"
@@ -55,6 +58,7 @@ case "$value" in disabled|masked|not-found) exit 1 ;; inactive|failed) exit 3 ;;
     env = dict(os.environ)
     env.update(TIMER_TEST_LOG=ops._no_spaces(log), BAD_UNIT=bad_unit,
                BAD_PROPERTY=bad_property, BAD_VALUE=bad_value,
+               MASKED_RETIRED="1" if masked_retired else "0",
                TALKY_PROD_HOST="nobody@example.invalid", TALKY_PROD_KEY="synthetic-unused-key")
     result = ops._launch(f'exec bash "{ops._no_spaces(helper)}"', env, tmp_path, shim)
     return result, log.read_text(encoding="utf-8").splitlines()
@@ -90,6 +94,12 @@ def test_retired_trunk_timer_must_remain_disabled_and_inactive(tmp_path, propert
     result, _ = _run_helper(tmp_path, bad_unit=RETIRED, bad_property=property_name, bad_value=value)
     assert result.returncode != 0
     assert RETIRED in result.stdout + result.stderr
+
+
+def test_retired_masked_timer_is_accepted_when_inactive(tmp_path):
+    result, _ = _run_helper(tmp_path, masked_retired=True)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "talky-trunk-status.timer load=masked enabled=masked active=inactive" in result.stdout
 
 
 def test_new_timer_file_is_automatically_verified_without_allowlist_update(tmp_path):
