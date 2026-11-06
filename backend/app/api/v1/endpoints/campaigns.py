@@ -11,7 +11,7 @@ Refactored: Business logic delegates to CampaignService.
 import logging
 import os
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
@@ -165,6 +165,7 @@ def _update_owned_outbound_campaign(
     tenant_id: str,
     payload: dict[str, Any],
     operation: str,
+    expected_updated_at=None,
 ) -> dict[str, Any]:
     """Compare-and-set one legacy campaign mutation at its final write.
 
@@ -174,14 +175,16 @@ def _update_owned_outbound_campaign(
     that decision atomic and prevents downstream outbound side effects.
     """
 
-    response = (
+    query = (
         db_client.table("campaigns")
         .update(payload)
         .eq("id", campaign_id)
         .eq("tenant_id", tenant_id)
         .eq("direction", "outbound")
-        .execute()
     )
+    if expected_updated_at is not None:
+        query = query.eq("updated_at", expected_updated_at)
+    response = query.execute()
     error = getattr(response, "error", None)
     if error:
         logger.error("Failed to %s %s: %s", operation, campaign_id, error)
@@ -196,7 +199,7 @@ def _update_owned_outbound_campaign(
         # only a tenant-owned inbound row earns the lifecycle-specific 409.
         probe = (
             db_client.table("campaigns")
-            .select("id, direction")
+            .select("*" if expected_updated_at is not None else "id, direction")
             .eq("id", campaign_id)
             .eq("tenant_id", tenant_id)
             .execute()
@@ -217,6 +220,12 @@ def _update_owned_outbound_campaign(
         if not owned_rows:
             raise HTTPException(status_code=404, detail="Campaign not found")
         if str(owned_rows[0].get("direction") or "outbound").lower() != "inbound":
+            if expected_updated_at is not None:
+                raise HTTPException(status_code=409, detail={
+                    "error": "campaign_version_conflict",
+                    "message": "This campaign changed since you opened it. Reload before saving.",
+                    "current": jsonable_encoder(dict(owned_rows[0])),
+                })
             raise HTTPException(
                 status_code=409,
                 detail={
@@ -804,6 +813,10 @@ async def update_campaign(
         if not current_user.tenant_id:
             raise HTTPException(status_code=400, detail="Current user is not associated with a tenant")
 
+        if campaign_data.expected_updated_at is None:
+            logger.info("campaign_update_without_version tenant=%s campaign=%s",
+                        current_user.tenant_id, campaign_id)
+
         _reject_inbound_campaign_mutation(
             db_client,
             [campaign_id],
@@ -833,6 +846,9 @@ async def update_campaign(
         if campaign_data.agent_name_genders:
             script_config["agent_name_genders"] = campaign_data.agent_name_genders
 
+        version_time = datetime.now(timezone.utc)
+        if campaign_data.expected_updated_at is not None:
+            version_time = max(version_time, campaign_data.expected_updated_at + timedelta(microseconds=1))
         update_payload = {
             "name": campaign_data.name.strip(),
             "description": campaign_data.description.strip() if campaign_data.description else None,
@@ -844,6 +860,8 @@ async def update_campaign(
             ),
             "goal": campaign_data.goal.strip() if campaign_data.goal else None,
             "script_config": script_config,
+            # Historical schema snapshots disable the timestamp trigger.
+            "updated_at": version_time,
         }
         _sched = _calling_config_from_schedule(campaign_data.calling_schedule)
         if _sched is not None:
@@ -866,6 +884,7 @@ async def update_campaign(
             tenant_id=current_user.tenant_id,
             payload=update_payload,
             operation="update campaign",
+            expected_updated_at=campaign_data.expected_updated_at,
         )
         return {"campaign": updated_campaign}
     except HTTPException:

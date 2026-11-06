@@ -38,7 +38,7 @@ def _wire(monkeypatch, ep, tenant_provider, writes):
     monkeypatch.setattr(ep, "_build_validated_script_config", lambda **kw: {"persona_type": kw["persona_type"]})
     monkeypatch.setattr(ep, "_reject_inbound_campaign_mutation", lambda *a, **k: None)
 
-    def _update(db, *, campaign_id, tenant_id, payload, operation):
+    def _update(db, *, campaign_id, tenant_id, payload, operation, expected_updated_at=None):
         writes.append(payload)
         return {"id": campaign_id, **payload}
 

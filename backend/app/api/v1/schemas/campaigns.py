@@ -5,7 +5,7 @@ import re
 import pytz
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.domain.services.voice_action_config import VoiceEmailAction, VoiceFormAction
 
 
@@ -268,6 +268,9 @@ class CampaignUpdateRequest(CampaignVoiceSelection):
     and bypass the production prompt composer.
     """
 
+    expected_updated_at: Optional[AwareDatetime] = Field(
+        None, description="Version read by the editor; a stale version returns 409 with current values.",
+    )
     name: str = Field(..., min_length=1, max_length=255)
     description: Optional[str] = None
     system_prompt: str = Field(default="")
