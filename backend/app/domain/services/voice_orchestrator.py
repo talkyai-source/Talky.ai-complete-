@@ -24,7 +24,7 @@ import logging
 import os
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any, Dict, Optional
 
@@ -1378,21 +1378,36 @@ class VoiceOrchestrator:
         tenant deploys keep working.
         """
         from app.infrastructure.llm.factory import LLMFactory
-        from app.domain.models.ai_config import validate_traditional_llm_selection
+        from app.domain.models.ai_config import traditional_llm_default
+        from app.domain.services.model_availability import (
+            get_model_cache, record_model_fallback, resolve_call_model,
+        )
         from app.domain.services.credential_resolver import (
             get_credential_resolver,
         )
 
         provider_type = config.llm_provider_type
-        # Invalid saved profiles must not turn into first-token failures that
-        # silently invoke an unrelated secondary model.
-        validate_traditional_llm_selection(provider_type, config.llm_model)
+        # Refuse an unknown vendor before credential lookup. A bad model for a
+        # known vendor instead uses that vendor's default for this call only.
+        traditional_llm_default(provider_type)
         api_key_env = self._LLM_API_KEY_ENV.get(provider_type)
         credential = await get_credential_resolver().resolve_with_metadata(
             provider_type,
             tenant_id=config.tenant_id,
             env_var=api_key_env,
         )
+        selection = await resolve_call_model(
+            provider=provider_type, model=config.llm_model, tenant_id=config.tenant_id,
+            credential=credential, cache=get_model_cache(),
+        )
+        if selection.reason:
+            await record_model_fallback(
+                getattr(self._db_client, "pool", None), tenant_id=config.tenant_id,
+                provider=provider_type, requested_model=config.llm_model, selection=selection,
+            )
+            # Also give secondary selection the actual primary, while keeping
+            # the caller's config and the tenant's persisted profile unchanged.
+            config = replace(config, llm_model=selection.model)
 
         provider = LLMFactory.create(provider_type, config={})
         init_config: dict = {

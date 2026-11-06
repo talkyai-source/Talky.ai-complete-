@@ -148,12 +148,13 @@ async def save_config(
             detail="Invalid TTS provider. Supported providers: cartesia, google, deepgram, elevenlabs.",
         )
 
-    # Save and runtime use the same offered + legacy provider/model contract.
-    from app.domain.models.ai_config import validate_traditional_llm_selection
+    # Saves use the displayed menu. Old profiles remain readable; runtime
+    # handles unknown/retired IDs with an audited call-local fallback.
+    from app.domain.models.ai_config import validate_offered_llm_selection
     from app.domain.services.telephony_session_config import resolve_stt_selection
     try:
         resolve_stt_selection(config)
-        validate_traditional_llm_selection(config.llm_provider, config.llm_model)
+        validate_offered_llm_selection(config.llm_provider, config.llm_model)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
 
@@ -285,10 +286,6 @@ async def save_config(
     PREVIEW_MODELS = {
         "openai/gpt-oss-120b",
         "openai/gpt-oss-20b",
-        # Superseded by the GA "gemini-3.1-flash-lite"; still selectable so
-        # already-saved tenants can write their config. Warn on it so nobody
-        # newly adopts a preview id that Google can retire.
-        "gemini-3.1-flash-lite-preview",
     }
 
     latency_warnings: list[str] = []

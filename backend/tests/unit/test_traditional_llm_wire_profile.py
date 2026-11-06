@@ -135,11 +135,9 @@ async def test_luna_invalid_model_or_reasoning_never_reaches_transport(invalid):
 
 
 @pytest.mark.parametrize("provider_type,model", [
-    ("groq", "gpt-oss-120b"), ("cerebras", "openai/gpt-oss-20b"),
-    ("gemini", "gpt-6-luna"), ("openai", "unrelated-model"), ("unknown", "unknown"),
-    ("", "openai/gpt-oss-20b"),
+    ("unknown", "unknown"), ("", "openai/gpt-oss-20b"),
 ])
-async def test_invalid_saved_selection_fails_before_credentials_factory_or_fallback(
+async def test_unknown_saved_provider_fails_before_credentials_factory_or_fallback(
     provider_type, model, monkeypatch,
 ):
     from app.domain.services import credential_resolver
@@ -157,6 +155,34 @@ async def test_invalid_saved_selection_fails_before_credentials_factory_or_fallb
         await VoiceOrchestrator()._create_llm_provider(config)
     resolver.assert_not_called()
     factory.assert_not_called()
+
+
+@pytest.mark.parametrize("provider_type,model,expected", [
+    ("groq", "gpt-oss-120b", "openai/gpt-oss-20b"),
+    ("cerebras", "openai/gpt-oss-20b", "gpt-oss-120b"),
+    ("gemini", "gpt-6-luna", "gemini-3.8-flash"),
+    ("openai", "unrelated-model", "gpt-6-luna"),
+])
+async def test_bad_saved_model_uses_its_provider_default_without_cross_vendor_routing(
+    provider_type, model, expected, monkeypatch,
+):
+    from app.domain.services import credential_resolver
+    from app.domain.services.voice_orchestrator import VoiceOrchestrator, VoiceSessionConfig
+    from app.infrastructure.llm.factory import LLMFactory
+    from unittest.mock import Mock
+
+    material = credential_resolver.ResolvedCredential("synthetic-profile-key", source="platform")
+    resolver = NS(resolve_with_metadata=AsyncMock(return_value=material))
+    monkeypatch.setattr(credential_resolver, "get_credential_resolver", lambda: resolver)
+    provider = NS(initialize=AsyncMock())
+    factory = Mock(return_value=provider)
+    monkeypatch.setattr(LLMFactory, "create", factory)
+    monkeypatch.setenv("LLM_FAILOVER_ENABLED", "false")
+    config = VoiceSessionConfig(llm_provider_type=provider_type, llm_model=model)
+    assert await VoiceOrchestrator()._create_llm_provider(config) is provider
+    factory.assert_called_once_with(provider_type, config={})
+    assert provider.initialize.await_args.args[0]["model"] == expected
+    assert config.llm_model == model
 
 
 def test_selected_and_previously_saved_catalog_models_share_one_validator():

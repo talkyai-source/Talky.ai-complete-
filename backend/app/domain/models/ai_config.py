@@ -97,10 +97,9 @@ class GeminiModel(str, Enum):
     GEMINI_2_5_FLASH = "gemini-2.5-flash"
     # Released March 2026 (developer preview). ~2.5× faster TTFT and ~64%
     # higher output throughput than 2.5 Flash.
-    # KEPT even though `gemini-3.1-flash-lite` is now GA: a tenant still has
-    # this exact id stored in tenant_ai_configs, and config.py rejects any
-    # llm_model outside this menu — dropping it would lock that tenant out of
-    # saving their AI Options. Remove only after migrating that row.
+    # Kept for reading/recognising an existing saved runtime profile. New
+    # saves use the separate offered menu; fresh account-specific catalog
+    # evidence can retire this ID for call-local fallback.
     GEMINI_3_1_FLASH_LITE_PREVIEW = "gemini-3.1-flash-lite-preview"
     # Same model, now generally available. Prefer this id for new configs.
     GEMINI_3_1_FLASH_LITE = "gemini-3.1-flash-lite"
@@ -383,11 +382,10 @@ GROQ_MODELS = [
 
 # HIDDEN, NOT FORBIDDEN.
 #
-# These are no longer offered in AI Options, but a tenant who already has one
-# stored must still be able to save their settings. Validation accepts this
-# list; the UI never shows it. Narrowing the OFFERED menu without this would
-# 400 a tenant on a value they never chose to have — locking them out of their
-# own settings page to enforce a menu change.
+# These remain recognised for existing runtime profiles and benchmarks. New
+# AI Options saves must choose an offered model; reading an old profile does
+# not rewrite it. Fresh account-specific retirement evidence can substitute
+# the same provider's default for one call without changing the saved row.
 #
 # 2026-09-07: qwen/qwen3.6-27b and both llama ids were REMOVED from this list.
 # Every tenant row that stored them was migrated to cerebras/gpt-oss-120b on
@@ -655,7 +653,7 @@ CEREBRAS_MODELS_HIDDEN = [
 
 
 def validate_traditional_llm_selection(provider: str, model: str) -> None:
-    """Use the same offered + saved-legacy contract at save and call startup."""
+    """Recognise offered + saved-legacy models for runtime/benchmark callers."""
     provider = getattr(provider, "value", provider)
     models_by_provider = {
         "openai": [item.id for item in OPENAI_MODELS],
@@ -673,6 +671,31 @@ def validate_traditional_llm_selection(provider: str, model: str) -> None:
             f"Invalid LLM model '{model}' for provider '{provider}'. "
             f"Must be one of: {models_by_provider[provider]}"
         )
+
+
+def offered_traditional_llm_models() -> Dict[str, tuple[ModelInfo, ...]]:
+    """The existing traditional menu, independent of credential availability."""
+    return {
+        "groq": tuple(GROQ_MODELS),
+        "cerebras": tuple(CEREBRAS_MODELS),
+        "gemini": tuple(m for m in GEMINI_MODELS if m.id == GeminiModel.GEMINI_3_8_FLASH.value),
+        "openai": tuple(OPENAI_MODELS),
+        "deepseek": tuple(DEEPSEEK_MODELS),
+    }
+
+
+def traditional_llm_default(provider: str) -> str:
+    provider = getattr(provider, "value", provider)
+    offered = offered_traditional_llm_models().get(provider)
+    if not offered:
+        raise ValueError("Invalid LLM provider: no platform default is configured")
+    return offered[0].id
+
+
+def validate_offered_llm_selection(provider: str, model: str) -> None:
+    provider = getattr(provider, "value", provider)
+    if model not in {item.id for item in offered_traditional_llm_models().get(provider, ())}:
+        raise ValueError("Selected LLM model is not available in the current provider menu")
 
 
 # =============================================================================
