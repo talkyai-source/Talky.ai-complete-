@@ -105,9 +105,31 @@ _SUBSTANCE_THIN = {
 
 
 def _make_lead_conn(lead_row, substance=_SUBSTANCE_OK):
-    """mark_lead_from_summary reads the call (substance gate) then UPDATEs the lead."""
+    """Model the gate, guarded UPDATE and exact durable-alert ownership reads."""
     conn = MagicMock()
-    conn.fetchrow = AsyncMock(side_effect=[substance, lead_row])
+    async def fetchrow(sql, *args):
+        query = " ".join(sql.split())
+        if query.startswith("SELECT duration_seconds, transcript_json FROM calls"):
+            assert args == (_CALL_ID, _TENANT_ID)
+            return substance
+        if query.startswith("UPDATE leads AS l"):
+            assert "c.tenant_id = $3::uuid" in query and "l.tenant_id = $3::uuid" in query
+            return lead_row
+        if query.startswith("SELECT c.campaign_id FROM leads l JOIN calls c"):
+            assert "c.tenant_id=$1::uuid" in query and "l.tenant_id=$1::uuid" in query
+            assert args == (_TENANT_ID, lead_row["lead_id"], _CALL_ID)
+            return {"campaign_id": lead_row["campaign_id"]}
+        raise AssertionError(f"Unexpected lead fixture query: {query}")
+
+    async def fetch(sql, *args):
+        query = " ".join(sql.split())
+        assert query == ("SELECT email FROM user_profiles WHERE tenant_id=$1::uuid "
+                         "AND role='tenant_admin' AND is_active IS NOT FALSE LIMIT 2")
+        assert args == (_TENANT_ID,)
+        return [{"email": "owner@synthetic.example"}]
+
+    conn.fetchrow = AsyncMock(side_effect=fetchrow)
+    conn.fetch = AsyncMock(side_effect=fetch)
     conn.execute = AsyncMock(return_value=None)
     return conn
 
@@ -380,7 +402,9 @@ class TestLeadMarking:
         with _patch_acquire(conn):
             flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is True
-        sql = conn.fetchrow.await_args.args[0]
+        updates = [call for call in conn.fetchrow.await_args_list if "UPDATE leads" in call.args[0]]
+        assert len(updates) == 1
+        sql = updates[0].args[0]
         assert "UPDATE leads" in sql and "is_lead" in sql and "RETURNING" in sql
         # Qualifying must also emit the qualified-lead alert into stream_events
         # (same connection) with the lead's name + number in the title.
@@ -461,7 +485,8 @@ class TestLeadMarking:
     async def test_alert_emit_failure_never_breaks_qualification(self):
         from app.domain.services.call_summary.store import mark_lead_from_summary
         # Qualify succeeds but the stream_events INSERT blows up — the lead must
-        # STILL be flagged (alerting is best-effort by design).
+        # STILL be flagged: only the stream is best effort. The durable
+        # security event and mail intent must both precede that stream failure.
         conn = _make_lead_conn({
             "lead_id": "L1",
             "first_name": "Jane",
@@ -469,7 +494,18 @@ class TestLeadMarking:
             "phone_number": "+15551234",
             "campaign_id": "C1",
         })
-        conn.execute = AsyncMock(side_effect=RuntimeError("insert failed"))
+        async def execute(sql, *args):
+            query = " ".join(sql.split())
+            if "INSERT INTO stream_events" in query:
+                raise RuntimeError("stream insert failed")
+            assert query.startswith(("INSERT INTO security_events", "INSERT INTO campaign_alert_outbox"))
+
+        conn.execute = AsyncMock(side_effect=execute)
         with _patch_acquire(conn):
             flagged = await mark_lead_from_summary(None, _TENANT_ID, _CALL_ID, _FAKE_SUMMARY, revision="synthetic-revision", snapshot=["", [], None])
         assert flagged is True
+        writes = [call.args[0] for call in conn.execute.await_args_list]
+        assert len(writes) == 3
+        assert "INSERT INTO security_events" in writes[0]
+        assert "INSERT INTO campaign_alert_outbox" in writes[1]
+        assert "INSERT INTO stream_events" in writes[2]

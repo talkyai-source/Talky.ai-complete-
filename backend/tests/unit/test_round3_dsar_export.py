@@ -20,6 +20,7 @@ OTHER = "b0000000-0000-4000-8000-000000000002"
 ACTOR = "c0000000-0000-4000-8000-000000000003"
 PHONE = "+14155552671"
 EMAIL = "person@example.invalid"
+EMPTY_ALERT_TABLES = frozenset({"security_events", "campaign_alert_outbox", "campaign_alert_state", "tenant_alert_state"})
 
 
 def uid(number):
@@ -88,6 +89,10 @@ def data():
     # A platform-global suppression record is not owned by the requested tenant.
     rows["dnc_entries"].append({"id": uid(34), "tenant_id": None,
                                  "phone_number": PHONE, "normalized_number": PHONE})
+    # This older fixture models present-but-empty alert relations. The dedicated
+    # campaign-alert DSAR fixture executes their nonempty predicates in SQLite.
+    # Actual absence is still represented only by Connection.absent.
+    rows.update({table: [] for table in EMPTY_ALERT_TABLES})
     return rows
 
 
@@ -180,6 +185,16 @@ class Connection:
         leads, calls = set(map(str, leads)), set(map(str, calls))
         assert isinstance(whole, bool)
         assert "$2" in flat
+        if table in EMPTY_ALERT_TABLES:
+            assert not self.rows[table], "Use the SQL-executing alert fixture for nonempty alert data"
+            if table in {"security_events", "campaign_alert_outbox"}:
+                assert "alert_call.tenant_id=$1" in flat and "alert_lead.tenant_id=$1" in flat
+                assert "alert_call.id=any($6" in flat and "alert_lead.id=any($5" in flat
+            if table == "campaign_alert_outbox":
+                assert "join public.security_events e" in flat and "e.tenant_id=$1" in flat
+            if table in {"campaign_alert_state", "tenant_alert_state"}:
+                assert "$2::boolean or (false)" in flat
+            return []
         if not whole:
             if table == "leads":
                 assert "r.phone_number" in flat and "r.email" in flat and "$5" in flat
@@ -301,7 +316,7 @@ async def test_preview_is_audited_but_never_mutates_subject_data_or_reads_audio(
     result = await service.preview(scope(mod), actor_id=ACTOR)
     assert result["mode"] == "dry_run" and result["destructive_apply_supported"] is False
     for table in conn.rows:
-        assert result["counts"][table] == (0 if table == "recordings" else 1), table
+        assert result["counts"][table] == (0 if table in EMPTY_ALERT_TABLES | {"recordings"} else 1), table
     assert conn.rows == before and artifacts.reads == [] and pool.active == 0
     assert len(conn.events) == 1 and conn.events[0]["action"] == "dsar.preview"
 
@@ -319,7 +334,7 @@ async def test_export_contains_all_subject_rows_and_audio_and_no_other_person_or
     assert rows["call_feedback"][0]["transcript"] == "private reviewer note 1"
     assert rows["crm_deliveries"][0]["contact_effect"]["arguments"]["email"] == EMAIL
     for table, values in rows.items():
-        assert len(values) == (0 if table == "recordings" else 1), table
+        assert len(values) == (0 if table in EMPTY_ALERT_TABLES | {"recordings"} else 1), table
         assert all(r.get("tenant_id", TENANT) == TENANT for r in values)
         assert all(r.get("call_id", uid(11)) == uid(11) for r in values)
     assert sorted(audio.values()) == [b"NOTE", b"RIFF"]

@@ -103,7 +103,80 @@ def _resolve(node, values):
     return "{" + ast.dump(node, include_attributes=False) + "}", True
 
 
-def _predicate_scope(sql, protected_tables, tenant_tables):
+def _sql_structure(clean):
+    """Return outer tokens and balanced pairs; quoted data is already masked."""
+    outer, pairs, stack = [], [], []
+    for token in re.finditer(r"[(),]|\b[a-z_][\w]*\b", clean, re.I):
+        word = token.group().upper()
+        if word == "(":
+            stack.append(token.start())
+        elif word == ")":
+            if not stack:
+                return None
+            pairs.append((stack.pop(), token.end()))
+        elif not stack:
+            outer.append((word, token.start(), token.end()))
+    return None if stack else (outer, pairs)
+
+
+def _mandatory_scope(clean, protected_tables, tenant_tables):
+    """Prove mandatory equalities only, without interpreting other filters."""
+    if (not re.match(r"\s*(?:SELECT|UPDATE|DELETE)\b", clean, re.I)
+            or re.search(r"\b(?:WITH|UNION|INTERSECT|EXCEPT|LEFT|RIGHT|FULL|OUTER|CROSS|NATURAL|USING|BETWEEN)\b", clean, re.I)
+            or ";" in clean.rstrip().rstrip(";")):
+        return False
+    structure = _sql_structure(clean)
+    if structure is None:
+        return False
+    replacements = []
+    for start, end in sorted(structure[1]):
+        if replacements and start < replacements[-1][1]:
+            continue
+        inner = clean[start + 1:end - 1].strip()
+        if re.match(r"SELECT\b", inner, re.I):
+            if not _predicate_scope(inner, protected_tables, tenant_tables)[1]:
+                return False
+            replacements.append((start, end))
+    for start, end in reversed(replacements):
+        clean = clean[:start] + "(__scoped_subquery__)" + clean[end:]
+    if len(re.findall(r"\bSELECT\b", clean, re.I)) != int(bool(re.match(r"\s*SELECT\b", clean, re.I))):
+        return False
+    outer = _sql_structure(clean)[0]
+    boundaries = {"WHERE", "ON", "JOIN", "INNER", "FROM", "SET", "RETURNING", "GROUP", "ORDER", "LIMIT", "OFFSET", "FETCH", "FOR"}
+    equalities, active = [], None
+    for index, (word, _start, end) in enumerate(outer):
+        if word in boundaries:
+            active = word
+        if word == "," and active in {"FROM", "JOIN", "INNER"}:
+            return False  # Comma relations are not part of this proof.
+        if word not in {"WHERE", "ON"}:
+            continue
+        stop = next((i for i in range(index + 1, len(outer)) if outer[i][0] in boundaries), len(outer))
+        finish = outer[stop][1] if stop < len(outer) else len(clean.rstrip().rstrip(";"))
+        clause_tokens = outer[index + 1:stop]
+        if any(token[0] == "OR" for token in clause_tokens) or re.search(r"\bCASE\b", clean[end:finish], re.I):
+            return False
+        cuts = [(end, end)] + [(start, end) for word, start, end in clause_tokens if word == "AND"] + [(finish, finish)]
+        for previous, following in zip(cuts, cuts[1:]):
+            conjunct = clean[previous[1]:following[0]].strip()
+            if _EQUALITY.fullmatch(conjunct):
+                equalities.append(conjunct)
+    relations = []
+    for match in _RELATION.finditer(clean):
+        table = match.group("table").lower()
+        if table in protected_tables:
+            alias = (match.group("alias") or table).lower()
+            relations.append(f"{table} {table if alias in _KEYWORDS else alias}")
+    if not relations or not equalities:
+        return False
+    # Reuse the simple alias/parameter graph, with no inner-query equalities or
+    # optional/inverted expressions available to supply an outer anchor.
+    proof = "SELECT 1 FROM " + relations[0] + "".join(f" JOIN {relation} ON TRUE" for relation in relations[1:])
+    proof += " WHERE " + " AND ".join(equalities)
+    return _predicate_scope(proof, protected_tables, tenant_tables, mandatory=False)[1]
+
+
+def _predicate_scope(sql, protected_tables, tenant_tables, *, mandatory=True):
     clean = _sql_parts(sql, analysis=True)
     relations = []
     for match in _RELATION.finditer(clean):
@@ -113,6 +186,8 @@ def _predicate_scope(sql, protected_tables, tenant_tables):
             relations.append((table, table if alias in _KEYWORDS else alias))
     tables = sorted({table for table, _alias in relations})
     if not tables:
+        return tables, False
+    if _sql_structure(clean) is None or re.search(r"\bBETWEEN\b", clean, re.I):
         return tables, False
     # A same-table copy can retain the source row's tenant without binding a
     # second tenant value. Prove only a plain projection of columns/constants;
@@ -132,6 +207,8 @@ def _predicate_scope(sql, protected_tables, tenant_tables):
             source_tables, scoped = _predicate_scope(copy['select'], protected_tables, tenant_tables)
             return sorted(set(tables) | set(source_tables)), scoped
         return tables, False
+    if mandatory and _mandatory_scope(clean, protected_tables, tenant_tables):
+        return tables, True
     # COALESCE in an UPDATE value does not weaken its WHERE predicate. Keep
     # refusing it in filters (where it can turn UNKNOWN into true), and retain
     # the independent subquery/boolean checks below for the entire statement.
@@ -170,7 +247,9 @@ def _predicate_scope(sql, protected_tables, tenant_tables):
         # An INSERT binds the destination tenant instead of filtering existing
         # rows. Only the direct single-row VALUES form is proved here.
         match = re.match(
-            r"\s*INSERT\s+INTO\s+(?:public\.)?\w+\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)\s*(?:RETURNING\b[\s\S]*)?$",
+            r"\s*INSERT\s+INTO\s+(?:public\.)?\w+\s*\(([^)]+)\)\s*VALUES\s*\(([^)]+)\)\s*"
+            r"(?:ON\s+CONFLICT\s*\(\s*[a-z_]\w*(?:\s*,\s*[a-z_]\w*)*\s*\)\s+DO\s+NOTHING\s*)?"
+            r"(?:RETURNING\b[\s\S]*)?$",
             clean.strip().rstrip(";"), re.I,
         )
         if not match or len(relations) != 1:

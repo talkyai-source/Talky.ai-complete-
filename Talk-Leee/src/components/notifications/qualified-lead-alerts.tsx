@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { useEventStream } from "@/lib/event-stream-api";
+import { useAlerts } from "@/lib/alerts-api";
 import { useNotificationsActions, useNotificationsState } from "@/lib/notifications-client";
 
 const LEGACY_SEEN_KEY = "talklee.qlead.seen.v1";
@@ -9,7 +9,9 @@ const SEEN_CAP = 500;
 const FRESH_WINDOW_MS = 60 * 60 * 1000;
 
 export function qualifiedLeadSeenKey(scopeKey: string) {
-    return `talklee.qlead.seen.v2:${scopeKey}`;
+    // A new namespace prevents legacy stream IDs from being treated as proof
+    // that these durable server notices were already observed.
+    return `talklee.campaign-alerts.seen.v1:${scopeKey}`;
 }
 
 function readSeen(key: string): string[] | null {
@@ -23,8 +25,9 @@ function readSeen(key: string): string[] | null {
     }
 }
 
-// Remount the observer when verified identity changes. Its query cache and its
-// saved deduplication IDs use that same identity; no legacy IDs are adopted.
+// This is a browser presentation of durable server notices, not a producer.
+// Remount on identity changes; never consume the separate legacy event stream
+// or initiate mail delivery. Keep the existing public component name/mount.
 export function QualifiedLeadAlerts() {
     const { scopeKey, generation, hydrated } = useNotificationsState();
     useEffect(() => {
@@ -36,7 +39,7 @@ export function QualifiedLeadAlerts() {
 }
 
 function ScopedLeadAlerts({ scopeKey }: { scopeKey: string }) {
-    const { data } = useEventStream("Alerts");
+    const { data } = useAlerts({ severity: new Set(), type: new Set(), status: new Set() });
     const { create } = useNotificationsActions();
     const seenRef = useRef<Set<string>>(new Set());
     const seededRef = useRef(false);
@@ -58,27 +61,28 @@ function ScopedLeadAlerts({ scopeKey }: { scopeKey: string }) {
         const saved = readSeen(storageKey);
         for (const id of saved ?? []) seenRef.current.add(id);
         const isSeed = !seededRef.current && saved === null;
-        const leads = data.filter((event) =>
-            event.metadata?.kind === "qualified_lead" && !seenRef.current.has(event.id));
-        for (const event of leads) seenRef.current.add(event.id);
+        const notices = data.filter((event) =>
+            ["qualified_lead", "campaign_failures", "low_minutes"].includes(String(event.metadata?.kind))
+            && !seenRef.current.has(event.id));
+        for (const event of notices) seenRef.current.add(event.id);
         seenRef.current = new Set([...seenRef.current].slice(-SEEN_CAP));
         seededRef.current = true;
         try { window.localStorage.setItem(storageKey, JSON.stringify([...seenRef.current])); } catch { /* Keep deduplication in memory. */ }
         if (isSeed) return;
 
         const cutoff = Date.now() - FRESH_WINDOW_MS;
-        for (const event of leads) {
+        for (const event of notices) {
             const created = Date.parse(event.createdAt);
-            if (!Number.isFinite(created) || created < cutoff) continue;
-            const phone = event.metadata?.phone_number;
-            const note = event.description || event.metadata?.follow_up_note;
-            const message = [phone ? `Phone: ${phone}` : "", note ? String(note) : ""].filter(Boolean).join(" — ");
+            if (!Number.isFinite(created) || created < cutoff || event.status === "Resolved") continue;
+            const kind = String(event.metadata?.kind);
             create({
-                type: "success",
+                type: kind === "qualified_lead" ? "success" : "warning",
                 title: event.title,
-                message: message || "New qualified lead — open the lead details for more information.",
+                message: event.description || "Review this notice in the campaign alert timeline.",
                 priority: "high",
-                data: { kind: "qualified_lead", ...(event.metadata ?? {}) },
+                // Persist only the server identity and notice kind. Do not
+                // copy legacy stream phone numbers or raw follow-up text.
+                data: { kind, server_event_id: event.id },
             });
         }
     }, [data, create, storageKey]);

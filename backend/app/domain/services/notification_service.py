@@ -37,6 +37,9 @@ class NotificationType(str, Enum):
     ACCOUNT_COMPROMISED = "account_compromised"
     SESSION_HIJACKING = "session_hijacking"
     SECURITY_ALERT = "security_alert"
+    CAMPAIGN_FAILURES = "campaign_failures"
+    LOW_MINUTES = "low_minutes"
+    QUALIFIED_LEAD = "qualified_lead"
 
 
 class NotificationService:

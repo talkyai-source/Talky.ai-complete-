@@ -136,6 +136,7 @@ class ReminderWorker:
         billing_task = asyncio.create_task(self._billing_delivery_loop())
         topup_usage_task = asyncio.create_task(self._topup_usage_loop())
         connector_refresh_task = asyncio.create_task(self._connector_refresh_loop())
+        campaign_alert_task = asyncio.create_task(self._campaign_alert_loop())
 
         try:
             while self.running:
@@ -172,6 +173,11 @@ class ReminderWorker:
 
                     await asyncio.sleep(min(5 * consecutive_errors, 60))
         finally:
+            campaign_alert_task.cancel()
+            try:
+                await campaign_alert_task
+            except (asyncio.CancelledError, Exception):
+                pass
             connector_refresh_task.cancel()
             try:
                 await connector_refresh_task
@@ -204,6 +210,19 @@ class ReminderWorker:
                 pass
 
         await self.shutdown()
+
+    async def _campaign_alert_loop(self):
+        """Deliver durable alerts while browsers are closed; never replay unknown sends."""
+        from app.domain.services.campaign_alerts import process_alert_tick
+        cursor = None
+        while self.running:
+            try:
+                cursor = await asyncio.wait_for(
+                    process_alert_tick(self._db_pool, after_tenant=cursor, limit=20), timeout=60,
+                )
+            except Exception as exc:
+                logger.warning("Campaign alert tick deferred: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
 
     async def _connector_refresh_loop(self):
         """Retire abandoned refresh claims without delaying reminder delivery."""

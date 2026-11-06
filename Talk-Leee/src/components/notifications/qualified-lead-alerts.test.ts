@@ -10,16 +10,21 @@ import { ensureDom } from "@/test-utils/dom";
 import { renderWithQueryClient } from "@/test-utils/render";
 
 ensureDom();
+const originalAlertsList = backendApi.alerts.list;
 const originalEventsList = backendApi.events.list;
-type RawEvent = Awaited<ReturnType<typeof backendApi.events.list>>["items"][number];
+const originalFetch = globalThis.fetch;
+let forbiddenRequests = 0;
+type RawEvent = Awaited<ReturnType<typeof backendApi.alerts.list>>["items"][number];
 const A = { userId: "user-a", tenantId: "tenant-a" };
 const B = { userId: "user-b", tenantId: "tenant-b" };
 
 function rawLead(id: string, ageMs = 0): RawEvent {
-    return { id, category: "alert", title: `Qualified lead: ${id}`, description: "Wants a callback",
-        severity: "info", related_campaign_id: null, related_call_id: null, actor_user_id: null,
+    const createdAt = new Date(Date.now() - ageMs).toISOString();
+    return { id, title: `Qualified lead: ${id}`, description: "Wants a callback",
+        severity: "Info", type: "Campaign", status: "Active", acknowledged: false,
+        relatedCampaignIds: [], resolutionNotes: null,
         metadata: { kind: "qualified_lead", phone_number: "+15550001111" },
-        created_at: new Date(Date.now() - ageMs).toISOString() };
+        createdAt, updatedAt: createdAt };
 }
 function result(items: RawEvent[], owner?: typeof A) {
     const [tenantId, userId] = JSON.parse(notificationsStore.getSnapshot().scopeKey ?? '["",""]') as [string, string];
@@ -27,7 +32,7 @@ function result(items: RawEvent[], owner?: typeof A) {
 }
 function seenKey() { return qualifiedLeadSeenKey(notificationsStore.getSnapshot().scopeKey!); }
 function titles() { return notificationsStore.getSnapshot().notifications.map((item) => item.title); }
-function stubEvents(items: RawEvent[]) { backendApi.events.list = async () => result(items); }
+function stubEvents(items: RawEvent[]) { backendApi.alerts.list = async () => result(items); }
 async function waitSeeded() {
     await waitFor(() => assert.notEqual(window.localStorage.getItem(seenKey()), null));
 }
@@ -36,12 +41,18 @@ beforeEach(() => {
     window.localStorage.clear();
     notificationsStore.setIdentity(null);
     notificationsStore.setIdentity(A);
+    forbiddenRequests = 0;
+    globalThis.fetch = async () => { forbiddenRequests += 1; throw new Error("No network in notice fixtures"); };
+    backendApi.events.list = async () => { forbiddenRequests += 1; throw new Error("Legacy stream must not produce campaign notices"); };
 });
 afterEach(() => {
     cleanup();
     notificationsStore.setIdentity(null);
+    backendApi.alerts.list = originalAlertsList;
     backendApi.events.list = originalEventsList;
+    globalThis.fetch = originalFetch;
     window.localStorage.clear();
+    assert.equal(forbiddenRequests, 0);
 });
 
 test("scoped saved lead IDs suppress repeats while fresh leads create in-app alerts", async () => {
@@ -77,14 +88,14 @@ test("an initially empty stream still alerts on the next newly qualified lead", 
     const { qc } = renderWithQueryClient(createElement(QualifiedLeadAlerts));
     await waitSeeded();
     stubEvents([rawLead("first-new")]);
-    await act(async () => { await qc.invalidateQueries({ queryKey: ["events"] }); });
+    await act(async () => { await qc.invalidateQueries({ queryKey: ["alerts"] }); });
     await waitFor(() => assert.deepEqual(titles(), ["Qualified lead: first-new"]));
 });
 
 test("late A event response cannot populate B's query or notifications after an identity switch", async () => {
     let resolveA!: (value: ReturnType<typeof result>) => void;
     let startedA = false;
-    backendApi.events.list = async () => {
+    backendApi.alerts.list = async () => {
         startedA = true;
         return new Promise((resolve) => { resolveA = resolve; });
     };
@@ -96,11 +107,11 @@ test("late A event response cannot populate B's query or notifications after an 
     await act(async () => { resolveA(result([rawLead("A-private")], A)); });
     assert.deepEqual(titles(), []);
     const current = notificationsStore.getSnapshot();
-    const ownQueries = qc.getQueriesData({ queryKey: ["events", current.scopeKey, current.generation] });
+    const ownQueries = qc.getQueriesData({ queryKey: ["alerts", current.scopeKey, current.generation] });
     assert.ok(ownQueries.length > 0);
     assert.ok(ownQueries.every(([, rows]) => JSON.stringify(rows).includes("A-private") === false));
     stubEvents([rawLead("B-new")]);
-    await act(async () => { await qc.invalidateQueries({ queryKey: ["events", current.scopeKey] }); });
+    await act(async () => { await qc.invalidateQueries({ queryKey: ["alerts", current.scopeKey] }); });
     await waitFor(() => assert.deepEqual(titles(), ["Qualified lead: B-new"]));
 });
 
@@ -110,14 +121,14 @@ test("another tab's scoped seen update prevents a repeated alert", async () => {
     await waitSeeded();
     window.localStorage.setItem(seenKey(), JSON.stringify(["seen-in-another-tab"]));
     stubEvents([rawLead("seen-in-another-tab")]);
-    await act(async () => { await qc.invalidateQueries({ queryKey: ["events"] }); });
+    await act(async () => { await qc.invalidateQueries({ queryKey: ["alerts"] }); });
     assert.deepEqual(titles(), []);
 });
 
 test("no verified identity means no lead polling or alert hydration", async () => {
     notificationsStore.setIdentity(null);
     let requested = false;
-    backendApi.events.list = async () => { requested = true; return result([rawLead("private")]); };
+    backendApi.alerts.list = async () => { requested = true; return result([rawLead("private")]); };
     await act(async () => { renderWithQueryClient(createElement(QualifiedLeadAlerts)); });
     assert.equal(requested, false);
     assert.deepEqual(titles(), []);
@@ -130,7 +141,7 @@ for (const [name, owner] of [
 ] as const) {
     test(`a response with ${name} cannot enter A's cache before the account marker arrives`, async () => {
         window.localStorage.setItem(seenKey(), "[]");
-        backendApi.events.list = async () => owner
+        backendApi.alerts.list = async () => owner
             ? result([rawLead("wrong-owner-private")], owner)
             : ({ items: [rawLead("wrong-owner-private")], next_cursor: null } as unknown as ReturnType<typeof result>);
         const { qc } = renderWithQueryClient(createElement(QualifiedLeadAlerts));

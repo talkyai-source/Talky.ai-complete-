@@ -33,6 +33,7 @@ _TABLES = (
     "recordings_s3", "recordings", "call_feedback", "conversation_reviews", "call_workflows",
     "crm_deliveries", "dnc_entries", "call_guard_decisions", "call_events",
     "call_legs", "stream_events", "dialer_jobs", "assistant_actions", "meetings", "reminders",
+    "security_events", "campaign_alert_outbox", "campaign_alert_state", "tenant_alert_state",
 )
 _CALL_ONLY = {
     "transcripts", "conversations", "recordings_s3", "recordings", "call_feedback",
@@ -49,6 +50,7 @@ _RETAINED_SCOPES = [
     {"scope": "legal_acceptances", "reason": "0085 acceptance receipts are append-only and retained."},
     {"scope": "external_crm_and_drive", "reason": "Remote copies are not erased or retrieved through unreviewed provider calls."},
     {"scope": "backups", "reason": "30-day expiry and erasure replay after restore require owner verification."},
+    {"scope": "alert_delivery_retention", "reason": "Delivery uncertainty and deduplication receipts need an owner-approved redaction policy."},
 ]
 
 
@@ -224,6 +226,25 @@ class DsarService:
                 OR r.action_id IN (SELECT a.id FROM public.assistant_actions a
                 WHERE a.tenant_id = $1::uuid AND
                 (a.call_id = ANY($6::uuid[]) OR a.lead_id = ANY($5::uuid[])))"""
+        elif table in {"campaign_alert_state", "tenant_alert_state"}:
+            # Aggregates include other contacts' activity. They belong in a
+            # whole-tenant export, never in an individual contact's export.
+            predicate = "FALSE"
+        elif table in {"security_events", "campaign_alert_outbox"}:
+            evidence, source = "r.evidence", "r.detection_source"
+            if table == "campaign_alert_outbox":
+                joins = "JOIN public.security_events e ON e.event_id=r.event_id AND e.tenant_id=$1::uuid"
+                evidence, source = "e.evidence", "e.detection_source"
+            # Selector IDs can originate in legacy captured fields. Verify the
+            # actual parent owner as well; a corrupt capture must not turn a
+            # foreign call ID into permission to export an alert about it.
+            predicate = f"""{source}='campaign_alerts' AND (
+                EXISTS (SELECT 1 FROM public.calls alert_call
+                    WHERE alert_call.tenant_id=$1::uuid AND alert_call.id=ANY($6::uuid[])
+                      AND alert_call.id::text={evidence}->>'call_id')
+                OR EXISTS (SELECT 1 FROM public.leads alert_lead
+                    WHERE alert_lead.tenant_id=$1::uuid AND alert_lead.id=ANY($5::uuid[])
+                      AND alert_lead.id::text={evidence}->>'lead_id'))"""
         elif table in _CALL_ONLY:
             predicate = "r.call_id = ANY($6::uuid[])"
         else:
@@ -254,7 +275,7 @@ class DsarService:
             "subject_kind": "tenant" if scope.whole_tenant else "phone" if scope.phone else "email",
             "mode": "dry_run", "destructive_apply_supported": False,
             "full_dsar_complete": False, "complete": True,
-            "coverage": "Declared operational call/contact tables and their supported media files only",
+            "coverage": "Declared operational call/contact/alert tables and their supported media files only",
             "consistency": "Read committed; live writers are not quiesced; this is not an erasure approval",
             "counts": {}, "missing_tables": [], "issues": [], "legal_hold": None,
             "retained_or_unimplemented_scopes": _RETAINED_SCOPES,
@@ -290,6 +311,8 @@ class DsarService:
                        "recordings": ("calls",), "transcripts": ("calls",),
                        "dnc_entries": ("leads", "calls"),
                        "call_guard_decisions": ("leads", "calls"),
+                       "security_events": ("calls", "leads"),
+                       "campaign_alert_outbox": ("security_events", "calls", "leads"),
                        "reminders": ("meetings", "assistant_actions")}.get(table, ())
             if any(not present[parent] for parent in parents):
                 manifest["counts"][table] = None

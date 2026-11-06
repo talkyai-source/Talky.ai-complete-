@@ -11,6 +11,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { backendApi } from "@/lib/backend-api";
 import type { AlertItem, AlertSeverity, AlertStatus, AlertType } from "@/lib/campaign-performance";
+import { useNotificationsState } from "@/lib/notifications-client";
+import { notificationScopeKey, notificationsStore } from "@/lib/notifications";
 
 type RawAlertItem = {
     id: string;
@@ -70,7 +72,7 @@ export const alertsQueryKeys = {
         severity: AlertSeverity[];
         type: AlertType[];
         status: AlertStatus[];
-    }) => ["alerts", "list", filters] as const,
+    }, scopeKey: string | null = null, generation = 0) => ["alerts", scopeKey, generation, "list", filters] as const,
 };
 
 export function useAlerts(filters: {
@@ -78,14 +80,20 @@ export function useAlerts(filters: {
     type: Set<AlertType>;
     status: Set<AlertStatus>;
 }) {
+    const { scopeKey, generation, hydrated } = useNotificationsState();
     const filterArrays = {
         severity: Array.from(filters.severity).sort(),
         type: Array.from(filters.type).sort(),
         status: Array.from(filters.status).sort(),
     };
-    return useQuery({
-        queryKey: alertsQueryKeys.list(filterArrays),
+    const query = useQuery({
+        queryKey: alertsQueryKeys.list(filterArrays, scopeKey, generation),
+        enabled: Boolean(scopeKey) && hydrated,
         queryFn: async ({ signal }): Promise<AlertItem[]> => {
+            const origin = notificationsStore.capture();
+            if (!origin.isCurrent() || origin.scopeKey !== scopeKey || origin.generation !== generation) {
+                throw new DOMException("Account changed", "AbortError");
+            }
             const data = await backendApi.alerts.list(
                 {
                     severity: filterArrays.severity,
@@ -93,8 +101,15 @@ export function useAlerts(filters: {
                     alert_type: filterArrays.type,
                     limit: 200,
                 },
-                signal,
+                AbortSignal.any([signal, origin.signal]),
             );
+            if (!origin.isCurrent()) throw new DOMException("Account changed", "AbortError");
+            // Cookies can change before another tab's identity marker arrives.
+            // Verify the server's actual reader before caching/displaying PII.
+            if (typeof data?.tenant_id !== "string" || typeof data?.user_id !== "string"
+                || notificationScopeKey({ tenantId: data.tenant_id, userId: data.user_id }) !== origin.scopeKey) {
+                throw new DOMException("Alert response owner could not be verified", "AbortError");
+            }
             return data.items.map((r) => mapAlert(r as RawAlertItem));
         },
         refetchInterval: () => {
@@ -104,8 +119,9 @@ export function useAlerts(filters: {
         refetchOnWindowFocus: true,
         refetchOnReconnect: true,
         staleTime: 5_000,
-        retry: 1,
+        retry: (failureCount, error) => error.name !== "AbortError" && failureCount < 1,
     });
+    return { ...query, data: scopeKey && hydrated ? query.data : undefined };
 }
 
 export function useAckAlert() {

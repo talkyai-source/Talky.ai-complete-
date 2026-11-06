@@ -16,6 +16,7 @@ import re
 from typing import Any, Optional
 
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.campaign_alerts import record_qualified_lead
 from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
 from app.domain.services.call_summary.business_details import (
     load_campaign_extract_fields,
@@ -486,11 +487,15 @@ def _lead_display_name(row: dict) -> str:
 
 
 async def _emit_qualified_lead_alert(conn, tenant_id: str, call_id: str, row: dict, note: str) -> None:
-    """Write a qualified-lead row to the Event Stream (best-effort, never raises).
+    """Persist notification intent, then publish the best-effort stream event.
 
     Runs on the SAME tenant-scoped connection as the qualify UPDATE so the
     stream_events INSERT is under the correct RLS context.
     """
+    # A durable-intent error must reach the existing outer transaction so the
+    # guarded qualification UPDATE rolls back and remains retryable. Stream
+    # delivery remains best effort after the durable event/outbox exists.
+    await record_qualified_lead(conn, tenant_id, str(row["lead_id"]), call_id)
     try:
         from app.domain.services.event_emitter import emit_event
 
