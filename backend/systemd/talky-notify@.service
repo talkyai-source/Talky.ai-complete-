@@ -1,0 +1,22 @@
+[Unit]
+Description=Notify operator of failed Talky unit %i
+# Deliberate sole OnFailure exception: a failed notifier must not recurse.
+
+[Service]
+Type=oneshot
+User=talky
+Group=talky
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=-/opt/talky/backend/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/talky/backend/venv/bin/python scripts/notify_failure.py --unit %i --send
+TimeoutStartSec=30
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-notify

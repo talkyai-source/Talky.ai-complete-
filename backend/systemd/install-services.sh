@@ -41,6 +41,9 @@ done
 # Only the service's own loop will refresh runtime evidence after this release.
 systemctl disable --now talky-trunk-status.timer
 
+# Deliberate operator test: dry-run unless --send is explicitly supplied.
+ln -sf "$SCRIPT_DIR/../deploy/talky-alert-test" /usr/local/bin/talky-alert-test
+
 # 2. Reload systemd
 echo ""
 echo "  Reloading systemd daemon..."
@@ -53,6 +56,8 @@ systemctl daemon-reload
 # anyone who runs this installer and moves on.
 #
 # Deliberate exceptions:
+#   * talky-notify@.service — instantiated only by OnFailure, never enabled as
+#     a daemon and deliberately has no recursive failure notification.
 #   * talky-trunk-status.timer — retained only for upgrade compatibility and
 #     disabled above; the long-running service replaces it.
 #   * talky-migrate.service — oneshot, started explicitly by deploy_to_server.sh
@@ -74,7 +79,7 @@ systemctl enable talky-voice-gateway.service   # C++ media gateway; see the unit
 systemctl enable talky-cleanup.timer   # activates talky-cleanup.service nightly
 systemctl enable talky-recording-discrepancy.timer --now  # read-only file/row reconciliation nightly
 systemctl enable talky-model-catalog.timer --now  # nightly credential-scoped saved-model report
-systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service every 2 min
+systemctl enable talky-healthwatch.timer   # activates bounded operational checks every minute
 systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 10 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky-db-backup.timer  # nightly verified pg_dump (deploy/db-backup.sh)

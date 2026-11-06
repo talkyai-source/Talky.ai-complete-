@@ -10,6 +10,7 @@
 # Stays at --workers 1 until the slowapi auth limiter gets Redis storage
 # (its counters are per process today).
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky.ai Dashboard API (no telephony)
 After=network.target
 StartLimitIntervalSec=0

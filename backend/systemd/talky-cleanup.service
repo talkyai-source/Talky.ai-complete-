@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky.ai Data-Retention Cleanup (call_events/stream_events/call_legs)
 After=network.target
 # One-shot, triggered by talky-cleanup.timer. Do NOT add Restart= here —

@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     # Dedicated write-only Alertmanager ingestion credential; not user/internal auth.
     alertmanager_ingest_token: SecretStr | None = None
     alertmanager_source_id: str = "platform-alertmanager"
+    # Operational systemd notifications; presence does not certify delivery.
+    talky_alert_webhook_url: SecretStr | None = None
+    talky_alert_email_to: str | None = None
     # AH-Phase-C: previous signing key during graceful rotation.
     # When the operator rotates `JWT_SECRET`, the previous value is
     # moved into `JWT_SECRET_PREVIOUS` for one window of (access TTL
@@ -122,6 +125,8 @@ class Settings(BaseSettings):
     database_url: str | None = None
 
     # Email Service (Microsoft 365 SMTP via GoDaddy)
+    brand_name: str = "Talk-Lee"
+    from_email: str | None = None  # Production requires an owned talkleeai.com address.
     email_user: str | None = None  # noreply@talkleeai.com
     email_pass: str | None = None  # App Password or M365 password
 

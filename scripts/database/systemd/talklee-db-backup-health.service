@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Check age and integrity of the latest Talklee database backup
 
 [Service]

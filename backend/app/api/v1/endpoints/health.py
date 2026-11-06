@@ -75,7 +75,13 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
     from app.core.container import get_container
 
     container = get_container()
+    from app.core.operational_alerts import alerting_status
+
     result: Dict[str, Any] = {"ready": True, "db": "unknown", "redis": "unknown"}
+    try:
+        result["alerting"] = alerting_status()
+    except Exception:
+        result["alerting"] = "unavailable"
 
     if not container.is_initialized:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE

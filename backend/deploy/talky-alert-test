@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# Dry-run by default. --send dispatches only a clearly synthetic test alert.
+set -euo pipefail
+exec /opt/talky/backend/venv/bin/python /opt/talky/backend/scripts/notify_failure.py --test "$@"

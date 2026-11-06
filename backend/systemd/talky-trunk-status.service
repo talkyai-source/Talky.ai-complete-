@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky SIP-trunk live endpoint and registration status updater
 After=asterisk.service docker.service
 StartLimitIntervalSec=0

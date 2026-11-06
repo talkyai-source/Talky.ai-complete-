@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky carrier-hairpin inbound synthetic call
 After=network-online.target asterisk.service talky-api.service talky-voice-gateway.service
 Wants=network-online.target

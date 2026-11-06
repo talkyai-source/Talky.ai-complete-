@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky.ai saved model availability report
 After=network.target
 # Item 16 supplies the notification template and OnFailure integration.
