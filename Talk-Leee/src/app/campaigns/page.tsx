@@ -11,6 +11,7 @@ import { queryKeys, useOutboundCampaigns } from "@/lib/api-hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNotificationMutation } from "@/lib/notification-mutations";
 import { useNotificationsActions } from "@/lib/notifications-client";
+import { isApiClientError } from "@/lib/http-client";
 
 export default function CampaignsPage() {
     const { create: createNotification } = useNotificationsActions();
@@ -18,7 +19,7 @@ export default function CampaignsPage() {
     const campaignsQuery = useOutboundCampaigns();
     const campaigns = useMemo(() => campaignsQuery.data ?? [], [campaignsQuery.data]);
     const loading = campaignsQuery.isLoading;
-    const error = campaignsQuery.isError ? (campaignsQuery.error instanceof Error ? campaignsQuery.error.message : "Failed to load campaigns") : "";
+    const error = campaignsQuery.isError ? "Could not load campaigns." : "";
 
     const pause = useNotificationMutation({
         mutationFn: (id: string) => dashboardApi.pauseCampaign(id),
@@ -130,6 +131,8 @@ export default function CampaignsPage() {
                     campaigns={campaigns}
                     loading={loading}
                     error={error}
+                    errorRequestId={isApiClientError(campaignsQuery.error) ? campaignsQuery.error.requestId : undefined}
+                    onRetry={() => { void campaignsQuery.refetch(); }}
                     onPause={handlePause}
                     onResume={handleResume}
                     onDelete={handleDelete}

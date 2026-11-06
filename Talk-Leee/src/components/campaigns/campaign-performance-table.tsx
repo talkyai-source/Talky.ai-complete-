@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
 import { Select } from "@/components/ui/select";
+import { ReadError } from "@/components/ui/read-error";
 import type { Campaign } from "@/lib/dashboard-api";
 import {
     applyCampaignFilters,
@@ -306,6 +307,8 @@ export function CampaignPerformanceTable({
     campaigns,
     loading,
     error,
+    errorRequestId,
+    onRetry,
     onPause,
     onResume,
     onDelete,
@@ -314,6 +317,8 @@ export function CampaignPerformanceTable({
     campaigns: Campaign[];
     loading: boolean;
     error: string;
+    errorRequestId?: string;
+    onRetry?: () => void;
     onPause: (id: string) => Promise<void>;
     onResume: (id: string) => Promise<void>;
     onDelete: (id: string) => Promise<void>;
@@ -957,7 +962,7 @@ export function CampaignPerformanceTable({
             <div className="content-card overflow-hidden">
                 <div className="flex flex-col gap-3 border-b border-border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                     <div className="text-sm text-muted-foreground text-center sm:text-left">
-                        {paged.start}-{paged.end} of {sorted.length}
+                        {error ? "Campaign data could not be refreshed" : <>{paged.start}-{paged.end} of {sorted.length}</>}
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-end">
                         <div className="text-xs font-semibold text-muted-foreground">Rows</div>
@@ -998,13 +1003,13 @@ export function CampaignPerformanceTable({
                     </div>
                 </div>
 
+                {error ? <ReadError resource="campaigns" requestId={errorRequestId} onRetry={onRetry}
+                    hasData={campaigns.length > 0} busy={loading} /> : null}
                 {loading ? (
                     <div className="flex items-center justify-center py-16">
                         <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
                     </div>
-                ) : error ? (
-                    <div className="p-6 text-sm font-semibold text-destructive">{error}</div>
-                ) : sorted.length === 0 ? (
+                ) : error && sorted.length === 0 ? null : sorted.length === 0 ? (
                     <div className="p-10 text-center">
                         <div className="text-sm font-semibold text-foreground">No campaigns match your filters</div>
                         <div className="mt-1 text-sm text-muted-foreground">Try adjusting status or success rate.</div>

@@ -9,6 +9,8 @@ import { Select } from "@/components/ui/select";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
 import { formatCalendarDate, reportingDateRange } from "@/lib/reporting-time";
+import { isApiClientError } from "@/lib/http-client";
+import { ReadError } from "@/components/ui/read-error";
 
 function formatDate(dateStr: string) {
     return formatCalendarDate(dateStr);
@@ -61,6 +63,8 @@ export default function AnalyticsPage() {
     const [data, setData] = useState<CallSeriesItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
+    const [retry, setRetry] = useState(0);
     const [groupBy, setGroupBy] = useState<"day" | "week" | "month">("day");
     const [direction, setDirection] = useState<"outbound" | "inbound" | "all">("outbound");
     const [dateRange, setDateRange] = useState(30);
@@ -93,10 +97,12 @@ export default function AnalyticsPage() {
                 reportingZoneRef.current = response.timezone;
                 setReportingZone(response.timezone);
                 setError("");
+                setErrorRequestId(undefined);
                 setData(response.series);
             } catch (err) {
                 if (cancelled) return;
-                setError(err instanceof Error ? err.message : "Failed to load analytics");
+                setError("Could not load analytics.");
+                setErrorRequestId(isApiClientError(err) ? err.requestId : undefined);
             } finally {
                 if (cancelled) return;
                 setLoading(false);
@@ -108,7 +114,7 @@ export default function AnalyticsPage() {
         return () => {
             cancelled = true;
         };
-    }, [groupBy, dateRange, direction]);
+    }, [groupBy, dateRange, direction, retry]);
 
     const totals = data.reduce(
         (acc, item) => ({
@@ -200,16 +206,14 @@ export default function AnalyticsPage() {
                 </div>
             </motion.div>
 
+            {error ? <ReadError resource="analytics" requestId={errorRequestId} hasData={data.length > 0}
+                busy={loading} onRetry={() => setRetry(value => value + 1)} /> : null}
             {loading ? (
                 <div className="flex items-center justify-center h-64" role="status" aria-live="polite" aria-busy="true">
                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" aria-hidden />
                     <span className="sr-only">Loading analytics…</span>
                 </div>
-            ) : error ? (
-                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-600" role="alert" aria-live="assertive">
-                    {error}
-                </div>
-            ) : (
+            ) : error && data.length === 0 ? null : (
                 <div className="space-y-6">
                     {/* Summary Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
