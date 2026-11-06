@@ -283,13 +283,19 @@ async def test_evaluate_blocks_when_spend_check_raises_unexpectedly():
     guard._get_partner_id = lambda tenant_id: _none()
     guard._log_decision = lambda *a, **k: _none()
 
+    spend_calls = []
+
     async def _boom(**kwargs):
+        spend_calls.append(kwargs)
         raise RuntimeError("genuine spend-lookup backend failure")
 
     guard._check_spend_limit = _boom
 
-    result = await guard.evaluate(tenant_id="t1", phone_number="+15551234567")
+    result = await guard.evaluate(tenant_id="t1", phone_number="+14155550100")
 
+    assert len(spend_calls) == 1
+    assert spend_calls[0]["tenant_id"] == "t1"
+    assert spend_calls[0]["phone_number"] == "+14155550100"
     assert result.decision == GuardDecision.BLOCK
     assert GuardCheck.SPEND_LIMIT in result.failed_checks
 

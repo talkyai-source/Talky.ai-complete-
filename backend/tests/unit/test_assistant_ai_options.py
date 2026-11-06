@@ -138,7 +138,7 @@ def _campaign_db(campaign_id="c1"):
 
 LEAD_ROW = {
     "id": "lead-1",
-    "phone_number": "+15559999999",
+    "phone_number": "+14155550100",
     "first_name": "Bob",
     "last_name": "Smith",
     "email": "bob@example.com",
@@ -233,7 +233,7 @@ async def test_manage_lead_update_preview_no_write():
         campaign_id="c1",
         action="update",
         lead_id="lead-1",
-        phone_number="+15550001111",
+        phone_number="+14155550101",
         confirm=False,
     )
 
@@ -246,8 +246,8 @@ async def test_manage_lead_update_preview_no_write():
     changes = result.get("changes", [])
     phone_change = next((c for c in changes if c["field"] == "phone_number"), None)
     assert phone_change is not None, f"phone_number not in diff: {changes}"
-    assert phone_change["before"] == "+15559999999"
-    assert phone_change["after"] == "+15550001111"
+    assert phone_change["before"] == "+14155550100"
+    assert phone_change["after"] == "+14155550101"
 
     # Note must mention confirm=true
     assert "confirm=true" in result.get("note", "").lower()
@@ -266,7 +266,7 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
         campaign_id="c1",
         action="update",
         lead_id="lead-1",
-        phone_number="+15550001111",
+        phone_number="+14155550101",
         first_name="Robert",
         confirm=True,
     )
@@ -275,7 +275,7 @@ async def test_manage_lead_update_confirm_applies_changed_fields():
     assert len(db._update_calls) == 1
 
     payload = db._update_calls[0]["payload"]
-    assert payload["phone_number"] == "+15550001111"
+    assert payload["phone_number"] == "+14155550101"
     assert payload["first_name"] == "Robert"
     # last_name and email not supplied → must NOT be in payload
     assert "last_name" not in payload
@@ -299,7 +299,7 @@ async def test_manage_lead_never_claims_success_for_zero_row_write(action):
         "confirm": True,
     }
     if action == "add":
-        kwargs["phone_number"] = "+15551234567"
+        kwargs["phone_number"] = "+14155550102"
         db.configure_response("leads", "insert", data=[])
     else:
         db.configure_response("leads", "select", data=[LEAD_ROW.copy()])
@@ -345,7 +345,7 @@ async def test_manage_lead_update_lead_not_found():
         campaign_id="c1",
         action="update",
         lead_id="ghost-lead",
-        phone_number="+15550001111",
+        phone_number="+14155550101",
         confirm=False,
     )
 
@@ -360,7 +360,7 @@ async def test_manage_lead_update_no_change_detected():
     db.configure_response(
         "leads",
         "select",
-        data=[LEAD_ROW.copy()],  # phone is +15559999999
+        data=[LEAD_ROW.copy()],  # phone is +14155550100
     )
 
     result = await manage_lead(
@@ -369,7 +369,7 @@ async def test_manage_lead_update_no_change_detected():
         campaign_id="c1",
         action="update",
         lead_id="lead-1",
-        phone_number="+15559999999",  # same as current
+        phone_number="+14155550100",  # same as current
         confirm=False,
     )
 

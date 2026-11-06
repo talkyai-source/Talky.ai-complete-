@@ -15,12 +15,12 @@ class TestPhoneNormalization:
     def test_normalize_us_10_digit(self):
         """10-digit US number should get +1 prefix"""
         from app.api.v1.endpoints.campaigns import normalize_phone_number
-        assert normalize_phone_number("5551234567") == "+15551234567"
+        assert normalize_phone_number("4155550100") == "+14155550100"
     
     def test_normalize_us_11_digit_with_1(self):
         """11-digit starting with 1 should get + prefix"""
         from app.api.v1.endpoints.campaigns import normalize_phone_number
-        assert normalize_phone_number("15551234567") == "+15551234567"
+        assert normalize_phone_number("14155550100") == "+14155550100"
     
     def test_normalize_with_plus(self):
         """Number with + should keep format"""
@@ -30,7 +30,7 @@ class TestPhoneNormalization:
     def test_normalize_with_formatting(self):
         """Formatted number should be cleaned"""
         from app.api.v1.endpoints.campaigns import normalize_phone_number
-        assert normalize_phone_number("(555) 123-4567") == "+15551234567"
+        assert normalize_phone_number("(415) 555-0100") == "+14155550100"
     
     def test_normalize_with_spaces(self):
         """Spaces should be removed"""

@@ -28,13 +28,13 @@ BOM = b"\xef\xbb\xbf"
 
 
 def test_bom_csv_with_phone_first_column_imports():
-    resp, db = _run_bytes(BOM + b"phone_number,first_name\n+447700900123,Sian\n")
+    resp, db = _run_bytes(BOM + b"phone_number,first_name\n+442079460958,Sian\n")
     assert resp.imported == 1
-    assert db.inserted[0]["phone_number"] == "+447700900123"
+    assert db.inserted[0]["phone_number"] == "+442079460958"
 
 
 def test_bom_csv_with_name_first_column_keeps_the_name():
-    resp, db = _run_bytes(BOM + b"first_name,phone_number\nSian,+447700900123\n")
+    resp, db = _run_bytes(BOM + b"first_name,phone_number\nSian,+442079460958\n")
     assert resp.imported == 1
     row = db.inserted[0]
     assert row["first_name"] == "Sian"
@@ -43,7 +43,7 @@ def test_bom_csv_with_name_first_column_keeps_the_name():
 
 def test_bom_csv_with_email_first_column_keeps_the_email():
     _, db = _run_bytes(
-        BOM + b"email,phone_number\nsian@buildwright.co.uk,+447700900123\n"
+        BOM + b"email,phone_number\nsian@buildwright.co.uk,+442079460958\n"
     )
     assert db.inserted[0]["email"] == "sian@buildwright.co.uk"
 
@@ -51,14 +51,14 @@ def test_bom_csv_with_email_first_column_keeps_the_email():
 def test_a_row_with_extra_cells_is_reported_and_the_rest_import():
     resp, db = _run_bytes(
         b"phone_number,first_name\n"
-        b"+447700900123,Sian\n"
-        b"+447700900124,Smith, John\n"
-        b"+447700900125,Rhys\n"
+        b"+442079460958,Sian\n"
+        b"+442079460959,Smith, John\n"
+        b"+442079460960,Rhys\n"
     )
     assert resp.imported == 2
     assert resp.failed == 1
     bad = [e for e in resp.errors if e.row == 3]
     assert bad and "more cells" in bad[0].error
     assert {r["phone_number"] for r in db.inserted} == {
-        "+447700900123", "+447700900125"
+        "+442079460958", "+442079460960"
     }

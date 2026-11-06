@@ -73,7 +73,7 @@ class _FakeConn:
     def __init__(self, calls_row: dict, leads_row: dict, dialer_jobs_row: dict) -> None:
         self.calls_row = calls_row
         self.calls_row.setdefault("tenant_id", "20000000-0000-4000-8000-000000000017")
-        self.calls_row.setdefault("phone_number", "+15555550107")
+        self.calls_row.setdefault("phone_number", "+14155550107")
         self.calls_row.setdefault("outcome", None)
         self.calls_row.setdefault("ended_at", None)
         self.calls_row.setdefault("duration_seconds", None)
@@ -152,6 +152,8 @@ class _FakeConn:
     async def fetchval(self, query: str, *args: Any):
         q = " ".join(query.split())
         if "FROM dnc_entries" in q:
+            assert args[0] == self.calls_row["tenant_id"]
+            assert args[1] == self.calls_row["phone_number"]
             return False
         if "SELECT id FROM leads" in q:
             return self.leads_row["id"] if self.leads_row["id"] == args[0] else None
@@ -239,7 +241,7 @@ def _make_case(outcome_value: str = "busy") -> tuple[_FakeConn, _RecordingQueue,
         leads_row={"id": "lead-1", "call_attempts": 0, "status": "calling"},
         dialer_jobs_row={
             "id": "job-1", "status": "processing", "attempt_number": 1,
-            "tenant_id": "tenant-1", "priority": 5, "phone_number": "+15550001111",
+            "tenant_id": "tenant-1", "priority": 5, "phone_number": "+14155550107",
         },
     )
     queue = _RecordingQueue()

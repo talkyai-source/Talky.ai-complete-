@@ -129,15 +129,15 @@ def test_editing_a_phone_uses_the_campaign_default_country():
         campaign_cfg={"default_country_code": "GB"},
         leads=[{
             "id": "l1", "tenant_id": "t1", "campaign_id": "c1",
-            "phone_number": "+447700900001", "status": "pending",
+            "phone_number": "+442079460950", "status": "pending",
         }],
     )
     asyncio.run(campaigns_ep.update_contact_in_campaign(
         campaign_id="c1", contact_id="l1",
-        contact=ContactUpdate(phone_number="07700 900123"),
+        contact=ContactUpdate(phone_number="020 7946 0958"),
         current_user=_User(), supabase=db,
     ))
-    assert db.tables["leads"][0]["phone_number"] == "+447700900123"
+    assert db.tables["leads"][0]["phone_number"] == "+442079460958"
 
 
 def test_readding_keeps_do_not_call_from_any_deleted_duplicate():
