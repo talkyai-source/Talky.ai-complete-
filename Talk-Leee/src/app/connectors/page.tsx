@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, type ComponentType } from "react";
+import { useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
 import type { ConnectorProviderStatus } from "@/lib/models";
-import type { ConnectorProviderType } from "@/lib/connectors-utils";
+import { CONNECTOR_RETURN_FAILED_TEXT, type ConnectorOAuthReturn, type ConnectorProviderType } from "@/lib/connectors-utils";
 import { cn } from "@/lib/utils";
 import { CalendarDays, Cloud, Mail, UsersRound, HardDrive } from "lucide-react";
 
@@ -75,9 +75,30 @@ export default function ConnectorsPage() {
     const q = useConnectorStatuses();
     const seenEvents = useRef(new Set<string>());
     const lastRefreshEventRaw = useRef<string | null>(null);
+    const returnSeq = useRef(0);
+    // The card that last opened an OAuth window. The backend does not name the
+    // connector on every failure return, so an unnamed return is given to it.
+    const lastOpenedType = useRef<ProviderType | null>(null);
+    const [oauthReturn, setOauthReturn] = useState<ConnectorOAuthReturn | null>(null);
 
     useEffect(() => {
-        const handleUpdated = (data: unknown) => {
+        // A return page marks its own tab as "already sent" so a reload does not
+        // send twice. A popup opened from this tab would inherit that mark and
+        // stay silent, so it is dropped whenever this page loads.
+        try {
+            window.sessionStorage.removeItem("connectors.callback.sent");
+        } catch {
+        }
+
+        // A return event left in storage by an earlier visit is not news: it
+        // still triggers the refetch below, but its sentence is not shown again.
+        let storedAtMount: string | null = null;
+        try {
+            storedAtMount = window.localStorage.getItem("connectors.refresh.event");
+        } catch {
+        }
+
+        const handleUpdated = (data: unknown, showResult = true) => {
             if (!data || typeof data !== "object") return;
             const obj = data as Record<string, unknown>;
             if (obj.type !== "connectors:updated") return;
@@ -89,12 +110,27 @@ export default function ConnectorsPage() {
             }
 
             // Popup/storage broadcasts do not prove the current account owns this
-            // connection. Refresh authoritative status without publishing their payload.
+            // connection. The cards may show the attempt's failure sentence, but a
+            // status only ever comes from the authoritative refetch below.
+            if (showResult) {
+                const named = typeof obj.providerType === "string" && obj.providerType ? obj.providerType : undefined;
+                const providerType = named ?? lastOpenedType.current ?? undefined;
+                lastOpenedType.current = null;
+                returnSeq.current += 1;
+                setOauthReturn({
+                    id: returnSeq.current,
+                    ok: obj.ok === true,
+                    providerType,
+                    message: typeof obj.message === "string" && obj.message.trim() ? obj.message : CONNECTOR_RETURN_FAILED_TEXT,
+                });
+            }
 
             void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
         };
 
         const onMessage = (event: MessageEvent) => {
+            // Any window can post here; only this app's own return page is heard.
+            if (event.origin !== window.location.origin) return;
             handleUpdated(event.data as unknown);
         };
         window.addEventListener("message", onMessage);
@@ -129,7 +165,7 @@ export default function ConnectorsPage() {
             if (!raw || raw === lastRefreshEventRaw.current) return;
             lastRefreshEventRaw.current = raw;
             try {
-                handleUpdated(JSON.parse(raw) as unknown);
+                handleUpdated(JSON.parse(raw) as unknown, raw !== storedAtMount);
             } catch {
             }
             void qc.invalidateQueries({ queryKey: queryKeys.connectorStatuses() });
@@ -165,6 +201,10 @@ export default function ConnectorsPage() {
     }, [searchParams]);
 
     const next = useMemo(() => searchParams.get("next") ?? "", [searchParams]);
+
+    // Cards speak only from a real answer to GET /connectors/status.
+    const statusAnswered = q.data !== undefined;
+    const statusChecking = !statusAnswered && !q.isError;
 
     const requirementsMet = useMemo(() => {
         if (required.length === 0) return false;
@@ -210,7 +250,8 @@ export default function ConnectorsPage() {
                             {PROVIDERS.map((p) => {
                                 const data = byType.get(p.type);
                                 const Icon = p.icon;
-                                const status = data?.status ?? "disconnected";
+                                const status = statusAnswered ? (data?.status ?? null) : null;
+                                const salesforceNotAdvertised = statusAnswered && p.type === "salesforce" && !data;
 
                                 return (
                                     <ConnectorCard
@@ -221,12 +262,17 @@ export default function ConnectorsPage() {
                                         icon={Icon}
                                         accentClassName={p.accent}
                                         status={status}
+                                        checking={statusChecking}
+                                        oauthReturn={oauthReturn}
+                                        onOAuthWindowOpened={(opened) => {
+                                            lastOpenedType.current = opened;
+                                        }}
                                         lastSync={data?.last_sync}
                                         provider={data?.provider}
                                         errorMessage={data?.error_message}
                                         oauthCallbackPath={`/connectors/${p.type}/callback`}
-                                        available={p.type !== "salesforce" || Boolean(data)}
-                                        unavailableReason={p.type === "salesforce" && !data
+                                        available={!salesforceNotAdvertised}
+                                        unavailableReason={salesforceNotAdvertised
                                             ? "Salesforce is not enabled by this server yet (SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET missing). No OAuth request will be started until the backend advertises the capability."
                                             : undefined}
                                     />

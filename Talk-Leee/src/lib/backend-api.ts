@@ -67,6 +67,7 @@ export type SalesforceImportInput = {
 };
 import { extractAuthorizationUrl } from "@/lib/connectors-utils";
 import { sharedHttpClient } from "@/lib/api";
+import { ApiClientError } from "@/lib/http-client";
 
 // Inline DTO for the new /alerts endpoint (avoids a circular import with
 // campaign-performance.ts AlertItem; the hook re-maps to AlertItem).
@@ -97,6 +98,39 @@ const httpClient = sharedHttpClient;
 
 function parseOrThrow<T>(schema: { parse: (v: unknown) => T }, data: unknown) {
     return schema.parse(data);
+}
+
+// GET /connectors/status and the Connect/Reconnect authorize call only. The
+// client's per-request timeout stops once response headers arrive, so a body
+// that stalls would never end. This bounds the whole request, body included,
+// and ends it as a timeout failure so retries, the error box and the button
+// reset still apply.
+const CONNECTOR_REQUEST_DEADLINE_MS = 20_000;
+
+async function withinConnectorDeadline<T>(
+    path: string,
+    signal: AbortSignal | undefined,
+    run: (signal: AbortSignal) => Promise<T>
+): Promise<T> {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort(signal?.reason);
+    if (signal) {
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const deadline = new Promise<never>((_resolve, reject) => {
+        timer = setTimeout(() => {
+            reject(new ApiClientError({ code: "timeout", message: "Request timed out", url: path, method: "GET" }));
+            controller.abort(new Error("Timeout"));
+        }, CONNECTOR_REQUEST_DEADLINE_MS);
+    });
+    try {
+        return await Promise.race([run(controller.signal), deadline]);
+    } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+    }
 }
 
 export type AuditLogsListInput = {
@@ -257,18 +291,23 @@ export const backendApi = {
             });
             return parseOrThrow(ConnectorResponseSchema, data);
         },
-        status: async (signal?: AbortSignal): Promise<ListResponse<ConnectorProviderStatus>> => {
-            const data = await httpClient().request({ path: backendEndpoints.connectorsStatus.path, timeoutMs: 12_000, signal });
-            return parseOrThrow(ListResponseSchema(ConnectorProviderStatusSchema), data);
-        },
-        authorize: async (input: { type: string; redirect_uri: string }): Promise<{ authorization_url: string }> => {
-            const data = await httpClient().request({
-                path: backendEndpoints.connectorsAuthorize.path.replace("{type}", encodeURIComponent(input.type)),
-                method: backendEndpoints.connectorsAuthorize.method,
-                query: { redirect_uri: input.redirect_uri },
-                timeoutMs: 12_000,
+        status: (signal?: AbortSignal): Promise<ListResponse<ConnectorProviderStatus>> =>
+            withinConnectorDeadline(backendEndpoints.connectorsStatus.path, signal, async (bounded) => {
+                const data = await httpClient().request({ path: backendEndpoints.connectorsStatus.path, timeoutMs: 12_000, signal: bounded });
+                return parseOrThrow(ListResponseSchema(ConnectorProviderStatusSchema), data);
+            }),
+        authorize: (input: { type: string; redirect_uri: string }): Promise<{ authorization_url: string }> => {
+            const path = backendEndpoints.connectorsAuthorize.path.replace("{type}", encodeURIComponent(input.type));
+            return withinConnectorDeadline(path, undefined, async (bounded) => {
+                const data = await httpClient().request({
+                    path,
+                    method: backendEndpoints.connectorsAuthorize.method,
+                    query: { redirect_uri: input.redirect_uri },
+                    timeoutMs: 12_000,
+                    signal: bounded,
+                });
+                return { authorization_url: extractAuthorizationUrl(data) };
             });
-            return { authorization_url: extractAuthorizationUrl(data) };
         },
         disconnect: async (input: { type: string }): Promise<void> => {
             await httpClient().request({

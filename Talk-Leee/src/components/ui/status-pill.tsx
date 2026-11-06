@@ -29,7 +29,7 @@ const DEFAULT_THEME: StatusPillTheme = {
         icon: CheckCircle2,
         iconClassName: "text-emerald-600",
         defaultLabel: "Connected",
-        defaultTooltip: "This connector is active and syncing successfully.",
+        defaultTooltip: "Connected.",
     },
     disconnected: {
         pillClassName: "border-gray-300 bg-gray-100 text-gray-700",
@@ -52,7 +52,7 @@ const DEFAULT_THEME: StatusPillTheme = {
         dotClassName: "bg-red-500",
         icon: AlertCircle,
         iconClassName: "text-red-600",
-        defaultLabel: "Error",
+        defaultLabel: "Needs attention",
         defaultTooltip: "The connector encountered an error. Reconnect or check details.",
     },
 };

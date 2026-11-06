@@ -1,8 +1,18 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { dashboardApi, type Campaign } from "@/lib/dashboard-api";
+import { CampaignStartDialog, useCampaignStartDialog } from "@/components/campaigns/campaign-start-dialog";
+import { CampaignControlNoticeBox } from "@/components/campaigns/campaign-control-notice";
+import {
+    canStartCampaign,
+    runCampaignPause,
+    runCampaignPauses,
+    runCampaignStop,
+    startOutcomeNotice,
+    type CampaignControlNotice,
+} from "@/lib/campaign-control";
 import { CampaignPerformanceTable } from "@/components/campaigns/campaign-performance-table";
 import { EventStream } from "@/components/campaigns/event-stream";
 import { AlertTimeline } from "@/components/campaigns/alert-timeline";
@@ -20,47 +30,24 @@ export default function CampaignsPage() {
     const loading = campaignsQuery.isLoading;
     const error = campaignsQuery.isError ? (campaignsQuery.error instanceof Error ? campaignsQuery.error.message : "Failed to load campaigns") : "";
 
-    const pause = useNotificationMutation({
-        mutationFn: (id: string) => dashboardApi.pauseCampaign(id),
-        onSuccess: (res, id) => {
-            qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => (prev ?? []).map((c) => (c.id === id ? { ...c, status: "paused" } : c)));
-            const termination = res.termination_summary;
-            if (termination.status === "confirmed") {
-                createNotification({ type: "success", title: "Campaign paused", message: res.message });
-            } else {
-                createNotification({
-                    type: "warning",
-                    title: termination.status === "partial" ? "Campaign paused — calls ending" : "Campaign paused — cleanup unverified",
-                    message: res.message,
-                });
-            }
-        },
-        onError: (err) => {
-            void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
-            createNotification({
-                type: "error",
-                title: "Can't pause campaign",
-                message: err instanceof Error ? err.message : "Could not pause the campaign.",
-            });
-        },
-    });
+    // Result of the last Start / Resume, Pause or Stop. `campaignId` = it was
+    // asked from that campaign's details modal and is shown there; null = it
+    // covers the list (Resume Selected, Pause Selected, the command bar).
+    const [notice, setNotice] = useState<{ campaignId: string | null; notice: CampaignControlNotice } | null>(null);
+    // Which details modal (if any) the open Start dialog was asked from.
+    const startScope = useRef<string | null>(null);
 
-    const resume = useNotificationMutation({
-        mutationFn: (id: string) => dashboardApi.startCampaign(id),
-        onSuccess: (_res, id) => {
-            qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) =>
-                (prev ?? []).map((c) => (c.id === id ? { ...c, status: "running", started_at: c.started_at || new Date().toISOString() } : c))
-            );
-            createNotification({ type: "success", title: "Campaign resumed", message: "Campaign started successfully." });
-        },
-        onError: (err) => {
-            // The out-of-minutes 402 ships a structured detail the http
-            // client exposes as `.details`; fall back to the plain message.
-            const detail = (err as { details?: { message?: string } })?.details;
-            const message =
-                (detail && typeof detail.message === "string" && detail.message) ||
-                (err instanceof Error ? err.message : "Could not start the campaign.");
-            createNotification({ type: "error", title: "Can't start campaign", message });
+    // Read the list again so every row shows the backend's own status.
+    const refresh = () => qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
+
+    // The ONE Start / Resume confirmation, shared with the campaign detail
+    // page. Every resume on this page (details modal, Resume Selected, command
+    // bar) opens it; nothing here starts a campaign on its own.
+    const startDialog = useCampaignStartDialog({
+        onFinished: async (outcome) => {
+            const result = startOutcomeNotice(outcome);
+            setNotice(result ? { campaignId: startScope.current, notice: result } : null);
+            await refresh();
         },
     });
 
@@ -82,56 +69,76 @@ export default function CampaignsPage() {
     });
 
     async function handlePause(id: string) {
-        await pause.mutateAsync(id);
+        setNotice(null);
+        const result = await runCampaignPause(id, refresh);
+        if (result) setNotice({ campaignId: id, notice: result });
+        if (result?.kind === "error") void refresh();
     }
 
-    async function handleResume(id: string) {
-        // onError already shows the toast (e.g. out-of-minutes 402); swallow
-        // the rejection so it doesn't bubble as an unhandled promise error.
-        try {
-            await resume.mutateAsync(id);
-        } catch {
-            /* handled in mutation onError */
-        }
+    async function handleStop(id: string) {
+        setNotice(null);
+        const result = await runCampaignStop(id, refresh);
+        if (result) setNotice({ campaignId: id, notice: result });
+        if (result?.kind === "error") void refresh();
+    }
+
+    async function handlePauseMany(targets: Campaign[]) {
+        setNotice(null);
+        const result = await runCampaignPauses(targets, refresh);
+        if (result) setNotice({ campaignId: null, notice: result });
+    }
+
+    function handleResume(ids: string[], detailsId?: string) {
+        setNotice(null);
+        startScope.current = detailsId ?? null;
+        startDialog.open(
+            // A set (Resume Selected, command bar) goes in whole: the dialog
+            // lists by name every campaign it will not start.
+            campaigns.filter((c) => ids.includes(c.id) && (detailsId === undefined || canStartCampaign(c.status))),
+            { listSkipped: detailsId === undefined },
+        );
+    }
+
+    // A closed details modal takes its message with it; a start still running
+    // from it reports to the list instead.
+    function handleNoticeDismiss() {
+        startScope.current = null;
+        setNotice((current) => (current?.campaignId ? null : current));
     }
 
     async function handleDelete(id: string) {
         await removeCampaign.mutateAsync(id);
     }
 
-    async function handleDuplicate(id: string) {
-        const src = campaigns.find((c) => c.id === id);
-        if (!src) return;
-        const now = Date.now();
-        const copy: Campaign = {
-            ...src,
-            id: `camp-copy-${now}`,
-            name: `${src.name} - Copy`,
-            status: "draft",
-            calls_completed: 0,
-            calls_failed: 0,
-            created_at: new Date().toISOString(),
-            started_at: undefined,
-            completed_at: undefined,
-        };
-        qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => [copy, ...(prev ?? [])]);
+    // The copy itself is made by the shared duplicateCampaign (a real
+    // POST /campaigns, see lib/campaign-duplicate); the table calls this once
+    // it exists. The row is never written into the cache here: the list is
+    // read again so the copy shows the backend's own values.
+    async function handleDuplicate() {
+        await qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
     }
 
     return (
         <DashboardLayout title="Campaign Performance" description="Sorting, filtering, bulk actions, and live ops signals">
             <div className="space-y-6">
-                <CommandBar campaigns={campaigns} onPause={handlePause} onResume={handleResume} />
+                <CommandBar campaigns={campaigns} onPause={handlePauseMany} onResume={handleResume} />
+                {notice && notice.campaignId === null ? <CampaignControlNoticeBox notice={notice.notice} testId="campaign-list-notice" /> : null}
                 <CampaignPerformanceTable
                     campaigns={campaigns}
                     loading={loading}
                     error={error}
                     onPause={handlePause}
+                    onStop={handleStop}
+                    onPauseSelected={handlePauseMany}
                     onResume={handleResume}
+                    notice={notice && notice.campaignId !== null ? { campaignId: notice.campaignId, notice: notice.notice } : null}
+                    onNoticeDismiss={handleNoticeDismiss}
                     onDelete={handleDelete}
                     onDuplicate={handleDuplicate}
                 />
                 <EventStream campaigns={campaigns} />
                 <AlertTimeline campaigns={campaigns} />
+                <CampaignStartDialog dialog={startDialog} />
             </div>
         </DashboardLayout>
     );

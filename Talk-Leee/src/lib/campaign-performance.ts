@@ -1,6 +1,8 @@
 import type { Campaign } from "@/lib/dashboard-api";
+import { campaignStatusLabel } from "@/lib/campaign-status";
 
-export type CampaignStatus = "Active" | "Paused" | "Completed" | "Draft" | "Failed";
+/** A status label from the shared helper (lib/campaign-status). */
+export type CampaignStatus = string;
 export type SortDir = "asc" | "desc";
 export type CampaignSortKey =
     | "name"
@@ -23,16 +25,6 @@ export type CampaignFilters = {
 
 function clamp(value: number, min: number, max: number) {
     return Math.min(max, Math.max(min, value));
-}
-
-export function normalizeCampaignStatus(status: string): CampaignStatus {
-    const s = (status || "").toLowerCase();
-    if (s === "running" || s === "active") return "Active";
-    if (s === "paused") return "Paused";
-    if (s === "completed") return "Completed";
-    if (s === "draft") return "Draft";
-    if (s === "failed" || s === "stopped") return "Failed";
-    return "Draft";
 }
 
 export function campaignProgressPct(campaign: Campaign): number {
@@ -59,7 +51,7 @@ export function progressColorClass(progressPct: number) {
 
 export function statusBadgeClass(status: CampaignStatus) {
     switch (status) {
-        case "Active":
+        case "Running":
             return "bg-transparent border border-black/70 text-emerald-800 dark:border-white/70 dark:text-emerald-300";
         case "Paused":
             return "bg-transparent border border-black/70 text-amber-800 dark:border-white/70 dark:text-amber-300";
@@ -67,6 +59,7 @@ export function statusBadgeClass(status: CampaignStatus) {
             return "bg-transparent border border-black/70 text-blue-800 dark:border-white/70 dark:text-blue-300";
         case "Draft":
             return "bg-transparent border border-black/70 text-gray-800 dark:border-white/70 dark:text-gray-200";
+        case "Stopped":
         case "Failed":
             return "bg-transparent border border-black/70 text-red-800 dark:border-white/70 dark:text-red-300";
         default:
@@ -89,7 +82,7 @@ function getSortValue(campaign: Campaign, key: CampaignSortKey) {
         case "name":
             return campaign.name || "";
         case "status":
-            return normalizeCampaignStatus(campaign.status);
+            return campaignStatusLabel(campaign.status);
         case "progress":
             return campaignProgressPct(campaign);
         case "successRate":
@@ -133,7 +126,7 @@ export function applyCampaignFilters(items: Campaign[], filters: CampaignFilters
     const hi = Math.max(min, max);
 
     return items.filter((c) => {
-        const st = normalizeCampaignStatus(c.status);
+        const st = campaignStatusLabel(c.status);
         if (statuses.size > 0 && !statuses.has(st)) return false;
         const sr = campaignSuccessRatePct(c);
         if (sr < lo || sr > hi) return false;
@@ -285,7 +278,7 @@ export function campaignsToCsv(campaigns: Campaign[]) {
         const row = [
             c.id,
             csvEscape(c.name),
-            normalizeCampaignStatus(c.status),
+            campaignStatusLabel(c.status),
             String(c.total_leads ?? 0),
             String(c.calls_completed ?? 0),
             String(c.calls_failed ?? 0),

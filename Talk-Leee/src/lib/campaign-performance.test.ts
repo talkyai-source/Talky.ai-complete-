@@ -6,10 +6,10 @@ import {
     campaignProgressPct,
     campaignSuccessRatePct,
     groupEventTime,
-    normalizeCampaignStatus,
     paginate,
     parseCommandInput,
 } from "@/lib/campaign-performance";
+import { campaignStatusLabel } from "@/lib/campaign-status";
 import type { Campaign } from "@/lib/dashboard-api";
 
 function makeCampaign(overrides: Partial<Campaign>): Campaign {
@@ -30,13 +30,13 @@ function makeCampaign(overrides: Partial<Campaign>): Campaign {
     };
 }
 
-test("normalizeCampaignStatus maps known statuses", () => {
-    assert.equal(normalizeCampaignStatus("running"), "Active");
-    assert.equal(normalizeCampaignStatus("paused"), "Paused");
-    assert.equal(normalizeCampaignStatus("completed"), "Completed");
-    assert.equal(normalizeCampaignStatus("draft"), "Draft");
-    assert.equal(normalizeCampaignStatus("failed"), "Failed");
-    assert.equal(normalizeCampaignStatus("stopped"), "Failed");
+test("the list's status label maps known statuses", () => {
+    assert.equal(campaignStatusLabel("running"), "Running");
+    assert.equal(campaignStatusLabel("paused"), "Paused");
+    assert.equal(campaignStatusLabel("completed"), "Completed");
+    assert.equal(campaignStatusLabel("draft"), "Draft");
+    assert.equal(campaignStatusLabel("failed"), "Failed");
+    assert.equal(campaignStatusLabel("stopped"), "Stopped");
 });
 
 test("campaignProgressPct clamps and handles zero leads", () => {
@@ -58,7 +58,7 @@ test("applyCampaignFilters supports status, success range, and query", () => {
         makeCampaign({ id: "c", name: "Draft X", status: "draft", calls_completed: 0, calls_failed: 0 }),
     ];
 
-    const filtered = applyCampaignFilters(items, { statuses: ["Active"], successMin: 0, successMax: 100, query: "" });
+    const filtered = applyCampaignFilters(items, { statuses: ["Running"], successMin: 0, successMax: 100, query: "" });
     assert.deepEqual(filtered.map((c) => c.id), ["a"]);
 
     const filtered2 = applyCampaignFilters(items, { statuses: [], successMin: 60, successMax: 100, query: "" });

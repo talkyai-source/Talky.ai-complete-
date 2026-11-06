@@ -25,17 +25,14 @@ function ConnectorsCallbackInner() {
         } catch {
         }
 
-        let stableEventId = randomEventId();
-        try {
-            const existing = sessionStorage.getItem("connectors.callback.eventId");
-            if (existing) stableEventId = existing;
-            else sessionStorage.setItem("connectors.callback.eventId", stableEventId);
-        } catch {
-        }
+        // Every return carries its own id. A stored id would be inherited by the
+        // next popup opened from the same tab, and the opener would then drop
+        // that popup's return as a duplicate of an earlier one.
+        const eventId = randomEventId();
 
         const payload = {
             type: "connectors:updated",
-            eventId: stableEventId,
+            eventId,
             ok: parsed.ok,
             providerType: parsed.providerType,
             message: parsed.message,
@@ -67,6 +64,9 @@ function ConnectorsCallbackInner() {
             if (!deliveredToOpener) localStorage.setItem("connectors.refresh.event", JSON.stringify({ ...payload, ts: Date.now() }));
         } catch {
         }
+
+        // A failure stays open so its sentence can be read; only a success closes itself.
+        if (!parsed.ok) return;
 
         const t = window.setTimeout(() => {
             try {

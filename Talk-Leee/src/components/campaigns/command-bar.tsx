@@ -36,8 +36,10 @@ export function CommandBar({
     onResume,
 }: {
     campaigns: Campaign[];
-    onPause: (id: string) => Promise<void>;
-    onResume: (id: string) => Promise<void>;
+    /** Pauses the given campaigns (only the running ones are acted on). */
+    onPause: (campaigns: Campaign[]) => Promise<void>;
+    /** Opens the shared Start / Resume dialog for these campaign ids. */
+    onResume: (ids: string[]) => void;
 }) {
     const router = useRouter();
     const [open, setOpen] = useState(false);
@@ -137,9 +139,7 @@ export function CommandBar({
                     title: "Pause all active campaigns",
                     subtitle: "Prototype action",
                     action: async () => {
-                        for (const c of campaigns) {
-                            if ((c.status || "").toLowerCase() === "running") await onPause(c.id);
-                        }
+                        await onPause(campaigns.filter((c) => (c.status || "").toLowerCase() === "running"));
                     },
                 },
                 {
@@ -148,11 +148,11 @@ export function CommandBar({
                     title: "Resume all paused campaigns",
                     subtitle: resumeReadiness.reason || "Calling routes are ready",
                     disabled: !resumeReadiness.ready,
-                    action: async () => {
+                    // Never starts anything itself: the shared dialog asks who
+                    // speaks first and sends the request.
+                    action: () => {
                         if (!resumeReadiness.ready) return;
-                        for (const c of campaigns) {
-                            if ((c.status || "").toLowerCase() === "paused") await onResume(c.id);
-                        }
+                        onResume(campaigns.filter((c) => (c.status || "").toLowerCase() === "paused").map((c) => c.id));
                     },
                 },
             ];

@@ -29,6 +29,7 @@ import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
+import { campaignStatusLabel } from "@/lib/campaign-status";
 
 function Counter({ value }: { value: number }) {
     const nodeRef = useRef<HTMLSpanElement>(null);
@@ -1411,7 +1412,7 @@ export default function DashboardPage() {
             return {
                 id: c.id,
                 title: c.name,
-                detail: `${c.calls_completed} completed • ${c.calls_failed} failed • ${c.status}`,
+                detail: `${c.calls_completed} completed • ${c.calls_failed} failed • ${campaignStatusLabel(c.status)}`,
                 timeLabel: time,
                 tone,
             };
@@ -1998,7 +1999,7 @@ export default function DashboardPage() {
                                                                 : "bg-gray-100 text-gray-800 dark:bg-gray-500/20 dark:text-gray-200"
                                                         }`}
                                                 >
-                                                    {campaign.status}
+                                                    {campaignStatusLabel(campaign.status)}
                                                 </span>
                                                 <ArrowUpRight className="w-4 h-4 text-gray-700 dark:text-muted-foreground" />
                                             </div>
