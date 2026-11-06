@@ -10,6 +10,8 @@ from unittest.mock import AsyncMock
 import pytest
 from pydantic import ValidationError
 
+from app.core import log_redact
+
 from app.api.v1.endpoints.telephony_sip.schemas import SIPTrunkCreateRequest, SIPTrunkUpdateRequest
 from scripts import reconcile_pjsip_configs as reconcile
 from tests.unit.test_pjsip_config_reconciliation import (
@@ -68,19 +70,28 @@ def build(rows, tmp_path, *, decrypt=None, inventory=None):
     ("sip_domain", "private-host\n[forged-host]"),
     ("port", 70000),
 ])
-def test_invalid_persisted_trunk_does_not_abort_good_config_or_its_route(tmp_path, caplog, field, value):
-    bad = _assignment_row(TRUNK_A, account="150001")
+def test_invalid_persisted_trunk_does_not_abort_good_config_or_its_route(tmp_path, caplog, monkeypatch, field, value):
+    # A valid UUID with hex letters stays distinct from phone-like digit runs.
+    bad_id = "abcdeabc-abcd-4abc-8abc-abcdefabcdef"
+    bad = _assignment_row(bad_id, account="150001")
     bad[field] = value
     good = _assignment_row(TRUNK_B, account="150002", did="+442046132301",
                            trunk_tenant_id=TENANT_B, assignment_tenant_id=TENANT_B)
-    candidate = build([bad, good], tmp_path)
+    # Exercise the actual privacy filter even in an isolated file run.
+    monkeypatch.setattr(log_redact, "pii_redaction_enabled", lambda: True)
+    pii_filter = log_redact.PIIRedactionFilter()
+    caplog.handler.addFilter(pii_filter)
+    try:
+        candidate = build([bad, good], tmp_path)
+    finally:
+        caplog.handler.removeFilter(pii_filter)
     assert f"pjsip.d/trunk-{TRUNK_B}.conf" in candidate.files
-    assert f"pjsip.d/trunk-{TRUNK_A}.conf" not in candidate.files
+    assert f"pjsip.d/trunk-{bad_id}.conf" not in candidate.files
     assert [route.trunk_id for route in candidate.routes] == [TRUNK_B]
-    assert candidate.invalid_trunks == (f"trunk-{TRUNK_A}:invalid_configuration",)
+    assert candidate.invalid_trunks == (f"trunk-{bad_id}:invalid_configuration",)
     assert str(value) not in caplog.text
     assert "synthetic-safe-secret" not in caplog.text
-    assert f"trunk-{TRUNK_A}" in caplog.text
+    assert f"trunk-{bad_id}" in caplog.text
 
 
 def test_decrypted_password_value_error_is_isolated_without_secret_logging(tmp_path, caplog):
