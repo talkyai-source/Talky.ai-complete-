@@ -289,8 +289,10 @@ async def lifespan(app: FastAPI):
     from app.core.sentry_init import init_sentry
     from app.core.telemetry import setup_telemetry, shutdown_telemetry
 
-    environment = os.getenv("ENVIRONMENT", "development")
-    strict_validation = environment.strip().lower() == "production"
+    from app.core.prod_gate import normalized_environment
+
+    environment = normalized_environment()
+    strict_validation = environment == "production"
 
     # ── 0. Production gate (T0.2 + T0.3) ─────────────────────────
     # Refuse to boot in production if any obvious fatal misconfig is
@@ -1028,7 +1030,7 @@ async def lifespan(app: FastAPI):
 
 
 _settings_for_app = get_settings()
-_is_prod = (_settings_for_app.environment or "").lower() == "production"
+_is_prod = (_settings_for_app.environment or "").strip().lower() == "production"
 
 # Vuln-fix 2026-05-21: lock the FastAPI auto-generated docs to non-prod.
 # In production /docs, /redoc, /openapi.json hand any visitor a complete
