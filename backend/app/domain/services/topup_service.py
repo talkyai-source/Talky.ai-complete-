@@ -227,18 +227,23 @@ class TopupService:
         )
         return out
 
-    async def attach_session(self, order_id: str, session_id: str) -> None:
+    async def attach_session(
+        self, order_id: str, session_id: str, *, tenant_id: Optional[str] = None,
+    ) -> None:
         """Link the order to the provider's checkout session.
 
         If this write is lost the order can never be matched to its payment, so
         a zero-row result raises rather than passing quietly.
         """
-        async with acquire_with_tenant(self._pool, None) as conn:
+        if not tenant_id:
+            raise TopupError("Tenant context is required to attach a checkout session.")
+        async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
             tag = await conn.execute(
                 "UPDATE topup_orders SET provider_session_id = $2, updated_at = NOW() "
-                " WHERE id = $1::uuid",
+                " WHERE id = $1::uuid AND tenant_id = $3::uuid",
                 str(order_id),
                 session_id,
+                str(tenant_id),
             )
         if _rows_affected(tag) == 0:
             raise TopupError(

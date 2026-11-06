@@ -171,7 +171,7 @@ async def test_campaign_hangup_timeout_retains_truthful_failure_summary(monkeypa
     monkeypatch.setattr(db, "_ACQUIRE_TIMEOUT_S", 0.02)
     monkeypatch.setattr(container, "get_container", lambda: SimpleNamespace(db_pool=pool))
     async with pool.acquire():
-        result = await asyncio.wait_for(telephony_bridge.hangup_calls_for_campaign(CALL), 0.5)
+        result = await asyncio.wait_for(telephony_bridge.hangup_calls_for_campaign(CALL, tenant_id=TENANT), 0.5)
     assert result["status"] == "lookup_failed"
     assert result["lookup_error"] == "database_lookup_failed"
     assert pool.conn.events == []

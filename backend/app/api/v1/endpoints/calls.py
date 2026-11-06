@@ -1378,21 +1378,23 @@ async def list_calls(
                              ORDER BY leg.created_at, leg.id LIMIT 1)
                                AS outbound_from_number,
                            (SELECT r.id FROM recordings_s3 r
-                             WHERE r.call_id = c.id AND r.status = 'uploaded'
+                             WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id
+                               AND r.status = 'uploaded'
                              ORDER BY r.created_at DESC LIMIT 1) AS recording_id,
                            (SELECT r.status FROM recordings_s3 r
-                             WHERE r.call_id = c.id
+                             WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1) AS recording_status,
                            ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '')
                              OR EXISTS (SELECT 1 FROM transcripts tr
                                          WHERE tr.call_id = c.id
+                                           AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL)
                                            AND COALESCE(tr.full_text, '') <> ''))
                                AS has_transcript,
                            EXISTS (SELECT 1 FROM call_feedback f
-                                    WHERE f.call_id = c.id) AS has_feedback,
+                                    WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback,
                            {_captured_contact_rows_sql()} AS captured_contact_rows
                     FROM calls c
-                    LEFT JOIN campaigns camp ON camp.id = c.campaign_id
+                    LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id
                     WHERE {where}
                     ORDER BY c.created_at DESC
                     LIMIT ${idx} OFFSET ${idx + 1}
@@ -1583,23 +1585,25 @@ async def get_call(
                            camp.name AS campaign_name,
                            (SELECT tr.full_text FROM transcripts tr
                              WHERE tr.call_id=c.id
+                               AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL)
                              ORDER BY tr.created_at DESC LIMIT 1)
                                AS persisted_transcript,
                            EXISTS (SELECT 1 FROM transcripts tr
                                     WHERE tr.call_id=c.id
+                                      AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL)
                                       AND COALESCE(tr.full_text, '') <> '')
                                AS has_transcript,
                            (SELECT r.id FROM recordings_s3 r
-                             WHERE r.call_id=c.id
+                             WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1)
                                AS recording_id,
                            (SELECT r.status FROM recordings_s3 r
-                             WHERE r.call_id=c.id
+                             WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1)
                                AS recording_status,
                            (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int
                              FROM inbound_usage_transactions u
-                             WHERE u.call_id=c.id
+                             WHERE u.call_id=c.id AND u.tenant_id=c.tenant_id
                                AND u.call_leg_id IS NULL
                                AND u.transaction_type IN ('finalize','release','reverse')
                              ORDER BY u.created_at DESC LIMIT 1)
@@ -1612,7 +1616,7 @@ async def get_call(
                                AS outbound_from_number,
                            to_jsonb(c)->'summary_json' AS persisted_summary_json
                     FROM calls c
-                    LEFT JOIN campaigns camp ON camp.id=c.campaign_id
+                    LEFT JOIN campaigns camp ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id
                     WHERE c.id=$1 AND c.tenant_id=$2
                     """,
                     call_uuid,

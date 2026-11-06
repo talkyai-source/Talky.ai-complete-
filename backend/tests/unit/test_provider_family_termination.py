@@ -316,7 +316,8 @@ async def test_campaign_batch_holds_entire_mismatched_call(monkeypatch, parent, 
     )
     monkeypatch.setattr(telephony_bridge, "_adapter", adapter)
     result = await telephony_bridge.hangup_calls_for_campaign(
-        "00000000-0000-4000-8000-000000000004"
+        "00000000-0000-4000-8000-000000000004",
+        tenant_id="00000000-0000-4000-8000-000000000002",
     )
     matched = parent == child == "asterisk"
     assert result["confirmed"] == int(matched)

@@ -49,7 +49,7 @@ async def test_the_live_switch_lists_minutes_bought_with_a_test_card(monkeypatch
         order = await service.create_order(tenant_id=str(tenant), user_id=None,
                                            package_code="payg_125", audience=PAYG)
         session = "cs_test_" + uuid4().hex
-        await service.attach_session(str(order["id"]), session)
+        await service.attach_session(str(order["id"]), session, tenant_id=str(tenant))
         assert await service.credit_paid_order(session_id=session, event_id="evt_" + uuid4().hex)
 
         monkeypatch.setattr("app.core.config.get_settings", lambda: SimpleNamespace(database_url=dsn))

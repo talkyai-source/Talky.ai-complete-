@@ -305,7 +305,7 @@ async def create_topup_checkout(
         )
 
     try:
-        await svc.attach_session(str(order["id"]), session["session_id"])
+        await svc.attach_session(str(order["id"]), session["session_id"], tenant_id=tenant_id)
     except TopupError as e:
         logger.error(
             "topup_session_orphaned order=%s session=%s — a payment on this "

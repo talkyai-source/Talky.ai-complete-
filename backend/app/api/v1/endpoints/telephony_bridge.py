@@ -2692,9 +2692,11 @@ async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
                 await conn.execute("SET LOCAL app.bypass_rls = 'on'")
                 row = await conn.fetchrow(
                     "SELECT tenant_id FROM calls "
-                    "WHERE external_call_uuid = $1 OR provider_call_id = $1 "
+                    "WHERE (external_call_uuid = $1 OR provider_call_id = $1) "
+                    "AND tenant_id = $2::uuid "
                     "ORDER BY created_at DESC LIMIT 1",
                     call_id,
+                    ctx.tenant_id,
                 )
     except DatabasePoolTimeoutError:
         raise
@@ -2987,7 +2989,9 @@ def _empty_campaign_termination_summary(
     }
 
 
-async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
+async def hangup_calls_for_campaign(
+    campaign_id: str, *, tenant_id: str | None = None,
+) -> dict[str, object]:
     """Fence, request, and prove every active campaign-call hangup.
 
     Selected calls are atomically moved to non-terminal
@@ -2999,6 +3003,11 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
     Lookup failures are explicit and missing provider identities remain in the
     selected/deferred totals; neither case can masquerade as zero live calls.
     """
+    if not tenant_id:
+        return _empty_campaign_termination_summary(
+            status="lookup_failed",
+            error="tenant_context_required",
+        )
 
     try:
         from app.core.container import get_container
@@ -3051,11 +3060,13 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                         FROM calls c
                         WHERE c.campaign_id=$1::uuid
                           AND c.status=ANY($2::text[])
+                          AND c.tenant_id=$3::uuid
                         ORDER BY c.id
                         FOR UPDATE OF c
                         """,
                         campaign_id,
                         list(active),
+                        tenant_id,
                     )
                 )
                 durable_ids = [str(row["durable_call_id"]) for row in call_rows]
@@ -3109,9 +3120,11 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                            SET status='termination_pending', updated_at=NOW()
                          WHERE id::text=ANY($1::text[])
                            AND status=ANY($2::text[])
+                           AND tenant_id=$3::uuid
                         """,
                         durable_ids,
                         list(active),
+                        tenant_id,
                     )
     except Exception as exc:
         logger.error("hangup_calls_for_campaign db lookup failed: %s", exc)

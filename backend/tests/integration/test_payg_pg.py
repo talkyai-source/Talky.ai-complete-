@@ -158,7 +158,7 @@ async def _buy(db, key, code, audience):
     order = await db.service.create_order(tenant_id=str(db.tenants[key]), user_id=None, package_code=code,
                                           audience=audience)
     session = "cs_test_" + uuid4().hex
-    await db.service.attach_session(str(order["id"]), session)
+    await db.service.attach_session(str(order["id"]), session, tenant_id=str(db.tenants[key]))
     assert await db.service.credit_paid_order(session_id=session, event_id="evt_" + uuid4().hex)
     return order
 

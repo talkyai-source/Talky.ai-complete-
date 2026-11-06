@@ -32,7 +32,7 @@ class _Svc:
         self.created += 1
         return dict(ORDER)
 
-    async def attach_session(self, *_a):
+    async def attach_session(self, *_a, tenant_id):
         return None
 
 

@@ -624,7 +624,9 @@ class CampaignService:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            termination = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(
+                campaign_id, tenant_id=scoped_tenant or campaign.get("tenant_id"),
+            )
         except Exception as exc:
             logger.warning("pause_campaign hangup sweep failed: %s", exc)
 
@@ -734,7 +736,9 @@ class CampaignService:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            termination = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(
+                campaign_id, tenant_id=scoped_tenant or campaign.get("tenant_id"),
+            )
         except Exception as exc:
             logger.warning("stop_campaign hangup sweep failed: %s", exc)
 
