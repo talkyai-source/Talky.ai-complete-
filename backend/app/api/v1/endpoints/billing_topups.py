@@ -23,6 +23,7 @@ a request, and the fact that the UI only ever sends good values is not a control
 — it is a hope.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import csv
 import io
@@ -266,7 +267,7 @@ async def create_topup_checkout(
     try:
         billing_base = billing_return_urls()
     except CheckoutError as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        raise HTTPException(status_code=e.status_code, detail=safe_exception_message(e, 'The request could not be completed.'))
     success_url = f"{billing_base}?topup=success"
     cancel_url = f"{billing_base}?topup=cancelled"
 
@@ -278,7 +279,7 @@ async def create_topup_checkout(
             audience=audience,
         )
     except TopupError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
 
     try:
         session = await billing.create_topup_checkout_session(

@@ -4,6 +4,7 @@ OAuth flows and connector management.
 
 Day 24: Unified Connector System
 """
+from app.core.error_handlers import safe_exception_message
 import asyncio
 import os
 import logging
@@ -502,7 +503,7 @@ async def _start_connector_authorization(*, connector_type, provider, name,
             current_user, "tenant_oauth_start", request=http_request))
         pending = await lifecycle.create_pending(current_user.tenant_id, connector_type, provider, name)
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Connector authorization could not be confirmed. Check connection status before starting again.") from exc
 
@@ -597,7 +598,7 @@ async def _disconnect_connector(db_client: Client, tenant_id: str, connector_id:
             tenant_id, connector_id, revoke_token=_revoke_token_at_provider
         )
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not confirm connector disconnect. Check its current status before trying again.") from exc
 
@@ -1032,7 +1033,7 @@ async def refresh_connector_tokens(
         _, account = await ConnectorLifecycle(db_client, actor=ConnectorActor.human(
             current_user, "tenant_refresh", request=request)).refresh(str(current_user.tenant_id), connector_id)
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Refresh could not be confirmed. Check connection status; reauthorize if its outcome is unknown.") from exc
     return {"success": True, "message": "Tokens refreshed", "audit_event_id": account["audit_event_id"],

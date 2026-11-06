@@ -17,6 +17,7 @@ import. An importer that decides all that silently is how a campaign ends up
 dialling a column of postcodes.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import csv
 import io
@@ -236,7 +237,7 @@ async def set_lead_fields(
             ]
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     async with acquire_with_tenant(container.db_pool, tenant_id) as conn:
         campaign = await conn.fetchrow(
             """
@@ -388,7 +389,7 @@ async def correct_lead_detail(
             validation_status="cancelled" if withdrawn else None,
         )
     except InvalidCaptureError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     if not written:
         # Should not happen: manual_edit is the top rank. If it does, something
         # is wrong with the ordering and silence would hide it.

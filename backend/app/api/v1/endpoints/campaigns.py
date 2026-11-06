@@ -8,6 +8,7 @@ Day 9 Additions:
 
 Refactored: Business logic delegates to CampaignService.
 """
+from app.core.error_handlers import safe_exception_message
 import logging
 import os
 import uuid
@@ -372,7 +373,7 @@ def _build_validated_script_config(
             campaign_brief=campaign_brief,
         )
     except CampaignPromptValidationError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
 
 async def _valid_voice_ids_for_provider(provider: str, *, pool=None, tenant_id=None) -> set[str]:
@@ -517,7 +518,7 @@ async def preview_prompt(
             agent_names=[body.agent_name],
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     violation = guidance_budget_violation(guidance, brief)
     if violation is not None:
         raise HTTPException(
@@ -540,7 +541,7 @@ async def preview_prompt(
             campaign_brief=brief,
         )
     except PromptCompositionError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     greeting = build_persona_greeting(
         persona_type=body.persona_type,
@@ -931,7 +932,7 @@ async def list_campaign_calls_with_transcripts(
             page_size=page_size,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.'))
     except Exception as exc:
         logger.error(f"fetch_campaign_transcripts failed campaign={campaign_id}: {exc}")
         raise HTTPException(status_code=500, detail="Failed to load campaign transcripts")
@@ -2150,7 +2151,7 @@ async def list_campaign_contacts(
         raise
     except Exception as e:
         logger.error(f"Error listing contacts for campaign {campaign_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'The request could not be completed.'))
 
 
 @router.delete("/{campaign_id}/contacts/{contact_id}", dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])

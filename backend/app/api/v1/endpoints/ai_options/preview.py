@@ -9,6 +9,7 @@ Endpoints:
   POST /voices/prefetch           - pre-download / pre-synth every voice
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 from app.domain.services.voice_eligibility import VoiceEligibilityError, require_elevenlabs_voice_eligible, filter_tenant_voices
 
@@ -292,7 +293,7 @@ async def preview_voice(request: VoicePreviewRequest, current_user=Depends(get_c
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Voice preview failed: {str(e)}"
+            detail=safe_exception_message(e, 'Voice preview failed.')
         )
 
 

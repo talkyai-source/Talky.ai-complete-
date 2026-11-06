@@ -1,6 +1,7 @@
 """Per-conversation review endpoints (goals.md §3)."""
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import logging
 from datetime import datetime
@@ -108,7 +109,7 @@ def _as_http(exc: Exception) -> HTTPException:
     if isinstance(exc, ReviewNotFoundError):
         return HTTPException(status_code=404, detail="Review not found")
     if isinstance(exc, InvalidReviewError):
-        return HTTPException(status_code=422, detail=str(exc))
+        return HTTPException(status_code=422, detail=safe_exception_message(exc, 'The request could not be completed.'))
     return HTTPException(status_code=500, detail="Review operation failed")
 
 

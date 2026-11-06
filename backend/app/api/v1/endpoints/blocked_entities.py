@@ -1,6 +1,7 @@
 """
 Admin Blocked Entities Management
 """
+from app.core.error_handlers import safe_exception_message
 import logging
 from datetime import datetime
 from typing import List, Optional
@@ -86,7 +87,7 @@ async def block_entity(
     try:
         normalized = normalize_e164_for_storage(request.value)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     try:
         import uuid

@@ -16,6 +16,7 @@ Endpoints
                                    (includes global entries)
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import logging
 from datetime import datetime
@@ -234,7 +235,7 @@ async def caller_opt_out(
             actor_role=getattr(current_user, "role", None),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     logger.warning(
         "dnc_caller_opt_out tenant=%s number=%s call=%s",
         tenant_id, entry.normalized_number, payload.call_id,

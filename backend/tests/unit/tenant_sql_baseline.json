@@ -3026,20 +3026,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5921cb07713a7dc60990e27664740d3efc423240ba2404618788a1017a98ceab",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "_has_active_compliance_hold",
-      "line": 826,
-      "method": "fetchval",
-      "tables": [],
-      "sql": "SELECT {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='$1'))])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "5ae93d090067db544ef128734d15417684cd578c40e1ab7ab37fef849655f72c",
       "file": "app/domain/services/support/staff_service.py",
       "function": "_detail",
@@ -8677,6 +8663,20 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
+      "id": "ed18b3f2eab15af78f4716c16696fd7a530056f0da03bb5eeac84f5bc54dfb36",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "_has_active_compliance_hold",
+      "line": 827,
+      "method": "fetchval",
+      "tables": [],
+      "sql": "SELECT {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='$1'))])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
       "id": "ed51ea4a73b29be0c57496f276149b2d48d7ec0c9dda2af9068f5a0ef02fa4fd",
       "file": "app/services/email_service.py",
       "function": "EmailService._update_action_status",
@@ -9455,21 +9455,6 @@
   ],
   "exceptions": [
     {
-      "id": "03a05bd8a2c8f7c34d082d6b5adda55d037885c45e7a409532fcf129cf99cb45",
-      "file": "app/api/v1/endpoints/auth/password_reset.py",
-      "function": "reset_password",
-      "line": 413,
-      "method": "enforce_budget",
-      "tables": [],
-      "sql": "reset-ip",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This reset-prefixed string is a Redis abuse-budget namespace, not SQL RESET or a tenant database statement. Exact reviewed operation: enforce_budget; app/api/v1/endpoints/auth/password_reset.py:413.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "043dfe24a991c8214ae254e6a18382f5a977360b6e6702dc0b067451b1f6862f",
       "file": "app/api/v1/endpoints/abuse_monitoring.py",
       "function": "delete_abuse_rule",
@@ -9621,23 +9606,6 @@
       "count": 1,
       "category": "reviewed_tenant_scoped",
       "reason": "CallWorkflowService._require_call always binds tenant_id=$1 and call id=$2 before either read or save. The sole optional SQL fragment is FOR UPDATE; it cannot remove the tenant predicate. Both mounted routes obtain tenant from authenticated CurrentUser and refuse missing context. Exact reviewed operation: fetchrow; app/domain/services/call_workflow_service.py:53."
-    },
-    {
-      "id": "08f4b80b53c99cb2cd56615bc3b8d26e61dffd839bdc74e61bf93797afc307b0",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "list_admin_media_deletions",
-      "line": 261,
-      "method": "_read_media_deletions",
-      "tables": [
-        "admin_media_deletion_intents"
-      ],
-      "sql": "SELECT id,resource_type,resource_id,tenant_id,call_id, actor_id AS original_actor_id,reason,status,attempt_count,created_at, updated_at,object_deleted_at,completed_at FROM admin_media_deletion_intents{IfExp(test=Name(id='predicates', ctx=Load()), body=BinOp(left=Constant(value=' WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='predicates', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY created_at DESC,id DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='values', ctx=Load())], keywords=[])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Delegated SQL goes to _read_media_deletions, which rechecks current platform administrator authority inside the transaction. These are administrator deletion-receipt list/detail reads spanning customer tenants; the exact delegated query and module are pinned. Exact reviewed operation: _read_media_deletions; app/api/v1/endpoints/admin/media.py:261.",
-      "category": "platform_admin"
     },
     {
       "id": "092825f6b2bb5bf3a5e6a5cbccae33af8f51a22c96d8a1f2a2c81ae9e359f3bc",
@@ -9818,21 +9786,6 @@
       "category": "not_database_sql"
     },
     {
-      "id": "1136e99af0c7c76f3ea0a93135e06f5c20e7fbab75965e6d6dc0abfc5c19fa6f",
-      "file": "app/api/v1/endpoints/campaigns.py",
-      "function": "add_contact_to_campaign",
-      "line": 1921,
-      "method": "_require_contact_write",
-      "tables": [],
-      "sql": "create",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _require_contact_write; app/api/v1/endpoints/campaigns.py:1921.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "11b7c1671255c24158ccddbfab70212f74674574ee36b9bde21117b534144d67",
       "file": "app/infrastructure/connectors/crm/salesforce.py",
       "function": "SalesforceConnector.probe",
@@ -9880,6 +9833,24 @@
       "category": "not_database_sql"
     },
     {
+      "id": "13bf4262a7d5a6a174cd85989801338f1603356e5c830c2001121f631ba7778c",
+      "file": "app/api/v1/endpoints/admin/connectors.py",
+      "function": "list_admin_connectors",
+      "line": 139,
+      "method": "fetch",
+      "tables": [
+        "connector_accounts",
+        "connectors"
+      ],
+      "sql": "SELECT c.id,c.tenant_id,c.type,c.provider,c.name,c.status,c.created_at, c.provider_revocation_status,t.business_name AS tenant_name, a.account_email,a.token_expires_at,a.last_refreshed_at,a.refresh_state,a.creation_ties FROM connectors c JOIN tenants t ON t.id=c.tenant_id LEFT JOIN LATERAL ( SELECT account_email,token_expires_at,last_refreshed_at,refresh_state, count(*) OVER(PARTITION BY created_at) AS creation_ties FROM connector_accounts WHERE connector_id=c.id AND tenant_id=c.tenant_id AND status='active' ORDER BY created_at DESC,id DESC LIMIT 1 ) a ON TRUE {IfExp(test=Name(id='filters', ctx=Load()), body=BinOp(left=Constant(value=' WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY c.created_at DESC,c.id DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=2)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin connector directory/statistics (line 96) intentionally covers every tenant. The latest account subquery joins connector_id and tenant_id together. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/connectors.py:138.",
+      "category": "platform_admin"
+    },
+    {
       "id": "16bc7df9be6214a980c9cca96efb291c96013ca1ce390f93d3456128053410dc",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.authorize_retry",
@@ -9911,6 +9882,25 @@
       "bypass": true,
       "count": 1,
       "reason": "Platform partner directory and counts are guarded by require_platform_admin at line 44; partner identities are platform resources, not owned by the requesting tenant. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/partners.py:69.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "1775c9db43235ab5e3063376d1cee2cab27d672d7c66152f8cfa94a8673f9c39",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "list_admin_recordings",
+      "line": 477,
+      "method": "fetchval",
+      "tables": [
+        "calls",
+        "campaigns",
+        "recordings_s3"
+      ],
+      "sql": "SELECT COUNT(*) FROM recordings_s3 r JOIN calls c ON c.id = r.call_id LEFT JOIN tenants t ON t.id = r.tenant_id LEFT JOIN campaigns cp ON cp.id = r.campaign_id {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin recording inventory (line 434) intentionally spans tenants, with optional customer/date/status filters; tenant-user recording routes are separate. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/media.py:476.",
       "category": "platform_admin"
     },
     {
@@ -9948,6 +9938,23 @@
       "category": "system_partner_aggregate"
     },
     {
+      "id": "18e8c322da1dd1ef797c70e7a54e77eb9641d57debde188f5edf5a9e016f4870",
+      "file": "app/api/v1/endpoints/admin/connectors.py",
+      "function": "list_admin_connectors",
+      "line": 138,
+      "method": "fetchval",
+      "tables": [
+        "connectors"
+      ],
+      "sql": "SELECT count(*) FROM connectors c{IfExp(test=Name(id='filters', ctx=Load()), body=BinOp(left=Constant(value=' WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin connector directory/statistics (line 96) intentionally covers every tenant. The latest account subquery joins connector_id and tenant_id together. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/connectors.py:137.",
+      "category": "platform_admin"
+    },
+    {
       "id": "19ff196a831ffd20e7cea06fcd9d3ff8fdec9bf20db135f4889977c528f72665",
       "file": "app/api/v1/endpoints/telephony_bridge.py",
       "function": "hangup_calls_for_campaign",
@@ -9980,23 +9987,6 @@
       "count": 1,
       "reason": "Parent call selection binds c.id=$1 and c.tenant_id=$2 from authentication. Recording/campaign/billing children bind c.tenant_id; nullable transcripts require the owned call and NULL or matching tenant. Tenantless call_legs is fetched only after that parent is authorized. Parent ran foreign-child, legacy-NULL and foreign-parent regressions. Exact reviewed operation: fetch; app/api/v1/endpoints/calls.py:1627.",
       "category": "reviewed_tenant_scoped"
-    },
-    {
-      "id": "1ad8079f0278f6305c69ff4fb13da408ec8bc69192dc72a3f90fe9df90c585b7",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "get_admin_media_deletion",
-      "line": 277,
-      "method": "_read_media_deletions",
-      "tables": [
-        "admin_media_deletion_intents"
-      ],
-      "sql": "SELECT id,resource_type,resource_id,tenant_id,call_id, actor_id AS original_actor_id,reason,status,attempt_count,created_at, updated_at,object_deleted_at,completed_at FROM admin_media_deletion_intents WHERE id=$1",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Delegated SQL goes to _read_media_deletions, which rechecks current platform administrator authority inside the transaction. These are administrator deletion-receipt list/detail reads spanning customer tenants; the exact delegated query and module are pinned. Exact reviewed operation: _read_media_deletions; app/api/v1/endpoints/admin/media.py:277.",
-      "category": "platform_admin"
     },
     {
       "id": "1bfe9ae80399ae47faf5403caa4e81824f126d13a2a840429c40fc13b62086c0",
@@ -10276,21 +10266,6 @@
       "category": "platform_admin"
     },
     {
-      "id": "2677679dcf52e0a1a9cef1cf9488542c07649a21fd2c0bed4bb37102f40598a1",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "_read_media_deletions",
-      "line": 224,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{query}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Shared query executor is called by media-deletion history/detail routes with require_platform_admin at lines 242/273; returned receipt metadata intentionally spans tenants. Query argument identity is pinned to this helper, while delegated literals are separately inventoried. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/media.py:224.",
-      "category": "platform_admin"
-    },
-    {
       "id": "269d74e97a3b6f0ab4646b4a61548e6c085c9ca522b9108f9a705684c049ff3e",
       "file": "app/api/v1/endpoints/telephony_runtime/rollback.py",
       "function": "rollback_runtime_policy",
@@ -10420,6 +10395,21 @@
       "count": 1,
       "reason": "Startup legacy-campaign audit counts active campaigns and reports bounded ID samples missing persona configuration across the deployment. It does not return tenant campaign data to a customer request. Exact reviewed operation: fetchval; app/core/legacy_campaign_audit.py:83.",
       "category": "system_audit"
+    },
+    {
+      "id": "2f342705b79fcb19f3feb5bba2cd822ab20eb8ca6787c841d7bb2f0132812c82",
+      "file": "app/api/v1/endpoints/telephony_sip/trunk_probe.py",
+      "function": "_registration_step",
+      "line": 691,
+      "method": "_Step",
+      "tables": [],
+      "sql": "Set up and loaded — waiting for the provider to answer the phone system's checks.",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: _Step; app/api/v1/endpoints/telephony_sip/trunk_probe.py:690.",
+      "category": "not_database_sql"
     },
     {
       "id": "3011c0b70d032a87542cacacfee4102c4753c57a009ff62ea1bb39ade5aa9f3f",
@@ -10558,6 +10548,26 @@
       "category": "platform_admin"
     },
     {
+      "id": "383e5d86151aa791ffa63071d35c0b59489f935907304187efd165c4f319d781",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "list_admin_feedback",
+      "line": 578,
+      "method": "fetchval",
+      "tables": [
+        "call_feedback",
+        "calls",
+        "campaigns",
+        "user_profiles"
+      ],
+      "sql": "SELECT COUNT(*) FROM call_feedback f JOIN calls c ON c.id = f.call_id LEFT JOIN tenants t ON t.id = f.tenant_id LEFT JOIN campaigns cp ON cp.id = c.campaign_id LEFT JOIN user_profiles up ON up.id = f.created_by {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin feedback inventory (line 541) intentionally spans tenants; tenant-user feedback routes are separate. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/media.py:577.",
+      "category": "platform_admin"
+    },
+    {
       "id": "39472bcff477e491d52b955b3b15c04a309091cb973bd7af55bc45774069c277",
       "file": "app/domain/services/suspension_service.py",
       "function": "SuspensionService.submit_appeal",
@@ -10689,6 +10699,21 @@
       "category": "reviewed_tenant_scoped"
     },
     {
+      "id": "41217beb43b5b287f19b7a723a12b3aefd245baa8e46ca2ac7445b0bfa5e47e6",
+      "file": "app/api/v1/endpoints/auth/password_reset.py",
+      "function": "reset_password",
+      "line": 414,
+      "method": "enforce_budget",
+      "tables": [],
+      "sql": "reset-ip",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This reset-prefixed string is a Redis abuse-budget namespace, not SQL RESET or a tenant database statement. Exact reviewed operation: enforce_budget; app/api/v1/endpoints/auth/password_reset.py:413.",
+      "category": "not_database_sql"
+    },
+    {
       "id": "41daf51b688bd2322a198676bf8ceab96f39e80cbe9cae6626ec809221aff553",
       "file": "app/api/v1/endpoints/telephony_runtime/rollback.py",
       "function": "rollback_runtime_policy",
@@ -10701,6 +10726,21 @@
       "bypass": null,
       "count": 6,
       "reason": "This string is the name of a telemetry/log step (begin/commit/rollback), not transaction SQL. Exact reviewed operation: _log_runtime_event; app/api/v1/endpoints/telephony_runtime/rollback.py:203.",
+      "category": "not_database_sql"
+    },
+    {
+      "id": "41e5fb7fe592f632596b982ca9fe48c1a26ecdace9c5b2eef185621f59a742f7",
+      "file": "app/api/v1/endpoints/campaigns.py",
+      "function": "start_campaign",
+      "line": 1051,
+      "method": "_update_owned_outbound_campaign",
+      "tables": [],
+      "sql": "update campaign pacing",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _update_owned_outbound_campaign; app/api/v1/endpoints/campaigns.py:1050.",
       "category": "not_database_sql"
     },
     {
@@ -10838,6 +10878,38 @@
       "category": "not_database_sql"
     },
     {
+      "id": "4907bcbb3d5296f4e830794a90b9b9aaf1ab7c91b5b7b9c9c7965b834211170e",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "get_admin_media_deletion",
+      "line": 278,
+      "method": "_read_media_deletions",
+      "tables": [
+        "admin_media_deletion_intents"
+      ],
+      "sql": "SELECT id,resource_type,resource_id,tenant_id,call_id, actor_id AS original_actor_id,reason,status,attempt_count,created_at, updated_at,object_deleted_at,completed_at FROM admin_media_deletion_intents WHERE id=$1",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Delegated SQL goes to _read_media_deletions, which rechecks current platform administrator authority inside the transaction. These are administrator deletion-receipt list/detail reads spanning customer tenants; the exact delegated query and module are pinned. Exact reviewed operation: _read_media_deletions; app/api/v1/endpoints/admin/media.py:277.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "4a321a2ce48bcb795e577113935858f91946d93d76729665d4781e78521e1bec",
+      "file": "app/api/v1/endpoints/campaigns.py",
+      "function": "create_campaign",
+      "line": 683,
+      "method": "_pinned_tts_provider",
+      "tables": [],
+      "sql": "create",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _pinned_tts_provider; app/api/v1/endpoints/campaigns.py:682.",
+      "category": "not_database_sql"
+    },
+    {
       "id": "4a38d87d342b89497c27b26f6519ff3cf5a4a38be1475aad52d84bb928f84cd4",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "get_tenant",
@@ -10871,25 +10943,6 @@
       "count": 1,
       "reason": "Transactional audit writes must read the global hash-chain tail under the shared writer lock before appending the tenant-tagged event; tenant filtering would create incompatible chain branches. Exact reviewed operation: fetchrow; app/domain/services/audit_logger.py:575.",
       "category": "system_audit_chain"
-    },
-    {
-      "id": "4aea7a36a0ebe84d0e91585559e2046d27e411f5a3e9d9f47c43ec7afe1af7b4",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "list_admin_recordings",
-      "line": 476,
-      "method": "fetchval",
-      "tables": [
-        "calls",
-        "campaigns",
-        "recordings_s3"
-      ],
-      "sql": "SELECT COUNT(*) FROM recordings_s3 r JOIN calls c ON c.id = r.call_id LEFT JOIN tenants t ON t.id = r.tenant_id LEFT JOIN campaigns cp ON cp.id = r.campaign_id {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Platform-admin recording inventory (line 434) intentionally spans tenants, with optional customer/date/status filters; tenant-user recording routes are separate. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/media.py:476.",
-      "category": "platform_admin"
     },
     {
       "id": "4c6657f2b2836538cc1cc66cc3b2ec3a37af9b81b1f1acee692b60a9c5a4d23c",
@@ -11162,35 +11215,23 @@
       "category": "platform_catalog"
     },
     {
-      "id": "53f5672b35df5386ff548be36cf0da5a19c7607e184d938715837f982f26d45c",
-      "file": "app/api/v1/endpoints/admin/connectors.py",
-      "function": "list_admin_connectors",
-      "line": 137,
-      "method": "fetchval",
-      "tables": [
-        "connectors"
-      ],
-      "sql": "SELECT count(*) FROM connectors c{IfExp(test=Name(id='filters', ctx=Load()), body=BinOp(left=Constant(value=' WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Platform-admin connector directory/statistics (line 96) intentionally covers every tenant. The latest account subquery joins connector_id and tenant_id together. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/connectors.py:137.",
-      "category": "platform_admin"
-    },
-    {
-      "id": "5508b50fe8f238be3857409b0dd1d49c80eedc4f07318d6cde5c6613ece033e7",
-      "file": "app/api/v1/endpoints/call_limits.py",
-      "function": "list_dnc_entries",
-      "line": 511,
+      "id": "55d5fa06cd0cbd1468cccda6f9b5ff0a2d362233324f3ce888af942a6485c62b",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "list_admin_feedback",
+      "line": 582,
       "method": "fetch",
-      "tables": [],
-      "sql": "{branch} ORDER BY created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)}",
+      "tables": [
+        "call_feedback",
+        "calls",
+        "campaigns",
+        "user_profiles"
+      ],
+      "sql": "SELECT f.id, f.call_id, f.tenant_id, c.campaign_id, f.created_by, f.audio_mime_type, f.audio_size_bytes, f.duration_seconds, f.transcript, f.transcript_status, f.transcript_error, f.transcription_attempts, f.transcript_provider, f.created_at, f.updated_at, c.phone_number, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, t.business_name AS tenant_name, cp.name AS campaign_name, up.name AS created_by_name, up.email AS created_by_email, {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='f.tenant_id'))])} AS legal_hold FROM call_feedback f JOIN calls c ON c.id = f.call_id LEFT JOIN tenants t ON t.id = f.tenant_id LEFT JOIN campaigns cp ON cp.id = c.campaign_id LEFT JOIN user_profiles up ON up.id = f.created_by {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY f.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=2)}",
       "scoped": false,
       "unresolved": true,
       "bypass": true,
       "count": 1,
-      "reason": "Administrative DNC inventory intentionally includes customer and global suppressions; route requires platform_admin at line 485. Exact reviewed operation: fetch; app/api/v1/endpoints/call_limits.py:511.",
+      "reason": "Platform-admin feedback inventory (line 541) intentionally spans tenants; tenant-user feedback routes are separate. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/media.py:581.",
       "category": "platform_admin"
     },
     {
@@ -11326,6 +11367,36 @@
       "category": "not_database_sql"
     },
     {
+      "id": "5ad0942b66a6963983eaadfd638b5913dc8d5f8e9b88de1dcf2596b040dee00d",
+      "file": "app/api/v1/endpoints/call_limits.py",
+      "function": "list_dnc_entries",
+      "line": 512,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{branch} ORDER BY created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Administrative DNC inventory intentionally includes customer and global suppressions; route requires platform_admin at line 485. Exact reviewed operation: fetch; app/api/v1/endpoints/call_limits.py:511.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "5b87609b2ac8c89f58ae358649f78a99e4f6233080015159f81be96ff33a6798",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "_read_media_deletions",
+      "line": 225,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{query}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Shared query executor is called by media-deletion history/detail routes with require_platform_admin at lines 242/273; returned receipt metadata intentionally spans tenants. Query argument identity is pinned to this helper, while delegated literals are separately inventoried. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/media.py:224.",
+      "category": "platform_admin"
+    },
+    {
       "id": "5c6cb519e4186896b0ae5a19212e763fa308dd5e8a049e346ff6685067b1be58",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.list_unresolved",
@@ -11426,6 +11497,21 @@
       "category": "platform_admin"
     },
     {
+      "id": "64946807a7388b1f4514e5505d6e131161861cd69efcb044e579f72e06d28f10",
+      "file": "app/api/v1/endpoints/campaigns.py",
+      "function": "delete_campaign",
+      "line": 1416,
+      "method": "_update_owned_outbound_campaign",
+      "tables": [],
+      "sql": "delete campaign",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _update_owned_outbound_campaign; app/api/v1/endpoints/campaigns.py:1415.",
+      "category": "not_database_sql"
+    },
+    {
       "id": "6608d4353a0a0f24f8a0b7c648719cb06a31525fc304c82244be23ee2075c7ef",
       "file": "app/api/v1/endpoints/admin/supplier_evidence.py",
       "function": "review_statement",
@@ -11458,26 +11544,6 @@
       "count": 1,
       "reason": "public_contact_enquiries is platform-only anonymous intake. Validation precedes the INSERT; a duplicate request ID must match the normalized payload hash before returning only its acceptance receipt. No tenant exists at this public-contact boundary. Exact reviewed operation: fetchrow; app/domain/services/contact_enquiry_service.py:106.",
       "category": "platform_public_intake"
-    },
-    {
-      "id": "6722114a69f5330d9c98a525281a7a1b6525a35c71fff6f5392a613ce8f64486",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "_feedback_storage_row",
-      "line": 615,
-      "method": "fetchrow",
-      "tables": [
-        "call_feedback",
-        "calls",
-        "campaigns",
-        "user_profiles"
-      ],
-      "sql": "SELECT f.*, c.phone_number, c.campaign_id, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, t.business_name AS tenant_name, cp.name AS campaign_name, up.name AS created_by_name, up.email AS created_by_email, {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='f.tenant_id'))])} AS legal_hold FROM call_feedback f JOIN calls c ON c.id = f.call_id LEFT JOIN tenants t ON t.id = f.tenant_id LEFT JOIN campaigns cp ON cp.id = c.campaign_id LEFT JOIN user_profiles up ON up.id = f.created_by WHERE f.id = $1",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Feedback storage lookup is used by platform-admin audio/retry/delete operations (route guards lines 718/772/1601), using the selected feedback ID. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/media.py:615.",
-      "category": "platform_admin"
     },
     {
       "id": "69112858571104767c53664ec7206bec3efb5b42abfc69a9a11c842acd198273",
@@ -11559,21 +11625,6 @@
       "bypass": null,
       "count": 1,
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Persists the approval list for that exact platform request under the same current approver boundary, without assigning it to the approver's tenant."
-    },
-    {
-      "id": "6b0c4e38729167cb509822718910d3b6838721705cd8af0c976e46eb45f86a3c",
-      "file": "app/api/v1/endpoints/campaigns.py",
-      "function": "start_campaign",
-      "line": 1050,
-      "method": "_update_owned_outbound_campaign",
-      "tables": [],
-      "sql": "update campaign pacing",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _update_owned_outbound_campaign; app/api/v1/endpoints/campaigns.py:1050.",
-      "category": "not_database_sql"
     },
     {
       "id": "6b6459265d346c20df6d022415927e29ea2aa06f4df2aecd4b3b815bde800f87",
@@ -11758,21 +11809,6 @@
       "category": "not_database_sql"
     },
     {
-      "id": "741a0df3b5dd36197880ff316f8af399ebe216dc8b3c424a2ae337e18797f906",
-      "file": "app/api/v1/endpoints/campaigns.py",
-      "function": "update_campaign",
-      "line": 881,
-      "method": "_update_owned_outbound_campaign",
-      "tables": [],
-      "sql": "update campaign",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _update_owned_outbound_campaign; app/api/v1/endpoints/campaigns.py:881.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "7459fdd7276340d966cb214db133d6477d8212fe06fa9429d93cd2df145d91d8",
       "file": "app/domain/services/support/jobs.py",
       "function": "mark_missed_deadlines",
@@ -11803,6 +11839,21 @@
       "count": 1,
       "reason": "DELETE binds source ID, campaign ID and authenticated tenant_id=$3 before RETURNING. The conservative direct-predicate suffix recognizer does not prove RETURNING syntax; the explicit tenant boundary is present. Exact reviewed operation: fetchval; app/api/v1/endpoints/campaign_knowledge.py:558.",
       "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "74cc0a87729d5735e10f34b35a58a8551f94044b6984147e1bdd446011a64775",
+      "file": "app/api/v1/endpoints/campaigns.py",
+      "function": "update_contact_in_campaign",
+      "line": 2058,
+      "method": "_require_contact_write",
+      "tables": [],
+      "sql": "update",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _require_contact_write; app/api/v1/endpoints/campaigns.py:2057.",
+      "category": "not_database_sql"
     },
     {
       "id": "75284a6d110acda9c2f031f4d7c39fbc5ba17b669084520c63fdd1174bb2bcc5",
@@ -11909,21 +11960,6 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "790eb920f4de1bef31f856a87b7641a45203fec447a571f900642884a5945362",
-      "file": "app/api/v1/endpoints/campaigns.py",
-      "function": "update_contact_in_campaign",
-      "line": 2057,
-      "method": "_require_contact_write",
-      "tables": [],
-      "sql": "update",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _require_contact_write; app/api/v1/endpoints/campaigns.py:2057.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "79d8500997b271755212e72fd128468241ba34b1bc2a41dc2c24395d1211736c",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.inspect",
@@ -11974,6 +12010,21 @@
       "count": 1,
       "reason": "Retention worker discovery joins recording/policy on tenant_id, filters the per-tenant age and active hold condition, and returns bounded candidates across tenants. Each later deletion carries expected_tenant_id; missing policy/hold schema causes a skip rather than implied permission. Exact reviewed operation: fetch; app/workers/recording_retention_purge.py:106.",
       "category": "system_retention_discovery"
+    },
+    {
+      "id": "7bc4242f4757b4e99b71931ed2c8d50ceb34750d37a15058c43bbb3ddbc8f275",
+      "file": "app/api/v1/endpoints/campaigns.py",
+      "function": "update_campaign",
+      "line": 882,
+      "method": "_update_owned_outbound_campaign",
+      "tables": [],
+      "sql": "update campaign",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _update_owned_outbound_campaign; app/api/v1/endpoints/campaigns.py:881.",
+      "category": "not_database_sql"
     },
     {
       "id": "7c46e6d40a4c70c24a1812600811c893447c085b8a7d42410972f48b8df8ec79",
@@ -12044,25 +12095,6 @@
       "category": "system_discovery"
     },
     {
-      "id": "7f4aac9c7615cdc66b4e88f6955ed348a33db798a40ba526c206059ff922a128",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "list_admin_recordings",
-      "line": 480,
-      "method": "fetch",
-      "tables": [
-        "calls",
-        "campaigns",
-        "recordings_s3"
-      ],
-      "sql": "SELECT r.id, r.call_id, r.tenant_id, r.campaign_id, r.s3_bucket, r.status, r.mime_type, r.duration_seconds, r.file_size_bytes, r.created_at, r.updated_at, c.phone_number, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, t.business_name AS tenant_name, cp.name AS campaign_name, {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='r.tenant_id'))])} AS legal_hold FROM recordings_s3 r JOIN calls c ON c.id = r.call_id LEFT JOIN tenants t ON t.id = r.tenant_id LEFT JOIN campaigns cp ON cp.id = r.campaign_id {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY r.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=2)}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Platform-admin recording inventory (line 434) intentionally spans tenants, with optional customer/date/status filters; tenant-user recording routes are separate. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/media.py:480.",
-      "category": "platform_admin"
-    },
-    {
       "id": "7f91bc94546b8f2fc68c0b2efb56bf7627f861ce234a54da248694c13b1d8b88",
       "file": "app/infrastructure/connectors/calendar/outlook_calendar.py",
       "function": "OutlookCalendarConnector.create_event",
@@ -12075,6 +12107,21 @@
       "bypass": null,
       "count": 2,
       "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: error; app/infrastructure/connectors/calendar/outlook_calendar.py:249.",
+      "category": "not_database_sql"
+    },
+    {
+      "id": "81b138c367a37ee902fe590ceab28b6371c29f4711a5cf72871d8518b0f9ce67",
+      "file": "app/api/v1/endpoints/campaigns.py",
+      "function": "add_contact_to_campaign",
+      "line": 1922,
+      "method": "_require_contact_write",
+      "tables": [],
+      "sql": "create",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _require_contact_write; app/api/v1/endpoints/campaigns.py:1921.",
       "category": "not_database_sql"
     },
     {
@@ -12142,6 +12189,25 @@
       "count": 1,
       "reason": "Refresh ownership recheck locks the same opaque-token hash and previously resolved user ID after the shared credential fence. It explicitly rejects a changed tenant before loading the current principal and issuing credentials; nullable tenant supports platform identities. Source: auth/refresh.py:102-128. Exact reviewed operation: fetchrow; app/api/v1/endpoints/auth/refresh.py:111.",
       "category": "individually_reviewed"
+    },
+    {
+      "id": "87aa819d91a2f705804638e5ab678562dbd5fda0108646256837d2ecae9627ad",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "list_admin_recordings",
+      "line": 481,
+      "method": "fetch",
+      "tables": [
+        "calls",
+        "campaigns",
+        "recordings_s3"
+      ],
+      "sql": "SELECT r.id, r.call_id, r.tenant_id, r.campaign_id, r.s3_bucket, r.status, r.mime_type, r.duration_seconds, r.file_size_bytes, r.created_at, r.updated_at, c.phone_number, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, t.business_name AS tenant_name, cp.name AS campaign_name, {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='r.tenant_id'))])} AS legal_hold FROM recordings_s3 r JOIN calls c ON c.id = r.call_id LEFT JOIN tenants t ON t.id = r.tenant_id LEFT JOIN campaigns cp ON cp.id = r.campaign_id {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY r.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=2)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin recording inventory (line 434) intentionally spans tenants, with optional customer/date/status filters; tenant-user recording routes are separate. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/media.py:480.",
+      "category": "platform_admin"
     },
     {
       "id": "880ee567d7c2d83b6746fefde840a3caf36308b23afbc8c0ee87bc65c21728df",
@@ -12228,6 +12294,23 @@
       "category": "platform_account_enforcement"
     },
     {
+      "id": "89e0d49b06370a8979173d82cf1ff244e53077a37879eaa5e58e7be93835a11a",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "list_admin_media_deletions",
+      "line": 262,
+      "method": "_read_media_deletions",
+      "tables": [
+        "admin_media_deletion_intents"
+      ],
+      "sql": "SELECT id,resource_type,resource_id,tenant_id,call_id, actor_id AS original_actor_id,reason,status,attempt_count,created_at, updated_at,object_deleted_at,completed_at FROM admin_media_deletion_intents{IfExp(test=Name(id='predicates', ctx=Load()), body=BinOp(left=Constant(value=' WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='predicates', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY created_at DESC,id DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='values', ctx=Load())], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Delegated SQL goes to _read_media_deletions, which rechecks current platform administrator authority inside the transaction. These are administrator deletion-receipt list/detail reads spanning customer tenants; the exact delegated query and module are pinned. Exact reviewed operation: _read_media_deletions; app/api/v1/endpoints/admin/media.py:261.",
+      "category": "platform_admin"
+    },
+    {
       "id": "8afe61a291468b2ed6b0eec01736f6840e5fa367fa5d6b72c045574680751c29",
       "file": "app/core/security/emergency_access.py",
       "function": "EmergencyAccess.complete_review",
@@ -12257,21 +12340,6 @@
       "count": 1,
       "reason": "Formal platform account enforcement locks the selected global user/tenant/partner identity and rechecks current platform-admin authority in the transaction. Automatic restoration instead supplies the exact expired hold ID and is checked under that same lock. A user or partner can affect multiple tenant memberships; caller-tenant filtering would not model this platform action. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:541.",
       "category": "platform_account_enforcement"
-    },
-    {
-      "id": "8c0eb7b5459e4ef7225469650719109c87cb311a628a960aa1a280c30c8b1520",
-      "file": "app/api/v1/endpoints/campaigns.py",
-      "function": "create_campaign",
-      "line": 682,
-      "method": "_pinned_tts_provider",
-      "tables": [],
-      "sql": "create",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _pinned_tts_provider; app/api/v1/endpoints/campaigns.py:682.",
-      "category": "not_database_sql"
     },
     {
       "id": "8c1674b88b7dcf28d918a072fbfa1d0e06f0994fee5deb2733d8662e7de2d864",
@@ -12386,24 +12454,6 @@
       "bypass": true,
       "count": 1,
       "reason": "Platform-admin global account mutation (line 670) resolves and locks the selected user; it is not limited to the operator tenant. Existing review-token/credential protections remain separate invariants. Exact reviewed operation: execute; app/api/v1/endpoints/admin/users.py:769.",
-      "category": "platform_admin"
-    },
-    {
-      "id": "91d8bc3acbef9b10d09b4baf6b380523e6f51df1d335ea4ec9851333203a50e4",
-      "file": "app/api/v1/endpoints/admin/connectors.py",
-      "function": "list_admin_connectors",
-      "line": 138,
-      "method": "fetch",
-      "tables": [
-        "connector_accounts",
-        "connectors"
-      ],
-      "sql": "SELECT c.id,c.tenant_id,c.type,c.provider,c.name,c.status,c.created_at, c.provider_revocation_status,t.business_name AS tenant_name, a.account_email,a.token_expires_at,a.last_refreshed_at,a.refresh_state,a.creation_ties FROM connectors c JOIN tenants t ON t.id=c.tenant_id LEFT JOIN LATERAL ( SELECT account_email,token_expires_at,last_refreshed_at,refresh_state, count(*) OVER(PARTITION BY created_at) AS creation_ties FROM connector_accounts WHERE connector_id=c.id AND tenant_id=c.tenant_id AND status='active' ORDER BY created_at DESC,id DESC LIMIT 1 ) a ON TRUE {IfExp(test=Name(id='filters', ctx=Load()), body=BinOp(left=Constant(value=' WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY c.created_at DESC,c.id DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=2)}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Platform-admin connector directory/statistics (line 96) intentionally covers every tenant. The latest account subquery joins connector_id and tenant_id together. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/connectors.py:138.",
       "category": "platform_admin"
     },
     {
@@ -13154,26 +13204,6 @@
       "category": "operator_billing_reconciliation"
     },
     {
-      "id": "b8b8c23ba6f791a4165a27779a5986c74c2b4a6bd1001c81c9922b80edc1853d",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "list_admin_feedback",
-      "line": 577,
-      "method": "fetchval",
-      "tables": [
-        "call_feedback",
-        "calls",
-        "campaigns",
-        "user_profiles"
-      ],
-      "sql": "SELECT COUNT(*) FROM call_feedback f JOIN calls c ON c.id = f.call_id LEFT JOIN tenants t ON t.id = f.tenant_id LEFT JOIN campaigns cp ON cp.id = c.campaign_id LEFT JOIN user_profiles up ON up.id = f.created_by {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Platform-admin feedback inventory (line 541) intentionally spans tenants; tenant-user feedback routes are separate. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/media.py:577.",
-      "category": "platform_admin"
-    },
-    {
       "id": "b990fec0da1d32bfcb8fc76c12dc028ee711a6f4652535fe93552e0971d3b230",
       "file": "app/api/v1/endpoints/passkeys.py",
       "function": "login_begin",
@@ -13206,6 +13236,26 @@
       "bypass": true,
       "count": 1,
       "reason": "Admin billing reconciliation intentionally spans the ledger and associated orders across all tenants; its sole HTTP caller requires require_platform_admin (billing_topups.py:413) and bounds the row count. Exact reviewed operation: fetch; app/domain/services/topup_service.py:608.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "bb8180caf2bf818f9b9223380101f2c872672689a5666a3e5a4443ae384e9b38",
+      "file": "app/api/v1/endpoints/admin/media.py",
+      "function": "_feedback_storage_row",
+      "line": 616,
+      "method": "fetchrow",
+      "tables": [
+        "call_feedback",
+        "calls",
+        "campaigns",
+        "user_profiles"
+      ],
+      "sql": "SELECT f.*, c.phone_number, c.campaign_id, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, t.business_name AS tenant_name, cp.name AS campaign_name, up.name AS created_by_name, up.email AS created_by_email, {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='f.tenant_id'))])} AS legal_hold FROM call_feedback f JOIN calls c ON c.id = f.call_id LEFT JOIN tenants t ON t.id = f.tenant_id LEFT JOIN campaigns cp ON cp.id = c.campaign_id LEFT JOIN user_profiles up ON up.id = f.created_by WHERE f.id = $1",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Feedback storage lookup is used by platform-admin audio/retry/delete operations (route guards lines 718/772/1601), using the selected feedback ID. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/media.py:615.",
       "category": "platform_admin"
     },
     {
@@ -13450,21 +13500,6 @@
       "count": 1,
       "category": "reviewed_tenant_scoped",
       "reason": "The same-module _sql builder accepts only the fixed _TABLES registry and binds scope.tenant_id as $1. Every tenant-bearing table has an explicit r.tenant_id predicate; tenantless call_events/call_legs require owned calls; nullable legacy media additionally rejects conflicting non-NULL ownership. DNC/guard/reminder subqueries independently bind the parent tenant. Module AST pins this registry/builder with the executor. Exact reviewed operation: fetch; app/domain/services/dsar_service.py:298. Item6 registry review: call_workflows is a fixed call-only table and uses the unchanged explicit r.tenant_id=$1 ownership branch; only the module AST identity changes."
-    },
-    {
-      "id": "ce8e37d3b91065127df1a0f183de82253a2eac9b3ba47f5c3e7168dbaf8e07a5",
-      "file": "app/api/v1/endpoints/telephony_sip/trunk_probe.py",
-      "function": "_registration_step",
-      "line": 690,
-      "method": "_Step",
-      "tables": [],
-      "sql": "Set up and loaded — waiting for the provider to answer the phone system's checks.",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This SQL-looking English text is a validation/status/error message supplied to the named exception/log/response constructor, not a database call. Exact reviewed operation: _Step; app/api/v1/endpoints/telephony_sip/trunk_probe.py:690.",
-      "category": "not_database_sql"
     },
     {
       "id": "cf119d1ccc48e2f07009a387f89ad8086784ba19ed69eb41be241d6a84b5ce94",
@@ -13973,21 +14008,6 @@
       "category": "system_bootstrap"
     },
     {
-      "id": "ef4f4ca88fd62ce90b20d0c905d7c03fe56fd8596cf6c82152b7f263721cc73d",
-      "file": "app/api/v1/endpoints/campaigns.py",
-      "function": "delete_campaign",
-      "line": 1415,
-      "method": "_update_owned_outbound_campaign",
-      "tables": [],
-      "sql": "delete campaign",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "This create/update/delete phrase is an operation label consumed by authorization/configuration/error handling. The actual database statements are separately inventoried. Exact reviewed operation: _update_owned_outbound_campaign; app/api/v1/endpoints/campaigns.py:1415.",
-      "category": "not_database_sql"
-    },
-    {
       "id": "efb6a34a0f4b1e1de7f0966b8879150cf4e3a486998a28fafb9f451208e3b2d0",
       "file": "app/api/v1/endpoints/admin/partners.py",
       "function": "list_partners",
@@ -14101,26 +14121,6 @@
       "bypass": true,
       "count": 1,
       "reason": "Platform-admin account creation (line 565) checks globally unique email and inserts the administrator-selected tenant/account role. Tenantless platform accounts are supported. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/users.py:614.",
-      "category": "platform_admin"
-    },
-    {
-      "id": "f35a09b837abb10c1dcf02cf1bad2ff8cc06ca3b32673405c81c2863ca047d74",
-      "file": "app/api/v1/endpoints/admin/media.py",
-      "function": "list_admin_feedback",
-      "line": 581,
-      "method": "fetch",
-      "tables": [
-        "call_feedback",
-        "calls",
-        "campaigns",
-        "user_profiles"
-      ],
-      "sql": "SELECT f.id, f.call_id, f.tenant_id, c.campaign_id, f.created_by, f.audio_mime_type, f.audio_size_bytes, f.duration_seconds, f.transcript, f.transcript_status, f.transcript_error, f.transcription_attempts, f.transcript_provider, f.created_at, f.updated_at, c.phone_number, c.direction, c.caller_ani, c.caller_ani_private, c.called_did, t.business_name AS tenant_name, cp.name AS campaign_name, up.name AS created_by_name, up.email AS created_by_email, {Call(func=Attribute(value=Name(id='_ACTIVE_COMPLIANCE_HOLD_SQL', ctx=Load()), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='tenant_expression', value=Constant(value='f.tenant_id'))])} AS legal_hold FROM call_feedback f JOIN calls c ON c.id = f.call_id LEFT JOIN tenants t ON t.id = f.tenant_id LEFT JOIN campaigns cp ON cp.id = c.campaign_id LEFT JOIN user_profiles up ON up.id = f.created_by {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY f.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=2)}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Platform-admin feedback inventory (line 541) intentionally spans tenants; tenant-user feedback routes are separate. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/media.py:581.",
       "category": "platform_admin"
     },
     {

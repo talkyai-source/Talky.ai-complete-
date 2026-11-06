@@ -32,6 +32,28 @@ logger = logging.getLogger(__name__)
 _DATABASE_CAPACITY_ERRORS = DATABASE_RETRYABLE_ERRORS
 
 
+def safe_exception_message(exc: BaseException, message: str = "The request could not be completed.") -> str:
+    """Keep driver/provider text in correlated logs, never in HTTP detail.
+
+    Password diagnostics are an exact finite public vocabulary. Unknown text,
+    including an unexpected PasswordValidationError message, uses the caller's
+    fixed fallback. The exception chain remains available to the 503 handler.
+    """
+    logger.warning("HTTP operation failed request_id=%s error_type=%s", get_request_id(),
+                   type(exc).__name__, exc_info=(type(exc), exc, exc.__traceback__))
+    from app.core.security.password import PasswordValidationError
+    if type(exc) is PasswordValidationError and len(exc.args) == 1:
+        public = {
+            "Password cannot be empty.": "Password cannot be empty.",
+            "Password must be at least 15 characters.": "Password must be at least 15 characters.",
+            "Password cannot exceed 128 characters.": "Password cannot exceed 128 characters.",
+            "Choose a password that is not commonly used.": "Choose a password that is not commonly used.",
+        }
+        if isinstance(exc.args[0], str) and exc.args[0] in public:
+            return public[exc.args[0]]
+    return message
+
+
 def _database_capacity_cause(exc: BaseException) -> BaseException | None:
     """Keep retry semantics when a route wraps the driver error in HTTP 500."""
     seen: set[int] = set()

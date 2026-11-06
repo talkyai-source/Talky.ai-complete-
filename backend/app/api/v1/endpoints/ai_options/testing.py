@@ -6,6 +6,7 @@ Endpoints:
   POST /test/tts   - synthesize a sample, measure first-audio / total latency
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 from app.domain.services.voice_eligibility import VoiceEligibilityError, require_elevenlabs_voice_eligible
 
@@ -168,7 +169,7 @@ async def test_llm(request: LLMTestRequest, current_user=Depends(get_current_use
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"LLM test failed: {str(e)}"
+            detail=safe_exception_message(e, 'LLM test failed.')
         )
     finally:
         if llm is not None:
@@ -317,5 +318,5 @@ async def test_tts(request: TTSTestRequest, current_user=Depends(get_current_use
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"TTS test failed: {str(e)}"
+            detail=safe_exception_message(e, 'TTS test failed.')
         )

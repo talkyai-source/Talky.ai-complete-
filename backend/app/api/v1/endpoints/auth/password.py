@@ -1,5 +1,6 @@
 """POST /auth/change-password — verified password change with session sweep."""
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 from typing import Optional
 
@@ -76,7 +77,7 @@ async def change_password(
     except PasswordValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=safe_exception_message(exc, 'Invalid password.'),
         ) from exc
 
     async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:

@@ -5,6 +5,7 @@ Calls finish as status='ended'/'completed' with the real result in `outcome`,
 so series are classified by `outcome` (keying on `status` under-counts badly).
 Supports hour/day/week/month buckets and a per-campaign breakdown.
 """
+from app.core.error_handlers import safe_exception_message
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel
 from typing import Dict, List, Literal, Optional
@@ -240,9 +241,9 @@ async def get_best_time_to_call(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch analytics.'))
 
 
 @router.get(
@@ -308,9 +309,9 @@ async def get_retry_effectiveness(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch analytics.'))
 
 
 @router.get(
@@ -367,9 +368,9 @@ async def get_call_analytics(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch analytics.'))
 
 
 @router.get(
@@ -453,6 +454,6 @@ async def get_call_analytics_by_campaign(
     except HTTPException:
         raise
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid date format: {str(e)}")
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'Invalid date format.'))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch analytics: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch analytics.'))

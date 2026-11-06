@@ -12,6 +12,7 @@ plan_id is never accepted from the frontend. Since 2026-10-27 billing is
 paid-only: a new account has no plan and no minutes, and can place calls
 only after buying a monthly or yearly plan in Billing.
 """
+from app.core.error_handlers import safe_exception_message
 
 import hashlib
 import json
@@ -318,7 +319,7 @@ async def signup_complete(
     except PasswordValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=safe_exception_message(exc, 'Invalid password.'),
         ) from exc
 
     # Pull pending signup from Redis.

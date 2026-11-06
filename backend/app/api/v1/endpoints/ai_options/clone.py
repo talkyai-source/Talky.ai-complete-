@@ -11,6 +11,7 @@ clone shows up in the user's normal voice list and is selectable per
 campaign exactly like any ElevenLabs voice.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import logging
 from typing import List
@@ -112,7 +113,7 @@ async def clone_voice(
         )
     except ElevenLabsCloneError as exc:
         # Surface EL's message (e.g. "voice limit reached") as a 4xx.
-        raise HTTPException(status_code=502, detail=str(exc))
+        raise HTTPException(status_code=502, detail=safe_exception_message(exc, 'The request could not be completed.'))
 
     row = await vcs.record_clone(
         db_client.pool,

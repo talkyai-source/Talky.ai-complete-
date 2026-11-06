@@ -2,6 +2,7 @@
 Billing API Endpoints
 Handles Stripe subscription management and payment operations
 """
+from app.core.error_handlers import safe_exception_message
 
 import logging
 import os
@@ -256,7 +257,7 @@ async def get_checkout_attempt(
         )
     except CheckoutError as exc:
         raise HTTPException(
-            exc.status_code, detail={"code": exc.code, "message": str(exc)}
+            exc.status_code, detail={"code": exc.code, "message": safe_exception_message(exc, 'The request could not be completed.')}
         ) from exc
     except Exception as exc:
         raise HTTPException(
@@ -307,7 +308,7 @@ async def stripe_webhook(
             headers={"Retry-After": "30"},
         ) from exc
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:
         logger.error("Webhook handling failed error_type=%s", type(e).__name__)
         raise HTTPException(
@@ -432,7 +433,7 @@ async def create_portal_session(
         return PortalResponse(**result)
 
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:
         logger.error("Failed to create portal session: %s", type(e).__name__)
         raise HTTPException(
@@ -476,7 +477,7 @@ async def cancel_subscription(
         return CancelResponse(**result)
 
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:
         logger.error("Failed to cancel subscription: %s", type(e).__name__)
         raise HTTPException(

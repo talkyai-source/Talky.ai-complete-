@@ -2,6 +2,7 @@
 Admin Connectors Endpoints
 Connector management: list, detail, reconnect, revoke
 """
+from app.core.error_handlers import safe_exception_message
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
@@ -232,7 +233,7 @@ async def get_admin_connector_detail(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get connector: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to get connector.')
         )
 
 
@@ -265,7 +266,7 @@ async def force_reconnect_connector(
     except HTTPException:
         raise
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Refresh could not be confirmed. Check connection status; reauthorize if its outcome is unknown.") from exc
 
@@ -298,6 +299,6 @@ async def revoke_connector(
     except HTTPException:
         raise
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not confirm connector disconnect. Check its current status before trying again.") from exc

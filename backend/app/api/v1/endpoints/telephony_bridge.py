@@ -24,6 +24,7 @@ Endpoints
 """
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import asyncio
 import json
@@ -540,7 +541,7 @@ async def start_telephony(
 
     except Exception as exc:
         logger.error(f"Failed to start telephony adapter: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=safe_exception_message(exc, 'The request could not be completed.'))
 
 
 @router.post("/stop")
@@ -2661,7 +2662,7 @@ async def make_call(request: Request, body: MakeCallRequest):
         proof, recovery_required = await _cleanup_failed_origination(str(exc))
         if recovery_required and proof is not None and durable_call_id is not None:
             raise _incomplete_origination_error(proof) from exc
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=safe_exception_message(exc, 'The request could not be completed.'))
 
 
 async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
@@ -3422,7 +3423,7 @@ async def _execute_transfer(
         call_id = validate_transfer_call_id(call_id)
         destination = canonicalize_transfer_destination(destination, mode)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
@@ -3509,7 +3510,7 @@ def _transfer_request_metadata(request: Request) -> dict[str, Optional[str]]:
     try:
         idempotency_key = validate_transfer_idempotency_key(request.headers.get("idempotency-key"))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     internal = is_internal_service_request(request)
     return {
         "idempotency_key": idempotency_key,
@@ -3606,7 +3607,7 @@ async def get_transfer_attempt(attempt_id: str, request: Request):
             tenant_id=None if ctx.is_internal else ctx.tenant_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Transfer attempt not found")
     return JSONResponse(result)

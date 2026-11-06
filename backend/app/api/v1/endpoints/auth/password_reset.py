@@ -20,6 +20,7 @@ the frontend pattern (email -> code email -> code+new-password) stays
 consistent and the SMTP / Redis plumbing is reused.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import hashlib
 import json
@@ -405,7 +406,7 @@ async def reset_password(
     except PasswordValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=safe_exception_message(exc, 'Invalid password.'),
         ) from exc
 
     redis = _get_redis_or_503()

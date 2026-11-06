@@ -9,6 +9,7 @@ Day 9 Enhancements:
 - Batch insertion for performance
 - Detailed error reporting per row
 """
+from app.core.error_handlers import safe_exception_message
 import csv
 import io
 import logging
@@ -444,7 +445,7 @@ async def upload_campaign_contacts(
         logger.error(f"CSV upload failed for campaign {campaign_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to import contacts: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to import contacts.')
         )
 
 
@@ -736,5 +737,5 @@ async def bulk_import_contacts(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to import contacts: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to import contacts.')
         )

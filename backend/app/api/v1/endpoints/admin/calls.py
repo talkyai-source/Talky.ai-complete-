@@ -1,6 +1,7 @@
 """Admin call monitoring, history, detail, and live-call control."""
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import asyncio
 import json
@@ -483,7 +484,7 @@ async def get_live_calls(
         return items
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch live calls: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch live calls.'))
 
 
 @router.get("/calls/history", response_model=CallHistoryResponse)
@@ -667,7 +668,7 @@ async def get_call_history(
         return CallHistoryResponse(items=items, page=page, page_size=page_size, total=total)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch call history: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch call history.'))
 
 
 @router.get("/calls/{call_id}", response_model=AdminCallDetail)
@@ -875,7 +876,7 @@ async def get_admin_call_detail(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch call detail: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch call detail.'))
 
 
 @router.get("/calls/{call_id}/crm-deliveries/{provider}/inspection", response_model=AdminCRMInspection)
@@ -1264,5 +1265,5 @@ async def terminate_call(
             return confirmed_result
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to terminate call: {str(e)}",
+            detail=safe_exception_message(e, 'Failed to terminate call.'),
         ) from e

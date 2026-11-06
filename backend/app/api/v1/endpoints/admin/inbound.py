@@ -1,6 +1,7 @@
 """Platform-admin inbound operations and emergency controls."""
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 from typing import Optional
 
@@ -74,7 +75,7 @@ def _raise_hold_resolution(exc: Exception) -> None:
         code = "invalid_inbound_hold_resolution"
     raise HTTPException(
         status_code=status_code,
-        detail={"code": code, "message": str(exc)},
+        detail={"code": code, "message": safe_exception_message(exc, 'The request could not be completed.')},
     ) from exc
 
 

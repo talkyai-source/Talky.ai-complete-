@@ -4,6 +4,7 @@ FastAPI endpoints for meeting booking and management.
 
 Day 25: Meeting Booking Feature
 """
+from app.core.error_handlers import safe_exception_message
 import logging
 from typing import Optional, List
 from datetime import datetime, time as dt_time, timezone as dt_timezone
@@ -161,7 +162,7 @@ async def get_availability(
             }
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'The request could not be completed.'))
 
 
 @router.post("/", response_model=CreateMeetingResponse, dependencies=[Depends(_require_calendar_manage)])
@@ -206,7 +207,7 @@ async def create_meeting(
             calendar_required=True
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'The request could not be completed.'))
 
 
 @router.get("/", response_model=List[MeetingResponse])

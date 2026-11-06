@@ -2,6 +2,7 @@
 Admin Actions Endpoints
 Assistant action log: list, detail, retry, cancel
 """
+from app.core.error_handlers import safe_exception_message
 from fastapi import APIRouter, HTTPException, Depends, Query, Response, Request
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import List, Literal, Optional
@@ -516,7 +517,7 @@ async def get_admin_action_detail(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch action detail: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to fetch action detail.')
         )
 
 
@@ -746,7 +747,7 @@ async def retry_action(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to retry action: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to retry action.')
         )
 
 

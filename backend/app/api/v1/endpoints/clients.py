@@ -2,6 +2,7 @@
 Clients Endpoints
 CRUD operations for client/contact management
 """
+from app.core.error_handlers import safe_exception_message
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
@@ -83,7 +84,7 @@ async def list_clients(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch clients: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to fetch clients.')
         )
 
 
@@ -145,7 +146,7 @@ async def create_client(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create client: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to create client.')
         )
 
 
@@ -187,7 +188,7 @@ async def get_client(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch client: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to fetch client.')
         )
 
 
@@ -220,5 +221,5 @@ async def delete_client(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete client: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to delete client.')
         )

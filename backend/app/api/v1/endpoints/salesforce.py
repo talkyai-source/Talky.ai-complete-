@@ -28,6 +28,7 @@ Direction boundary: every campaign write goes through
 callback target (409 ``inbound_campaign_managed_separately``).
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import hashlib
 import hmac
@@ -240,7 +241,7 @@ async def _update_config(db_client: Client, connector_id: str, tenant_id: str, p
             tenant_id, connector_id, patch, provider="salesforce"
         )
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Salesforce settings could not be saved") from exc
 
@@ -502,7 +503,7 @@ async def import_salesforce_people(
     except ConnectorLookupError as exc:
         raise HTTPException(status_code=503, detail=exc.message)
     except ConnectorProviderError as exc:
-        raise HTTPException(status_code=502, detail={"error": f"salesforce_{exc.category}", "message": str(exc)})
+        raise HTTPException(status_code=502, detail={"error": f"salesforce_{exc.category}", "message": safe_exception_message(exc, 'The request could not be completed.')})
 
     object_label = "Contact" if body.object_type.lower() == "contact" else "Lead"
     list_name = (body.list_name or "").strip() or f"Salesforce {object_label}s {datetime.now(timezone.utc).date().isoformat()}"
@@ -923,7 +924,7 @@ async def salesforce_outbound_message(
     try:
         org_id, records = await run_in_threadpool(parse_outbound_message, raw)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.'))
 
     expected_org = str(config.get("org_id") or "")
     if expected_org and org_id and expected_org[:15] != org_id[:15]:

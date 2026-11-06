@@ -14,6 +14,7 @@ Routes:
 """
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -439,7 +440,7 @@ async def add_dnc_entry(
     try:
         normalized = normalize_e164_for_storage(entry.phone_number)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     # Parse expires_at
     expires = None

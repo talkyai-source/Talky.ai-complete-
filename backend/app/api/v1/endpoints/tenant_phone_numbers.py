@@ -11,6 +11,7 @@ origination on `status='verified'` here, so a row in this table is the
 only thing that lets a tenant dial with a given caller_id.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import logging
 from typing import Optional
@@ -145,7 +146,7 @@ async def register_phone_number(
     except TenantPhoneNumberConflictError as exc:
         # A revoked or suspended number is a platform control the tenant
         # cannot undo by registering it again.
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     logger.info(
         "tenant_phone_number_registered tenant=%s e164=%s provider=%s",
         tenant_id, redact_did(payload.e164), payload.provider,
@@ -190,7 +191,7 @@ async def verify_phone_number(
             actor_role=current_user.role,
         )
     except TenantPhoneNumberError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     logger.info(
         "tenant_phone_number_verified tenant=%s did=%s method=%s attestation_set=%s",
@@ -219,6 +220,6 @@ async def revoke_phone_number(
         )
     except TenantPhoneNumberError as exc:
         code = 409 if "assignment" in str(exc).lower() else 404
-        raise HTTPException(status_code=code, detail=str(exc)) from exc
+        raise HTTPException(status_code=code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     logger.info("tenant_phone_number_revoked tenant=%s did=%s", tenant_id, did_id)
     return Response(status_code=204)

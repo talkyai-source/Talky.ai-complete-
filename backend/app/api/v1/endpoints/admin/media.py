@@ -1,6 +1,7 @@
 """Cross-tenant Admin APIs for call recordings and reviewer feedback notes."""
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import asyncio
 import base64
@@ -742,7 +743,7 @@ async def get_admin_feedback_audio(
             return RedirectResponse(url, status_code=302)
         data = await storage.read(row)
     except FeedbackStorageError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     await _safe_audit(
         audit_logger,
         event_type=AuditEvent.RECORD_EXPORTED,
@@ -786,11 +787,11 @@ async def retry_admin_feedback_transcription(
             expected_feedback_id=str(feedback_id),
         )
     except FeedbackTranscriptionInProgressError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except FeedbackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except FeedbackStorageError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     refreshed = await _feedback_storage_row(db_client, feedback_id)
     if not refreshed:
