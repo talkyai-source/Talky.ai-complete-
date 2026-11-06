@@ -18,10 +18,11 @@ import logging
 import re
 from typing import Optional, Any
 
-from fastapi import Request, status
+from fastapi import HTTPException, Request, status
 from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from app.core.error_handlers import http_exception_handler
 
 logger = logging.getLogger(__name__)
 
@@ -328,10 +329,10 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             # Content-Type validation
             if not self._is_webhook_path(request.url.path):
                 if content_type and content_type not in ALLOWED_CONTENT_TYPES:
-                    return JSONResponse(
+                    return await http_exception_handler(request, HTTPException(
                         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                        content={"detail": f"Content-Type '{content_type}' not supported"}
-                    )
+                        detail=f"Content-Type '{content_type}' not supported",
+                    ))
 
             # Payload Sanitization (Day 6) — DISABLED.
             #

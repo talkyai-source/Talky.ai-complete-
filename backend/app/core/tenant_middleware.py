@@ -16,12 +16,12 @@ Security:
 - Day 4: Sets PostgreSQL RLS context for defense-in-depth
 """
 import logging
-from fastapi import Request, status
+from fastapi import HTTPException, Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import JSONResponse
 from typing import Optional
 
 from app.core.jwt_security import JWTValidationError, decode_and_validate_token
+from app.core.error_handlers import http_exception_handler
 from app.core.security.rbac import UserRole, normalize_role
 from app.core.security.tenant_isolation import (
     set_current_tenant_id,
@@ -152,18 +152,17 @@ class TenantMiddleware(BaseHTTPMiddleware):
                 logger.error(e.detail)
             else:
                 logger.warning("Invalid JWT token: %s", e.detail)
-            return JSONResponse(
-                status_code=e.status_code,
-                content={"detail": e.detail},
+            return await http_exception_handler(request, HTTPException(
+                status_code=e.status_code, detail=e.detail,
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ))
         except Exception as e:
             logger.error(f"JWT decode error: {e}")
-            return JSONResponse(
+            return await http_exception_handler(request, HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                content={"detail": "Authentication failed"},
+                detail="Authentication failed",
                 headers={"WWW-Authenticate": "Bearer"},
-            )
+            ))
 
         try:
             response = await call_next(request)

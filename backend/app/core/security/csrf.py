@@ -37,13 +37,15 @@ import os
 import re
 import secrets
 from typing import Iterable
+from fastapi import HTTPException
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.core.config import get_settings
+from app.core.error_handlers import http_exception_handler
 
 _INTERNAL_TOKEN_HEADER = "x-internal-service-token"
 
@@ -136,14 +138,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         origin = request.headers.get("origin")
         if origin is None:
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Missing Origin header for state-changing request."},
-            )
+            return await http_exception_handler(request, HTTPException(
+                status_code=403, detail="Missing Origin header for state-changing request.",
+            ))
         if origin not in self._allowed:
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Origin not permitted."},
-            )
+            return await http_exception_handler(request, HTTPException(
+                status_code=403, detail="Origin not permitted.",
+            ))
 
         return await call_next(request)
