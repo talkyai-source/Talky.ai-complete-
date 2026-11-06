@@ -32,6 +32,9 @@ import { CampaignStartControl } from "@/components/campaigns/campaign-readiness"
 
 type ColumnDef = { key: CampaignSortKey; label: string; numeric?: boolean };
 
+// No server job executes the browser-only report schedule (QA F1-13).
+const REPORT_SCHEDULING_AVAILABLE = false;
+
 const COLUMNS: ColumnDef[] = [
     { key: "name", label: "Campaign" },
     { key: "status", label: "Status" },
@@ -1168,11 +1171,11 @@ export function CampaignPerformanceTable({
                             PDF opens a print view; save as PDF from your browser.
                         </div>
                     </div>
-                    <div className="rounded-xl border border-border bg-muted/30 p-4">
+                    {REPORT_SCHEDULING_AVAILABLE && <div className="rounded-xl border border-border bg-muted/30 p-4">
                         <div className="text-sm font-semibold text-foreground">Scheduling</div>
                         <div className="mt-2 text-sm text-muted-foreground">Save recurring settings locally (prototype mode).</div>
                         <ReportScheduleEditor storageKey="campaigns.performance.reportSchedule" />
-                    </div>
+                    </div>}
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="rounded-xl border border-border bg-muted/30 p-4">
