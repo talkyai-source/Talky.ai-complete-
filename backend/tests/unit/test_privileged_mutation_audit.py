@@ -258,6 +258,11 @@ def setup_case(monkeypatch, case):
     store = Store(family, existing=existing)
     monkeypatch.setattr(keys, "get_encryption_service", lambda: SimpleNamespace(encrypt=lambda value: CIPHER))
 
+    async def valid_probe(provider, api_key):
+        return SimpleNamespace(status="valid", checked_at=datetime(2026, 11, 6, tzinfo=timezone.utc))
+
+    monkeypatch.setattr(keys, "probe_provider_key", valid_probe)
+
     def invalidate(**kwargs):
         assert store.depth == 0, "Credential cache must be invalidated only after commit"
         store.cache_events.append(kwargs)

@@ -18,6 +18,7 @@ import asyncio
 import importlib.util
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from urllib.parse import urlsplit, urlunsplit
@@ -61,6 +62,14 @@ CREATE INDEX idx_tenant_ai_credentials_lookup
     WHERE status = 'active';
 """
 NO_TABLE = "SELECT 1"
+
+
+@pytest.fixture(autouse=True)
+def fake_provider_probe(monkeypatch):
+    async def valid_probe(provider, api_key):
+        return SimpleNamespace(status="valid", checked_at=datetime(2026, 11, 6, tzinfo=timezone.utc))
+
+    monkeypatch.setattr(ep, "probe_provider_key", valid_probe)
 
 
 def _migration():
@@ -124,8 +133,27 @@ class _Enc:
         return f"ENC:{plaintext}"
 
 
+class _Audit:
+    async def lock_transaction(self, conn):
+        assert conn.is_in_transaction()
+        self.conn = conn
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.conn and conn.is_in_transaction()
+        assert event["tenant_id"] in {TENANT, OTHER_TENANT}
+        assert event["actor_role"] == "tenant_admin"
+        assert "ENC:" not in str(event)
+
+
+async def _current_endpoint_metadata(conn):
+    # Endpoint scenarios use today's nullable observation fields; the historic
+    # TABLE_AT_0066 and every 0067 migration/catalog assertion stay unchanged.
+    await conn.execute("ALTER TABLE tenant_ai_credentials ADD COLUMN validation_status TEXT, "
+                       "ADD COLUMN last_checked_at TIMESTAMPTZ")
+
+
 def _user(tenant=TENANT):
-    return SimpleNamespace(tenant_id=tenant)
+    return SimpleNamespace(tenant_id=tenant, id="33333333-3333-4333-8333-333333333333", role="tenant_admin")
 
 
 async def _post(pool, key, provider="groq", tenant=TENANT):
@@ -133,6 +161,7 @@ async def _post(pool, key, provider="groq", tenant=TENANT):
         ep.CredentialCreateRequest(provider=provider, api_key=key),
         current_user=_user(tenant),
         db_pool=pool,
+        audit_logger=_Audit(),
     )
 
 
@@ -266,6 +295,7 @@ def test_rotations_through_the_endpoint_keep_every_version_and_one_active(monkey
         out = {}
         async with pool.acquire() as conn:
             await _apply(conn, migration.UPGRADE_STATEMENTS)
+            await _current_endpoint_metadata(conn)
 
         created = [await _post(pool, f"key-aaaa-{n}{n}{n}{n}") for n in range(1, 5)]
         rows = await _rows(pool)
@@ -278,10 +308,10 @@ def test_rotations_through_the_endpoint_keep_every_version_and_one_active(monkey
         )
 
         # Revoke the live key, create another, revoke again: history keeps growing.
-        await ep.disable_credential(created[-1].id, current_user=_user(), db_pool=pool)
+        await ep.disable_credential(created[-1].id, current_user=_user(), db_pool=pool, audit_logger=_Audit())
         out["after_revoke"] = [r["status"] for r in await _rows(pool)]
         fifth = await _post(pool, "key-aaaa-5555")
-        await ep.disable_credential(fifth.id, current_user=_user(), db_pool=pool)
+        await ep.disable_credential(fifth.id, current_user=_user(), db_pool=pool, audit_logger=_Audit())
         out["after_second_revoke"] = [r["status"] for r in await _rows(pool)]
 
         # Other tenants and other providers are independent.
@@ -344,6 +374,7 @@ def test_downgrade_refuses_while_history_exists_and_restores_the_constraint_when
         out = {}
         async with pool.acquire() as conn:
             await _apply(conn, migration.UPGRADE_STATEMENTS)
+            await _current_endpoint_metadata(conn)
         for n in range(1, 4):  # two disabled versions + one active
             await _post(pool, f"key-aaaa-{n}{n}{n}{n}")
 

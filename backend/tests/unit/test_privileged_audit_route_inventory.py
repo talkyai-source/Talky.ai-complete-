@@ -76,6 +76,7 @@ AUDITED = {
     ("DELETE", "/admin/abuse/rules/{rule_id}"): record("abuse_monitoring", "delete_abuse_rule"),
     ("POST", "/admin/abuse/events/{event_id}/resolve"): record("abuse_monitoring", "resolve_abuse_event"),
     ("POST", "/tenant-ai-credentials/"): record("tenant_ai_credentials", "create_credential"),
+    ("POST", "/tenant-ai-credentials/{credential_id}/check"): record("tenant_ai_credentials", "check_credential"),
     ("DELETE", "/tenant-ai-credentials/{credential_id}"): record("tenant_ai_credentials", "disable_credential"),
 }
 

@@ -16,6 +16,7 @@ import DeviceList from "@/components/auth/device-list";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TelephonyProvidersSection } from "@/components/settings/telephony-providers-section";
 import { RecordingPolicySection } from "@/components/settings/recording-policy-section";
+import { ProviderKeysSection } from "@/components/settings/provider-keys-section";
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { api } from "@/lib/api";
@@ -372,6 +373,8 @@ export default function SettingsPage() {
                         </Tabs>
                     </CardContent>
                 </Card>
+                <ProviderKeysSection tenantId={user?.tenant_id} userId={user?.id}
+                    canEdit={["tenant_admin", "partner_admin", "platform_admin", "admin", "owner", "super_admin"].includes(String(user?.role ?? ""))} />
             </div>
         </DashboardLayout>
     );

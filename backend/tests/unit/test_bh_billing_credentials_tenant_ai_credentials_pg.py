@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import asyncpg
@@ -61,6 +62,18 @@ class _Enc:
         return f"ENC:{p}"
 
 
+class _Audit:
+    async def lock_transaction(self, conn):
+        assert conn.is_in_transaction()
+        self.conn = conn
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.conn and conn.is_in_transaction()
+        assert event["tenant_id"] in {TENANT, OTHER_TENANT}
+        assert event["actor_role"] == "tenant_admin"
+        assert "ENC:" not in str(event)
+
+
 @pytest.fixture
 async def pool(monkeypatch):
     p = await asyncpg.create_pool(
@@ -68,7 +81,16 @@ async def pool(monkeypatch):
     )
     async with p.acquire() as c:
         await c.execute(DDL)
+        # Nullable 0089 observations needed by the current endpoint; retain
+        # the 0067 active-only index and all lifecycle assertions unchanged.
+        await c.execute(f"ALTER TABLE {SCHEMA}.tenant_ai_credentials "
+                        "ADD COLUMN validation_status TEXT, ADD COLUMN last_checked_at TIMESTAMPTZ")
     monkeypatch.setattr(ep, "get_encryption_service", lambda: _Enc())
+
+    async def valid_probe(provider, api_key):
+        return SimpleNamespace(status="valid", checked_at=datetime(2026, 11, 6, tzinfo=timezone.utc))
+
+    monkeypatch.setattr(ep, "probe_provider_key", valid_probe)
     try:
         yield p
     finally:
@@ -78,7 +100,7 @@ async def pool(monkeypatch):
 
 
 def _user(tenant=TENANT):
-    return SimpleNamespace(tenant_id=tenant)
+    return SimpleNamespace(tenant_id=tenant, id="33333333-3333-4333-8333-333333333333", role="tenant_admin")
 
 
 async def _post(pool, key, provider="groq", tenant=TENANT):
@@ -86,6 +108,7 @@ async def _post(pool, key, provider="groq", tenant=TENANT):
         ep.CredentialCreateRequest(provider=provider, api_key=key),
         current_user=_user(tenant),
         db_pool=pool,
+        audit_logger=_Audit(),
     )
 
 
@@ -114,11 +137,11 @@ async def test_third_rotation_succeeds_and_only_newest_key_is_active(pool):
 @pytest.mark.asyncio
 async def test_post_delete_post_delete_leaves_no_active_key(pool):
     first = await _post(pool, "key-aaaa-1111")
-    await ep.disable_credential(first.id, current_user=_user(), db_pool=pool)
+    await ep.disable_credential(first.id, current_user=_user(), db_pool=pool, audit_logger=_Audit())
     second = await _post(pool, "key-bbbb-2222")
     # Second revoke of the same provider/kind: was UniqueViolationError -> 500,
     # leaving the leaked key active.
-    await ep.disable_credential(second.id, current_user=_user(), db_pool=pool)
+    await ep.disable_credential(second.id, current_user=_user(), db_pool=pool, audit_logger=_Audit())
     rows = await _rows(pool)
     # Both revoked keys stay on record (0067): nothing is deleted to make room.
     assert len(rows) == 2 and all(r["status"] == "disabled" for r in rows)
@@ -129,10 +152,10 @@ async def test_disable_is_idempotent_and_tenant_scoped(pool):
     mine = await _post(pool, "key-aaaa-1111")
     theirs = await _post(pool, "key-zzzz-9999", tenant=OTHER_TENANT)
     # Another tenant cannot disable my key, even knowing its id.
-    await ep.disable_credential(mine.id, current_user=_user(OTHER_TENANT), db_pool=pool)
+    await ep.disable_credential(mine.id, current_user=_user(OTHER_TENANT), db_pool=pool, audit_logger=_Audit())
     assert [r["status"] for r in await _rows(pool)] == ["active"]
-    await ep.disable_credential(mine.id, current_user=_user(), db_pool=pool)
-    await ep.disable_credential(mine.id, current_user=_user(), db_pool=pool)
+    await ep.disable_credential(mine.id, current_user=_user(), db_pool=pool, audit_logger=_Audit())
+    await ep.disable_credential(mine.id, current_user=_user(), db_pool=pool, audit_logger=_Audit())
     assert [r["status"] for r in await _rows(pool)] == ["disabled"]
     assert [r["status"] for r in await _rows(pool, OTHER_TENANT)] == ["active"]
     assert str((await _rows(pool, OTHER_TENANT))[0]["id"]) == theirs.id
@@ -171,5 +194,5 @@ async def test_resolver_cache_invalidated_after_commit(pool, monkeypatch):
 
     created = await _post(pool, "key-aaaa-1111")
     assert seen == [(TENANT, "groq")]
-    await ep.disable_credential(created.id, current_user=_user(), db_pool=pool)
+    await ep.disable_credential(created.id, current_user=_user(), db_pool=pool, audit_logger=_Audit())
     assert seen == [(TENANT, "groq"), (TENANT, "groq")]
