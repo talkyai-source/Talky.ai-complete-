@@ -61,6 +61,7 @@ systemctl enable talky-dialer-worker.service
 systemctl enable talky-reminder-worker.service
 systemctl enable talky-voice-gateway.service   # C++ media gateway; see the unit's header
 systemctl enable talky-cleanup.timer   # activates talky-cleanup.service nightly
+systemctl enable talky-recording-discrepancy.timer --now  # read-only file/row reconciliation nightly
 systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service every 2 min
 systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 10 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof

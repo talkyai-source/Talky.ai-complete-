@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly read-only recording file and row reconciliation
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+
