@@ -86,7 +86,7 @@ from app.infrastructure.assistant.tools.campaign_ai_options import (
 QUERY_TOOLS = {
     "get_dashboard_stats": {
         "function": get_dashboard_stats,
-        "description": "Call statistics for one day, for the account or one campaign",
+        "description": "Call statistics for an explicit range or UTC day, for the account or one campaign",
         "input_schema": GetDashboardStatsInput
     },
     "get_usage_info": {
@@ -96,7 +96,7 @@ QUERY_TOOLS = {
     },
     "get_leads": {
         "function": get_leads,
-        "description": "Get leads/contacts list with optional filters by campaign or status; set only_leads=true for just the qualified leads. Includes is_lead + follow_up_note.",
+        "description": "Get leads/contacts with optional campaign, status and created_at since/until filters; set only_leads=true for qualified contacts. Includes is_lead + follow_up_note.",
         "input_schema": GetLeadsInput
     },
     "get_lead_followup": {
@@ -109,7 +109,8 @@ QUERY_TOOLS = {
         "description": (
             "Recently-QUALIFIED leads (newest first) with their PHONE NUMBERS and follow-up. "
             "Use for 'any new leads?', 'who qualified today?', or to alert the client about "
-            "qualified leads during active campaigns — always read out the name + number + follow-up."
+            "qualified leads during active campaigns — pass since/until to filter qualified_at, "
+            "and always read out the name + number + follow-up."
         ),
         "input_schema": None,
     },
@@ -159,7 +160,7 @@ QUERY_TOOLS = {
     },
     "get_recent_calls": {
         "function": get_recent_calls,
-        "description": "Get recent calls with outcomes, durations and campaign, optionally for one campaign",
+        "description": "Get recent calls with outcomes, durations and campaign, optionally with a since/until range and one campaign",
         "input_schema": None
     },
     "get_actions_today": {

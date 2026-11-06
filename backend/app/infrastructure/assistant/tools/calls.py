@@ -4,12 +4,12 @@ Call query and action tools for the assistant agent.
 import json
 import logging
 from typing import Optional, Dict, Any
-from datetime import date
 from datetime import datetime, timezone
 from uuid import uuid4
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 from app.infrastructure.assistant.tools.campaigns import campaign_names
+from app.infrastructure.assistant.tools.date_ranges import apply_range, normalize_range, utc_day_range
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +29,17 @@ async def get_recent_calls(
     outcome: Optional[str] = None,
     limit: int = 10,
     campaign_id: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get recent calls for the tenant, optionally for one campaign. Every call
     carries its campaign_id and campaign_name so answers never blend campaigns.
     """
     try:
+        start, end = normalize_range(since, until)
+        if today_only and since is None and until is None:
+            start, end = utc_day_range()
         query = db_client.table("calls").select(
             "id, campaign_id, phone_number, status, outcome, goal_achieved, duration_seconds, created_at",
             count="exact"
@@ -43,9 +48,7 @@ async def get_recent_calls(
         if campaign_id:
             query = query.eq("campaign_id", campaign_id)
 
-        if today_only:
-            today = date.today().isoformat()
-            query = query.gte("created_at", f"{today}T00:00:00")
+        query = apply_range(query, "created_at", start, end)
 
         if outcome:
             query = query.eq("outcome", outcome)
@@ -58,7 +61,8 @@ async def get_recent_calls(
 
         return {
             "total_count": response.count,
-            "calls": calls
+            "calls": calls,
+            "applied_range": {"since": start, "until": end, "timestamp_field": "created_at"},
         }
     except Exception as e:
         logger.error(f"Error getting calls: {e}")

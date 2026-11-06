@@ -7,6 +7,9 @@ from datetime import date
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 from app.infrastructure.assistant.tools.campaigns import campaign_names
+from app.infrastructure.assistant.tools.date_ranges import (
+    SINCE_DESCRIPTION, UNTIL_DESCRIPTION, apply_range, normalize_range, utc_day_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +18,8 @@ class GetDashboardStatsInput(BaseModel):
     """Input for get_dashboard_stats tool"""
     date_str: Optional[str] = Field(None, description="Date in YYYY-MM-DD format, defaults to today")
     campaign_id: Optional[str] = Field(None, description="Only this campaign's calls")
+    since: Optional[str] = Field(None, description=SINCE_DESCRIPTION)
+    until: Optional[str] = Field(None, description=UNTIL_DESCRIPTION)
 
 
 async def get_dashboard_stats(
@@ -22,12 +27,14 @@ async def get_dashboard_stats(
     db_client: Client,
     date_str: Optional[str] = None,
     campaign_id: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get dashboard statistics for the tenant, or for one of its campaigns.
 
     Returns:
-        - Total calls today
+        - Total calls in the applied range
         - Calls completed
         - Calls failed
         - Success rate
@@ -35,8 +42,13 @@ async def get_dashboard_stats(
         - scope: "campaign" (with campaign_id/campaign_name) or "all_campaigns"
     """
     try:
-        # Default to today
-        target_date = date_str or date.today().isoformat()
+        if date_str is not None and (since is not None or until is not None):
+            return {"error": "Use either date_str or since/until, not both."}
+        start, end = normalize_range(since, until)
+        target_date = None
+        if since is None and until is None:
+            start, end = utc_day_range(date_str)
+            target_date = start[:10]
 
         campaign_name = None
         if campaign_id:
@@ -44,18 +56,14 @@ async def get_dashboard_stats(
             if campaign_name is None:
                 return {"error": "campaign not found"}
 
-        # Get calls for the day
+        # The result describes exactly these inclusive/exclusive UTC bounds.
         calls_query = db_client.table("calls").select(
             "id, status, outcome, goal_achieved",
             count="exact"
         ).eq("tenant_id", tenant_id)
         if campaign_id:
             calls_query = calls_query.eq("campaign_id", campaign_id)
-        calls_response = calls_query.gte(
-            "created_at", f"{target_date}T00:00:00"
-        ).lte(
-            "created_at", f"{target_date}T23:59:59"
-        ).execute()
+        calls_response = apply_range(calls_query, "created_at", start, end).execute()
 
         total_calls = calls_response.count or 0
         completed = len([c for c in calls_response.data if c.get("status") == "completed"])
@@ -80,7 +88,9 @@ async def get_dashboard_stats(
             "failed": failed,
             "goal_achieved": goal_achieved,
             "success_rate": round(success_rate, 1),
-            "active_campaigns": active_campaigns
+            "active_campaigns": active_campaigns,
+            "active_campaigns_scope": "current_account",
+            "applied_range": {"since": start, "until": end, "timestamp_field": "created_at"},
         }
         if campaign_id:
             stats["campaign_id"] = str(campaign_id)
