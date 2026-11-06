@@ -20,6 +20,14 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 # --- helpers used by the validators below + by endpoint code -----------
 
+def _reject_sip_control_characters(value):
+    # Check raw input before host canonicalisation can strip a newline/tab.
+    # Ordinary spaces and credential bytes remain unchanged.
+    if isinstance(value, str) and any(ord(ch) < 32 or 127 <= ord(ch) <= 159 for ch in value):
+        raise ValueError("SIP trunk values must not contain control characters")
+    return value
+
+
 def _normalize_codec(codec: str) -> str:
     return codec.strip().upper()
 
@@ -251,6 +259,11 @@ class SIPTrunkCreateRequest(BaseModel):
     auth_password: Optional[str] = Field(default=None, max_length=255)
     metadata: Dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("trunk_name", "sip_domain", "auth_username", "auth_password", mode="before")
+    @classmethod
+    def reject_control_characters(cls, value):
+        return _reject_sip_control_characters(value)
+
     @field_validator("trunk_name")
     @classmethod
     def reject_reserved_platform_name(cls, value: str) -> str:
@@ -293,6 +306,11 @@ class SIPTrunkUpdateRequest(BaseModel):
     auth_password: Optional[str] = Field(default=None, max_length=255)
     clear_auth: bool = False
     metadata: Optional[Dict[str, Any]] = None
+
+    @field_validator("trunk_name", "sip_domain", "auth_username", "auth_password", mode="before")
+    @classmethod
+    def reject_control_characters(cls, value):
+        return _reject_sip_control_characters(value)
 
     @field_validator("sip_domain")
     @classmethod

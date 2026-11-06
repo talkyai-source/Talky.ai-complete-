@@ -96,9 +96,27 @@ async def test_delete_is_tenant_scoped_and_never_changes_what_it_cannot_finish(m
     commands = []
 
     class Conn:
+        def __init__(self):
+            self.depth = 0
+            self.audit_locked = False
+            self.receipts = []
+
+        def is_in_transaction(self):
+            return self.depth > 0
+
         @asynccontextmanager
         async def transaction(self):
-            yield self
+            receipts_before = list(self.receipts)
+            locked_before = self.audit_locked
+            self.depth += 1
+            try:
+                yield self
+            except BaseException:
+                self.receipts[:] = receipts_before
+                raise
+            finally:
+                self.depth -= 1
+                self.audit_locked = locked_before
 
         async def fetchrow(self, query, *args):
             assert "tenant_id=$1 AND id=$2" in query and "deleted_at IS NULL" in query and "FOR UPDATE" in query
@@ -119,9 +137,27 @@ async def test_delete_is_tenant_scoped_and_never_changes_what_it_cannot_finish(m
         async def execute(self, query, *args):
             commands.append((" ".join(query.split()), args))
 
+    conn = Conn()
+
+    class Audit:
+        async def lock_transaction(self, connection):
+            assert connection is conn and connection.is_in_transaction()
+            connection.audit_locked = True
+
+        async def log_in_transaction(self, connection, **receipt):
+            assert connection is conn and connection.is_in_transaction()
+            assert connection.audit_locked
+            assert receipt["tenant_id"] == tenant
+            assert receipt["resource_id"] == tid
+            assert receipt["action"] == "sip.trunk.delete"
+            connection.receipts.append(receipt)
+
     @asynccontextmanager
     async def acquire(*_args, **kwargs):
-        yield Conn()
+        # acquire_with_tenant opens the outer transaction before the handler's
+        # savepoint; audit locking and receipt rollback share that connection.
+        async with conn.transaction():
+            yield conn
 
     cleanup = AsyncMock(side_effect=RuntimeError("reload unavailable") if case == "cleanup_failed" else None)
     monkeypatch.setattr(trunks, "acquire_with_tenant", acquire)
@@ -132,7 +168,11 @@ async def test_delete_is_tenant_scoped_and_never_changes_what_it_cannot_finish(m
     monkeypatch.setattr(pjsip_config_generator, "remove_trunk_config", cleanup)
     request = Request({"type": "http", "method": "DELETE", "path": f"/trunks/{tid}", "headers": []})
     try:
-        result = await trunks.delete_sip_trunk(tid, request, "delete-key", SimpleNamespace(tenant_id=tenant, id=str(uuid4())), object())
+        result = await trunks.delete_sip_trunk(
+            tid, request, "delete-key",
+            SimpleNamespace(tenant_id=tenant, id=str(uuid4()), role="tenant_admin"),
+            object(), Audit(),
+        )
         actual = getattr(result, "status_code", 200)
     except HTTPException as exc:
         actual = exc.status_code
@@ -144,6 +184,7 @@ async def test_delete_is_tenant_scoped_and_never_changes_what_it_cannot_finish(m
     if case in {"foreign", "shared", "cleanup_failed"}:
         assert not any(q.startswith(("UPDATE", "DELETE")) for q, _ in commands), "nothing may change"
     assert cleanup.await_count == (1 if case in {"unused", "active", "history", "cleanup_failed"} else 0)
+    assert len(conn.receipts) == (1 if case in {"unused", "active", "history"} else 0)
 
 
 @pytest.mark.asyncio
