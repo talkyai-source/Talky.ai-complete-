@@ -14,6 +14,10 @@ already states instead of reinterpreting the conversation:
    transferred, passed on) is spoken only when an action result on this call
    has ``confirmation_allowed`` true (action_tools.py: confirmation is allowed
    only when that flag is set). Otherwise an honest line replaces it.
+   The claim must also match the action's real state (QA F10-01): delivery is
+   never confirmed (a provider only accepts a message for sending), a transfer
+   is "under way" only once it was accepted, and a request whose outcome is
+   unresolved is neither sent, failed nor to be sent again.
 2. Once the caller explicitly denies being a customer, a sentence that claims
    an existing relationship is replaced, and the denial reaches the model in
    the live structured state (live_structured_state.py).
@@ -26,6 +30,7 @@ import re
 from typing import Any, Iterable, Optional
 
 from app.domain.models.conversation import MessageRole
+from app.domain.services.voice_pipeline.action_tools import safe_failure_speech
 
 # "I have sent the email", "We've just emailed it", "I sent you the link".
 # Object words keep historical statements ("we sent you a quote last month")
@@ -47,9 +52,77 @@ _DONE_CLAIM = re.compile(
 _SENT_PASSIVE_CLAIM = re.compile(
     r"\b(?:email|e-mail|message|text|link|confirmation|details|information|copy|"
     r"brochure|quote|invoice|receipt|it|that|this)(?:'s|\s+has|\s+have)\s+"
-    r"(?:just\s+|now\s+|already\s+)?been\s+(?:sent|emailed|texted|forwarded|delivered)\b",
+    r"(?:just\s+|now\s+|already\s+)?been\s+(?:sent|emailed|texted|forwarded)\b",
     re.IGNORECASE,
 )
+# Simple past of the same: "The email was sent to you." (_claims_now keeps "The
+# quote was sent last week" out of scope).
+_SENT_PAST_CLAIM = re.compile(
+    r"\b(?:email|e-mail|message|text|link|confirmation|details|information|copy|"
+    r"brochure|quote|invoice|receipt|it|that|this)\s+(?:was|were)\s+"
+    r"(?:just\s+|now\s+|already\s+|successfully\s+)?(?:sent|emailed|texted|forwarded)\b",
+    re.IGNORECASE,
+)
+# "The email was delivered to your inbox." No executor confirms delivery.
+_DELIVERED_CLAIM = re.compile(
+    r"\b(?:was|were|has\s+been|have\s+been|'s\s+been|got)\s+"
+    r"(?:just\s+|now\s+|already\s+|successfully\s+)?delivered\b"
+    r"|\bdelivered\s+(?:it\s+)?(?:to|into)\s+your\s+inbox\b"
+    r"|\b(?:arrived|landed)\s+in\s+your\s+inbox\b"
+    r"|\b(?:it'?s|it\s+is)\s+(?:now\s+|already\s+)?in\s+your\s+inbox\b",
+    re.IGNORECASE,
+)
+# A transfer under way: "I'm transferring you now", "You're being transferred".
+_TRANSFER_PROGRESS_CLAIM = re.compile(
+    r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+(?:now\s+|just\s+)?"
+    r"(?:(?:transferring|connecting)\s+you|putting\s+you\s+through)\b"
+    r"|^\W*(?:(?:transferring|connecting)\s+you|putting\s+you\s+through)\b"
+    r"|\byou(?:'re|\s+are)\s+(?:now\s+)?being\s+(?:transferred|connected)\b",
+    re.IGNORECASE,
+)
+# An unresolved outcome stated as a failure, or a blind resend.
+_FAILED_CLAIM = re.compile(
+    r"\b(?:could\s*n'?t|could\s+not|was\s*n'?t|was\s+not|were\s*n'?t|were\s+not|"
+    r"did\s*n'?t|did\s+not)\s+(?:be\s+|get\s+)?(?:sent|send|delivered|go\s+through|"
+    r"transferred|connected|booked|scheduled|submitted)\b"
+    r"|\bfailed\s+to\s+(?:send|deliver|go\s+through|transfer|connect|book|schedule|submit)\b"
+    r"|\b(?:sending|email|transfer|booking|request)\s+(?:has\s+)?failed\b",
+    re.IGNORECASE,
+)
+_RESEND_REQUEST = re.compile(
+    r"\bre-?send\b|\b(?:send|email|transfer|book)\s+(?:\w+\s+){0,3}?again\b",
+    re.IGNORECASE,
+)
+# Which action a failure or resend sentence is about.
+_ACTION_WORDS = (
+    (re.compile(r"\b(?:e-?mail\w*|sen[dt]\w*|deliver\w*|message|link|form|submi\w*)\b",
+                re.IGNORECASE), frozenset({"send_email", "submit_form"})),
+    (re.compile(r"\b(?:transfer\w*|connect\w*|through)\b", re.IGNORECASE),
+     frozenset({"transfer_call"})),
+    (re.compile(r"\b(?:book\w*|schedul\w*|callback|call\s+back|appointment)\b", re.IGNORECASE),
+     frozenset({"schedule_callback"})),
+)
+# A hedge covers the clause it governs: "I can't confirm that the email was
+# sent" is not a claim, but "I'm not sure you got it, but I've sent it" is.
+_CONJUNCTION = r"\b(?:but|though|although|however|and|so|yet)\b"
+_HEDGED_CLAUSE = re.compile(
+    r"\b(?:(?:can'?t|cannot|can\s+not|couldn'?t|could\s+not|unable\s+to|not\s+able\s+to)\s+"
+    r"(?:confirm|verify)|(?:not\s+sure|don'?t\s+know|do\s+not\s+know)\s+(?:if|whether))\b"
+    rf"(?:(?!{_CONJUNCTION})[^,;:.!?])*",
+    re.IGNORECASE,
+)
+# An explicit past date on the claim itself: "The quote was sent last week".
+# "Just now" or "a moment ago" is this call.
+_PAST_TIME = re.compile(
+    r"\b(?:last\s+(?:week|month|year|time)|yesterday|previously"
+    r"|(?:\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|a\s+few|few|several)\s+"
+    r"(?:days?|weeks?|months?|years?)\s+ago)\b",
+    re.IGNORECASE,
+)
+_CLAUSE_END = re.compile(rf"[,;:.!?]|{_CONJUNCTION}", re.IGNORECASE)
+_UNRESOLVED_STATUSES = frozenset({"unknown", "in_progress"})
+_SEND_ACTIONS = frozenset({"send_email", "submit_form"})
+_TRANSFER_ACTIONS = frozenset({"transfer_call"})
 _DONE_PASSIVE_CLAIM = re.compile(
     r"\b(?:callback|call\s*back|appointment|booking|reservation|slot|meeting|call|"
     r"demo|visit|consultation|it|that|this)(?:'s|\s+has|\s+have)\s+"
@@ -59,7 +132,7 @@ _DONE_PASSIVE_CLAIM = re.compile(
     re.IGNORECASE,
 )
 _TRANSFER_PASSIVE_CLAIM = re.compile(
-    r"\byou(?:'re|\s+are)\s+(?:now\s+)?(?:being\s+)?(?:transferred|connected)\b"
+    r"\byou(?:'re|\s+are)\s+(?:now\s+)?(?:transferred|connected)\b"
     r"|\byou(?:'ve|\s+have)\s+been\s+(?:transferred|connected)\b",
     re.IGNORECASE,
 )
@@ -79,6 +152,15 @@ _CALLER_DENIES_RELATIONSHIP = re.compile(
     r"|\b(?:i|we)\s+(?:don'?t|do\s+not)\s+have\s+an?\s+account\s+with\s+you\b",
     re.IGNORECASE,
 )
+# The caller says they are a customer ("Actually, I am your customer.").
+_CALLER_AFFIRMS_RELATIONSHIP = re.compile(
+    r"\b(?:i'?m|i\s+am|we'?re|we\s+are)\s+(?:a|an|your|one\s+of\s+your)\s+"
+    r"(?:existing\s+|current\s+)?(?:customer|client)s?\b",
+    re.IGNORECASE,
+)
+# Words in quotation marks are someone else's ("The script says "I am your
+# customer"."), never the caller's own affirmation.
+_QUOTED = re.compile(r'"[^"]*"|“[^”]*”')
 # The agent claims an existing relationship.
 _RELATIONSHIP_CLAIM = re.compile(
     r"\b(?:existing|current|valued|loyal)\s+(?:customer|client)s?\b"
@@ -102,18 +184,29 @@ OPT_OUT_PENDING_LINE = "I've noted your request."
 _SECTION_ID = re.compile(r"\s*\bk[0-9a-f]{8}_\d+\b")
 
 UNBACKED_ACTION_LINE = "I'm not able to do that from this call."
+UNRESOLVED_ACTION_LINE = "I couldn't confirm the outcome of that request."
 RELATIONSHIP_ACK_LINE = "Thanks for clarifying."
 
 
-def _confirmed_actions(session: Any) -> set[str]:
+def _action_results(session: Any) -> dict[str, dict]:
     results = getattr(session, "_voice_action_results", None)
     if not isinstance(results, dict):
-        return set()
+        return {}
     return {
-        str(r.get("action") or name)
+        str(r.get("action") or name): r
         for name, r in results.items()
-        if isinstance(r, dict) and r.get("confirmation_allowed") is True
+        if isinstance(r, dict)
     }
+
+
+def _claims_now(pattern: re.Pattern, text: str) -> bool:
+    """A match of ``pattern`` that is not dated to an explicit past time in its own clause."""
+    for match in pattern.finditer(text):
+        rest = text[match.end():]
+        end = _CLAUSE_END.search(rest)
+        if not _PAST_TIME.search(rest[:end.start()] if end else rest):
+            return True
+    return False
 
 
 def _needed_actions(sentence: str) -> Optional[frozenset[str]]:
@@ -123,7 +216,8 @@ def _needed_actions(sentence: str) -> Optional[frozenset[str]]:
     claim is checked against the action that does that thing.
     """
     needed: set[str] = set()
-    if _SENT_CLAIM.search(sentence) or _SENT_PASSIVE_CLAIM.search(sentence):
+    if (_SENT_CLAIM.search(sentence) or _SENT_PASSIVE_CLAIM.search(sentence)
+            or _claims_now(_SENT_PAST_CLAIM, sentence)):
         needed |= {"send_email", "submit_form"}
     if _TRANSFER_PASSIVE_CLAIM.search(sentence) or (
         _DONE_CLAIM.search(sentence) and _TRANSFERRED_CLAIM.search(sentence)
@@ -138,26 +232,66 @@ def _needed_actions(sentence: str) -> Optional[frozenset[str]]:
     return frozenset(needed) if needed else None
 
 
-def _confirmation_allowed(session: Any, sentence: Optional[str] = None) -> bool:
-    confirmed = _confirmed_actions(session)
-    if sentence is None:
-        return bool(confirmed)
-    needed = _needed_actions(sentence)
-    return needed is None or bool(confirmed & needed)
-
-
 def claims_completed_action(sentence: str) -> bool:
     return _needed_actions(sentence) is not None
 
 
-def caller_denied_relationship(history: Iterable[Any]) -> bool:
-    """True once any caller turn explicitly denies being a customer."""
+def _action_claim_line(session: Any, sentence: str) -> Optional[str]:
+    """The truthful line for an action claim this call's results do not back.
+
+    None keeps the sentence. Each claim is checked against the state of the
+    action that does that thing; only the hedged clause itself is set aside.
+    """
+    text = _HEDGED_CLAUSE.sub(" ", sentence)
+    results = _action_results(session)
+
+    def about(actions: Iterable[str]) -> list[dict]:
+        return [r for name, r in results.items() if name in actions]
+
+    def unresolved(actions: Iterable[str]) -> bool:
+        return any(r.get("status") in _UNRESOLVED_STATUSES for r in about(actions))
+
+    needed = _needed_actions(text)
+    if needed is not None and not any(r.get("confirmation_allowed") is True for r in about(needed)):
+        return UNRESOLVED_ACTION_LINE if unresolved(needed) else UNBACKED_ACTION_LINE
+    if _claims_now(_DELIVERED_CLAIM, text):
+        if unresolved(_SEND_ACTIONS):
+            return UNRESOLVED_ACTION_LINE
+        for r in about(_SEND_ACTIONS):
+            if r.get("success") is True and r.get("status") in {"accepted", "provider_accepted"}:
+                return safe_failure_speech(str(r.get("action")), r)
+        return UNBACKED_ACTION_LINE
+    if _TRANSFER_PROGRESS_CLAIM.search(text) and not any(
+        r.get("success") is True for r in about(_TRANSFER_ACTIONS)
+    ):
+        return UNRESOLVED_ACTION_LINE if unresolved(_TRANSFER_ACTIONS) else UNBACKED_ACTION_LINE
+    if _FAILED_CLAIM.search(text) or _RESEND_REQUEST.search(text):
+        named = frozenset().union(*(actions for words, actions in _ACTION_WORDS if words.search(text)))
+        if unresolved(named or results.keys()):
+            return UNRESOLVED_ACTION_LINE
+    return None
+
+
+def caller_relationship(history: Iterable[Any]) -> Optional[str]:
+    """The caller's latest own statement about being a customer: "denied",
+    "affirmed", or None when they never said either (QA F10-02). A denial
+    stands until the caller takes it back; quoted words don't take it back."""
+    latest = None
     for message in history or ():
         if getattr(message, "role", None) != MessageRole.USER:
             continue
-        if _CALLER_DENIES_RELATIONSHIP.search(str(getattr(message, "content", "") or "")):
-            return True
-    return False
+        text = str(getattr(message, "content", "") or "")
+        own = _QUOTED.sub(lambda quoted: " " * len(quoted.group()), text)
+        said = [(m.start(), "denied") for m in _CALLER_DENIES_RELATIONSHIP.finditer(text)]
+        said += [(m.start(), "affirmed") for m in _CALLER_AFFIRMS_RELATIONSHIP.finditer(own)]
+        if said:
+            latest = max(said)[1]
+    return latest
+
+
+def caller_denied_relationship(history: Iterable[Any]) -> bool:
+    """True while the caller's latest own statement denies being a customer."""
+    return caller_relationship(history) == "denied"
 
 
 def guard_spoken_sentence(session: Any, sentence: str) -> str:
@@ -168,8 +302,9 @@ def guard_spoken_sentence(session: Any, sentence: str) -> str:
         sentence = _SECTION_ID.sub("", sentence).strip()
         if not any(c.isalnum() for c in sentence):
             return ""
-    if claims_completed_action(sentence) and not _confirmation_allowed(session, sentence):
-        return UNBACKED_ACTION_LINE
+    action_line = _action_claim_line(session, sentence)
+    if action_line is not None:
+        return action_line
     if _REMOVED_CLAIM.search(sentence) and getattr(session, "_opt_out_recorded", False) is not True:
         return OPT_OUT_PENDING_LINE
     if _RELATIONSHIP_CLAIM.search(sentence) and caller_denied_relationship(

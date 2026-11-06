@@ -231,6 +231,18 @@ def _message_role(msg: Any) -> str:
     return str(getattr(role, "value", role) or "").strip().lower()
 
 
+def _network_intercept_outcome(voice_session: Any) -> Optional[CallOutcome]:
+    """INVALID / NO_ANSWER when the interim machine detector heard a network
+    intercept message (it flags the pipeline CallSession it holds)."""
+    for holder in (voice_session, getattr(voice_session, "call_session", None)):
+        flag = getattr(holder, "_amd_network_outcome", None) if holder is not None else None
+        if flag == "invalid":
+            return CallOutcome.INVALID
+        if flag == "no_answer":
+            return CallOutcome.NO_ANSWER
+    return None
+
+
 def _looks_like_voicemail(voice_session: Any) -> bool:
     """Heuristic: an AMD flag on the session, or a machine phrase in what the
     CALLEE said early in the call. Cheap; runs once at hangup."""
@@ -318,6 +330,13 @@ def resolve_call_outcome(
             cause_outcome = None
     if cause_outcome is not None:
         return cause_outcome
+
+    # The network answered with an intercept message (QA F10-06): recorded as
+    # its carrier cause would be (Q.850 1 → INVALID, 20 → NO_ANSWER above),
+    # never as a voicemail.
+    network_outcome = _network_intercept_outcome(voice_session)
+    if network_outcome is not None:
+        return network_outcome
 
     # Voicemail check happens AFTER cause-code classification — if the
     # PBX gave us a definite BUSY/NO_ANSWER we trust it over heuristic

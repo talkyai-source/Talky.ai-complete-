@@ -21,7 +21,7 @@ def _block(**kw):
 def test_block_present_with_full_name_and_company():
     b = _block(first_name="Jane", last_name="Doe", company="Acme Roofing")
     assert "PERSON YOU'RE CALLING: Jane Doe, from Acme Roofing." in b
-    assert 'is this Jane?' in b            # greets by FIRST name
+    assert 'speaking with Jane?' in b      # asks for the FIRST name
     assert "not a confirmed fact" in b     # framed as expectation, not CAPTURED
 
 
@@ -46,7 +46,7 @@ def test_block_greet_name_prefers_first_then_full():
     # Only a last name given → greet with the full (last) name, not blank.
     b = _block(last_name="Doe")
     assert "PERSON YOU'RE CALLING: Doe." in b
-    assert "is this Doe?" in b
+    assert "speaking with Doe?" in b
 
 
 # ── build_telephony_session_config integration ────────────────────

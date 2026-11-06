@@ -184,6 +184,23 @@ async def _run_greeting(decision, initialized=True, **pipeline_kwargs):
 
 
 @pytest.mark.asyncio
+async def test_notice_decision_is_made_for_the_callee_country_and_kept_for_the_save():
+    """QA F12-04: the live decision gets the country of the number on the
+    call, and records it for save_and_link, which re-runs the decision."""
+    log = []
+    voice_session, _session = _make_voice_session(log)
+    voice_session._dialer_phone = "+923001234567"
+    p_container, p_policy = _patched_policy(_NO_ANNOUNCE)
+    try:
+        with p_container, p_policy as decide:
+            await _send_outbound_greeting(voice_session)
+        assert decide.await_args.kwargs.get("callee_country_code") == "PK"
+        assert rps.get_callee_country(CALL_UUID) == "PK"
+    finally:
+        rps.clear_disclosure_state(CALL_UUID)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("first_speaker", ["user", "agent"])
 async def test_pinned_inbound_consent_is_exact_first_audio_for_both_modes(first_speaker):
     log = []

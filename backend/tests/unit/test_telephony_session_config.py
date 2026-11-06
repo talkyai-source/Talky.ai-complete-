@@ -19,45 +19,36 @@ class TestAgentNames:
 
 class TestBuildTelephonyGreeting:
     """
-    Bare pickup-greeting contract (2026-08-11 opener redesign): the FIRST
-    turn on an outbound call is a short, natural "Hi there." / "Hello?" and
-    NOTHING else — no agent name, no company, no reason, no time-ask. That
-    content is not gone, it moved to the model's own first generated reply
-    (once the callee has actually spoken) — see the OPENER REDESIGN note
-    above ``_PERSONA_GREETINGS`` in telephony_session_config.py and the
-    STAGE 1 / OPENING blocks in prompts/personas/*.py.
+    Identity-opener contract (owner decision 2026-11-05, QA F12-03): the
+    FIRST line on an outbound call says who is calling, for which business,
+    and that it is an AI assistant, then asks for the callee by name: "Hi,
+    this is Sarah, an AI assistant from All State Estimation. Am I speaking
+    with John?"
 
-    Superseded the previous "consent-first opener" contract (2026-04-22:
-    introduce the agent by name, ask permission to continue), which itself
-    packed identity into turn 1 — exactly what this redesign removes.
+    Superseded the 2026-08-11 bare pickup greeting ("Hi there."), which left
+    the AI disclosure to the model; QA found the model did not reliably give
+    it. The reason for the call still comes on the next turn.
     """
 
-    def test_greeting_does_not_contain_agent_name(self):
+    def test_greeting_names_the_agent_the_company_and_the_ai(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
-        for _ in range(30):
-            result = build_telephony_greeting("John", "All States Estimation")
-            assert "John" not in result, (
-                f"Identity must wait for the callee's reply, not the pickup "
-                f"greeting: {result!r}"
-            )
+        assert build_telephony_greeting("John", "All States Estimation") == (
+            "Hi, this is John, an AI assistant from All States Estimation. "
+            "Who am I speaking with?"
+        )
+
+    def test_greeting_asks_for_the_callee_by_first_name(self):
+        from app.domain.services.telephony_session_config import build_telephony_greeting
+        assert build_telephony_greeting("Sarah", "Acme", "Jane").endswith(
+            "Am I speaking with Jane?"
+        )
 
     def test_greeting_does_not_ask_for_time(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
         # The time-ask ("got a minute?", "thirty seconds?") belongs to the
-        # RELOCATED identity+reason turn, not the hello.
-        for _ in range(30):
-            result = build_telephony_greeting("John", "All States Estimation")
-            lower = result.lower()
-            assert not (
-                "minute" in lower or "moment" in lower or "second" in lower
-            ), f"Pickup greeting must not ask for time: {result!r}"
-
-    def test_greeting_does_not_mention_company(self):
-        from app.domain.services.telephony_session_config import build_telephony_greeting
-        result = build_telephony_greeting("John", "All States Estimation")
-        assert "All States Estimation" not in result, (
-            "Company name must wait for the callee's reply"
-        )
+        # next turn, not the opener.
+        lower = build_telephony_greeting("John", "All States Estimation", "Jane").lower()
+        assert not ("minute" in lower or "moment" in lower or "second" in lower), lower
 
     def test_greeting_does_not_pitch(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
@@ -65,31 +56,25 @@ class TestBuildTelephonyGreeting:
         lower = result.lower()
         for pitch_word in ("estimate", "bidding", "takeoff", "contractor", "cold call"):
             assert pitch_word not in lower, (
-                f"Opener must not pitch — found '{pitch_word}' in: {result!r}"
+                f"Opener must not pitch -- found '{pitch_word}' in: {result!r}"
             )
 
-    def test_greeting_is_short(self):
-        """Roughly 2-5 words — a hello, not a sentence."""
+    def test_greeting_is_one_short_line_with_one_question(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
-        for _ in range(30):
-            result = build_telephony_greeting("Alex", "TestCo")
-            assert len(result) < 20, f"Pickup greeting must be tiny; got {result!r}"
-            words = [w for w in result.split() if any(c.isalnum() for c in w)]
-            assert 1 <= len(words) <= 5, (
-                f"Pickup greeting should be ~2-5 words; got {len(words)}: {result!r}"
-            )
+        result = build_telephony_greeting("Alex", "TestCo", "Jane")
+        words = [w for w in result.split() if any(c.isalnum() for c in w)]
+        assert len(words) <= 20, result
+        assert result.count("?") == 1 and result.endswith("?"), result
 
     def test_greeting_is_a_non_empty_string(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
         result = build_telephony_greeting("Alex", "TestCo")
         assert isinstance(result, str) and len(result) > 0
 
-    def test_greeting_variants_rotate(self):
-        """Random selection is intentional — consecutive dials should not
-        all sound identical, same as every other greeting builder here."""
+    def test_greeting_is_the_same_approved_line_every_call(self):
         from app.domain.services.telephony_session_config import build_telephony_greeting
-        seen = {build_telephony_greeting("Alex", "TestCo") for _ in range(50)}
-        assert len(seen) >= 2, f"expected variant rotation, got only: {seen}"
+        seen = {build_telephony_greeting("Alex", "TestCo") for _ in range(20)}
+        assert len(seen) == 1, seen
 
 
 class TestBuildTelephonyInboundGreeting:
@@ -280,30 +265,24 @@ class TestBuildPersonaGreeting:
     in telephony_session_config.py.
     """
 
-    def test_outbound_is_persona_agnostic_and_bare(self):
-        """Every persona's OUTBOUND greeting is now the same bare pickup —
-        no identity, no persona framing, nothing to distinguish lead_gen
-        from customer_support from receptionist on this turn."""
+    def test_outbound_is_the_same_identity_opener_for_every_persona(self):
+        """Every persona's OUTBOUND greeting is the identity opener (owner
+        decision 2026-11-05, QA F12-03); persona framing comes next turn."""
         from app.domain.services.telephony_session_config import (
             build_persona_greeting,
             build_telephony_greeting,
         )
-        from unittest.mock import patch as _patch
 
-        with _patch("random.choice", side_effect=lambda seq: seq[0]):
-            expected = build_telephony_greeting("Adam", "Acme")
-            for persona in ("lead_gen", "customer_support", "receptionist"):
-                out = build_persona_greeting(
-                    persona_type=persona,
-                    agent_name="Adam",
-                    company_name="Acme",
-                    direction="outbound",
-                )
-                assert out == expected, (
-                    f"{persona} outbound opener should be the shared bare "
-                    f"pickup greeting, got: {out!r}"
-                )
-                assert "Adam" not in out and "Acme" not in out
+        expected = build_telephony_greeting("Adam", "Acme")
+        for persona in ("lead_gen", "customer_support", "receptionist"):
+            out = build_persona_greeting(
+                persona_type=persona,
+                agent_name="Adam",
+                company_name="Acme",
+                direction="outbound",
+            )
+            assert out == expected, f"{persona}: {out!r}"
+            assert "Adam" in out and "Acme" in out and "AI assistant" in out
 
     def test_lead_gen_inbound_thanks_for_reaching_out(self):
         from app.domain.services.telephony_session_config import (
@@ -341,24 +320,23 @@ class TestBuildPersonaGreeting:
                 seen_thanks = True
         assert seen_thanks, "customer_support inbound should have a 'Thanks for calling' variant"
 
-    def test_customer_support_outbound_is_bare(self):
-        """The callback framing ('calling about your recent inquiry') did
-        not disappear — it moved into CUSTOMER_SUPPORT_OPENINGS['outbound']
-        (prompts/personas/customer_support.py), spoken by the model on its
-        own first turn. This spoken pickup greeting no longer carries it."""
+    def test_customer_support_outbound_is_the_identity_opener(self):
+        """The callback framing ('calling about your recent inquiry') lives in
+        CUSTOMER_SUPPORT_OPENINGS['outbound'] (prompts/personas/
+        customer_support.py), spoken by the model next turn; the opener says
+        only who is calling and that it is an AI."""
         from app.domain.services.telephony_session_config import (
             build_persona_greeting,
         )
-        for _ in range(30):
-            out = build_persona_greeting(
-                persona_type="customer_support",
-                agent_name="Sam",
-                company_name="Acme",
-                direction="outbound",
-            )
-            assert "Sam" not in out and "Acme" not in out
-            lower = out.lower()
-            assert "recent inquiry" not in lower and "follow-up" not in lower
+        out = build_persona_greeting(
+            persona_type="customer_support",
+            agent_name="Sam",
+            company_name="Acme",
+            direction="outbound",
+        )
+        assert "Sam" in out and "Acme" in out and "AI assistant" in out
+        lower = out.lower()
+        assert "recent inquiry" not in lower and "follow-up" not in lower
 
     def test_receptionist_inbound_warm(self):
         from app.domain.services.telephony_session_config import (
@@ -375,23 +353,22 @@ class TestBuildPersonaGreeting:
             assert "Acme" in out
             assert "Maya" in out
 
-    def test_receptionist_outbound_is_bare(self):
-        """The follow-up framing ('following up on your inquiry') moved to
+    def test_receptionist_outbound_is_the_identity_opener(self):
+        """The follow-up framing ('following up on your inquiry') lives in
         RECEPTIONIST_OPENINGS['outbound'] (prompts/personas/receptionist.py);
-        the spoken pickup greeting no longer carries it."""
+        the opener says only who is calling and that it is an AI."""
         from app.domain.services.telephony_session_config import (
             build_persona_greeting,
         )
-        for _ in range(30):
-            out = build_persona_greeting(
-                persona_type="receptionist",
-                agent_name="Maya",
-                company_name="Acme",
-                direction="outbound",
-            )
-            assert "Maya" not in out and "Acme" not in out
-            # Still must not accidentally read the inbound framing either.
-            assert "Thank you for calling" not in out
+        out = build_persona_greeting(
+            persona_type="receptionist",
+            agent_name="Maya",
+            company_name="Acme",
+            direction="outbound",
+        )
+        assert "Maya" in out and "Acme" in out and "AI assistant" in out
+        # Still must not accidentally read the inbound framing either.
+        assert "Thank you for calling" not in out
 
     def test_unknown_persona_falls_back_to_generic(self):
         """Legacy estimation campaign has no persona — must still
@@ -470,16 +447,13 @@ class TestBuildCallGreetingPersonaDispatch:
         )
 
     def test_persona_aware_outbound(self):
-        """2026-08-11: the spoken opener no longer references identity at
-        all — Adam/Acme are said on the model's own first reply instead
-        (see personas/lead_gen.py STAGE 1), not in this pre-synth text."""
+        """2026-11-05 (QA F12-03): the spoken opener says who is calling and
+        that it is an AI, whatever the persona; the reason comes next turn
+        (see personas/lead_gen.py STAGE 1)."""
         from app.domain.services.telephony.config import _build_call_greeting
         session = self._session(agent_name="Adam", persona_type="lead_gen")
-        for _ in range(30):
-            out = _build_call_greeting(session, first_speaker="agent")
-            assert "Adam" not in out and "Acme" not in out
-            words = [w for w in out.split() if any(c.isalnum() for c in w)]
-            assert 1 <= len(words) <= 5, f"expected a bare greeting, got: {out!r}"
+        out = _build_call_greeting(session, first_speaker="agent")
+        assert out == "Hi, this is Adam, an AI assistant from Acme. Who am I speaking with?"
 
     def test_caller_first_uses_outbound_greeting(self):
         """Caller-first OUTBOUND calls must STILL use the outbound
@@ -488,19 +462,16 @@ class TestBuildCallGreetingPersonaDispatch:
         inbound 'how can I help' opener, which sounded wrong because
         the callee had not initiated the call.
 
-        2026-08-11: that outbound greeting is now bare, so this also pins
-        that a caller-first call does NOT get identity in its pre-synth
-        text either — first_speaker only ever changed TIMING, never
-        content (see _build_call_greeting's docstring)."""
+        first_speaker only ever changes TIMING, never content (see
+        _build_call_greeting's docstring): a caller-first call gets the
+        same identity opener (owner decision 2026-11-05, QA F12-03)."""
         from app.domain.services.telephony.config import _build_call_greeting
         session = self._session(persona_type="customer_support")
-        for _ in range(30):
-            out = _build_call_greeting(session, first_speaker="user")
-            # Must NOT use the inbound "Thanks for calling" / "How can I help" opener.
-            assert "Thanks for calling" not in out
-            # Must NOT contain identity — that is said on the model's own
-            # first reply now, after the callee speaks.
-            assert "Acme" not in out and "Alex" not in out
+        out = _build_call_greeting(session, first_speaker="user")
+        # Must NOT use the inbound "Thanks for calling" / "How can I help" opener.
+        assert "Thanks for calling" not in out
+        assert out == _build_call_greeting(session, first_speaker="agent")
+        assert "Alex" in out and "Acme" in out and "AI assistant" in out
 
     def test_no_config_falls_back_gracefully(self):
         """Some legacy / browser sessions don't carry config at all.

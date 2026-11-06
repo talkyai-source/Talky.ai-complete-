@@ -462,16 +462,28 @@ class TurnEnder:
                     pass
                 return
 
-        # Caller-first speech reaches the model unchanged, including a bare
-        # greeting. Do not play a separate scripted opener before this reply.
-        # The recording notice is not an opener: on the first accepted caller
-        # turn it plays before the reply, as agent-first calls play it before
-        # their greeting (caller_first_disclosure).
+        # The first accepted caller turn on a caller-first call: an outbound
+        # call answers it with the identity opener ("Hi, this is Sarah, an AI
+        # assistant from ... Am I speaking with John?", owner decision
+        # 2026-11-05, QA F12-03), which ends on a question, so the model does
+        # not also answer it; an inbound call plays the recording notice before
+        # the model's reply (caller_first_disclosure).
         if not _has_prior_user_turn_for_floor and _first_speaker_label(session) == "user":
             from app.domain.services.voice_pipeline.caller_first_disclosure import (
                 speak_disclosure_before_first_reply,
             )
-            await speak_disclosure_before_first_reply(session)
+            # First words that opt out or say goodbye get the normal turn, which
+            # records the opt-out before the farewell (block below).
+            ends_or_opts_out = contains_dnc(full_transcript) or caller_signaled_end(full_transcript)
+            if await speak_disclosure_before_first_reply(
+                session, full_transcript, opener=not ends_or_opts_out,
+            ):
+                try:
+                    session.current_user_input = ""
+                except AttributeError:
+                    pass
+                await self._flush_transcript(session)
+                return
 
         # Guard against the confirmed Deepgram Flux hallucination bug (GitHub #1524)
         # where the STT model outputs repetitive nonsense text ("blah blah blah…").

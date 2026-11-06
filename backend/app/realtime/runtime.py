@@ -240,6 +240,7 @@ async def create_realtime_voice_session(
             # pins that distinction explicitly on the config; direction is
             # only the backwards-compatible default for older callers.
             greet_on_start=greet_on_start,
+            opening_line=realtime_opening_line(config) if greet_on_start else None,
             transcript_service=realtime_transcript_service,
             talklee_call_id=talklee_call_id,
             call_direction=config.direction.value,
@@ -279,6 +280,28 @@ async def create_realtime_voice_session(
                     await gateway.cleanup()
                 except Exception:
                     logger.debug("Realtime gateway cleanup failed", exc_info=True)
+
+def realtime_opening_line(config: VoiceSessionConfig):
+    """The identity opener for an outbound Realtime call; None inbound.
+
+    Same line as the standard path (owner decision 2026-11-05, QA F12-03),
+    without ", on a recorded line": this path has no notice proof. The lead
+    name goes into the model's instructions here, so it is cleaned like any
+    other lead field first.
+    """
+    if config.direction != Direction.OUTBOUND:
+        return None
+    from app.domain.services.telephony_session_config import (
+        _sanitize_lead_field,
+        build_identity_opener,
+    )
+    agent_config = getattr(config, "agent_config", None)
+    return build_identity_opener(
+        getattr(agent_config, "agent_name", None),
+        getattr(agent_config, "company_name", None),
+        _sanitize_lead_field(getattr(config, "callee_first_name", None), field="first_name") or None,
+    )
+
 
 def resolve_realtime_greet_on_start(config: VoiceSessionConfig) -> bool:
     """Who opens a realtime call.
