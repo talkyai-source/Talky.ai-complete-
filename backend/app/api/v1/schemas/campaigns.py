@@ -91,7 +91,7 @@ class CampaignStartRequest(BaseModel):
 
     priority_override: Optional[int] = None
     tenant_id: Optional[str] = None
-    first_speaker: Literal["agent", "user"] = "agent"
+    first_speaker: Optional[Literal["agent", "user"]] = None
     # Max calls in flight at once (dialing/ringing/answered). The campaign dials
     # in batches of this size — a new call starts only as an earlier one reaches
     # a terminal outcome. Client-selectable; None keeps the campaign's existing

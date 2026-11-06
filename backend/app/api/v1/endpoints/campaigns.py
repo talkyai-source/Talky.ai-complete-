@@ -1003,7 +1003,7 @@ async def start_campaign(
         # someone else's campaign by spoofing tenant_id in JSON.
         tenant_id = current_user.tenant_id
         priority_override = (start_request.priority_override if start_request else None)
-        first_speaker = (start_request.first_speaker if start_request else "agent")
+        first_speaker = (start_request.first_speaker if start_request else None)
 
         # Activation gate: guidance saved before the budget was enforced at
         # save time (or with a larger env budget) must not go live with its

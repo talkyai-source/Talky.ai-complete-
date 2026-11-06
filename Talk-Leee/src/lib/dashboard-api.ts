@@ -573,9 +573,8 @@ class DashboardApi {
         id: string,
         opts?: { first_speaker?: "agent" | "user"; batch_size?: number; call_gap_seconds?: number },
     ): Promise<{ message: string; jobs_enqueued: number }> {
-        const body: Record<string, unknown> = {
-            first_speaker: opts?.first_speaker ?? "agent",
-        };
+        const body: Record<string, unknown> = {};
+        if (opts?.first_speaker !== undefined) body.first_speaker = opts.first_speaker;
         // Only send pacing settings when the caller set them, so omitting one
         // leaves the campaign's existing setting untouched.
         if (opts?.batch_size !== undefined && opts?.batch_size !== null) {

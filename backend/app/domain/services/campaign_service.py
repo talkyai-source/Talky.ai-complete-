@@ -257,7 +257,7 @@ class CampaignService:
         campaign_id: str,
         tenant_id: Optional[str] = None,
         priority_override: Optional[int] = None,
-        first_speaker: Literal["agent", "user"] = "agent",
+        first_speaker: Optional[Literal["agent", "user"]] = None,
         list_id: Optional[str] = None,
         allow_running: bool = False,
     ) -> StartCampaignResult:
@@ -302,6 +302,13 @@ class CampaignService:
 
             # 1. Validate campaign
             campaign = await self.get_campaign(campaign_id, tenant_id=scoping_tenant_id)
+            requested_first_speaker = first_speaker
+            saved_calling_config = campaign.get("calling_config")
+            if first_speaker is None:
+                first_speaker = (saved_calling_config.get("first_speaker", "agent")
+                                 if isinstance(saved_calling_config, dict) else "agent")
+            if first_speaker not in ("agent", "user"):
+                raise CampaignError("Campaign first speaker must be agent or user", status_code=422)
 
             # Inbound configurations have their own readiness/activation
             # lifecycle.  They must never enqueue outbound dialer jobs even if
@@ -324,6 +331,21 @@ class CampaignService:
             readiness = await self._evaluate_outbound_readiness(campaign, campaign_id, str(tenant_id))
             if not readiness["ready"]:
                 raise CampaignReadinessError(readiness)
+
+            if requested_first_speaker is not None:
+                from app.core.db_utils import acquire_with_tenant
+                # Persist only this choice; an atomic JSON update preserves
+                # concurrently edited schedule/trunk/pacing keys on resume.
+                async with acquire_with_tenant(self.db_client.pool, str(tenant_id)) as conn:
+                    saved = await conn.fetchval(
+                        """UPDATE campaigns
+                           SET calling_config = jsonb_set(COALESCE(calling_config, '{}'::jsonb),
+                               '{first_speaker}', to_jsonb($3::text), true), updated_at = NOW()
+                           WHERE id = $1::uuid AND tenant_id = $2::uuid AND direction = 'outbound'
+                           RETURNING id""", str(campaign_id), str(tenant_id), first_speaker,
+                    )
+                if not saved:
+                    raise CampaignDirectionError("Campaign changed; outbound start was refused")
 
             # 3. Get pending leads (optionally scoped to a single contact list)
             leads = await self._get_pending_leads(
