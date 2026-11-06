@@ -1,6 +1,7 @@
 "use client";
 
 import { Clock } from "lucide-react";
+import { formatTimestamp } from "@/lib/timestamps";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function formatCallDuration(seconds?: number | null): string {
@@ -12,8 +13,8 @@ export function formatCallDuration(seconds?: number | null): string {
 }
 
 /** The text the hover card shows; exported so the test can pin it. */
-export function callTimestampLabel(iso: string): string {
-    return new Date(iso).toLocaleString(undefined, { dateStyle: "full", timeStyle: "medium" });
+export function callTimestampLabel(iso: string, timeZone?: string): string {
+    return formatTimestamp(iso, timeZone).label;
 }
 
 /**
@@ -22,14 +23,12 @@ export function callTimestampLabel(iso: string): string {
  * wanted a quiet row — they appear on hover/focus together with the duration
  * and the viewer's timezone. Screen readers get the full time via aria-label.
  */
-export function CallTimestamp({ iso, durationSeconds }: { iso: string; durationSeconds?: number | null }) {
-    const label = callTimestampLabel(iso);
-    const d = new Date(iso);
+export function CallTimestamp({ iso, durationSeconds, timeZone }: { iso: string; durationSeconds?: number | null; timeZone?: string }) {
+    const stamp = formatTimestamp(iso, timeZone);
+    const label = stamp.label;
     // Short visible form (2026-10): the hover card is unreachable on touch, so
     // the date and time must exist as text. Two tiny lines fit the grid's
     // 2.5rem icon-width Time track without changing the column template.
-    const dateShort = d.toLocaleDateString(undefined, { month: "numeric", day: "numeric" });
-    const timeShort = d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
     return (
         <div className="inline-flex max-w-full flex-col items-center">
             <TooltipProvider delayDuration={150}>
@@ -38,6 +37,7 @@ export function CallTimestamp({ iso, durationSeconds }: { iso: string; durationS
                         <button
                             type="button"
                             aria-label={`Call time ${label}`}
+                            title={stamp.utc}
                             data-testid="call-timestamp"
                             className="inline-flex h-8 w-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-foreground/5 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                         >
@@ -48,21 +48,25 @@ export function CallTimestamp({ iso, durationSeconds }: { iso: string; durationS
                     <TooltipContent side="top" align="center" sideOffset={8} className="p-3 text-xs shadow-xl">
                         <div className="font-semibold">{label}</div>
                         <div className="mt-1 text-muted-foreground">
-                            Duration {formatCallDuration(durationSeconds)} · {Intl.DateTimeFormat().resolvedOptions().timeZone}
+                            Duration {formatCallDuration(durationSeconds)} · {stamp.zone}
                         </div>
+                        <div className="mt-1 text-muted-foreground">{stamp.utc}</div>
                     </TooltipContent>
                 </Tooltip>
             </TooltipProvider>
             {/* aria-hidden: the button above already announces the full timestamp. */}
             <time
                 dateTime={iso}
+                title={stamp.utc}
                 aria-hidden
                 data-testid="call-timestamp-text"
                 className="whitespace-nowrap text-center text-[9px] leading-[11px] tracking-tight text-muted-foreground tabular-nums"
             >
-                {dateShort}
+                {stamp.date}
                 <br />
-                {timeShort}
+                {stamp.time}
+                <br />
+                {stamp.offset}
             </time>
         </div>
     );

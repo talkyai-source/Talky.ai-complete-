@@ -10,6 +10,7 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.rbac import UserRole, normalize_role
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.reporting_time import reporting_zone
 
 from ._shared import get_client_ip, get_user_agent, normalize_optional_text
 from .schemas import LegalAcceptanceRequest, MeResponse, UpdateMeRequest
@@ -48,6 +49,7 @@ async def get_me(
             SELECT t.id                       AS tenant_id,
                    t.white_label_partner_id   AS partner_id,
                    t.status                   AS tenant_status,
+                   t.calling_rules->>'timezone' AS account_timezone,
                    t.suspended_at             AS tenant_suspended_at,
                    t.suspension_reason        AS tenant_suspension_reason,
                    p.status                   AS partner_status,
@@ -70,6 +72,10 @@ async def get_me(
     partner_id = str(row["partner_id"]) if row and row["partner_id"] else None
     tenant_status = row["tenant_status"] if row else None
     partner_status = row["partner_status"] if row else None
+    try:
+        account_timezone = reporting_zone(row.get("account_timezone") if row else None).key
+    except ValueError:
+        account_timezone = None
 
     suspended_scope = _derive_suspension_scope(tenant_status, partner_status)
     # Pick the reason / timestamp from whichever scope is suspended.
@@ -90,6 +96,7 @@ async def get_me(
         email=current_user.email,
         name=current_user.name,
         business_name=current_user.business_name,
+        account_timezone=account_timezone,
         role=current_user.role,
         minutes_remaining=current_user.minutes_remaining,
         minutes_state=current_user.minutes_state,

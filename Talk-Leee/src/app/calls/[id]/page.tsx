@@ -1,5 +1,7 @@
 "use client";
 
+import { formatTimestamp } from "@/lib/timestamps";
+
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
@@ -7,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { ArrowLeft, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
+import { useAuth } from "@/lib/auth-context";
 import { extendedApi } from "@/lib/extended-api";
 import { callStatusLabel, statusPillClass } from "@/lib/status-colors";
 import { CallBillingPanel, CallLoadError, CallPartiesPanel, InboundConsentStatePanel, InboundRouteSnapshot, TransferLegsPanel } from "@/components/calls/call-panels";
@@ -53,6 +56,7 @@ const TRANSCRIPT_ROW_GAP_PX = 12;
 const CARD_SLOT = "mb-6 break-inside-avoid empty:hidden";
 
 export default function CallDetailPage() {
+    const { user } = useAuth();
     const params = useParams();
     const router = useRouter();
     const callId = params.id as string;
@@ -309,7 +313,7 @@ export default function CallDetailPage() {
 
                             <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
                                 <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Date</div>
-                                <div className="mt-1 text-sm font-semibold text-foreground">{new Date(call.created_at).toLocaleString()}</div>
+                                <time dateTime={call.created_at} title={formatTimestamp(call.created_at, user?.account_timezone).utc} className="mt-1 block text-sm font-semibold text-foreground">{formatTimestamp(call.created_at, user?.account_timezone).label}</time>
                             </div>
                         </div>
                     </motion.div>

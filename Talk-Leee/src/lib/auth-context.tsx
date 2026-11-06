@@ -29,6 +29,7 @@ interface MeResponse {
     email: string;
     name?: string;
     business_name?: string;
+    account_timezone?: string;
     role: string;
     minutes_remaining: number | null;
     minutes_state?: MinutesState;

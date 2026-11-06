@@ -74,6 +74,7 @@ class MeResponse(BaseModel):
     email: str
     name: Optional[str] = None
     business_name: Optional[str] = None
+    account_timezone: Optional[str] = None
     role: str
     legal_acceptance_required: bool = False
     terms_version: Optional[str] = None

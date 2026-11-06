@@ -9369,16 +9369,16 @@
       "category": "external_query"
     },
     {
-      "id": "4e07d1cc5d192f5763f31a993d1f51fc4c54c7759bfb3564c5cbbee6e03af716",
+      "id": "21caafe509b3262964c6ccf87adbe1b2c3db714fece976edfd9d033e087c9041",
       "file": "app/api/v1/endpoints/auth/profile.py",
       "function": "get_me",
-      "line": 46,
+      "line": 47,
       "method": "fetchrow",
       "tables": [
         "user_profiles",
         "white_label_partners"
       ],
-      "sql": "SELECT t.id AS tenant_id, t.white_label_partner_id AS partner_id, t.status AS tenant_status, t.suspended_at AS tenant_suspended_at, t.suspension_reason AS tenant_suspension_reason, p.status AS partner_status, p.suspended_at AS partner_suspended_at, p.suspension_reason AS partner_suspension_reason FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE up.id = $1 AND up.tenant_id IS NOT DISTINCT FROM $2::uuid",
+      "sql": "SELECT t.id AS tenant_id, t.white_label_partner_id AS partner_id, t.status AS tenant_status, t.calling_rules->>'timezone' AS account_timezone, t.suspended_at AS tenant_suspended_at, t.suspension_reason AS tenant_suspension_reason, p.status AS partner_status, p.suspended_at AS partner_suspended_at, p.suspension_reason AS partner_suspension_reason FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE up.id = $1 AND up.tenant_id IS NOT DISTINCT FROM $2::uuid",
       "scoped": false,
       "unresolved": false,
       "bypass": false,

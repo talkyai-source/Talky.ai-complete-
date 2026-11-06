@@ -1,5 +1,7 @@
 "use client";
 
+import { formatTimestamp } from "@/lib/timestamps";
+
 /**
  * Security — a main sidebar destination, not a tab inside Settings (goals.md §4).
  *
@@ -377,7 +379,7 @@ export default function SecurityPage() {
                             </p>
                             {mfaVerifiedAt && (
                                 <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
-                                    Verified {new Date(mfaVerifiedAt).toLocaleString()}
+                                    Verified <time dateTime={mfaVerifiedAt} title={formatTimestamp(mfaVerifiedAt, user?.account_timezone).utc}>{formatTimestamp(mfaVerifiedAt, user?.account_timezone).label}</time>
                                 </p>
                             )}
                             <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">

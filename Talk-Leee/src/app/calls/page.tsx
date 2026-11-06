@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallTimestamp } from "@/components/calls/call-timestamp";
+import { formatTimestamp } from "@/lib/timestamps";
 import { DialAgainButton } from "@/components/calls/dial-again-button";
 import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, CalendarClock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
@@ -179,12 +180,14 @@ function callBestTimeToCall(call: Call): string | null {
 
 function CallRow({
     call,
+    timeZone,
     canPlayMedia,
     workflow,
     onWorkflowChange,
     onReview,
 }: {
     call: Call;
+    timeZone?: string;
     canPlayMedia: boolean;
     workflow: CallHistoryWorkflowEntry;
     onWorkflowChange: (call: Call, patch: CallWorkflowPatch) => void;
@@ -286,9 +289,9 @@ function CallRow({
                             {humanizeOutcome(call.outcome)}
                         </span>
                     ) : null}
-                    <time dateTime={call.created_at} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    <time dateTime={call.created_at} title={formatTimestamp(call.created_at, timeZone).utc} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <Clock className="h-3.5 w-3.5" aria-hidden />
-                        {new Date(call.created_at).toLocaleString()}
+                        {formatTimestamp(call.created_at, timeZone).label}
                     </time>
                 </div>
                 <CallHistoryNotesField
@@ -394,7 +397,7 @@ function CallRow({
                     callLabel={callLabel}
                 />
                 <div className="flex justify-center">
-                    <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} />
+                    <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} timeZone={timeZone} />
                 </div>
                 <div className="flex items-center justify-center gap-1">
                     <TooltipProvider delayDuration={250}>
@@ -648,6 +651,7 @@ function groupByCampaign(calls: Call[]): CampaignGroup[] {
 
 function CampaignSection({
     group,
+    timeZone,
     defaultOpen,
     canPlayMedia,
     workflow,
@@ -655,6 +659,7 @@ function CampaignSection({
     onReview,
 }: {
     group: CampaignGroup;
+    timeZone?: string;
     defaultOpen: boolean;
     canPlayMedia: boolean;
     workflow: CallHistoryWorkflowMap;
@@ -837,6 +842,7 @@ function CampaignSection({
                                     >
                                         <CallRow
                                             call={call}
+                                            timeZone={timeZone}
                                             canPlayMedia={canPlayMedia}
                                             workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
                                             onWorkflowChange={onWorkflowChange}
@@ -1044,6 +1050,7 @@ export default function CallsPage() {
                             <CampaignSection
                                 key={g.id}
                                 group={g}
+                                timeZone={user?.account_timezone}
                                 defaultOpen={idx === 0}
                                 canPlayMedia={canPlayMedia}
                                 workflow={workflow}
