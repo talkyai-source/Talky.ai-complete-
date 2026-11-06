@@ -98,7 +98,7 @@ class TestDriveSyncServiceInit:
         """Root folder name is set."""
         mock_supabase = MagicMock()
         service = DriveSyncService(mock_supabase)
-        assert service.ROOT_FOLDER_NAME == "Talky.ai Calls"
+        assert service.ROOT_FOLDER_NAME == "Talk-Lee Calls"
     
     def test_singleton_pattern(self):
         """get_drive_sync_service returns singleton."""

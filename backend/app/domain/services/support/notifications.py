@@ -27,40 +27,40 @@ _TEMPLATES = (
         subject_template="[{{ number }}] We received your support request",
         body_template=("Hi {{ name | default('there') }},\n\nWe received your request \"{{ subject }}\" "
                        "as ticket {{ number }}. Our support team will reply here:\n{{ link }}\n\n"
-                       "You can add details or files to the ticket at any time.\n\nTalk-Lee Support"),
+                       "You can add details or files to the ticket at any time.\n\n{{ brand_name }} Support"),
         body_html_template=("<p>Hi {{ name | default('there') }},</p><p>We received your request "
                             "&ldquo;{{ subject }}&rdquo; as ticket <strong>{{ number }}</strong>.</p>"
                             "<p><a href=\"{{ link }}\">Open your ticket</a> to follow it or add details.</p>"
-                            "<p>Talk-Lee Support</p>")),
+                            "<p>{{ brand_name }} Support</p>")),
     EmailTemplate(
         name="support_staff_reply", variables=["number", "subject", "link"],
         description="Customer: support replied (the reply itself stays in the app).",
         subject_template="[{{ number }}] Support replied to your request",
         body_template=("Hi {{ name | default('there') }},\n\nOur support team replied to ticket {{ number }} "
-                       "(\"{{ subject }}\"). Read the reply and respond here:\n{{ link }}\n\nTalk-Lee Support"),
+                       "(\"{{ subject }}\"). Read the reply and respond here:\n{{ link }}\n\n{{ brand_name }} Support"),
         body_html_template=("<p>Hi {{ name | default('there') }},</p><p>Our support team replied to ticket "
                             "<strong>{{ number }}</strong> (&ldquo;{{ subject }}&rdquo;).</p>"
-                            "<p><a href=\"{{ link }}\">Read the reply</a></p><p>Talk-Lee Support</p>")),
+                            "<p><a href=\"{{ link }}\">Read the reply</a></p><p>{{ brand_name }} Support</p>")),
     EmailTemplate(
         name="support_ticket_resolved", variables=["number", "subject", "link"],
         description="Customer: ticket resolved, with a rating link.",
         subject_template="[{{ number }}] Your support request was resolved",
         body_template=("Hi {{ name | default('there') }},\n\nTicket {{ number }} (\"{{ subject }}\") was marked "
                        "resolved. If something is still wrong, reply within 7 days to reopen it.\n\n"
-                       "How did we do? Rate the help you received:\n{{ link }}\n\nTalk-Lee Support"),
+                       "How did we do? Rate the help you received:\n{{ link }}\n\n{{ brand_name }} Support"),
         body_html_template=("<p>Hi {{ name | default('there') }},</p><p>Ticket <strong>{{ number }}</strong> "
                             "(&ldquo;{{ subject }}&rdquo;) was marked resolved. If something is still wrong, "
                             "reply within 7 days to reopen it.</p><p><a href=\"{{ link }}\">Rate the help you "
-                            "received</a></p><p>Talk-Lee Support</p>")),
+                            "received</a></p><p>{{ brand_name }} Support</p>")),
     EmailTemplate(
         name="support_staff_alert", variables=["number", "priority", "category", "headline", "link"],
         description="Staff: urgent/high ticket or missed deadline.",
         subject_template="[{{ priority | upper }}] {{ headline }}: {{ number }}",
         body_template=("{{ headline }}: {{ number }}\nPriority: {{ priority }}\nCategory: {{ category }}\n"
-                       "Tenant: {{ tenant }}\nSubject: {{ subject }}\n\n{{ link }}"),
+                       "Tenant: {{ tenant }}\nSubject: {{ subject }}\n\n{{ link }}\n\n{{ brand_name }} Support"),
         body_html_template=("<p><strong>{{ headline }}: {{ number }}</strong></p><p>Priority: {{ priority }}<br>"
                             "Category: {{ category }}<br>Tenant: {{ tenant }}<br>Subject: {{ subject }}</p>"
-                            "<p><a href=\"{{ link }}\">Open in the staff console</a></p>")),
+                            "<p><a href=\"{{ link }}\">Open in the staff console</a></p><p>{{ brand_name }} Support</p>")),
 )
 
 

@@ -16,16 +16,28 @@ Microsoft 365 Authentication:
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from html import escape
 from typing import Optional
+from urllib.parse import urlsplit, urlunsplit
 
 import aiosmtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.utils import formataddr
 
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+
+def frontend_link(path_or_link: str, *, base_url: str | None = None) -> str:
+    """Keep the account path/query on the configured frontend, never its old host."""
+    base = urlsplit(base_url or get_settings().frontend_url)
+    target = urlsplit(path_or_link)
+    path = f"{base.path.rstrip('/')}/{target.path.lstrip('/')}"
+    return urlunsplit((base.scheme, base.netloc, path, target.query, target.fragment))
 
 
 class EmailService:
@@ -57,6 +69,9 @@ class EmailService:
         settings = get_settings()
         self.sender_email = sender_email or settings.email_user
         self.sender_password = sender_password or settings.email_pass
+        self.from_email = getattr(settings, "from_email", None) or self.sender_email
+        self.brand_name = getattr(settings, "brand_name", "Talk-Lee")
+        self.frontend_url = settings.frontend_url
 
         if not self.sender_email or not self.sender_password:
             logger.warning(
@@ -71,6 +86,7 @@ class EmailService:
         subject: str,
         html_body: str,
         text_body: Optional[str] = None,
+        reply_to: Optional[str] = None,
     ) -> bool:
         """
         Send an email via Office 365 SMTP.
@@ -92,8 +108,10 @@ class EmailService:
             # Create message container
             msg = MIMEMultipart("alternative")
             msg["Subject"] = subject
-            msg["From"] = self.sender_email
+            msg["From"] = formataddr((self.brand_name, self.from_email))
             msg["To"] = recipient_email
+            if reply_to:
+                msg["Reply-To"] = reply_to
 
             # Attach plain text (optional fallback)
             if text_body:
@@ -107,21 +125,22 @@ class EmailService:
             # EHLO. aiosmtplib's `use_tls=True` is for implicit TLS on
             # port 465 (SMTPS) and produces "SSL: WRONG_VERSION_NUMBER"
             # against 587. Correct flag is `start_tls=True`.
-            async with aiosmtplib.SMTP(
-                hostname=self.SMTP_HOST,
-                port=self.SMTP_PORT,
-                start_tls=self.SMTP_USE_TLS,
-            ) as smtp:
-                await smtp.login(self.sender_email, self.sender_password)
-                await smtp.send_message(msg)
+            async with asyncio.timeout(20):
+                async with aiosmtplib.SMTP(
+                    hostname=self.SMTP_HOST,
+                    port=self.SMTP_PORT,
+                    start_tls=self.SMTP_USE_TLS,
+                    timeout=10,
+                ) as smtp:
+                    await smtp.login(self.sender_email, self.sender_password)
+                    await smtp.send_message(msg)
 
-            logger.info(f"Email sent successfully to {recipient_email}")
+            logger.info("Account email accepted by SMTP")
             return True
 
         except Exception as exc:
             logger.error(
-                f"Failed to send email to {recipient_email}: {exc}",
-                exc_info=True,
+                "Account email outcome unconfirmed error_type=%s", type(exc).__name__,
             )
             return False
 
@@ -147,6 +166,10 @@ class EmailService:
             if recipient_name
             else "Hello,"
         )
+        verification_link = frontend_link(verification_link, base_url=self.frontend_url)
+        html_greeting = escape(name_greeting)
+        html_link = escape(verification_link, quote=True)
+        html_brand = escape(self.brand_name)
 
         subject = "Please verify your email address"
 
@@ -162,7 +185,7 @@ This link will expire in 24 hours.
 If you did not create this account, please ignore this email.
 
 Best regards,
-Talky.ai Team
+{self.brand_name} Team
         """.strip()
 
         html_body = f"""
@@ -170,11 +193,11 @@ Talky.ai Team
   <body style="font-family: Arial, sans-serif; color: #333;">
     <div style="max-width: 600px; margin: 0 auto;">
       <h2>Email Verification</h2>
-      <p>{name_greeting}</p>
+      <p>{html_greeting}</p>
       <p>Thank you for signing up! Please verify your email address by clicking the button below:</p>
 
       <div style="margin: 30px 0; text-align: center;">
-        <a href="{verification_link}"
+        <a href="{html_link}"
            style="background-color: #007bff; color: white; padding: 12px 30px; text-decoration: none; border-radius: 4px; display: inline-block;">
           Verify Email Address
         </a>
@@ -182,7 +205,7 @@ Talky.ai Team
 
       <p style="font-size: 12px; color: #666;">
         Or copy and paste this link in your browser:<br>
-        <code>{verification_link}</code>
+        <code>{html_link}</code>
       </p>
 
       <p style="font-size: 12px; color: #666;">
@@ -195,7 +218,7 @@ Talky.ai Team
 
       <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
       <p style="font-size: 12px; color: #666;">
-        © 2026 Talky.ai. All rights reserved.
+        © 2026 {html_brand}. All rights reserved.
       </p>
     </div>
   </body>
@@ -227,19 +250,23 @@ Talky.ai Team
             f"Hi {recipient_name}," if recipient_name else "Hi,"
         )
 
-        subject = f"Your Talky.ai verification code: {code}"
+        subject = f"Your {self.brand_name} verification code: {code}"
+        html_greeting = escape(name_greeting)
+        html_code = escape(str(code))
+        html_expiry = escape(str(expires_in_minutes))
+        html_brand = escape(self.brand_name)
 
         text_body = f"""
 {name_greeting}
 
-Your Talky.ai verification code is: {code}
+Your {self.brand_name} verification code is: {code}
 
 Enter this code on the signup page to continue. The code expires in
 {expires_in_minutes} minutes.
 
 If you did not request this code, please ignore this email.
 
-— Talky.ai
+— {self.brand_name}
         """.strip()
 
         html_body = f"""
@@ -247,23 +274,23 @@ If you did not request this code, please ignore this email.
   <body style="font-family: Arial, sans-serif; color: #333;">
     <div style="max-width: 600px; margin: 0 auto;">
       <h2>Your verification code</h2>
-      <p>{name_greeting}</p>
+      <p>{html_greeting}</p>
       <p>Enter this code on the signup page to continue:</p>
       <div style="margin: 30px 0; text-align: center;">
         <div style="display: inline-block; background:#f5f5f5;
                     padding: 16px 32px; font-size: 32px;
                     letter-spacing: 8px; font-weight: bold;
                     font-family: monospace; border-radius: 8px;">
-          {code}
+          {html_code}
         </div>
       </div>
       <p style="font-size: 13px; color: #666;">
-        The code expires in {expires_in_minutes} minutes. If you did not
+        The code expires in {html_expiry} minutes. If you did not
         request this code, you can safely ignore this email.
       </p>
       <hr style="margin: 40px 0; border: none; border-top: 1px solid #ddd;">
       <p style="font-size: 12px; color: #666;">
-        © 2026 Talky.ai. All rights reserved.
+        © 2026 {html_brand}. All rights reserved.
       </p>
     </div>
   </body>
@@ -276,6 +303,38 @@ If you did not request this code, please ignore this email.
             html_body=html_body,
             text_body=text_body,
         )
+
+    async def send_password_reset_email(
+        self,
+        recipient_email: str,
+        recipient_name: Optional[str],
+        code: str,
+        expires_in_minutes: int = 15,
+    ) -> bool:
+        """Send a reset-specific code without implying a new account was created."""
+        greeting = f"Hi {recipient_name}," if recipient_name else "Hi,"
+        reset_link = frontend_link("/auth/forgot-password", base_url=self.frontend_url)
+        subject = f"Your {self.brand_name} password reset code"
+        text_body = (
+            f"{greeting}\n\nSomeone asked to reset the password for your {self.brand_name} account.\n\n"
+            f"Your password reset code is: {code}\nEnter it in the reset form you already opened.\n"
+            f"To start a new reset request, visit:\n{reset_link}\n\n"
+            f"The code expires in {expires_in_minutes} minutes.\n"
+            f"If this wasn't you, ignore this email. Your password has not changed.\n\n— {self.brand_name}"
+        )
+        html_body = f"""<html><body style="font-family: Arial, sans-serif; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto;">
+            <h2>Password reset</h2><p>{escape(greeting)}</p>
+            <p>Someone asked to reset the password for your {escape(self.brand_name)} account.</p>
+            <p>Your password reset code is:</p>
+            <p style="font-family: monospace; font-size: 32px; letter-spacing: 8px;">{escape(str(code))}</p>
+            <p>Enter it in the reset form you already opened.</p>
+            <p>To start a new reset request, visit the <a href="{escape(reset_link, quote=True)}">password recovery page</a>.</p>
+            <p>The code expires in {escape(str(expires_in_minutes))} minutes.</p>
+            <p>If this wasn't you, ignore this email. Your password has not changed.</p>
+            <p>— {escape(self.brand_name)}</p></div></body></html>"""
+        return await self.send_email(recipient_email=recipient_email, subject=subject,
+                                     html_body=html_body, text_body=text_body)
 
 
 # Singleton instance

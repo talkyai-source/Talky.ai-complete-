@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
+from app.core import config
 from app.services.crm_delivery_store import CRMDeliveryStore, MAX_ATTEMPTS
 from app.domain.services.call_summary.business_details import transcript_revision
 from app.domain.services.lead_capture_service import LeadCaptureService
@@ -83,7 +84,7 @@ class CRMNotConnectedWarning:
     """Operator-facing copy for missing/expired CRM connections."""
 
     MISSING_CRM = (
-        "CRM not connected. Call data was saved in Talky.ai but not synced to a CRM. "
+        "CRM not connected. Call data was saved but not synced to a CRM. "
         "Connect HubSpot or Salesforce on the Connectors page to enable automatic "
         "lead creation and call logging."
     )
@@ -164,7 +165,7 @@ def build_call_body(call: Dict[str, Any], summary: Optional[dict], *, campaign_n
     direction = str(call.get("direction") or "outbound").lower()
     duration = int(call.get("duration_seconds") or 0)
     lines: List[str] = [
-        f"Talky.ai {direction} call - {outcome_label(call.get('outcome'), summary)}",
+        f"{config.get_settings().brand_name} {direction} call - {outcome_label(call.get('outcome'), summary)}",
     ]
     if campaign_name:
         lines.append(f"Campaign: {campaign_name}")
@@ -199,7 +200,7 @@ def build_call_body(call: Dict[str, Any], summary: Optional[dict], *, campaign_n
         lines.append(excerpt)
 
     lines.append("")
-    lines.append(f"Talky.ai call id: {call.get('id')}")
+    lines.append(f"Call ID: {call.get('id')}")
     return "\n".join(lines)
 
 
@@ -689,7 +690,7 @@ class CRMSyncService:
             return {}
         custom = _coerce_json((lead or {}).get("custom_fields")) or {}
         company = (lead or {}).get("company_name") or custom.get("company")
-        props: Dict[str, Any] = {"description": f"Created by Talky.ai after a call.\n\n{body}"}
+        props: Dict[str, Any] = {"description": f"Created by {config.get_settings().brand_name} after a call.\n\n{body}"}
         if company:
             props["company"] = str(company)
         title = (lead or {}).get("job_title")

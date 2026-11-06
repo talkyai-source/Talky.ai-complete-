@@ -242,14 +242,14 @@ def test_build_call_body_carries_outcome_campaign_summary_recording_and_excerpt(
     call = _call_row(recording_url="https://rec/1.wav", transcript="x" * 2000)
     body = build_call_body(call, {"headline": "Qualified - demo Tue", "outcome": "qualified | wants a demo", "next_step": "Send deck", "follow_up_tips": ["Call at 10"]},
                            campaign_name="Spring promo")
-    assert body.startswith("Talky.ai outbound call - Qualified")
+    assert body.startswith("Talk-Lee outbound call - Qualified")
     assert "Campaign: Spring promo" in body
     assert "Duration: 1m 35s" in body
     assert "Summary: Qualified - demo Tue" in body and "Next step: Send deck" in body and "- Call at 10" in body
     assert "Recording: https://rec/1.wav" in body
     assert "Transcript excerpt:" in body
     assert ("x" * 1500 + " ...") in body and ("x" * 1501) not in body  # excerpt is capped
-    assert f"Talky.ai call id: {CALL}" in body
+    assert f"Call ID: {CALL}" in body
 
 
 def test_result_and_warning_shapes_are_stable():
@@ -297,7 +297,7 @@ def test_unknown_callee_is_searched_then_created_and_remembered(harness):
     create = conn.calls[1]
     assert create[2] == "Pat" and create[3] == "Lee" and create[4] == "+15550100100"
     assert create[5]["company"] == "ACME" and create[5]["Title"] == "CTO"
-    assert "Created by Talky.ai" in create[5]["description"]
+    assert "Created by Talk-Lee" in create[5]["description"]
     assert harness["remembered"] == [(LEAD, "salesforce", "00Qcreated")]
 
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -123,6 +124,7 @@ def enforce_production_gate() -> None:
     violations.extend(_check_staging_only_flags())
     violations.extend(_check_pbx_default_credentials())
     violations.extend(_check_required_secrets())
+    violations.extend(_check_account_sender())
     violations.extend(_check_caller_id_enforcement())
     violations.extend(_check_inbound_strict_routing())
 
@@ -140,6 +142,17 @@ def enforce_production_gate() -> None:
     for v in violations:
         msg_lines.append(f"  - [{v.rule}] {v.detail}")
     raise ProductionGateError("\n".join(msg_lines))
+
+
+def _check_account_sender() -> list[GateViolation]:
+    """Account mail must use a bare address on the owned sending domain."""
+    atom = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+    if re.fullmatch(rf"{atom}(?:\.{atom})*@talkleeai\.com", os.getenv("FROM_EMAIL", ""), re.IGNORECASE):
+        return []
+    return [GateViolation(
+        rule="invalid_account_sender",
+        detail="FROM_EMAIL must be a bare email address on talkleeai.com.",
+    )]
 
 
 def _check_guard_bypass_flags() -> list[GateViolation]:
