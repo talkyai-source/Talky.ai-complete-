@@ -25,7 +25,14 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_current_user,
+    get_db_pool,
+    require_admin,
+)
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.dnc_service import (
     KNOWN_SOURCES,
     SOURCE_BULK_IMPORT,
@@ -129,6 +136,7 @@ async def add_dnc_entry(
     payload: DNCAddRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ) -> DNCEntryResponse:
     """Add a number to the tenant's DNC list. Idempotent — adding
     the same number twice just refreshes `updated_at`."""
@@ -144,6 +152,8 @@ async def add_dnc_entry(
             reason=payload.reason,
             expires_at=payload.expires_at,
             added_by=str(current_user.id) if current_user.id else None,
+            audit=audit,
+            actor_role=getattr(current_user, "role", None),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -159,6 +169,7 @@ async def bulk_import(
     payload: DNCBulkImportRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ) -> DNCBulkImportResponse:
     tenant_id = _require_tenant(current_user)
     svc = DNCService(db_pool)
@@ -167,6 +178,22 @@ async def bulk_import(
         numbers=payload.numbers,
         source=payload.source,
         reason=payload.reason,
+    )
+    # One summary row after the import (QA F12-10). Holding the audit chain
+    # lock across a 10,000-number import would stall every audited write.
+    await audit.log(
+        event_type=AuditEvent.CONFIG_CHANGED,
+        action="dnc.bulk_import",
+        actor_id=current_user.id,
+        actor_role=getattr(current_user, "role", None),
+        tenant_id=tenant_id,
+        resource_type="dnc_list",
+        metadata={
+            "source": payload.source,
+            "accepted_count": result["accepted_count"],
+            "skipped_count": result["skipped_count"],
+            "invalid_count": result["invalid_count"],
+        },
     )
     logger.info(
         "dnc_bulk_import tenant=%s source=%s accepted=%d skipped=%d invalid=%d",
@@ -181,6 +208,7 @@ async def caller_opt_out(
     payload: DNCCallerOptOutRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ) -> DNCEntryResponse:
     """Record an in-call opt-out. Called by the voice pipeline when
     it detects a stop request (DTMF opt-out, "stop calling me"
@@ -192,6 +220,9 @@ async def caller_opt_out(
             tenant_id=tenant_id,
             e164=payload.e164,
             call_id=payload.call_id,
+            audit=audit,
+            actor_id=str(current_user.id) if current_user.id else None,
+            actor_role=getattr(current_user, "role", None),
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -221,13 +252,20 @@ async def remove_dnc_entry(
     entry_id: str,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ):
     """Remove a DNC entry. Only entries owned by the current tenant
     can be deleted — global (tenant_id=NULL) entries are managed by
     the operator via direct DB access."""
     tenant_id = _require_tenant(current_user)
     svc = DNCService(db_pool)
-    removed = await svc.remove(tenant_id=tenant_id, entry_id=entry_id)
+    removed = await svc.remove(
+        tenant_id=tenant_id,
+        entry_id=entry_id,
+        audit=audit,
+        actor_id=str(current_user.id) if current_user.id else None,
+        actor_role=getattr(current_user, "role", None),
+    )
     logger.info(
         "dnc_entry_removed tenant=%s id=%s removed=%s",
         tenant_id, entry_id, removed,

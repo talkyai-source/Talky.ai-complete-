@@ -74,6 +74,18 @@ class _FakeConn:
     async def fetchrow(self, sql: str, *args):
         sql_norm = " ".join(sql.split())
 
+        if sql_norm.startswith("DELETE FROM dnc_entries") and "RETURNING" in sql_norm:
+            # remove() returns the deleted row so it can be audited (QA F12-10).
+            tenant_id, entry_id = args
+            row = self.store["by_id"].get(str(entry_id))
+            if row and row["tenant_id"] == tenant_id:
+                del self.store["by_id"][str(entry_id)]
+                for k, v in list(self.store["by_tuple"].items()):
+                    if v is row:
+                        del self.store["by_tuple"][k]
+                return row
+            return None
+
         if "INSERT INTO dnc_entries" in sql_norm and "DO NOTHING" in sql_norm:
             tenant_id, number, source, reason = args[:4]
             added_by, expires_at = args[4:] if len(args) == 6 else (None, None)
