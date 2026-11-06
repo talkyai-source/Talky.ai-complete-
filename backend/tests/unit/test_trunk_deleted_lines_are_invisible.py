@@ -24,15 +24,39 @@ from app.api.v1.endpoints.telephony_sip import trunks
 TENANT = str(uuid4())
 
 
+class _Audit:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def lock_transaction(self, conn):
+        assert conn is self.conn and conn.depth > 0
+        conn.locked = True
+        conn.audit_lock_calls += 1
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.conn and conn.depth > 0 and conn.locked
+        assert str(event["tenant_id"]) == TENANT and str(event["actor_id"]) == USER.id
+        conn.audit_events.append(event)
+
+
 class RecordingConn:
     """Answers every query with ``rows`` and remembers the SQL it was given."""
 
     def __init__(self, row=None):
         self.row, self.sql = row, []
+        self.depth, self.locked, self.audit_lock_calls = 0, False, 0
+        self.audit_events = []
+        self.audit = _Audit(self)
 
     @asynccontextmanager
     async def transaction(self):
-        yield self
+        locked_before = self.locked
+        self.depth += 1
+        try:
+            yield self
+        finally:
+            self.depth -= 1
+            self.locked = locked_before
 
     async def execute(self, sql, *args):
         return "SELECT 1"
@@ -52,8 +76,10 @@ class RecordingConn:
 
 def install(monkeypatch, conn):
     @asynccontextmanager
-    async def acquire(*_args, **_kwargs):
-        yield conn
+    async def acquire(_pool, tenant_id, **_kwargs):
+        assert str(tenant_id) == TENANT
+        async with conn.transaction():
+            yield conn
 
     monkeypatch.setattr(trunks, "acquire_with_tenant", acquire)
     monkeypatch.setattr(trunks, "_claim_idempotency", AsyncMock(return_value=("new", None, None)))
@@ -90,12 +116,14 @@ async def test_edit_switch_on_switch_off_and_test_all_treat_a_deleted_line_as_mi
     tid = uuid4()
     patch = trunks.SIPTrunkUpdateRequest(metadata={"region": "eu"})
     answers = [
-        await trunks.update_sip_trunk(tid, patch, request(), "k1", None, USER, object()),
-        await trunks.activate_sip_trunk(tid, request(), "k2", None, USER, object()),
-        await trunks.deactivate_sip_trunk(tid, request(), "k3", None, USER, object()),
-        await trunks.test_sip_trunk(tid, request(), USER, object()),
+        await trunks.update_sip_trunk(tid, patch, request(), "k1", None, USER, object(), audit_logger=conn.audit),
+        await trunks.activate_sip_trunk(tid, request(), "k2", None, USER, object(), audit_logger=conn.audit),
+        await trunks.deactivate_sip_trunk(tid, request(), "k3", None, USER, object(), audit_logger=conn.audit),
+        await trunks.test_sip_trunk(tid, request(), USER, object(), audit_logger=conn.audit),
     ]
     assert [a.status_code for a in answers] == [404] * 4
+    assert conn.audit_lock_calls == 3 and conn.audit_events == []
+    assert conn.depth == 0 and conn.locked is False
     live_only(conn.sql)
 
 
@@ -120,11 +148,14 @@ async def test_a_line_deleted_between_the_read_and_the_write_is_404_not_a_crash(
     tid = uuid4()
     if call == "update":
         answer = await trunks.update_sip_trunk(
-            tid, trunks.SIPTrunkUpdateRequest(metadata={"region": "eu"}), request(), "k", None, USER, object()
+            tid, trunks.SIPTrunkUpdateRequest(metadata={"region": "eu"}), request(), "k", None, USER, object(),
+            audit_logger=conn.audit,
         )
     else:
-        answer = await trunks.activate_sip_trunk(tid, request(), "k", None, USER, object())
+        answer = await trunks.activate_sip_trunk(tid, request(), "k", None, USER, object(), audit_logger=conn.audit)
     assert answer.status_code == 404
+    assert conn.audit_lock_calls == 1 and conn.audit_events == []
+    assert conn.depth == 0 and conn.locked is False
     updates = [s for s in conn.sql if s.startswith("UPDATE tenant_sip_trunks")]
     assert updates and all("deleted_at IS NULL" in s for s in updates)
 

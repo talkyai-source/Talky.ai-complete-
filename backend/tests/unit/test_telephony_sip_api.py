@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import re
 from dataclasses import dataclass
@@ -601,9 +602,83 @@ class FakeTelephonyConn:
         raise AssertionError(f"Unexpected execute query: {normalized}")
 
 
+class _AuditedTransaction:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        self.before = {name: copy.deepcopy(getattr(self.conn, name)) for name in
+                       ("trunks", "codec_policies", "route_policies", "idempotency", "quota_events", "audit_events")}
+        self.locked_before = self.conn.audit_locked
+        self.conn.audit_depth += 1
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if exc_type is not None:
+            for name, value in self.before.items():
+                setattr(self.conn, name, value)
+        self.conn.audit_depth -= 1
+        self.conn.audit_locked = self.locked_before
+        return False
+
+
+class _Audit:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def lock_transaction(self, conn):
+        assert conn is self.conn and conn.audit_depth > 0
+        conn.audit_locked = True
+        conn.audit_order.append("lock")
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.conn and conn.audit_depth > 0 and conn.audit_locked
+        assert str(event["tenant_id"]) == conn.current_tenant_id
+        assert str(event["actor_id"]) == conn.current_user_id
+        assert event["actor_role"] == "admin"
+        assert event["event_type"].value == "config_changed"
+        conn.audit_events.append(copy.deepcopy(event))
+        conn.audit_order.append("audit")
+
+
+class _AuditedTelephonyConn(FakeTelephonyConn):
+    """This fixture only: immutable returned records and atomic audit receipts."""
+
+    def __init__(self):
+        super().__init__()
+        self.audit_depth = 0
+        self.audit_locked = False
+        self.audit_events = []
+        self.audit_order = []
+        self.pjsip_projections = []
+        self.audit = _Audit(self)
+
+    def transaction(self):
+        return _AuditedTransaction(self)
+
+    def _check_business_write(self, query, args):
+        normalized = " ".join(query.split())
+        if re.match(r"(?:INSERT INTO|UPDATE|DELETE FROM) tenant_(?:sip_trunks|codec_policies|route_policies)\b", normalized):
+            assert self.audit_depth > 0 and self.audit_locked
+            assert str(args[0]) == self.current_tenant_id
+            self.audit_order.append("write")
+
+    async def fetchrow(self, query, *args):
+        self._check_business_write(query, args)
+        return copy.deepcopy(await super().fetchrow(query, *args))
+
+    async def fetch(self, query, *args):
+        self._check_business_write(query, args)
+        return copy.deepcopy(await super().fetch(query, *args))
+
+    async def execute(self, query, *args):
+        self._check_business_write(query, args)
+        return await super().execute(query, *args)
+
+
 @pytest.fixture
-def wsf_context():
-    conn = FakeTelephonyConn()
+def wsf_context(monkeypatch):
+    conn = _AuditedTelephonyConn()
     pool = FakePool(conn)
     user = CurrentUser(
         id=str(uuid4()),
@@ -611,6 +686,17 @@ def wsf_context():
         tenant_id=str(uuid4()),
         role="admin",
     )
+    from app.api.v1.endpoints.telephony_sip import trunks
+
+    async def sync(row, *, active, previous_row=None):
+        assert conn.audit_depth > 0 and conn.audit_locked
+        receipt = conn.audit_events[-1]
+        assert str(receipt["resource_id"]) == str(row["id"])
+        assert receipt["after_state"]["is_active"] is active
+        conn.audit_order.append("external")
+        conn.pjsip_projections.append((str(row["id"]), active))
+
+    monkeypatch.setattr(trunks, "_sync_trunk_pjsip_config", sync)
     conn.threshold_policies.append(
         {
             "id": str(uuid4()),
@@ -688,11 +774,11 @@ def test_tenant_create_cannot_claim_platform_route_by_name(monkeypatch, name):
 async def test_tenant_rename_cannot_claim_or_repurpose_platform_route(wsf_context, monkeypatch, seeded, patch_name):
     monkeypatch.delenv("PLATFORM_SIP_TRUNK_NAME", raising=False)
     conn, pool, user = wsf_context
-    created = await create_sip_trunk(payload=_create_payload(), request=_make_request("/trunks"), idempotency_key="create-reserved-test", current_user=user, db_pool=pool)
+    created = await create_sip_trunk(payload=_create_payload(), request=_make_request("/trunks"), idempotency_key="create-reserved-test", current_user=user, db_pool=pool, audit_logger=pool._conn.audit)
     tid = _json_body(created)["id"]
     previous = "platform-default" if seeded else "main-trunk"
     conn.trunks[tid]["trunk_name"] = previous
-    response = await update_sip_trunk(trunk_id=tid, payload=SIPTrunkUpdateRequest(trunk_name=patch_name), request=_make_request(f"/trunks/{tid}"), idempotency_key="rename-reserved-test", current_user=user, db_pool=pool)
+    response = await update_sip_trunk(trunk_id=tid, payload=SIPTrunkUpdateRequest(trunk_name=patch_name), request=_make_request(f"/trunks/{tid}"), idempotency_key="rename-reserved-test", current_user=user, db_pool=pool, audit_logger=pool._conn.audit)
     assert response.status_code == 400
     assert _json_body(response)["title"] == "Reserved Trunk Name"
     assert conn.trunks[tid]["trunk_name"] == previous
@@ -702,10 +788,10 @@ async def test_tenant_rename_cannot_claim_or_repurpose_platform_route(wsf_contex
 async def test_seeded_platform_trunk_allows_existing_non_name_update(wsf_context, monkeypatch):
     monkeypatch.delenv("PLATFORM_SIP_TRUNK_NAME", raising=False)
     conn, pool, user = wsf_context
-    created = await create_sip_trunk(payload=_create_payload(), request=_make_request("/trunks"), idempotency_key="create-seeded-test", current_user=user, db_pool=pool)
+    created = await create_sip_trunk(payload=_create_payload(), request=_make_request("/trunks"), idempotency_key="create-seeded-test", current_user=user, db_pool=pool, audit_logger=pool._conn.audit)
     tid = _json_body(created)["id"]
     conn.trunks[tid]["trunk_name"] = "platform-default"
-    response = await update_sip_trunk(trunk_id=tid, payload=SIPTrunkUpdateRequest(metadata={"region": "test"}), request=_make_request(f"/trunks/{tid}"), idempotency_key="edit-seeded-test", current_user=user, db_pool=pool)
+    response = await update_sip_trunk(trunk_id=tid, payload=SIPTrunkUpdateRequest(metadata={"region": "test"}), request=_make_request(f"/trunks/{tid}"), idempotency_key="edit-seeded-test", current_user=user, db_pool=pool, audit_logger=pool._conn.audit)
     assert response.trunk_name == "platform-default"
     assert response.metadata["region"] == "test"
 
@@ -719,6 +805,7 @@ async def test_create_trunk_requires_idempotency_key(wsf_context):
         idempotency_key=None,
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
 
     assert response.status_code == 400
@@ -735,6 +822,7 @@ async def test_create_trunk_success_and_list(wsf_context):
         idempotency_key="k-1",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
 
     assert created.status_code == 201
@@ -742,6 +830,16 @@ async def test_create_trunk_success_and_list(wsf_context):
     assert created_body["trunk_name"] == "trunk-a"
     assert created_body["auth_configured"] is True
     assert conn.trunks[created_body["id"]]["auth_password_encrypted"] != "pass1"
+    receipt, = conn.audit_events
+    assert receipt["action"] == "sip.trunk.create"
+    assert receipt["resource_type"] == "sip_trunk" and str(receipt["resource_id"]) == created_body["id"]
+    assert receipt["before_state"] is None
+    assert receipt["after_state"]["trunk_name"] == "trunk-a"
+    assert receipt["after_state"]["auth_password_encrypted"] == "[configured]"
+    serialized = json.dumps(receipt, default=str)
+    assert "pass1" not in serialized and conn.trunks[created_body["id"]]["auth_password_encrypted"] not in serialized
+    assert conn.audit_order.index("lock") < conn.audit_order.index("write") < conn.audit_order.index("audit")
+    assert conn.audit_depth == 0 and conn.audit_locked is False
 
     listed = await list_sip_trunks(
         request=_make_request("/api/v1/telephony/sip/trunks"),
@@ -765,6 +863,7 @@ async def test_create_trunk_idempotent_replay_returns_cached_result(wsf_context)
         idempotency_key="k-replay",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     second = await create_sip_trunk(
         payload=payload,
@@ -772,11 +871,13 @@ async def test_create_trunk_idempotent_replay_returns_cached_result(wsf_context)
         idempotency_key="k-replay",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
 
     assert first.status_code == 201
     assert second.status_code == 201
     assert _json_body(first)["id"] == _json_body(second)["id"]
+    assert [event["action"] for event in pool._conn.audit_events] == ["sip.trunk.create"]
 
 
 @pytest.mark.asyncio
@@ -789,6 +890,7 @@ async def test_create_trunk_idempotency_mismatch_returns_conflict(wsf_context):
         idempotency_key="k-conflict",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert first.status_code == 201
 
@@ -798,9 +900,11 @@ async def test_create_trunk_idempotency_mismatch_returns_conflict(wsf_context):
         idempotency_key="k-conflict",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert second.status_code == 409
     assert _json_body(second)["title"] == "Idempotency Conflict"
+    assert [event["action"] for event in pool._conn.audit_events] == ["sip.trunk.create"]
 
 
 @pytest.mark.asyncio
@@ -820,6 +924,7 @@ async def test_update_trunk_rejects_half_auth_patch(wsf_context):
         idempotency_key="k-patch-create",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     trunk_id = _json_body(created)["id"]
 
@@ -830,9 +935,11 @@ async def test_update_trunk_rejects_half_auth_patch(wsf_context):
         idempotency_key="k-patch",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert patched.status_code == 400
     assert _json_body(patched)["title"] == "Invalid Authentication Configuration"
+    assert [event["action"] for event in pool._conn.audit_events] == ["sip.trunk.create"]
 
 
 @pytest.mark.asyncio
@@ -844,6 +951,7 @@ async def test_activate_and_deactivate_trunk(wsf_context):
         idempotency_key="k-activate-create",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     trunk_id = _json_body(created)["id"]
 
@@ -858,6 +966,7 @@ async def test_activate_and_deactivate_trunk(wsf_context):
         idempotency_key="k-activate",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert active.is_active is True
 
@@ -867,8 +976,14 @@ async def test_activate_and_deactivate_trunk(wsf_context):
         idempotency_key="k-deactivate",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert inactive.is_active is False
+    events = pool._conn.audit_events
+    assert [event["action"] for event in events] == ["sip.trunk.create", "sip.trunk.activate", "sip.trunk.deactivate"]
+    assert [event["before_state"]["is_active"] for event in events[1:]] == [False, True]
+    assert [event["after_state"]["is_active"] for event in events[1:]] == [True, False]
+    assert pool._conn.pjsip_projections == [(trunk_id, True), (trunk_id, False)]
 
 
 @pytest.mark.asyncio
@@ -883,6 +998,7 @@ async def test_activate_without_prior_test_succeeds(wsf_context):
         idempotency_key="k-unverified-create",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     trunk_id = _json_body(created)["id"]
 
@@ -893,6 +1009,7 @@ async def test_activate_without_prior_test_succeeds(wsf_context):
         idempotency_key="k-unverified-activate",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert activated.is_active is True
     assert _conn.trunks[trunk_id]["is_active"] is True
@@ -907,6 +1024,7 @@ async def test_cross_tenant_update_trunk_is_denied(wsf_context):
         idempotency_key="k-tenant-a",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     trunk_id = _json_body(created)["id"]
 
@@ -923,9 +1041,11 @@ async def test_cross_tenant_update_trunk_is_denied(wsf_context):
         idempotency_key="k-tenant-b",
         current_user=other_tenant_user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert response.status_code == 404
     assert _json_body(response)["title"] == "Trunk Not Found"
+    assert [event["action"] for event in pool._conn.audit_events] == ["sip.trunk.create"]
 
 
 @pytest.mark.asyncio
@@ -959,6 +1079,7 @@ async def test_create_codec_policy_list_and_toggle_active_state(wsf_context):
         idempotency_key="k-codec-create",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert created.status_code == 201
     body = _json_body(created)
@@ -980,6 +1101,7 @@ async def test_create_codec_policy_list_and_toggle_active_state(wsf_context):
         idempotency_key="k-codec-active",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert active.is_active is True
 
@@ -989,8 +1111,13 @@ async def test_create_codec_policy_list_and_toggle_active_state(wsf_context):
         idempotency_key="k-codec-inactive",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert inactive.is_active is False
+    events = pool._conn.audit_events
+    assert [event["action"] for event in events] == ["sip.codec_policy.create", "sip.codec_policy.activate", "sip.codec_policy.deactivate"]
+    assert [event["before_state"]["is_active"] for event in events[1:]] == [False, True]
+    assert [event["after_state"]["is_active"] for event in events[1:]] == [True, False]
 
 
 @pytest.mark.asyncio
@@ -1003,6 +1130,7 @@ async def test_create_route_policy_with_valid_references_and_toggle(wsf_context)
         idempotency_key="k-route-trunk",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     trunk_id = _json_body(trunk)["id"]
 
@@ -1012,6 +1140,7 @@ async def test_create_route_policy_with_valid_references_and_toggle(wsf_context)
         idempotency_key="k-route-codec",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     codec_id = _json_body(codec)["id"]
 
@@ -1033,6 +1162,7 @@ async def test_create_route_policy_with_valid_references_and_toggle(wsf_context)
         idempotency_key="k-route-create",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert route.status_code == 201
     route_id = _json_body(route)["id"]
@@ -1051,6 +1181,7 @@ async def test_create_route_policy_with_valid_references_and_toggle(wsf_context)
         idempotency_key="k-route-active",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert active.is_active is True
 
@@ -1060,8 +1191,15 @@ async def test_create_route_policy_with_valid_references_and_toggle(wsf_context)
         idempotency_key="k-route-inactive",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert inactive.is_active is False
+    events = pool._conn.audit_events
+    assert [event["action"] for event in events] == ["sip.trunk.create", "sip.codec_policy.create", "sip.route_policy.create", "sip.route_policy.activate", "sip.route_policy.deactivate"]
+    assert [event["resource_type"] for event in events[2:]] == ["route_policy"] * 3
+    assert str(events[2]["resource_id"]) == route_id
+    assert [event["before_state"]["is_active"] for event in events[3:]] == [True, True]
+    assert [event["after_state"]["is_active"] for event in events[3:]] == [True, False]
 
 
 @pytest.mark.asyncio
@@ -1086,9 +1224,11 @@ async def test_create_route_policy_rejects_invalid_trunk_reference(wsf_context):
         idempotency_key="k-route-invalid-ref",
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
     assert response.status_code == 400
     assert _json_body(response)["title"] == "Invalid Route References"
+    assert pool._conn.audit_events == []
 
 
 @pytest.mark.asyncio
