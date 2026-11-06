@@ -99,22 +99,27 @@ export default function CampaignsPage() {
         await removeCampaign.mutateAsync(id);
     }
 
+    const duplicate = useNotificationMutation({
+        mutationFn: (id: string) => dashboardApi.duplicateCampaign(id),
+        onSuccess: ({ campaign }) => {
+            qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => [campaign, ...(prev ?? [])]);
+            createNotification({ type: "success", title: "Campaign duplicated", message: "A draft copy was saved." });
+        },
+        onError: (err) => {
+            // A lost response can leave the result uncertain; refresh durable
+            // state without inventing a copy or automatically replaying the POST.
+            void qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
+            createNotification({ type: "error", title: "Can't duplicate campaign",
+                message: err instanceof Error ? err.message : "Could not confirm the campaign copy. Refresh before retrying." });
+        },
+    });
+
     async function handleDuplicate(id: string) {
-        const src = campaigns.find((c) => c.id === id);
-        if (!src) return;
-        const now = Date.now();
-        const copy: Campaign = {
-            ...src,
-            id: `camp-copy-${now}`,
-            name: `${src.name} - Copy`,
-            status: "draft",
-            calls_completed: 0,
-            calls_failed: 0,
-            created_at: new Date().toISOString(),
-            started_at: undefined,
-            completed_at: undefined,
-        };
-        qc.setQueryData<Campaign[]>(queryKeys.campaigns(), (prev) => [copy, ...(prev ?? [])]);
+        try {
+            await duplicate.mutateAsync(id);
+        } catch {
+            /* handled in mutation onError */
+        }
     }
 
     return (

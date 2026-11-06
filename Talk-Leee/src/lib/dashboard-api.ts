@@ -503,6 +503,17 @@ class DashboardApi {
         return { campaign: response.campaign };
     }
 
+    async duplicateCampaign(id: string): Promise<{ campaign: Campaign }> {
+        const response = await this.client.request<{ campaign: Campaign | null }>({
+            path: `/campaigns/${id}/duplicate`,
+            method: "POST",
+        });
+        if (!response?.campaign?.id) {
+            throw new Error("Campaign duplication failed. The backend did not return a duplicated campaign.");
+        }
+        return { campaign: response.campaign };
+    }
+
     async updateCampaign(id: string, data: CampaignCreate): Promise<{ campaign: Campaign }> {
         const response = await this.client.request<{ campaign: Campaign | null }>({
             path: `/campaigns/${id}`,

@@ -19,6 +19,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, HTTPException, Request, Depends, Query
 from fastapi.encoders import jsonable_encoder
 from app.core.db_utils import acquire_with_tenant
+from app.core.db import DATABASE_RETRYABLE_ERRORS
 from app.core.postgres_adapter import Client
 from app.core.dotenv_compat import load_dotenv
 
@@ -37,10 +38,13 @@ from app.domain.services.phone_number_normalizer import (
     normalize_phone_number_lenient,
 )
 from app.domain.services.event_emitter import emit_event_via_pool
+from app.domain.services.audit_logger import AuditLogger
+from app.services.campaign_duplication import CampaignDuplicationRefused, duplicate_campaign_snapshot
 from app.api.v1.dependencies import (
     get_db_client,
     get_db_read_client,
     get_current_user,
+    get_audit_logger,
     CurrentUser,
 )
 from app.api.v1.schemas.campaigns import (
@@ -717,6 +721,34 @@ async def create_campaign(
             await release_idempotency_lock(request)
         logger.error(f"Error creating campaign: {e}")
         raise HTTPException(status_code=500, detail="Failed to create campaign")
+
+
+@router.post("/{campaign_id}/duplicate", status_code=201, dependencies=[
+    Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_READ)),
+    Depends(require_permission(Permission.CAMPAIGNS_CREATE)),
+])
+async def duplicate_campaign(
+    campaign_id: ResourceUUID,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+):
+    """Persist an owned outbound draft copy, including independent knowledge."""
+    if not current_user.tenant_id:
+        raise HTTPException(400, "Current user is not associated with a tenant")
+    try:
+        copied = await duplicate_campaign_snapshot(
+            db_client.pool, tenant_id=str(current_user.tenant_id), campaign_id=campaign_id,
+            actor_id=str(current_user.id), actor_role=current_user.role, audit=audit_logger,
+        )
+    except CampaignDuplicationRefused as exc:
+        raise HTTPException(exc.status_code, str(exc)) from exc
+    except DATABASE_RETRYABLE_ERRORS:
+        raise
+    except Exception as exc:
+        logger.error("campaign duplication unavailable error_type=%s", type(exc).__name__)
+        raise HTTPException(503, "Campaign duplication could not be confirmed. Refresh the campaign list before retrying.") from exc
+    return {"campaign": copied}
 
 
 @router.post("/apply-tts-config", dependencies=[Depends(rate_limit_dependency), Depends(require_permission(Permission.CAMPAIGNS_UPDATE))])
