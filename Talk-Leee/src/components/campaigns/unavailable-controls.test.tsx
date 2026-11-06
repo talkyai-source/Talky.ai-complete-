@@ -45,9 +45,9 @@ test("the working export dialog does not offer a browser-only recurring report",
     mount(<CampaignPerformanceTable campaigns={[]} loading={false} error=""
         onPause={async () => {}} onResume={async () => {}} onDelete={async () => {}}
         onDuplicate={async () => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Export", exact: true }));
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
     const dialog = within(await screen.findByRole("dialog"));
-    assert.ok(dialog.getByRole("button", { name: "CSV", exact: true }));
+    assert.ok(dialog.getByRole("button", { name: "CSV" }));
     assert.ok(dialog.queryByText("Scheduling", { exact: true }) === null,
         "A recurring schedule with no server execution must not be offered");
     assert.ok(dialog.queryByText(/prototype mode/i) === null,
@@ -65,8 +65,8 @@ test("real alert details retain acknowledgement but do not offer a local-only ru
     });
     fireEvent.click((await screen.findByText("Synthetic saved alert")).closest("button")!);
     const dialog = within(await screen.findByRole("dialog"));
-    assert.ok(dialog.getByRole("button", { name: "Acknowledge", exact: true }));
-    assert.ok(dialog.queryByRole("button", { name: "Create Rule", exact: true }) === null,
+    assert.ok(dialog.getByRole("button", { name: "Acknowledge" }));
+    assert.ok(dialog.queryByRole("button", { name: "Create Rule" }) === null,
         "A rule with no server execution must not be offered");
     assert.ok(screen.queryByText("Rule builder", { exact: true }) === null,
         "The unavailable rule builder must remain hidden");
