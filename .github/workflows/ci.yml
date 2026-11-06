@@ -15,6 +15,52 @@ env:
   NODE_VERSION: "22"
 
 jobs:
+  quarantine-policy:
+    name: Quarantine policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Refuse growth and quarantine older than 14 days
+        env:
+          # PRs compare exact identities against their trusted base SHA. Pushes
+          # compare the previous SHA; age remains enforced in both cases.
+          POLICY_BASE: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: python backend/scripts/check_release_quarantine.py --base-ref "$POLICY_BASE"
+
+  changed-line-coverage:
+    name: Changed-line coverage
+    if: github.event_name == 'pull_request'
+    needs: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend
+      - name: Require 80 percent of changed backend executable lines
+        env:
+          COVERAGE_BASE: ${{ github.event.pull_request.base.sha }}
+        run: python backend/scripts/check_diff_coverage.py --base-ref "$COVERAGE_BASE" --coverage backend/coverage.xml --threshold 80
+
   # ──────────────────────────────────────────────────────────────────
   # Secret scanning — runs first, blocks everything if secrets found
   # ──────────────────────────────────────────────────────────────────
