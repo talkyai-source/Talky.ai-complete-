@@ -41,12 +41,82 @@ import os
 import struct
 import time
 import wave
+from contextlib import AsyncExitStack, asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import wraps
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _RecordingPoolBudget:
+    remaining: float = 60.0
+
+
+_recording_pool_budget: ContextVar[Optional[_RecordingPoolBudget]] = ContextVar(
+    "recording_pool_budget", default=None,
+)
+
+
+def _with_recording_pool_budget(method):
+    """Share one acquisition/backoff budget across nested recording entry points."""
+    @wraps(method)
+    async def scoped(self, *args, **kwargs):
+        if _recording_pool_budget.get() is not None:
+            return await method(self, *args, **kwargs)
+        token = _recording_pool_budget.set(_RecordingPoolBudget())
+        try:
+            return await method(self, *args, **kwargs)
+        finally:
+            _recording_pool_budget.reset(token)
+    return scoped
+
+
+@asynccontextmanager
+async def _acquire_recording_connection(
+    db_pool, call_id: str, tenant_id: str, *, acquire_context=None,
+):
+    """Retry pool admission only; never replay SQL, commit or storage work."""
+    budget = _recording_pool_budget.get() or _RecordingPoolBudget()
+    backoff = 0.5
+    async with AsyncExitStack() as stack:
+        while budget.remaining > 0:
+            # Existing teardown contexts own their default acquisition cap.
+            # Do not begin one that exceeds the shared remaining budget.
+            if acquire_context is not None and budget.remaining < db._ACQUIRE_TIMEOUT_S:
+                break
+            options = (
+                {"timeout": budget.remaining}
+                if budget.remaining < db._ACQUIRE_TIMEOUT_S else {}
+            )
+            started = time.monotonic()
+            try:
+                conn = await stack.enter_async_context(
+                    acquire_context() if acquire_context is not None
+                    else acquire_with_tenant(db_pool, tenant_id, **options)
+                )
+            except db.DatabasePoolTimeoutError:
+                budget.remaining -= max(0.0, time.monotonic() - started)
+                if budget.remaining <= 0:
+                    break
+                delay = min(backoff, budget.remaining)
+                started = time.monotonic()
+                await asyncio.sleep(delay)
+                budget.remaining -= max(delay, time.monotonic() - started)
+                backoff = min(backoff * 2, 5.0)
+            else:
+                budget.remaining -= max(0.0, time.monotonic() - started)
+                # Body/transaction exit are outside the retry catch, including
+                # an INSERT whose commit result is unknown. Cancellation passes
+                # through and ExitStack preserves connection cleanup.
+                yield conn
+                return
+    logger.error("recording_db_pool_retry_exhausted call=%s", call_id)
+    raise db.DatabasePoolTimeoutError("Recording database acquisition retry budget exhausted")
 
 
 def _bounded_env_float(
@@ -568,7 +638,7 @@ class RecordingService:
                 call_uuid = UUID(str(call_id))
             except (ValueError, TypeError, AttributeError):
                 call_uuid = None
-            async with acquire_with_tenant(self._db, str(tenant_uuid)) as conn:
+            async with _acquire_recording_connection(self._db, call_id, str(tenant_uuid)) as conn:
                 row = await conn.fetchrow(
                     "SELECT id FROM calls WHERE tenant_id = $1 "
                     "AND (id = $2 OR ($2::uuid IS NULL AND external_call_uuid = $3)) "
@@ -604,6 +674,7 @@ class RecordingService:
             logger.warning("recording_retention_admission_unavailable call=%s", call_id)
             return False
 
+    @_with_recording_pool_budget
     async def save_recording(
         self,
         call_id: str,
@@ -632,6 +703,7 @@ class RecordingService:
 
     # ── Main workflow ─────────────────────────────────────────────
 
+    @_with_recording_pool_budget
     async def save_and_link(
         self,
         call_id: str,
@@ -719,6 +791,7 @@ class RecordingService:
 
     # ── Local file fallback ───────────────────────────────────────
 
+    @_with_recording_pool_budget
     async def _save_local(
         self,
         call_id: str,
@@ -962,7 +1035,7 @@ class RecordingService:
         never silently dropped by a ``UUID()`` parse failure.
         """
         try:
-            async with acquire_with_tenant(self._db, tenant_id) as conn:
+            async with _acquire_recording_connection(self._db, call_id, tenant_id) as conn:
                 try:
                     tenant_uuid = UUID(tenant_id)
                 except (ValueError, AttributeError, TypeError):
@@ -1032,7 +1105,7 @@ class RecordingService:
         if not recording_id:
             return
         try:
-            async with acquire_with_tenant(self._db, tenant_id) as conn:
+            async with _acquire_recording_connection(self._db, call_id, tenant_id) as conn:
                 await conn.execute(
                     """
                     UPDATE calls
@@ -1058,7 +1131,7 @@ class RecordingService:
         be verified.
         """
         try:
-            async with acquire_with_tenant(self._db, tenant_id) as conn:
+            async with _acquire_recording_connection(self._db, call_id, tenant_id) as conn:
                 referenced = await conn.fetchval(
                     """
                     SELECT EXISTS (
@@ -1261,4 +1334,5 @@ def make_recording_service(db_pool: Any) -> RecordingService:
     return RecordingService(db_pool=db_pool)
 
 
+from app.core import db
 from app.core.db_utils import acquire_with_tenant
