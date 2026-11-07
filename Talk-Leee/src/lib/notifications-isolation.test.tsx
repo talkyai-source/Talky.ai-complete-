@@ -134,7 +134,12 @@ test("refresh rotation updates the token owned by AuthProvider before retrying",
 });
 
 test("callback token commitment reaches the live HTTP owner before its profile lookup", async () => {
-    mount(); api.getMe = originalGetMe;
+    let bootstrapReads = 0;
+    api.getMe = async () => { bootstrapReads++; throw new Error("synthetic anonymous bootstrap"); };
+    mount();
+    await waitFor(() => assert.equal(auth.status, "anonymous"));
+    assert.equal(bootstrapReads, 1);
+    api.getMe = originalGetMe;
     const tokens: Array<string | null> = [];
     globalThis.fetch = (async (_url, init) => {
         tokens.push(new Headers(init?.headers).get("authorization"));
