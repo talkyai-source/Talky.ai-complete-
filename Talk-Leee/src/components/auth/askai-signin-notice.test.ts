@@ -28,10 +28,18 @@ for (const file of ["login/login-client.tsx", "register/register-client.tsx"]) {
         assert.ok(read >= 0, "reads the flag");
         assert.ok(clear >= 0, "clears the flag");
         assert.ok(read < clear, "the flag is read before it is cleared");
-        // The homepage is only ever chosen from the flag, never from a URL,
-        // and never for a white-label admin.
+        // The Ask AI homepage shortcut stays flag-derived and excludes white-label admins.
+        // Only login's fallback may consume a return URL, through the validated helper.
         assert.match(source, /fromAskAi\s*&&\s*\w+\.role\s*!==\s*"white_label_admin"\s*\?\s*"\/"\s*:\s*postAuthDashboard\(/);
-        assert.doesNotMatch(source, /\.get\(\s*["']next["']\s*\)/);
+        if (file === "login/login-client.tsx") {
+            assert.match(source, /import\s*\{\s*postAuthDashboard\s*\}\s*from\s*["']@\/lib\/post-auth-navigation["']/);
+            const nextReads = source.match(/\.get\(\s*["']next["']\s*\)/g) ?? [];
+            assert.equal(nextReads.length, 1, "the return target is read only for the validated helper");
+            assert.match(source, /postAuthDashboard\(\s*\w+\.role\s*,\s*searchParams\?\.get\(\s*["']next["']\s*\)\s*\)/);
+            assert.doesNotMatch(source, /(?:router\.(?:push|replace)|window\.location\.(?:assign|replace))\(\s*searchParams\??\.get\(\s*["']next["']\s*\)/);
+        } else {
+            assert.doesNotMatch(source, /\.get\(\s*["']next["']\s*\)/);
+        }
     });
 }
 
