@@ -427,6 +427,53 @@ test("with download permission playback pausing keeps the loaded recording", asy
     assert.equal(container.querySelector("audio")?.getAttribute("src"), created[0]);
 });
 
+test("unmounting a pending call review stops queued detail retries", async () => {
+    const user = userEvent.setup({ document: globalThis.document });
+    const detail = deferred<Awaited<ReturnType<typeof dashboardApi.getCall>>>();
+    const detailCalls: string[] = [];
+    let livePolls = 0;
+    api.listLiveCalls = async (input) => {
+        assert.deepEqual(input, {
+            campaignId: "campaign-review",
+            direction: "outbound",
+            recentWindowSeconds: 60,
+        });
+        livePolls += 1;
+        return { items: [endedCall()], server_time: "2026-08-26T10:00:12.000Z" };
+    };
+    // Keep this exact fake installed until after the retry deadline, including
+    // the failing-before case; no original HTTP method can be reached.
+    dashboardApi.getCall = async (callId) => {
+        assert.equal(callId, "call-1");
+        detailCalls.push(callId);
+        return detail.promise;
+    };
+
+    const view = renderPanel([], { campaignId: "campaign-review", direction: "outbound" });
+    await waitFor(() => assert.deepEqual(detailCalls, ["call-1"]));
+    await user.click(await screen.findByText("+15550001111"));
+    await act(async () => {
+        detail.resolve({
+            id: "call-1",
+            campaign_id: "campaign-review",
+            lead_id: "",
+            phone_number: "+15550001111",
+            status: "completed",
+            created_at: "2026-08-26T10:00:00.000Z",
+        });
+        await detail.promise;
+    });
+    assert.ok(screen.getByText("Finalizing recording & transcript…"));
+    const pollsBeforeUnmount = livePolls;
+    view.unmount();
+
+    // The source's real detail retry delay is 1500ms. Waiting past it exercises
+    // the queued callback rather than mocking the component's retry function.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1700)); });
+    assert.deepEqual(detailCalls, ["call-1"], "Unmounted review requested call detail again");
+    assert.equal(livePolls, pollsBeforeUnmount, "Unmounted panel polled live calls again");
+});
+
 test("polling a terminal call clears Ending and uses the server's final status", async () => {
     const user = userEvent.setup({ document: globalThis.document });
     let polls = 0;

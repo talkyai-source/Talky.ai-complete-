@@ -333,8 +333,10 @@ function LiveCallsPanelScope({ campaignId, direction, title = "Live calls" }: Li
     // Fetch a call's transcript + recording id. Polls a few times because the
     // recording upload + transcript persist land a beat after "ended".
     const loadDetail = useCallback(async (callId: string, attempt = 0) => {
+        if (aborted.current) return;
         try {
             const call = await dashboardApi.getCall(callId);
+            if (aborted.current) return;
             const hasTranscript = !!(call.transcript && call.transcript.trim());
             const hasRecording = !!call.recording_id;
             const ready = hasTranscript || hasRecording;
@@ -351,6 +353,7 @@ function LiveCallsPanelScope({ campaignId, direction, title = "Live calls" }: Li
                 window.setTimeout(() => void loadDetail(callId, attempt + 1), 1500);
             }
         } catch (e) {
+            if (aborted.current) return;
             setReviews((r) => ({
                 ...r,
                 [callId]: {
