@@ -2224,7 +2224,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4f89d2fdebc098afc69f8d02f8d21004d56ca389490df545991544a5ea124c96",
+      "id": "5ff82a66c75ad8e74690a66ddc68b19b8bb39c411ef1c295536bb426dd9d308f",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts.sync_subscription",
       "line": 468,
@@ -2232,7 +2232,7 @@
       "tables": [
         "subscriptions"
       ],
-      "sql": "INSERT INTO subscriptions(tenant_id,stripe_subscription_id,stripe_customer_id,plan_id,status, current_period_start,current_period_end,cancel_at,metadata) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,jsonb_build_object('purchase',$9::jsonb)) ON CONFLICT(stripe_subscription_id) DO UPDATE SET status=EXCLUDED.status, current_period_start=EXCLUDED.current_period_start,current_period_end=EXCLUDED.current_period_end, cancel_at=EXCLUDED.cancel_at,metadata=COALESCE(subscriptions.metadata,'{}'::jsonb)||EXCLUDED.metadata,updated_at=NOW() WHERE subscriptions.tenant_id=EXCLUDED.tenant_id AND subscriptions.stripe_customer_id=EXCLUDED.stripe_customer_id",
+      "sql": "INSERT INTO subscriptions(tenant_id,stripe_subscription_id,stripe_customer_id,plan_id,status, current_period_start,current_period_end,cancel_at,metadata) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,jsonb_build_object('purchase',$9::jsonb, 'cancel_at_period_end',$10::boolean)) ON CONFLICT(stripe_subscription_id) DO UPDATE SET status=EXCLUDED.status, current_period_start=EXCLUDED.current_period_start,current_period_end=EXCLUDED.current_period_end, cancel_at=EXCLUDED.cancel_at,metadata=COALESCE(subscriptions.metadata,'{}'::jsonb)||EXCLUDED.metadata,updated_at=NOW() WHERE subscriptions.tenant_id=EXCLUDED.tenant_id AND subscriptions.stripe_customer_id=EXCLUDED.stripe_customer_id",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -5518,15 +5518,15 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b66bb088d079b18d49296fca4a2a2f6417f8af65972a1c7d07a38377d3d2b91e",
+      "id": "337d0ab9e7a8aa83d7ee6ca1a52f8d0e54a04b0ee2b6964e6593cef109166cf3",
       "file": "app/domain/services/billing_state_events.py",
       "function": "_apply_subscription",
-      "line": 203,
+      "line": 206,
       "method": "execute",
       "tables": [
         "subscriptions"
       ],
-      "sql": "INSERT INTO subscriptions(tenant_id,stripe_subscription_id,stripe_customer_id,plan_id,status, current_period_start,current_period_end,cancel_at,canceled_at) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(stripe_subscription_id) DO UPDATE SET status=EXCLUDED.status, current_period_start=EXCLUDED.current_period_start,current_period_end=EXCLUDED.current_period_end, cancel_at=EXCLUDED.cancel_at,canceled_at=EXCLUDED.canceled_at,updated_at=NOW() WHERE subscriptions.tenant_id=EXCLUDED.tenant_id AND subscriptions.stripe_customer_id=EXCLUDED.stripe_customer_id",
+      "sql": "INSERT INTO subscriptions(tenant_id,stripe_subscription_id,stripe_customer_id,plan_id,status, current_period_start,current_period_end,cancel_at,canceled_at,metadata) VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,jsonb_build_object('cancel_at_period_end',$10::boolean)) ON CONFLICT(stripe_subscription_id) DO UPDATE SET status=EXCLUDED.status, current_period_start=EXCLUDED.current_period_start,current_period_end=EXCLUDED.current_period_end, cancel_at=EXCLUDED.cancel_at,canceled_at=EXCLUDED.canceled_at, metadata=COALESCE(subscriptions.metadata,'{}'::jsonb)||EXCLUDED.metadata,updated_at=NOW() WHERE subscriptions.tenant_id=EXCLUDED.tenant_id AND subscriptions.stripe_customer_id=EXCLUDED.stripe_customer_id",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -11482,10 +11482,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "bc7ec97a9a96734ada5660029df7aafa141e0bd1095af2e2569b8db72c2973ee",
+      "id": "b1cd01a3054b6269102ffb0e7011676463e4f737601d21112b9ce9a74b70b92e",
       "file": "app/domain/services/billing_checkout.py",
       "function": "CheckoutAttempts.create",
-      "line": 367,
+      "line": 359,
       "method": "_stripe_call",
       "tables": [],
       "sql": "create",

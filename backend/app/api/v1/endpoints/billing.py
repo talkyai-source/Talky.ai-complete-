@@ -137,6 +137,23 @@ def _is_platform_admin(current_user) -> bool:
         return False
 
 
+def _cancel_at_period_end(subscription) -> bool:
+    """Stripe's own flag, synced into subscriptions.metadata (G9).
+
+    Rows synced before the flag was stored have no key; for those the old
+    reading (a scheduled cancel_at) is kept.
+    """
+    metadata = subscription.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except ValueError:
+            metadata = None
+    if isinstance(metadata, dict) and isinstance(metadata.get("cancel_at_period_end"), bool):
+        return metadata["cancel_at_period_end"]
+    return bool(subscription.get("cancel_at"))
+
+
 def _is_billing_team(current_user) -> bool:
     """Who may see and buy team-only plans (billing_mode.is_billing_team)."""
     from app.domain.services.billing_mode import is_billing_team
@@ -372,7 +389,7 @@ async def get_subscription(
                 if subscription.get("current_period_end")
                 else None
             ),
-            cancel_at_period_end=bool(subscription.get("cancel_at")),
+            cancel_at_period_end=_cancel_at_period_end(subscription),
             minutes_allocated=allocated,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,

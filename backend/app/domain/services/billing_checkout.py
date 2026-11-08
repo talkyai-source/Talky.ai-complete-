@@ -468,7 +468,8 @@ class CheckoutAttempts:
             stored = await conn.execute(
                 """INSERT INTO subscriptions(tenant_id,stripe_subscription_id,stripe_customer_id,plan_id,status,
                    current_period_start,current_period_end,cancel_at,metadata)
-                   VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,jsonb_build_object('purchase',$9::jsonb))
+                   VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,jsonb_build_object('purchase',$9::jsonb,
+                          'cancel_at_period_end',$10::boolean))
                    ON CONFLICT(stripe_subscription_id) DO UPDATE SET status=EXCLUDED.status,
                    current_period_start=EXCLUDED.current_period_start,current_period_end=EXCLUDED.current_period_end,
                    cancel_at=EXCLUDED.cancel_at,metadata=COALESCE(subscriptions.metadata,'{}'::jsonb)||EXCLUDED.metadata,updated_at=NOW()
@@ -477,6 +478,7 @@ class CheckoutAttempts:
                 subscription["status"], start, end,
                 datetime.fromtimestamp(subscription["cancel_at"], UTC) if subscription.get("cancel_at") else None,
                 json.dumps(purchase),
+                subscription.get("cancel_at_period_end") is True,
             )
             if stored != "INSERT 0 1":
                 raise CheckoutError("subscription_binding_conflict", "Subscription belongs to another billing account.")

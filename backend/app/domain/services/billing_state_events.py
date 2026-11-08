@@ -200,16 +200,21 @@ async def _apply_subscription(conn, billing, subscription, binding, *, session=N
         start, end = subscription_period(subscription)
         recorded = binding["recorded"] or {}
         plan_id = recorded.get("plan_id") or binding["tenant"]["plan_id"]
+        # Stripe's own cancel_at_period_end goes into metadata (merged, so the
+        # recorded purchase stays); the API reads it instead of guessing from
+        # cancel_at (G9).
         written = await conn.execute(
             """INSERT INTO subscriptions(tenant_id,stripe_subscription_id,stripe_customer_id,plan_id,status,
-               current_period_start,current_period_end,cancel_at,canceled_at)
-               VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9)
+               current_period_start,current_period_end,cancel_at,canceled_at,metadata)
+               VALUES($1::uuid,$2,$3,$4,$5,$6,$7,$8,$9,jsonb_build_object('cancel_at_period_end',$10::boolean))
                ON CONFLICT(stripe_subscription_id) DO UPDATE SET status=EXCLUDED.status,
                current_period_start=EXCLUDED.current_period_start,current_period_end=EXCLUDED.current_period_end,
-               cancel_at=EXCLUDED.cancel_at,canceled_at=EXCLUDED.canceled_at,updated_at=NOW()
+               cancel_at=EXCLUDED.cancel_at,canceled_at=EXCLUDED.canceled_at,
+               metadata=COALESCE(subscriptions.metadata,'{}'::jsonb)||EXCLUDED.metadata,updated_at=NOW()
                WHERE subscriptions.tenant_id=EXCLUDED.tenant_id AND subscriptions.stripe_customer_id=EXCLUDED.stripe_customer_id""",
             tenant_id, subscription_id, customer_id, plan_id, subscription["status"], start, end,
             _timestamp(subscription.get("cancel_at")), _timestamp(subscription.get("canceled_at")),
+            subscription.get("cancel_at_period_end") is True,
         )
         if written != "INSERT 0 1":
             raise BillingStateReviewRequired("subscription_binding_conflict")
