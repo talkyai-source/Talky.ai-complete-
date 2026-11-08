@@ -730,10 +730,11 @@ class DashboardApi {
     }
 
     // Calls
-    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}): Promise<{ calls: Call[]; total: number }> {
+    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}, signal?: AbortSignal): Promise<{ calls: Call[]; total: number }> {
         const response = await this.client.request<{ items: (CallListItem & { summary?: string })[]; total: number }>({
             path: "/calls",
             method: "GET",
+            signal,
             params: {
                 page: String(page),
                 page_size: String(pageSize),

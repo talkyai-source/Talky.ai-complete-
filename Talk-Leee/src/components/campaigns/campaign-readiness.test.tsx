@@ -128,7 +128,7 @@ test("table selection and details block resume while the route is unavailable", 
 test("command-bar keyboard execution cannot bypass unavailable resume routes", async () => {
     api.request = async <T,>() => ({ ready: false, reason: "Selected trunk unavailable" }) as T;
     let resumed = 0;
-    mount(<CommandBar campaigns={[campaign]} onPause={async () => {}} onResume={async () => { resumed++; }} />);
+    mount(<CommandBar campaigns={[campaign]} onPause={async () => {}} onResume={async () => { resumed++; }} onExport={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Ctrl + K" }));
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "/resume" } });

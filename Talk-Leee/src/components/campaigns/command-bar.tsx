@@ -34,12 +34,15 @@ export function CommandBar({
     campaigns,
     onPause,
     onResume,
+    onExport,
 }: {
     campaigns: Campaign[];
     /** Pauses the given campaigns (only the running ones are acted on). */
     onPause: (campaigns: Campaign[]) => Promise<void>;
     /** Opens the shared Start / Resume dialog for these campaign ids. */
     onResume: (ids: string[]) => void;
+    /** 3.4 E4: "Export campaigns" opens the campaigns Export window. */
+    onExport: () => void;
 }) {
     const router = useRouter();
     const [open, setOpen] = useState(false);
@@ -124,7 +127,7 @@ export function CommandBar({
                     category: "Reports",
                     title: "Export campaigns",
                     subtitle: "Opens export modal",
-                    action: () => router.push("/campaigns#export"),
+                    action: () => onExport(),
                 },
                 {
                     id: "action-new-campaign",
@@ -211,7 +214,7 @@ export function CommandBar({
             .map((x) => x.r);
 
         return scored;
-    }, [campaigns, onPause, onResume, parsed.prefix, parsed.query, router, resumeReadiness.ready, resumeReadiness.reason]);
+    }, [campaigns, onExport, onPause, onResume, parsed.prefix, parsed.query, router, resumeReadiness.ready, resumeReadiness.reason]);
 
     const runResult = async (r: Result) => {
         if (r.disabled || runningAction.current) return;

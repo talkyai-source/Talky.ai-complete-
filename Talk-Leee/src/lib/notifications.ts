@@ -84,6 +84,11 @@ export function notificationStorageKeys(identity: NotificationIdentity) {
     const key = encodeURIComponent(notificationScopeKey(identity));
     return { history: `talklee.notifications.v2:${key}`, settings: `talklee.notifications.settings.v2:${key}`, clear: `talklee.notifications.clear.v1:${key}` };
 }
+/** Per-account ids one alert source has already acted on; shared across tabs. */
+export function notificationSeenKey(scopeKey: string, source: string): string {
+    return `talklee.${source}.seen.v2:${scopeKey}`;
+}
+const SEEN_CAP = 500;
 
 export class NotificationsStore {
     private listeners = new Set<() => void>();
@@ -93,6 +98,7 @@ export class NotificationsStore {
     private suspended = false;
     private suspendedState: NotificationsState | null = null;
     private listeningWindow: Window | null = null;
+    private memorySeen = new Map<string, string[]>();
     constructor() { this.controller.abort(); }
     subscribe(listener: () => void) { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
     getSnapshot() { return this.state; }
@@ -248,6 +254,37 @@ export class NotificationsStore {
         // secret-free marker also clears other tabs' live, memory-only alerts.
         try { this.storage()?.setItem(clearKey, crypto.randomUUID()); }
         catch { /* This tab cleared; cross-tab clearing requires writable storage. */ }
+    }
+    /**
+     * Ids already acted on for this account and alert source, read fresh so
+     * another tab's write counts before its storage event arrives. Null until
+     * the first markSeen for this account, so a caller can tell a first run.
+     */
+    readSeen(source: string): Set<string> | null {
+        if (!this.state.scopeKey || this.suspended) return null;
+        const key = notificationSeenKey(this.state.scopeKey, source);
+        // Browser storage is the truth when it is readable; memory only covers
+        // a browser where storage is unavailable.
+        const storage = this.storage();
+        const memory = () => { const ids = this.memorySeen.get(key); return ids ? new Set(ids) : null; };
+        if (!storage) return memory();
+        let raw: string | null;
+        try { raw = storage.getItem(key); } catch { return memory(); }
+        if (raw === null) return null;
+        const value = parseJson(raw);
+        return new Set(Array.isArray(value) ? value.filter((id): id is string => typeof id === "string") : []);
+    }
+    markSeen(source: string, ids: Iterable<string>) { this.writeSeen(source, ids, []); }
+    unmarkSeen(source: string, ids: Iterable<string>) { this.writeSeen(source, [], ids); }
+    private writeSeen(source: string, add: Iterable<string>, remove: Iterable<string>) {
+        if (!this.state.scopeKey || this.suspended) return;
+        const key = notificationSeenKey(this.state.scopeKey, source);
+        const next = this.readSeen(source) ?? new Set<string>();
+        for (const id of add) next.add(id);
+        for (const id of remove) next.delete(id);
+        const ids = [...next].slice(-SEEN_CAP);
+        this.memorySeen.set(key, ids);
+        try { this.storage()?.setItem(key, JSON.stringify(ids)); } catch { /* Keep deduplication in memory. */ }
     }
     exportHistoryJson() {
         return JSON.stringify({ exportedAt: new Date().toISOString(), scopeKey: this.state.scopeKey, settings: this.state.settings, notifications: this.state.notifications }, null, 2);

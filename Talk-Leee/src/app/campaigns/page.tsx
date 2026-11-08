@@ -36,6 +36,8 @@ export default function CampaignsPage() {
     const [notice, setNotice] = useState<{ campaignId: string | null; notice: CampaignControlNotice } | null>(null);
     // Which details modal (if any) the open Start dialog was asked from.
     const startScope = useRef<string | null>(null);
+    // 3.4 E4: the Export window, opened from the table's buttons or the command bar.
+    const [exportOpen, setExportOpen] = useState(false);
 
     // Read the list again so every row shows the backend's own status.
     const refresh = () => qc.invalidateQueries({ queryKey: queryKeys.campaigns() });
@@ -121,7 +123,7 @@ export default function CampaignsPage() {
     return (
         <DashboardLayout title="Campaign Performance" description="Sorting, filtering, bulk actions, and live ops signals">
             <div className="space-y-6">
-                <CommandBar campaigns={campaigns} onPause={handlePauseMany} onResume={handleResume} />
+                <CommandBar campaigns={campaigns} onPause={handlePauseMany} onResume={handleResume} onExport={() => setExportOpen(true)} />
                 {notice && notice.campaignId === null ? <CampaignControlNoticeBox notice={notice.notice} testId="campaign-list-notice" /> : null}
                 <CampaignPerformanceTable
                     campaigns={campaigns}
@@ -135,6 +137,8 @@ export default function CampaignsPage() {
                     onNoticeDismiss={handleNoticeDismiss}
                     onDelete={handleDelete}
                     onDuplicate={handleDuplicate}
+                    exportOpen={exportOpen}
+                    onExportOpenChange={setExportOpen}
                 />
                 <EventStream campaigns={campaigns} />
                 <AlertTimeline campaigns={campaigns} />

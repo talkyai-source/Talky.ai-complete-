@@ -22,6 +22,8 @@ import { isWithinFreshLoginGrace } from "@/lib/http-client";
 // produced "Cannot read properties of undefined (reading 'call')".
 import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 import { QualifiedLeadAlerts } from "@/components/notifications/qualified-lead-alerts";
+import { LowMinutesAlerts } from "@/components/notifications/low-minutes-alerts";
+import { FailedCallAlerts } from "@/components/notifications/failed-call-alerts";
 import { SupportLauncher } from "@/components/support/support-launcher";
 
 interface DashboardLayoutProps {
@@ -207,6 +209,9 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
 
             {/* Real-time qualified-lead toasts (reuses the Event Stream poll). */}
             <QualifiedLeadAlerts />
+            {/* Low-minutes and failed-call notifications (plan 3.8 N1, N2). */}
+            <LowMinutesAlerts />
+            <FailedCallAlerts />
 
             {/* Support: Help button above the assistant launcher, the drawer and
                 unread notifications. Renders nothing until GET /support/config

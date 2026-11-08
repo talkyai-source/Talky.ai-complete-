@@ -77,6 +77,9 @@ type ExportColumnKey =
 
 const EXPORT_PRESETS: ExportPreset[] = ["All Time", "Last 7 Days", "Last 30 Days", "This Month", "Custom"];
 
+/** 3.4 E4: shown when a download or the print view could not be started. */
+export const EXPORT_FAILED_TEXT = "The export failed. Try again.";
+
 function isExportPreset(value: unknown): value is ExportPreset {
     return typeof value === "string" && (EXPORT_PRESETS as string[]).includes(value);
 }
@@ -146,25 +149,34 @@ function applyDateRangeByCreatedAt(items: Campaign[], range: { from: number | nu
     });
 }
 
-function campaignsToCsvWithColumns(campaigns: Campaign[], columns: ExportColumnKey[]) {
+export function campaignsToCsvWithColumns(campaigns: Campaign[], columns: ExportColumnKey[]) {
     const headers = columns.join(",");
     const lines = [headers];
     for (const c of campaigns) {
         const row = columns.map((col) => {
-            if (col === "id") return csvEscape(c.id);
-            if (col === "name") return csvEscape(c.name);
-            if (col === "status") return csvEscape(campaignStatusLabel(c.status));
+            if (col === "id") return c.id;
+            if (col === "name") return c.name;
+            if (col === "status") return campaignStatusLabel(c.status);
             if (col === "total_leads") return String(c.total_leads ?? 0);
             if (col === "calls_completed") return String(c.calls_completed ?? 0);
             if (col === "calls_failed") return String(c.calls_failed ?? 0);
             if (col === "progress_pct") return campaignProgressPct(c).toFixed(1);
             if (col === "success_rate_pct") return campaignSuccessRatePct(c).toFixed(1);
-            if (col === "created_at") return csvEscape(c.created_at);
+            if (col === "created_at") return c.created_at;
             return "";
         });
-        lines.push(row.join(","));
+        lines.push(row.map((value) => csvEscape(csvFormulaGuard(value))).join(","));
     }
     return lines.join("\n");
+}
+
+/**
+ * 3.4 E3: a value beginning with =, +, - or @ gets a leading ' so a
+ * spreadsheet shows it as text instead of running it as a formula.
+ */
+export function csvFormulaGuard(value: string) {
+    const v = String(value ?? "");
+    return /^[=+\-@]/.test(v) ? `'${v}` : v;
 }
 
 function campaignsToJsonWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], meta: { rangeLabel: string }) {
@@ -206,20 +218,38 @@ function sortIndicator(spec: CampaignSortSpec[] | undefined, key: CampaignSortKe
     return s.dir === "asc" ? "↑" : "↓";
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+/** 3.4 E4: true when the browser accepted the download, false when any step threw. */
+function downloadBlob(blob: Blob, filename: string): boolean {
+    try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
-function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], rangeLabel: string) {
-    const w = window.open("", "_blank", "noopener,noreferrer");
-    if (!w) return;
+/**
+ * 3.4 E1: opens the print view in a new window and asks for the browser's
+ * print dialog. Returns false when the window could not be opened (pop-ups
+ * blocked) or writing to it threw, so the caller can show the failure state.
+ * The window is opened without "noopener": with it Chromium returns null and
+ * the rows can never be written.
+ */
+export function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], rangeLabel: string): boolean {
+    let w: Window | null = null;
+    try {
+        w = window.open("", "_blank");
+    } catch {
+        w = null;
+    }
+    if (!w) return false;
     const headCells = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
     const rows = campaigns
         .map((c) => {
@@ -240,7 +270,8 @@ function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnK
             return `<tr>${cells}</tr>`;
         })
         .join("");
-    w.document.write(`<!doctype html>
+    try {
+        w.document.write(`<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -263,9 +294,13 @@ function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnK
   </table>
 </body>
 </html>`);
-    w.document.close();
-    w.focus();
-    w.print();
+        w.document.close();
+        w.focus();
+        w.print();
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function escapeHtml(value: string) {
@@ -312,6 +347,8 @@ export function CampaignPerformanceTable({
     onDuplicate,
     notice,
     onNoticeDismiss,
+    exportOpen: exportOpenProp,
+    onExportOpenChange,
 }: {
     campaigns: Campaign[];
     loading: boolean;
@@ -331,6 +368,9 @@ export function CampaignPerformanceTable({
     onDelete: (id: string) => Promise<void>;
     /** Runs after Duplicate created a real backend copy (the list refetches here). */
     onDuplicate: (result: CampaignDuplicateResult) => Promise<void>;
+    /** 3.4 E4: the Export window's open state, when the page owns it (the command bar opens it too). */
+    exportOpen?: boolean;
+    onExportOpenChange?: (next: boolean) => void;
 }) {
     const router = useRouter();
     const [sort, setSort] = useState<CampaignSortSpec[]>([]);
@@ -349,7 +389,11 @@ export function CampaignPerformanceTable({
     const inFlight = useCampaignsInFlight();
     const [bulkPausing, setBulkPausing] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-    const [exportOpen, setExportOpen] = useState(false);
+    const [exportOpenLocal, setExportOpenLocal] = useState(false);
+    const exportOpen = exportOpenProp ?? exportOpenLocal;
+    const setExportOpen = onExportOpenChange ?? setExportOpenLocal;
+    // 3.4 E4: what the last export did, shown next to the export buttons.
+    const [exportStatus, setExportStatus] = useState<string>("");
     const [exportPreset, setExportPreset] = useState<ExportPreset>("All Time");
     const [exportFrom, setExportFrom] = useState<string>("");
     const [exportTo, setExportTo] = useState<string>("");
@@ -619,15 +663,18 @@ export function CampaignPerformanceTable({
         const items = exportItems;
         if (format === "csv") {
             const csv = campaignsToCsvWithColumns(items, exportColumnList);
-            downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "campaigns-export.csv");
+            const ok = downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "campaigns-export.csv");
+            setExportStatus(ok ? "Downloaded campaigns-export.csv." : EXPORT_FAILED_TEXT);
             return;
         }
         if (format === "json") {
             const json = campaignsToJsonWithColumns(items, exportColumnList, { rangeLabel: exportRange.label });
-            downloadBlob(new Blob([json], { type: "application/json" }), "campaigns-export.json");
+            const ok = downloadBlob(new Blob([json], { type: "application/json" }), "campaigns-export.json");
+            setExportStatus(ok ? "Downloaded campaigns-export.json." : EXPORT_FAILED_TEXT);
             return;
         }
-        printCampaignsWithColumns(items, exportColumnList, exportRange.label);
+        const ok = printCampaignsWithColumns(items, exportColumnList, exportRange.label);
+        setExportStatus(ok ? "Print view opened." : EXPORT_FAILED_TEXT);
     };
 
     const bulkPause = async () => {
@@ -1198,6 +1245,11 @@ export function CampaignPerformanceTable({
                             <Button type="button" variant="secondary" onClick={() => onExport("json")}>
                                 JSON
                             </Button>
+                            {exportStatus ? (
+                                <div role="status" aria-live="polite" data-testid="campaign-export-status" className="flex min-w-0 items-center break-words text-xs font-semibold text-foreground">
+                                    {exportStatus}
+                                </div>
+                            ) : null}
                         </div>
                         <div className="mt-3 text-xs font-semibold text-muted-foreground">
                             PDF opens a print view; save as PDF from your browser.

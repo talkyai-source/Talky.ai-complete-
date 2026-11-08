@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
-import { afterEach, beforeEach, test } from "node:test";
+import { afterEach, beforeEach, mock, test } from "node:test";
 import { createElement } from "react";
 import { act, cleanup, waitFor } from "@testing-library/react";
 
 import { QualifiedLeadAlerts, qualifiedLeadSeenKey } from "@/components/notifications/qualified-lead-alerts";
 import { backendApi } from "@/lib/backend-api";
-import { notificationsStore } from "@/lib/notifications";
+import { NotificationsStore, notificationsStore } from "@/lib/notifications";
 import { ensureDom } from "@/test-utils/dom";
 import { renderWithQueryClient } from "@/test-utils/render";
 
@@ -52,7 +52,7 @@ test("scoped saved lead IDs suppress repeats while fresh leads create in-app ale
     assert.deepEqual(JSON.parse(window.localStorage.getItem(seenKey())!).sort(), ["evt-fresh", "evt-seen"]);
 });
 
-test("a first load seeds silently without adopting legacy or another identity's seen IDs", async () => {
+test("a first load notifies every lead present, without adopting legacy or another identity's seen IDs", async () => {
     window.localStorage.setItem("talklee.qlead.seen.v1", JSON.stringify(["evt-legacy"]));
     const keyA = seenKey();
     window.localStorage.setItem(keyA, JSON.stringify(["evt-a"]));
@@ -60,16 +60,54 @@ test("a first load seeds silently without adopting legacy or another identity's 
     stubEvents([rawLead("evt-a"), rawLead("evt-new")]);
     renderWithQueryClient(createElement(QualifiedLeadAlerts));
     await waitSeeded();
-    assert.deepEqual(titles(), []);
+    // N3: no first-load skip. B has shown neither lead; A's seen IDs are A's.
+    await waitFor(() => assert.deepEqual(titles(), ["Qualified lead: evt-new", "Qualified lead: evt-a"]));
     assert.notEqual(seenKey(), keyA);
+    assert.deepEqual(JSON.parse(window.localStorage.getItem(seenKey())!).sort(), ["evt-a", "evt-new"]);
     assert.equal(window.localStorage.getItem("talklee.qlead.seen.v1"), null);
 });
 
-test("stale unseen leads are absorbed silently while fresh ones toast", async () => {
+test("a lead older than 60 minutes is notified like a fresh one", async () => {
     window.localStorage.setItem(seenKey(), JSON.stringify(["evt-seen"]));
     stubEvents([rawLead("evt-old", 3 * 60 * 60 * 1000), rawLead("evt-new")]);
     renderWithQueryClient(createElement(QualifiedLeadAlerts));
-    await waitFor(() => assert.deepEqual(titles(), ["Qualified lead: evt-new"]));
+    await waitFor(() => assert.deepEqual(titles(), ["Qualified lead: evt-new", "Qualified lead: evt-old"]));
+});
+
+test("no lead is notified twice: same poll again, reload, second tab", async () => {
+    stubEvents([rawLead("evt-1")]);
+    const first = renderWithQueryClient(createElement(QualifiedLeadAlerts));
+    await waitFor(() => assert.deepEqual(titles(), ["Qualified lead: evt-1"]));
+    await act(async () => { await first.qc.invalidateQueries({ queryKey: ["events"] }); });
+    assert.deepEqual(titles(), ["Qualified lead: evt-1"]);
+    first.unmount();
+    const second = renderWithQueryClient(createElement(QualifiedLeadAlerts));
+    await waitFor(() => assert.notEqual(second.qc.getQueryCache().getAll()[0]?.state.status, "pending"));
+    assert.deepEqual(titles(), ["Qualified lead: evt-1"]);
+    const otherTab = new NotificationsStore();
+    otherTab.setIdentity(A);
+    assert.equal(otherTab.readSeen("qlead")?.has("evt-1"), true);
+    otherTab.dispose();
+});
+
+test("a lead that arrived while the tab was hidden is notified when it becomes visible", async () => {
+    stubEvents([]);
+    renderWithQueryClient(createElement(QualifiedLeadAlerts));
+    await waitSeeded();
+    const visibility = { value: "hidden" as DocumentVisibilityState };
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility.value });
+    try {
+        await act(async () => { window.dispatchEvent(new window.Event("visibilitychange")); });
+        stubEvents([rawLead("evt-while-hidden", 10 * 60 * 1000)]);
+        // The hidden period outlasts the 5 s stale window of the event poll.
+        mock.timers.enable({ apis: ["Date"], now: Date.now() + 6_000 });
+        visibility.value = "visible";
+        await act(async () => { window.dispatchEvent(new window.Event("visibilitychange")); });
+        await waitFor(() => assert.deepEqual(titles(), ["Qualified lead: evt-while-hidden"]));
+    } finally {
+        mock.timers.reset();
+        Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    }
 });
 
 test("an initially empty stream still alerts on the next newly qualified lead", async () => {

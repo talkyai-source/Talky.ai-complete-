@@ -6,6 +6,8 @@ import {
     ConnectorResponseSchema,
     ConnectorAccountSchema,
     ConnectorProviderStatusSchema,
+    RbacRoleListSchema,
+    TenantMemberListSchema,
     SalesforceImportResultSchema,
     SalesforceProbeSchema,
     SalesforceSettingsResponseSchema,
@@ -47,7 +49,9 @@ import {
     type VoiceCallStartResponse,
     type VoiceFeature,
 } from "@/lib/models";
-import type { SalesforceImportResult, SalesforceProbe, SalesforceSettingsResponse } from "@/lib/models";
+import type { RbacRole, SalesforceImportResult, SalesforceProbe, SalesforceSettingsResponse, TenantMember } from "@/lib/models";
+
+export type TenantMemberStatus = "pending" | "active" | "suspended" | "removed";
 
 export type SalesforceSettingsUpdateInput = {
     callback_campaign_id?: string | null;
@@ -313,6 +317,36 @@ export const backendApi = {
             await httpClient().request({
                 path: backendEndpoints.connectorsDisconnect.path.replace("{type}", encodeURIComponent(input.type)),
                 method: backendEndpoints.connectorsDisconnect.method,
+                timeoutMs: 12_000,
+            });
+        },
+    },
+    team: {
+        // GET /rbac/tenant-users: any member may call it; the backend shows
+        // every status to tenant admins and active members only to others.
+        members: async (status: TenantMemberStatus, signal?: AbortSignal): Promise<TenantMember[]> => {
+            const data = await httpClient().request({ path: backendEndpoints.rbacTenantUsers.path, query: { status }, timeoutMs: 12_000, signal });
+            return parseOrThrow(TenantMemberListSchema, data);
+        },
+        roles: async (signal?: AbortSignal): Promise<RbacRole[]> => {
+            const data = await httpClient().request({ path: backendEndpoints.rbacRoles.path, timeoutMs: 12_000, signal });
+            return parseOrThrow(RbacRoleListSchema, data);
+        },
+        updateMember: async (input: { id: string; role_name?: string; status?: TenantMemberStatus }): Promise<void> => {
+            const body: { role_name?: string; status?: TenantMemberStatus } = {};
+            if (input.role_name) body.role_name = input.role_name;
+            if (input.status) body.status = input.status;
+            await httpClient().request({
+                path: backendEndpoints.rbacTenantUserUpdate.path.replace("{id}", encodeURIComponent(input.id)),
+                method: backendEndpoints.rbacTenantUserUpdate.method,
+                body,
+                timeoutMs: 12_000,
+            });
+        },
+        removeMember: async (input: { id: string }): Promise<void> => {
+            await httpClient().request({
+                path: backendEndpoints.rbacTenantUserRemove.path.replace("{id}", encodeURIComponent(input.id)),
+                method: backendEndpoints.rbacTenantUserRemove.method,
                 timeoutMs: 12_000,
             });
         },
