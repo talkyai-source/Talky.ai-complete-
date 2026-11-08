@@ -420,7 +420,10 @@ async def list_connector_statuses(
         # connector IDs: an older row may be a different Gmail account and
         # silently selecting it could expose the wrong mailbox.
         active_candidates = [row for row in candidates if row.get("status") == "active"]
-        conn = candidates[0]
+        # A newer pending row (a reconnect started and abandoned) never hides
+        # the real state of an older expired/error row (D3-2).
+        settled = [row for row in candidates if row.get("status") != "pending"]
+        conn = (settled or candidates)[0]
         last_sync: Optional[str] = None
         status = _ui_status(conn.get("status"))
         error_message: Optional[str] = None
