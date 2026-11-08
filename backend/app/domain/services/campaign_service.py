@@ -17,6 +17,7 @@ from typing import Literal, Optional, List, Dict, Any
 from dataclasses import dataclass
 
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_with_tenant
 
 from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.queue_service import DialerQueueService
@@ -77,9 +78,11 @@ class CampaignDispatchError(CampaignError):
     """A durable dialer job could not be confirmed in the queue.
 
     ``jobs_enqueued`` counts Redis acknowledgements from this invocation.
-    ``jobs_pending`` counts durable ``pending`` rows that a later start can
-    reconcile.  Keeping both values on the exception lets HTTP callers report
-    a partial dispatch without pretending the whole list was queued.
+    ``jobs_pending`` counts jobs not acknowledged by this invocation, which a
+    later start must reconcile. It is an upper bound on live pending rows: a
+    worker may already have moved some rows on. A lost Redis reply also leaves
+    delivery unknown for that batch. These counts never promise zero delivery
+    or pretend that the whole list was queued.
     """
 
     def __init__(
@@ -1335,6 +1338,13 @@ class CampaignService:
         pending, which Stop cancels. An unreadable status keeps dispatching:
         the dialer re-checks the campaign before every call.
         """
+        # Select the protocol before I/O. Never fall back after a possibly
+        # successful batch push. Legacy clients without a pool retain their
+        # existing per-row acknowledgement contract.
+        if getattr(self.db_client, "pool", None) is not None and callable(
+            getattr(queue_service, "enqueue_jobs", None)
+        ):
+            return await self._dispatch_durable_job_batches(queue_service, jobs)
         redis_accepted = 0
         db_acknowledged = 0
         for index, job in enumerate(jobs):
@@ -1382,6 +1392,117 @@ class CampaignService:
                 ) from exc
             db_acknowledged += 1
         return redis_accepted
+
+    @staticmethod
+    def _validate_dispatch_batch(jobs: List[DialerJob]) -> None:
+        if not jobs:
+            return
+        scope = (str(jobs[0].tenant_id), str(jobs[0].campaign_id))
+        if len({str(job.job_id) for job in jobs}) != len(jobs) or any(
+            (str(job.tenant_id), str(job.campaign_id)) != scope for job in jobs
+        ):
+            raise ValueError("dialer batch scope is not exact")
+        # Invalid IDs must be rejected before Redis receives any payload.
+        for value in (*scope, *(str(job.job_id) for job in jobs), *(str(job.lead_id) for job in jobs)):
+            if str(uuid.UUID(value)) != value:
+                raise ValueError("dialer batch scope requires canonical UUIDs")
+
+    async def _confirm_jobs_dispatched(self, jobs: List[DialerJob]) -> None:
+        """ACK exact job/lead pairs together; never overwrite advanced states."""
+        if not jobs:
+            return
+        if len(jobs) > _DISPATCH_STATUS_CHECK_EVERY:
+            raise ValueError("dialer acknowledgement batch exceeds 100 jobs")
+        self._validate_dispatch_batch(jobs)
+        tenant_id, campaign_id = str(jobs[0].tenant_id), str(jobs[0].campaign_id)
+        ids = [uuid.UUID(str(job.job_id)) for job in jobs]
+        leads = [uuid.UUID(str(job.lead_id)) for job in jobs]
+        async with acquire_with_tenant(self.db_client.pool, tenant_id) as conn:
+            rows = await conn.fetch(
+                """UPDATE dialer_jobs AS j
+                   SET status = 'queued', updated_at = NOW()
+                   FROM unnest($1::uuid[], $2::uuid[]) AS sent(id, lead_id)
+                   WHERE j.id = sent.id AND j.lead_id = sent.lead_id
+                     AND j.tenant_id = $3::uuid AND j.campaign_id = $4::uuid
+                     AND j.status = 'pending'
+                   RETURNING j.id""",
+                ids, leads, uuid.UUID(tenant_id), uuid.UUID(campaign_id),
+            )
+            acknowledged = {str(row["id"]) for row in rows}
+            expected = {str(job.job_id): job for job in jobs}
+            if not acknowledged <= expected.keys() or len(acknowledged) != len(rows):
+                raise RuntimeError("dialer dispatch acknowledgement was not exact")
+            missing = [job for job in jobs if str(job.job_id) not in acknowledged]
+            if not missing:
+                return
+            # A worker can consume before the ACK. Read only missing exact
+            # pairs; a missing or still-pending row cannot be claimed as ACKed.
+            current = await conn.fetch(
+                """SELECT j.id, j.status
+                   FROM dialer_jobs AS j
+                   JOIN unnest($1::uuid[], $2::uuid[]) AS sent(id, lead_id)
+                     ON j.id = sent.id AND j.lead_id = sent.lead_id
+                   WHERE j.tenant_id = $3::uuid AND j.campaign_id = $4::uuid""",
+                [uuid.UUID(str(job.job_id)) for job in missing],
+                [uuid.UUID(str(job.lead_id)) for job in missing],
+                uuid.UUID(tenant_id), uuid.UUID(campaign_id),
+            )
+            advanced = {str(row["id"]) for row in current if row["status"] and row["status"] != "pending"}
+            if advanced != {str(job.job_id) for job in missing}:
+                # Exiting the tenant transaction with an error rolls back the
+                # whole ACK, keeping unconfirmed pushes replayable.
+                raise RuntimeError("dialer dispatch acknowledgement was not exact")
+
+    async def _dispatch_durable_job_batches(self, queue_service, jobs: List[DialerJob]) -> int:
+        try:
+            self._validate_dispatch_batch(jobs)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise CampaignDispatchError("Dialer batch scope is not exact", jobs_pending=len(jobs)) from exc
+        accepted_count = acknowledged_count = 0
+        for offset in range(0, len(jobs), _DISPATCH_STATUS_CHECK_EVERY):
+            batch = jobs[offset:offset + _DISPATCH_STATUS_CHECK_EVERY]
+            if offset:
+                try:
+                    running = await self._campaign_still_running(batch[0].campaign_id, batch[0].tenant_id)
+                except Exception as exc:
+                    logger.warning(
+                        "campaign_dispatch_status_unreadable campaign=%s err=%s — continuing",
+                        batch[0].campaign_id, type(exc).__name__,
+                    )
+                    running = True
+                if not running:
+                    break
+            try:
+                accepted = await queue_service.enqueue_jobs(batch)
+            except Exception as exc:
+                # Transport ambiguity: only earlier confirmed replies count.
+                # This batch may have reached Redis and stays replayable.
+                raise CampaignDispatchError(
+                    "Dialer queue batch dispatch could not be confirmed",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                ) from exc
+            if not isinstance(accepted, list) or len(accepted) != len(batch) or any(
+                type(value) is not bool for value in accepted
+            ):
+                raise CampaignDispatchError(
+                    "Dialer queue batch acceptance was not exact",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                )
+            accepted_count += sum(accepted)
+            if not all(accepted):
+                raise CampaignDispatchError(
+                    "Dialer queue batch dispatch failed",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                )
+            try:
+                await self._confirm_jobs_dispatched(batch)
+            except Exception as exc:
+                raise CampaignDispatchError(
+                    "Dialer queue acknowledgement could not be persisted",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                ) from exc
+            acknowledged_count += len(batch)
+        return accepted_count
 
     async def _campaign_still_running(self, campaign_id: str, tenant_id: str) -> bool:
         """Whether a campaign being dispatched is still running (QA F6-04)."""
