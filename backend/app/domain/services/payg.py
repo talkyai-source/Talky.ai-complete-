@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from app.domain.services.subscription_status import (
     ACTIVE,
+    INACTIVE,
     SUBSCRIPTION_BLOCKED_STATUSES,
     TRIALING,
     canonical,
@@ -22,6 +23,20 @@ PAYG_PLAN_ID = "payg"
 SUBSCRIBER = "subscriber"
 PAYG = "payg"
 AUDIENCES = (SUBSCRIBER, PAYG)
+
+
+def displayed_subscription_status(stored: Any, plan_id: Any) -> Optional[str]:
+    """The status to show for an account; never written back (G6).
+
+    Signup stores ``inactive`` and the first paid prepaid bundle only sets
+    ``plan_id = 'payg'``: a prepaid account never has a subscription. Calls
+    already allow ``inactive``, so only the shown status was wrong. Any other
+    stored value (suspended, past_due, ...) is returned unchanged. Inbound
+    routing still reads the stored value; that is not changed here.
+    """
+    if plan_id == PAYG_PLAN_ID and canonical(stored) in ("", INACTIVE):
+        return ACTIVE
+    return stored
 
 
 class PurchaseRefused(Exception):

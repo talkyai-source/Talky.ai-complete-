@@ -393,10 +393,14 @@ class BillingService:
             return None
         data = tenant.data
         subscription_id = data.get("stripe_subscription_id")
-        if not subscription_id and data.get("subscription_status") == SUBSCRIPTION_INACTIVE:
+        from app.domain.services.payg import displayed_subscription_status
+        # A paid prepaid (PAYG) account shows its plan and an active status.
+        status = displayed_subscription_status(
+            data.get("subscription_status", SUBSCRIPTION_INACTIVE), data.get("plan_id"))
+        if not subscription_id and status == SUBSCRIPTION_INACTIVE:
             return None
         result = {
-            "status": data.get("subscription_status", SUBSCRIPTION_INACTIVE),
+            "status": status,
             "plan_id": data.get("plan_id"), "plan": data.get("plans"),
             "stripe_subscription_id": subscription_id,
             "stripe_customer_id": data.get("stripe_customer_id"),

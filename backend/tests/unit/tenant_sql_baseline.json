@@ -8419,10 +8419,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "20981dddeea62df6eab5a5327184a09930fb14952a20526289a19765ea7c4bd0",
+      "id": "bda755f3e0b2ff6d47e7652e0ccbcb48bd3fb6685f9c1af332c251a0d23664ee",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
-      "line": 503,
+      "line": 505,
       "method": "fetch",
       "tables": [
         "campaigns",
@@ -9870,7 +9870,7 @@
       "category": "platform_public_intake"
     },
     {
-      "id": "69112858571104767c53664ec7206bec3efb5b42abfc69a9a11c842acd198273",
+      "id": "4ffcbe951d91eac0fc1ef51f48cb9d22d762997e0bcf9f2ca1d078b6d03b9e90",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.create_topup_checkout_session",
       "line": 270,
@@ -10003,10 +10003,10 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "74d8683bb342ffb5ab200627ef9f707aebcaa1472140a69e123b4ce745e65c7d",
+      "id": "f80d0ddbc282d3e8181c078e4278759c0d50c284ba3d02274ae61a0c1947f076",
       "file": "app/api/v1/endpoints/admin/tenants.py",
       "function": "list_tenants",
-      "line": 493,
+      "line": 495,
       "method": "fetchval",
       "tables": [],
       "sql": "SELECT count(*) FROM tenants t {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))}",
@@ -10118,7 +10118,7 @@
       "category": "platform_admin"
     },
     {
-      "id": "73b57715b3ffbd751b9eecaa3e096d32ac0ef5f011f8c9f1f45242afa4f6579b",
+      "id": "f0e678ea9c1e9df103492a97114bd1bfe78cedfed15a0ecfc524592ee3ad9b9f",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.create_or_get_customer",
       "line": 151,
@@ -10682,10 +10682,10 @@
       "category": "operator_billing_reconciliation"
     },
     {
-      "id": "8f16d5bae4da114df32c61e35926ec7d768b7fd1b72a503879e013d88f34a59b",
+      "id": "faaaf72c24dad818757a52f9b4306357cbfbc8d18d6a6cbcff579eeeab4fb14a",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.cancel_subscription",
-      "line": 444,
+      "line": 448,
       "method": "_stripe_call",
       "tables": [],
       "sql": "update",
@@ -12281,7 +12281,7 @@
       "category": "individually_reviewed"
     },
     {
-      "id": "f19ee86fbf206fe437eccd6a6e7e11706a99806eeac0adecc61d6ee7e41653da",
+      "id": "d22f6a1e445e10585261b2922a00ef0aec338b10b07a21971e1c76c58db04fc0",
       "file": "app/domain/services/billing_service.py",
       "function": "BillingService.create_portal_session",
       "line": 343,
