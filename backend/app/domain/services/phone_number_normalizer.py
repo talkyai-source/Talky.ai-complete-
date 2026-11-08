@@ -1,8 +1,9 @@
 """Shared phone normalization contracts.
 
 Dial destinations require libphonenumber validity in the selected country.
-Campaign/import selection falls back to tenants.calling_rules.default_country,
-then US. Extensions never become part of a dial destination or DNC key.
+Campaign/import selection falls back to tenants.calling_rules.default_country
+and never guesses US (D2-5); only DNC keys keep an explicit US default.
+Extensions never become part of a dial destination or DNC key.
 DNC writes and CallGuard reads use the same strict parser; malformed guard
 inputs become an empty, undialable key. Existing canonical E.164 keys remain
 unchanged. Historical malformed DNC rows still require owner reconciliation.
