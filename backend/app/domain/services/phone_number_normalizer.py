@@ -7,8 +7,8 @@ DNC writes and CallGuard reads use the same strict parser; malformed guard
 inputs become an empty, undialable key. Existing canonical E.164 keys remain
 unchanged. Historical malformed DNC rows still require owner reconciliation.
 
-Voice capture-as-said, DID registration, legacy digits/lock keys, and the
-unreferenced lenient/legacy compatibility helpers retain separate contracts.
+Voice capture-as-said, DID registration and legacy digits/lock keys retain
+separate contracts. There is no lenient intake path (D2-6).
 """
 from __future__ import annotations
 
@@ -161,79 +161,6 @@ def region_of_e164(number: str | None) -> str | None:
     if not phonenumbers.is_valid_number(parsed):
         return None
     return phonenumbers.region_code_for_number(parsed) or None
-
-
-def normalize_phone_number_lenient(phone: str) -> str:
-    """Lenient normalization that NEVER rejects on length/format.
-
-    For accounts whose phone validation is temporarily relaxed (e.g. adding
-    short or odd test numbers). It tries the strict normalizer first, so a
-    normal number still comes out as proper E.164; only when the strict path
-    rejects the number does it fall back to a digits passthrough (preserving a
-    leading +). The single hard rule that remains is "must contain a digit".
-    """
-    try:
-        return normalize_phone_number(phone)
-    except ValueError:
-        pass  # fall through to the lenient passthrough below
-
-    has_plus = (phone or "").strip().startswith("+")
-    digits = re.sub(r"[^\d]", "", phone or "")
-    if not digits:
-        raise ValueError("Phone number contains no digits")
-    return f"+{digits}" if has_plus else digits
-
-
-def normalize_phone_number_legacy(phone: str) -> str:
-    """The pre-consolidation ``contacts.normalize_phone_number`` contract.
-
-    DEPRECATED -- do not add callers; use :func:`normalize_phone_number`.
-    It is kept verbatim because ``app.api.v1.endpoints.contacts`` still
-    exports the symbol.
-
-    Differs from the canonical normalizer in three ways:
-      * minimum is 3 digits, not 4;
-      * SIP-extension passthrough runs to 6 digits, not 5 (so ``"123456"``
-        is accepted here and rejected canonically);
-      * no libphonenumber at all -- so extensions are not stripped
-        (``"+1 415 555 1234 ext 22"`` keeps the ``22``) and ``default_country``
-        has no equivalent.
-
-    Raises ValueError for empty/None and for digitless input.
-    """
-    if not phone:
-        raise ValueError("Phone number is empty")
-
-    # Remove all non-digit characters except leading +
-    has_plus = phone.strip().startswith("+")
-    cleaned = re.sub(r"[^\d]", "", phone)
-
-    if not cleaned:
-        raise ValueError("Phone number contains no digits")
-
-    # Allow short SIP extensions (3-6 digits) to pass through as-is
-    if len(cleaned) <= 6:
-        if len(cleaned) < 3:
-            raise ValueError("Phone number too short (minimum 3 digits for SIP extensions)")
-        return cleaned  # Return raw SIP extension - no E.164 normalization
-
-    if len(cleaned) > 15:
-        raise ValueError("Phone number too long (maximum 15 digits)")
-
-    # If already has + and country code, use as-is
-    if has_plus:
-        return f"+{cleaned}"
-
-    # If 10 digits (US/Canada without country code), add +1
-    if len(cleaned) == 10:
-        return f"+1{cleaned}"
-
-    # If 11 digits starting with 1 (US/Canada with country code), add +
-    if len(cleaned) == 11 and cleaned.startswith("1"):
-        return f"+{cleaned}"
-
-    # Otherwise, return with + prefix
-    return f"+{cleaned}"
 
 
 def normalize_e164_digits(phone_number: str) -> str:

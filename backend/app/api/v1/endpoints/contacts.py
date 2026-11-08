@@ -142,30 +142,6 @@ def _resolve_country(db_client, tenant_id, campaign=None, requested=None):
                             "message": "Use a supported ISO alpha-2 country"}]) from exc
 
 
-def normalize_phone_number(phone: str) -> str:
-    """
-    DEPRECATED legacy normalizer — kept only so nothing breaks if an old import
-    path still references it. New code must use _normalize_for_user so CSV import
-    and Add-Contact share one definition (see Fix #9). Do not add callers.
-
-    Normalize phone number to E.164 format.
-
-    Args:
-        phone: Raw phone number string
-
-    Returns:
-        Normalized phone in E.164 format (+1234567890)
-        
-    Raises:
-        ValueError: If phone is invalid
-    """
-    from app.domain.services.phone_number_normalizer import (
-        normalize_phone_number_legacy,
-    )
-
-    return normalize_phone_number_legacy(phone)
-
-
 # =============================================================================
 # The import template (goals.md §11 "Update CSV import template")
 # =============================================================================

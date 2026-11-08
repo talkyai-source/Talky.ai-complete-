@@ -39,7 +39,6 @@ from app.domain.services.campaign_service import (
 from app.domain.services.phone_number_normalizer import (
     normalize_phone_number,
     phone_number_error,
-    normalize_phone_number_lenient,
 )
 from app.domain.services.event_emitter import emit_event_via_pool
 from app.domain.services.audit_logger import AuditLogger

@@ -234,10 +234,15 @@ class TestCSVUpload:
     
     def test_normalize_phone_in_contacts(self):
         """CSV upload should use same normalization as single add"""
-        from app.api.v1.endpoints.contacts import normalize_phone_number
-        
-        # Test the same normalization is available
-        assert normalize_phone_number("5551234567") == "+15551234567"
+        from types import SimpleNamespace
+        from app.api.v1.endpoints.contacts import _normalize_for_user
+        from app.domain.services.phone_number_normalizer import normalize_phone_number
+
+        # D2-6: the deprecated contacts.normalize_phone_number (legacy, lenient)
+        # is gone; the CSV path normalises with the shared strict function.
+        user = SimpleNamespace(email="owner@example.com")
+        assert _normalize_for_user("4155552671", user, "US") == "+14155552671"
+        assert _normalize_for_user("4155552671", user, "US") == normalize_phone_number("4155552671", "US")
     
     def test_upload_endpoint_exists(self):
         """Campaign CSV upload endpoint should exist"""
