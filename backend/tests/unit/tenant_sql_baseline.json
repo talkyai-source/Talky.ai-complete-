@@ -4841,7 +4841,7 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a1b42af1a4acec6cc9e22f5b47807effed706a0a4c1bd821a62962a196856a13",
+      "id": "22e3cc669f6895183cab45ffc8ac313a6221e4d8ba0d9117585c505583d87efd",
       "file": "app/core/security/passkeys.py",
       "function": "get_credential_by_id",
       "line": 840,
@@ -9087,10 +9087,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "51ff028d971cbf55b7f687c732eb604f2e4771a340b1e9ec3dfe049ec8f6615f",
+      "id": "604bdb22a29cf0dba71a4be7925426cb270d3a7ee30b9e365b342f6c55c3a269",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "start_campaign",
-      "line": 1094,
+      "line": 1135,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign pacing",
@@ -9253,10 +9253,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "e64995bdb48dfe424ff71cfa525c2d882bcd794e988f2210fb2a85f6f9410718",
+      "id": "0481fee68142e8763d7f38dfa91af8e1c03050b28a0a89c15907a5159fa3feff",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "create_campaign",
-      "line": 697,
+      "line": 735,
       "method": "_pinned_tts_provider",
       "tables": [],
       "sql": "create",
@@ -9369,16 +9369,16 @@
       "category": "external_query"
     },
     {
-      "id": "21caafe509b3262964c6ccf87adbe1b2c3db714fece976edfd9d033e087c9041",
+      "id": "455b180ff71c000397e188dd7e781369cc8d37007efca2a5c379a36a4336b942",
       "file": "app/api/v1/endpoints/auth/profile.py",
       "function": "get_me",
-      "line": 47,
+      "line": 68,
       "method": "fetchrow",
       "tables": [
         "user_profiles",
         "white_label_partners"
       ],
-      "sql": "SELECT t.id AS tenant_id, t.white_label_partner_id AS partner_id, t.status AS tenant_status, t.calling_rules->>'timezone' AS account_timezone, t.suspended_at AS tenant_suspended_at, t.suspension_reason AS tenant_suspension_reason, p.status AS partner_status, p.suspended_at AS partner_suspended_at, p.suspension_reason AS partner_suspension_reason FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE up.id = $1 AND up.tenant_id IS NOT DISTINCT FROM $2::uuid",
+      "sql": "SELECT t.id AS tenant_id, up.mfa_enabled AS mfa_enabled, t.white_label_partner_id AS partner_id, t.status AS tenant_status, t.subscription_status AS subscription_status, t.calling_rules->>'timezone' AS account_timezone, t.suspended_at AS tenant_suspended_at, t.suspension_reason AS tenant_suspension_reason, p.status AS partner_status, p.suspended_at AS partner_suspended_at, p.suspension_reason AS partner_suspension_reason FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE up.id = $1 AND up.tenant_id IS NOT DISTINCT FROM $2::uuid",
       "scoped": false,
       "unresolved": false,
       "bypass": false,
@@ -9821,10 +9821,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "b7ee9ebc585e1e56d99d235d6ff9296d3e896189cec965622d56631bd0f61473",
+      "id": "0026ea5b1cee3024eff47d4e3439beccb6b290d36abe17cee2400582f79e1cf8",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "delete_campaign",
-      "line": 1459,
+      "line": 1500,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "delete campaign",
@@ -10148,10 +10148,10 @@
       "category": "system_support_scheduler"
     },
     {
-      "id": "c88de6d08d1996c50b434b6bd685e4e932b3a9b358edefdea5f1108bb791200b",
+      "id": "a924f1574ea849095b8e4aef3332194ac705ab168bc5f0064583f9de9be3b0ab",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_contact_in_campaign",
-      "line": 2122,
+      "line": 2163,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "update",
@@ -10319,10 +10319,10 @@
       "category": "system_retention_discovery"
     },
     {
-      "id": "be249c37088c374b1d7241673299b5c3556c90291ad372805337b6bb9284313c",
+      "id": "b3e39160e8fb621dfce623fa002e417865dbfdee00c8a9e8f6fccacf294c8d41",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "update_campaign",
-      "line": 924,
+      "line": 962,
       "method": "_update_owned_outbound_campaign",
       "tables": [],
       "sql": "update campaign",
@@ -10417,10 +10417,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "613e9146e3baca897e0a07b879acbe50f369daf45a6e998d54ef3339e163564f",
+      "id": "9470d6fd361be5a73f150dc511988d3569cfe8b6589e3968508c6d37639337d1",
       "file": "app/api/v1/endpoints/campaigns.py",
       "function": "add_contact_to_campaign",
-      "line": 1986,
+      "line": 2027,
       "method": "_require_contact_write",
       "tables": [],
       "sql": "create",
