@@ -1863,6 +1863,29 @@ def _resolved_contact_names(contact: ContactCreate | ContactUpdate) -> tuple[Opt
     return first, last
 
 
+def _normalized_optional_numbers(contact: ContactCreate | ContactUpdate, country: Optional[str]) -> dict:
+    """mobile_number / business_number follow the dial number's rule (D2-9).
+
+    Each supplied, non-blank optional number is normalised to E.164 with the
+    same country; every bad one is reported as its own field error (422).
+    """
+    values: dict = {}
+    errors: list[dict] = []
+    for field in ("mobile_number", "business_number"):
+        if field not in contact.model_fields_set:
+            continue
+        raw = (getattr(contact, field, None) or "").strip()
+        if not raw:
+            continue
+        try:
+            values[field] = normalize_phone_number(raw, default_country=country)
+        except ValueError:
+            errors.append({"row": 1, "field": field, "message": phone_number_error(raw, country)})
+    if errors:
+        raise HTTPException(status_code=422, detail=errors)
+    return values
+
+
 def _contact_custom_fields(contact: ContactCreate | ContactUpdate, existing: Optional[dict] = None) -> dict:
     fields = dict(existing or {})
     supplied = getattr(contact, "custom_fields", None)
@@ -1945,7 +1968,8 @@ async def add_contact_to_campaign(
             normalized_phone = normalize_phone_number(contact.phone_number, default_country=default_country)
         except ValueError as e:
             raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": phone_number_error(contact.phone_number, default_country)}]) from e
-        
+        contact = contact.model_copy(update=_normalized_optional_numbers(contact, default_country))
+
         # 3. Look up ANY existing row for this phone (including soft-deleted).
         #    - A live row is a real duplicate -> 409.
         #    - A soft-deleted row gets REVIVED in place (keeps its id, call
@@ -2074,6 +2098,7 @@ async def update_contact_in_campaign(
         )
         if not existing.data:
             raise HTTPException(status_code=404, detail="Contact not found in this campaign")
+        contact = contact.model_copy(update=_normalized_optional_numbers(contact, default_country))
 
         update_payload: dict = {}
 

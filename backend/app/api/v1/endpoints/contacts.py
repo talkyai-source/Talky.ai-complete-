@@ -109,6 +109,30 @@ def _preflight_phones(records, default_country):
         raise HTTPException(status_code=422, detail=errors[:100])
 
 
+def _check_optional_numbers(values: dict, row_num: int, country) -> list["ImportError"]:
+    """CSV: mobile_number / business_number follow the dial number's rule (D2-9).
+
+    A valid one is stored in E.164; a bad one is dropped from the row and
+    reported, and the contact still imports (the policy for every bad cell).
+    A mobile column that IS the dial number (no phone_number column) is left
+    to the stricter dial-number check, which rejects the import.
+    """
+    from app.domain.services.phone_number_normalizer import normalize_phone_number, phone_number_error
+
+    errors = []
+    for field in ("mobile_number", "business_number"):
+        raw = (values.get(field) or "").strip()
+        if not raw or (field == "mobile_number" and not values.get("phone_number")):
+            continue
+        try:
+            values[field] = normalize_phone_number(raw, default_country=country)
+        except ValueError:
+            values.pop(field, None)
+            errors.append(ImportError(row=row_num, field=field, value=raw[:40],
+                                      error=phone_number_error(raw, country)))
+    return errors
+
+
 def _resolve_country(db_client, tenant_id, campaign=None, requested=None):
     from app.domain.services.phone_number_normalizer import resolve_default_country
     try:
@@ -341,6 +365,7 @@ async def upload_campaign_contacts(
                     row=issue.row, field=issue.field, value=issue.value,
                     error=f"{label}: {issue.reason}",
                 ))
+            field_errors.extend(_check_optional_numbers(values, row_num, default_country))
 
             first_name = values.get("first_name")
             last_name = values.get("last_name")
