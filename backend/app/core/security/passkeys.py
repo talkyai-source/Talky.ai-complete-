@@ -973,6 +973,32 @@ def set_rp_config(
         DEV_ORIGINS = dev_origins
 
 
+def _extra_origins() -> list[str]:
+    """HTTPS origins under RP_ID besides RP_ORIGIN, e.g. the Admin console (R3).
+
+    ``PASSKEY_EXTRA_ORIGINS`` (comma-separated; empty turns it off) overrides
+    the default ``https://admin.<RP_ID>``. A host outside RP_ID could never
+    produce an assertion for this RP, so such entries are dropped, as are
+    non-HTTPS entries and entries with a path.
+    """
+    from urllib.parse import urlsplit
+
+    raw = _os.getenv("PASSKEY_EXTRA_ORIGINS")
+    candidates = raw.split(",") if raw is not None else [f"https://admin.{RP_ID}"]
+    allowed: list[str] = []
+    for candidate in candidates:
+        origin = candidate.strip().rstrip("/")
+        if not origin:
+            continue
+        parts = urlsplit(origin)
+        host = (parts.hostname or "").lower()
+        if (parts.scheme == "https" and not parts.path and not parts.query
+                and (host == RP_ID or host.endswith("." + RP_ID))):
+            allowed.append(origin)
+    return allowed
+
+
 def get_allowed_origins() -> list[str]:
-    """Get all allowed origins (production + dev)."""
-    return [RP_ORIGIN] + DEV_ORIGINS
+    """Get all allowed origins (production + dev + extra hosts under RP_ID)."""
+    extras = [origin for origin in _extra_origins() if origin != RP_ORIGIN]
+    return [RP_ORIGIN] + DEV_ORIGINS + extras
