@@ -195,6 +195,9 @@ async def test_campaign_service_passes_owned_tenant_to_termination(monkeypatch, 
         def eq(self, _column, _value):
             return self
 
+        def in_(self, _column, _values):  # D3-17 state predicate on the UPDATE
+            return self
+
         def execute(self):
             return SimpleNamespace(data=[campaign], error=None)
 

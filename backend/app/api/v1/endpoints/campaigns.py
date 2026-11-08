@@ -1511,12 +1511,14 @@ async def delete_campaign(
 
         # Best-effort stop + clear queue so a running campaign stops dialing.
         # Already-stopped/draft campaigns raise or no-op here — that's fine.
+        # from_statuses=None: delete stops whatever it removes (D3-17).
         try:
             service = _get_campaign_service(db_client)
             await service.stop_campaign(
                 campaign_id,
                 clear_queue=True,
                 tenant_id=current_user.tenant_id,
+                from_statuses=None,
             )
         except CampaignNotFoundError:
             raise HTTPException(status_code=404, detail="Campaign not found")

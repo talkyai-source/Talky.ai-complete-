@@ -66,6 +66,13 @@ class CampaignDirectionError(CampaignStateError):
         CampaignError.__init__(self, message, status_code=409)
 
 
+# D3-17: the states pause and stop apply to. A paused campaign still holds
+# queued calls, and stopping is how it ends without resuming. Delete passes
+# from_statuses=None: it stops a campaign in any state before removing it.
+PAUSABLE_STATUSES = ("running",)
+STOPPABLE_STATUSES = ("running", "paused")
+
+
 class CampaignReadinessError(CampaignError):
     """The current outbound telephony route cannot safely start."""
 
@@ -587,10 +594,30 @@ class CampaignService:
     # Pause Campaign
     # =========================================================================
 
+    @staticmethod
+    def _require_lifecycle_status(campaign: Dict[str, Any], from_statuses, done: str) -> None:
+        """D3-17: refuse pause/stop for a campaign not in a state it applies to."""
+        status = campaign.get("status")
+        if from_statuses is not None and status not in from_statuses:
+            raise CampaignStateError(
+                f"Only a {' or '.join(from_statuses)} campaign can be {done}; "
+                f"this campaign is {status or 'in an unknown state'}."
+            )
+
+    async def _refuse_lost_update(self, campaign_id, tenant_id, from_statuses, done, direction_message):
+        """The guarded UPDATE matched no row: say whether the state or the
+        direction changed since the read."""
+        if from_statuses is not None:
+            current = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+            if current.get("direction", "outbound") == "outbound":
+                self._require_lifecycle_status(current, from_statuses, done)
+        raise CampaignDirectionError(direction_message)
+
     async def pause_campaign(
         self,
         campaign_id: str,
         tenant_id: Optional[str] = None,
+        from_statuses=PAUSABLE_STATUSES,
     ) -> Dict[str, Any]:
         """Pause a campaign.
 
@@ -614,6 +641,7 @@ class CampaignService:
             raise CampaignDirectionError(
                 "Inbound campaigns cannot be paused by the outbound dialer"
             )
+        self._require_lifecycle_status(campaign, from_statuses, "paused")
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         query = self.db_client.table("campaigns").update({
@@ -621,12 +649,15 @@ class CampaignService:
         }).eq("id", campaign_id)
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
+        if from_statuses is not None:
+            query = query.in_("status", list(from_statuses))
         response = query.eq("direction", "outbound").execute()
         if getattr(response, "error", None):
             raise CampaignError("Failed to pause campaign")
         if not getattr(response, "data", None):
-            raise CampaignDirectionError(
-                "Campaign direction changed; outbound pause was refused"
+            await self._refuse_lost_update(
+                campaign_id, tenant_id, from_statuses, "paused",
+                "Campaign direction changed; outbound pause was refused",
             )
 
         # Hang up live calls now. The campaign state is already paused, but
@@ -678,6 +709,7 @@ class CampaignService:
         campaign_id: str,
         clear_queue: bool = False,
         tenant_id: Optional[str] = None,
+        from_statuses=STOPPABLE_STATUSES,
     ) -> Dict[str, Any]:
         """
         Stop a campaign completely.
@@ -688,6 +720,8 @@ class CampaignService:
             tenant_id: Applied to the UPDATE as defense-in-depth alongside
                 RLS (see ``_resolve_tenant_id``); same value get_campaign
                 just validated the row against.
+            from_statuses: states stop applies to (D3-17); None = any state
+                (delete stops whatever it removes).
         """
         # Validate exists (and belongs to this tenant). See pause_campaign for
         # why direction is checked again at the domain boundary.
@@ -696,6 +730,7 @@ class CampaignService:
             raise CampaignDirectionError(
                 "Inbound campaigns cannot be stopped by the outbound dialer"
             )
+        self._require_lifecycle_status(campaign, from_statuses, "stopped")
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         # Update campaign status
@@ -705,12 +740,15 @@ class CampaignService:
         }).eq("id", campaign_id)
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
+        if from_statuses is not None:
+            query = query.in_("status", list(from_statuses))
         response = query.eq("direction", "outbound").execute()
         if getattr(response, "error", None):
             raise CampaignError("Failed to stop campaign")
         if not getattr(response, "data", None):
-            raise CampaignDirectionError(
-                "Campaign direction changed; outbound stop was refused"
+            await self._refuse_lost_update(
+                campaign_id, tenant_id, from_statuses, "stopped",
+                "Campaign direction changed; outbound stop was refused",
             )
 
         # Cancel only queued/not-yet-originated work immediately. Jobs already

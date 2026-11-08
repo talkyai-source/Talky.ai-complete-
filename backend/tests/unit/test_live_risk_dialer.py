@@ -257,7 +257,7 @@ async def test_dialer5_stop_campaign_snapshots_before_cancel_and_releases_after(
     order = []
     db = _DB()
     svc = CampaignService(db)
-    svc.get_campaign = AsyncMock(return_value={"direction": "outbound"})
+    svc.get_campaign = AsyncMock(return_value={"direction": "outbound", "status": "running"})
     svc._leads_awaiting_retry = MagicMock(side_effect=lambda *a, **k: order.append("snap") or ["L1"])
     svc._release_leads_to_pending = MagicMock(side_effect=lambda *a, **k: order.append("release"))
     svc._get_queue_service = AsyncMock(return_value=AsyncMock())
