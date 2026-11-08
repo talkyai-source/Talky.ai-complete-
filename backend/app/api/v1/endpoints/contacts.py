@@ -97,14 +97,14 @@ def _normalize_for_user(phone: str, user, default_country: str = "US") -> str:
 
 
 def _preflight_phones(records, default_country):
-    from app.domain.services.phone_number_normalizer import normalize_phone_number
+    from app.domain.services.phone_number_normalizer import normalize_phone_number, phone_number_error
     errors = []
     for record in records:
         try:
             normalize_phone_number(record.phone_raw, default_country)
         except ValueError:
             errors.append({"row": record.source_row, "field": "phone_number",
-                           "message": "Invalid phone number for the selected country"})
+                           "message": phone_number_error(record.phone_raw, default_country)})
     if errors:
         raise HTTPException(status_code=422, detail=errors[:100])
 

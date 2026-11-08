@@ -17,10 +17,21 @@ import re
 _STRICT_E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 
 
-def normalize_phone_number(phone: str, default_country: str = "US") -> str:
-    """Return a valid dial destination, excluding any extension; never guess."""
-    country = validate_country(default_country)
+def normalize_phone_number(phone: str, default_country: str | None = "US") -> str:
+    """Return a valid dial destination, excluding any extension; never guess.
+
+    ``default_country=None`` means no country is known: a number written with
+    its ``+`` country code still normalises, a national one is refused (D2-5).
+    """
+    country = validate_country(default_country) if default_country else None
     return normalize_phone_for_capture(phone, region=country)
+
+
+def phone_number_error(raw: str, country: str | None) -> str:
+    """The row-level message for a refused number: what the customer must fix."""
+    if not country and not str(raw or "").strip().startswith("+"):
+        return "Add the country code (for example +44) or choose a country for this number"
+    return "Invalid phone number for the selected country"
 
 
 def validate_country(value: str) -> str:
@@ -33,8 +44,14 @@ def validate_country(value: str) -> str:
     return country
 
 
-def campaign_country(campaign=None, account_rules=None, requested=None) -> str:
-    """Explicit import override, campaign country, account calling rules, US."""
+def campaign_country(campaign=None, account_rules=None, requested=None, *, fallback=None) -> str | None:
+    """Explicit import override, campaign country, account calling rules.
+
+    No country is guessed (D2-5): with none of those set the result is
+    ``fallback``, which is ``None`` for contact intake. Only callers that must
+    stay consistent with an existing US-default key (DNC writes, the legacy
+    repair tool) name ``fallback="US"`` explicitly.
+    """
     config = (campaign or {}).get("script_config") or {}
     if not isinstance(config, dict):
         config = {}
@@ -42,13 +59,14 @@ def campaign_country(campaign=None, account_rules=None, requested=None) -> str:
     if not isinstance(slots, dict):
         slots = {}
     rules = account_rules if isinstance(account_rules, dict) else {}
-    return validate_country(
+    chosen = (
         requested or config.get("default_country_code")
-        or slots.get("default_country_code") or rules.get("default_country") or "US"
+        or slots.get("default_country_code") or rules.get("default_country") or fallback
     )
+    return validate_country(chosen) if chosen else None
 
 
-def resolve_default_country(db_client, tenant_id, campaign=None, requested=None) -> str:
+def resolve_default_country(db_client, tenant_id, campaign=None, requested=None) -> str | None:
     """Read the existing account JSON only when no explicit/campaign choice exists."""
     config = (campaign or {}).get("script_config") or {}
     slots = config.get("campaign_slots") if isinstance(config, dict) else None

@@ -151,10 +151,11 @@ def test_csv_import_and_manual_add_agree(raw, country):
     [
         ({"script_config": {"default_country_code": "gb"}}, "GB"),
         ({"script_config": {"campaign_slots": {"default_country_code": "PK"}}}, "PK"),
-        ({"script_config": {}}, "US"),
-        ({"script_config": None}, "US"),
-        ({}, "US"),
-        (None, "US"),
+        # D2-5: no country anywhere is "unknown", never a US guess.
+        ({"script_config": {}}, None),
+        ({"script_config": None}, None),
+        ({}, None),
+        (None, None),
     ],
 )
 def test_campaign_default_country_resolution(campaign, expected):

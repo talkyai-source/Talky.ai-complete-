@@ -91,14 +91,14 @@ def normalize_e164_for_storage(raw: str, default_country: str = "US") -> str:
 async def _write_country(conn, tenant_id, requested):
     from app.domain.services.phone_number_normalizer import campaign_country
     if requested is not None:
-        return campaign_country(requested=requested)
+        return campaign_country(requested=requested, fallback="US")
     # tenants.id is the tenant boundary; global suppressions default to US.
     rules = await conn.fetchval(
         "SELECT calling_rules FROM tenants WHERE id = $1::uuid", tenant_id,
     ) if tenant_id is not None else None
     if isinstance(rules, str):
         rules = json.loads(rules)
-    return campaign_country(account_rules=rules)
+    return campaign_country(account_rules=rules, fallback="US")
 
 
 class DNCService:

@@ -38,6 +38,7 @@ from app.domain.services.campaign_service import (
 )
 from app.domain.services.phone_number_normalizer import (
     normalize_phone_number,
+    phone_number_error,
     normalize_phone_number_lenient,
 )
 from app.domain.services.event_emitter import emit_event_via_pool
@@ -1943,7 +1944,7 @@ async def add_contact_to_campaign(
         try:
             normalized_phone = normalize_phone_number(contact.phone_number, default_country=default_country)
         except ValueError as e:
-            raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": "Invalid phone number for the selected country"}]) from e
+            raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": phone_number_error(contact.phone_number, default_country)}]) from e
         
         # 3. Look up ANY existing row for this phone (including soft-deleted).
         #    - A live row is a real duplicate -> 409.
@@ -2080,7 +2081,7 @@ async def update_contact_in_campaign(
             try:
                 normalized_phone = normalize_phone_number(contact.phone_number, default_country=default_country)
             except ValueError as e:
-                raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": "Invalid phone number for the selected country"}]) from e
+                raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone_number", "message": phone_number_error(contact.phone_number, default_country)}]) from e
 
             # Reject duplicate within the campaign (excluding this same lead).
             dupe = (

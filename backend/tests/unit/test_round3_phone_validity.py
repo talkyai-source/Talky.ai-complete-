@@ -31,12 +31,14 @@ def test_unknown_country_cannot_silently_fall_back_to_us():
         normalize_phone_number("4155552671", default_country="XX")
 
 
-def test_campaign_then_account_then_us_country():
+def test_campaign_then_account_country_and_no_us_guess():
     from app.domain.services.phone_number_normalizer import campaign_country
 
     assert campaign_country({}, {"default_country": "gb"}) == "GB"
     assert campaign_country({"script_config": {"default_country_code": "DE"}}, {"default_country": "GB"}) == "DE"
-    assert campaign_country({}, {}) == "US"
+    # D2-5: intake never guesses US; only a caller that names it gets it.
+    assert campaign_country({}, {}) is None
+    assert campaign_country({}, {}, fallback="US") == "US"
 
 
 def test_dnc_and_guard_share_extension_free_key():

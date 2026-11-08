@@ -706,7 +706,9 @@ async def test_manage_lead_refuses_inbound_before_preview_or_apply(confirm):
 async def test_manage_lead_add_uses_canonical_phone_normalizer():
     db = FakeDbClient()
     db.configure_response(
-        "campaigns", "select", data=[{"id": "c1", "direction": "outbound"}]
+        "campaigns", "select",
+        # D2-5: intake never guesses a country, so the campaign names it.
+        data=[{"id": "c1", "direction": "outbound", "script_config": {"default_country_code": "US"}}],
     )
 
     result = await manage_lead(
@@ -725,7 +727,9 @@ async def test_manage_lead_add_uses_canonical_phone_normalizer():
 async def test_manage_lead_rechecks_direction_when_add_proposal_is_applied():
     db = FakeDbClient()
     db.configure_response(
-        "campaigns", "select", data=[{"id": "c1", "direction": "outbound"}]
+        "campaigns", "select",
+        # D2-5: intake never guesses a country, so the campaign names it.
+        data=[{"id": "c1", "direction": "outbound", "script_config": {"default_country_code": "US"}}],
     )
     preview = await manage_lead(
         tenant_id="t1",

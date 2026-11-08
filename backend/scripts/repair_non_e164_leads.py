@@ -104,9 +104,12 @@ def plan_row(row):
             return {"action": "valid", "candidate": None}
         return {"action": "invalid", "candidate": None, "reason": "invalid_e164_number"}
     try:
+        # Historical rows were saved under the old US default; this owner-run,
+        # dry-run-first repair keeps that fallback explicitly (D2-5).
         country = campaign_country(
             {"script_config": _object(row.get("script_config"))},
             account_rules=_object(row.get("calling_rules")),
+            fallback="US",
         )
         candidate = normalize_phone_number(row["phone_number"], default_country=country)
     except (ValueError, TypeError):
