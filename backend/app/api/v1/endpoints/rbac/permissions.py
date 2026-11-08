@@ -9,6 +9,7 @@ from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_connection
 
+from .roles import permission_visible, visible_role_ceiling
 from .schemas import PermissionResponse
 
 router = APIRouter(tags=["rbac"])
@@ -20,7 +21,8 @@ async def list_permissions(
     db_client: Client = Depends(get_db_client),
     resource: Optional[str] = Query(None, description="Filter by resource"),
 ) -> List[PermissionResponse]:
-    """List all available permissions."""
+    """List the permissions the caller may see (platform:* only for platform admins)."""
+    ceiling = visible_role_ceiling(current_user)
     async with acquire_connection(db_client.pool) as conn:
         if resource:
             rows = await conn.fetch(
@@ -50,4 +52,5 @@ async def list_permissions(
             action=row["action"],
         )
         for row in rows
+        if permission_visible(row["name"], ceiling)
     ]

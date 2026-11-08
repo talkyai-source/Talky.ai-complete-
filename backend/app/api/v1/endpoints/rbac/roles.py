@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -23,6 +23,7 @@ from app.api.v1.dependencies import (
 )
 from app.core.postgres_adapter import Client
 from app.core.db_utils import acquire_connection, acquire_with_tenant
+from app.core.security.rbac import normalize_role
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from .schemas import PermissionResponse, RolePermissionResponse, RoleResponse
@@ -31,13 +32,44 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["rbac"])
 
+PLATFORM_PERMISSION_PREFIX = "platform:"
+
+
+def visible_role_ceiling(current_user: CurrentUser) -> Optional[int]:
+    """``None`` for a platform admin (every role); else the caller's level (D4-3)."""
+    role = normalize_role(current_user.role or "user")
+    if role == UserRole.PLATFORM_ADMIN:
+        return None
+    return role.level
+
+
+def role_visible(row, ceiling: Optional[int]) -> bool:
+    """Tenant callers see tenant-scoped roles at or below their own level only.
+
+    ``partner_admin`` is seeded ``tenant_scoped = TRUE``; the level bound is
+    what keeps it from tenant admins. ``platform_admin`` is never tenant-visible.
+    """
+    if ceiling is None:
+        return True
+    return (
+        row["tenant_scoped"] is True
+        and row["name"] != UserRole.PLATFORM_ADMIN.value
+        and row["level"] is not None
+        and row["level"] <= ceiling
+    )
+
+
+def permission_visible(name: str, ceiling: Optional[int]) -> bool:
+    return ceiling is None or not str(name).startswith(PLATFORM_PERMISSION_PREFIX)
+
 
 @router.get("/roles", response_model=List[RoleResponse])
 async def list_roles(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> List[RoleResponse]:
-    """List all available roles."""
+    """List the roles the caller may see (all of them for a platform admin)."""
+    ceiling = visible_role_ceiling(current_user)
     async with acquire_connection(db_client.pool) as conn:
         rows = await conn.fetch(
             """
@@ -46,6 +78,7 @@ async def list_roles(
             ORDER BY level DESC
             """
         )
+    rows = [row for row in rows if role_visible(row, ceiling)]
 
     return [
         RoleResponse(
@@ -77,7 +110,7 @@ async def get_role(
             role_id,
         )
 
-    if not row:
+    if not row or not role_visible(row, visible_role_ceiling(current_user)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Role not found",
@@ -99,14 +132,15 @@ async def get_role_permissions(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> RolePermissionResponse:
-    """Get all permissions assigned to a role."""
+    """Get all permissions assigned to a role the caller may see."""
+    ceiling = visible_role_ceiling(current_user)
     async with acquire_connection(db_client.pool) as conn:
         # Get role name
         role_row = await conn.fetchrow(
-            "SELECT id, name FROM roles WHERE id = $1",
+            "SELECT id, name, level, tenant_scoped FROM roles WHERE id = $1",
             role_id,
         )
-        if not role_row:
+        if not role_row or not role_visible(role_row, ceiling):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Role not found",
@@ -136,6 +170,7 @@ async def get_role_permissions(
                 action=row["action"],
             )
             for row in perm_rows
+            if permission_visible(row["name"], ceiling)
         ],
     )
 
