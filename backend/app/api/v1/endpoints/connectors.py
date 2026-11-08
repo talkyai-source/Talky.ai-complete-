@@ -362,6 +362,36 @@ class ConnectorTypeStatus(BaseModel):
     provider: Optional[str] = None
     last_sync: Optional[str] = None
     error_message: Optional[str] = None
+    # Whether this server can run the card's OAuth sign-in at all (D3-1).
+    available: bool = True
+    unavailable_reason: Optional[str] = None
+
+
+# The OAuth app settings each provider reads when a sign-in starts (the
+# connector classes read the same names). Salesforce has its own check.
+_OAUTH_SETTINGS = {
+    "google_calendar": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+    "gmail": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+    "google_drive": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+    "outlook_calendar": ("MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"),
+    "hubspot": ("HUBSPOT_CLIENT_ID", "HUBSPOT_CLIENT_SECRET"),
+}
+_CONNECTOR_UNAVAILABLE = "This connector isn't available yet. Contact support to turn it on."
+
+
+def _oauth_availability(provider: str) -> tuple[bool, Optional[str]]:
+    """Can this server start the provider's OAuth sign-in? (D3-1)
+
+    The reason never names a server setting; the operator sees those in the
+    authorize log line when a sign-in is refused.
+    """
+    if not ConnectorFactory.is_registered(provider):
+        return False, _CONNECTOR_UNAVAILABLE
+    if provider == "salesforce":
+        configured = SalesforceConnector.is_configured()
+    else:
+        configured = all(os.getenv(name, "").strip() for name in _OAUTH_SETTINGS.get(provider, ()))
+    return (True, None) if configured else (False, _CONNECTOR_UNAVAILABLE)
 
 
 class ConnectorStatusListResponse(BaseModel):
@@ -412,8 +442,10 @@ async def list_connector_statuses(
     items: List[ConnectorTypeStatus] = []
     for type_name in card_keys:
         candidates = connectors_by_type[type_name]
+        available, unavailable_reason = _oauth_availability(CARD_PROVIDERS[type_name][1])
         if not candidates:
-            items.append(ConnectorTypeStatus(type=type_name, status="disconnected", provider=None))
+            items.append(ConnectorTypeStatus(type=type_name, status="disconnected", provider=None,
+                                             available=available, unavailable_reason=unavailable_reason))
             continue
 
         # The newest active connector is authoritative. Do not fall back across
@@ -493,6 +525,8 @@ async def list_connector_statuses(
             provider=conn.get("provider"),
             last_sync=last_sync,
             error_message=error_message,
+            available=available,
+            unavailable_reason=unavailable_reason,
         ))
 
     return ConnectorStatusListResponse(items=items)
