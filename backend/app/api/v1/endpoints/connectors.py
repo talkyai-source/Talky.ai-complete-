@@ -571,9 +571,12 @@ async def authorize_connector_by_type(
     if not ConnectorFactory.is_registered(provider):
         raise HTTPException(status_code=503, detail=f"Provider not configured: {provider}")
     if provider == "salesforce" and not SalesforceConnector.is_configured():
+        # The operator reads the cause in the log; the customer gets a plain
+        # sentence with no server setting names (D3-7).
+        logger.warning("Salesforce authorize refused: SALESFORCE_CLIENT_ID/SECRET are not set")
         raise HTTPException(
             status_code=503,
-            detail="Salesforce is not enabled on this server (SALESFORCE_CLIENT_ID/SECRET missing)",
+            detail="Salesforce isn't available yet. Contact support to turn it on.",
         )
 
     prepared = await _start_connector_authorization(

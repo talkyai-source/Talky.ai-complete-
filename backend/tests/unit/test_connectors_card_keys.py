@@ -172,7 +172,10 @@ async def test_authorize_salesforce_without_server_credentials_is_a_503(monkeypa
             current_user=_user(), db_client=FakeDB(),
         )
     assert exc.value.status_code == 503
-    assert "SALESFORCE_CLIENT_ID" in str(exc.value.detail)
+    detail = str(exc.value.detail)
+    # D3-7: a customer-safe sentence; server setting names stay in the log.
+    assert "Salesforce" in detail
+    assert "SALESFORCE_" not in detail and "SECRET" not in detail and "CLIENT_ID" not in detail
 
 
 async def test_authorize_salesforce_admits_a_crm_row_for_the_salesforce_provider(monkeypatch):
