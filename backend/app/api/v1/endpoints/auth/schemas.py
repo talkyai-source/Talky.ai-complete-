@@ -105,6 +105,11 @@ class MeResponse(BaseModel):
     # Stable code: subscription_suspended | tenant_hold | partner_hold | null.
     account_state_reason: Optional[str] = None
 
+    # Two-factor state (G2): enabled on the profile, and completed by THIS
+    # session (server-recorded). mfa_verified is null when unknown.
+    mfa_enabled: bool = False
+    mfa_verified: Optional[bool] = None
+
 
 class UpdateMeRequest(BaseModel):
     name: Optional[AccountName] = None

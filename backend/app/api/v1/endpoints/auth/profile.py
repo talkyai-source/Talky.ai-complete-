@@ -53,6 +53,7 @@ def _derive_account_state(
 
 @router.get("/me", response_model=MeResponse)
 async def get_me(
+    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> MeResponse:
@@ -67,6 +68,7 @@ async def get_me(
         row = await conn.fetchrow(
             """
             SELECT t.id                       AS tenant_id,
+                   up.mfa_enabled             AS mfa_enabled,
                    t.white_label_partner_id   AS partner_id,
                    t.status                   AS tenant_status,
                    t.subscription_status      AS subscription_status,
@@ -133,6 +135,8 @@ async def get_me(
         subscription_status=subscription_status,
         account_state=account_state,
         account_state_reason=account_state_reason,
+        mfa_enabled=bool(row and row.get("mfa_enabled") is True),
+        mfa_verified=getattr(request.state, "session_mfa_verified", None),
     )
 
 

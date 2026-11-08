@@ -189,7 +189,7 @@ def _clear_current_user_scope(request: Request) -> None:
     clear_tenant_context()
     for name in (
         "tenant_id", "user_id", "user_role", "authenticated_session_id",
-        "authenticated_user_id", "target_tenant_id",
+        "authenticated_user_id", "target_tenant_id", "session_mfa_verified",
     ):
         setattr(request.state, name, None)
     request.state.cross_tenant_access = False
@@ -343,6 +343,11 @@ async def get_current_user(
         **meter.allowance(),
     )
     _publish_current_user_scope(request, user, str(session["id"]))
+    # This session's own server-recorded factor evidence, for /auth/me (G2).
+    # Unknown (None), never False, when a legacy cookie session lacks the column.
+    request.state.session_mfa_verified = (
+        session["mfa_verified"] is True if "mfa_verified" in session else None
+    )
     return user
 
 
