@@ -23,12 +23,12 @@ from app.api.v1.validation import ResourceUUID
 import csv
 import io
 import logging
-from typing import Any, Optional
+from typing import Annotated, Any, Optional
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import get_current_user
+from app.api.v1.dependencies import get_current_user, get_db_client
 from app.core.container import get_container
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.contact_fields import (
@@ -104,6 +104,14 @@ class ImportPreview(BaseModel):
     issues: list[dict]
     duplicates_in_file: list[dict]
     sample: list[dict]
+    # D2-8: the country national-format numbers were read with (None = only
+    # "+" numbers are accepted), and per previewed row the numbers as the
+    # import stores them; phone_number is None when the row cannot be dialled.
+    default_country: Optional[str] = None
+    normalized_rows: list[dict] = Field(default_factory=list)
+
+
+_PHONE_KEYS = ("phone_number", "mobile_number", "business_number")
 
 
 @router.post(
@@ -111,8 +119,28 @@ class ImportPreview(BaseModel):
     response_model=ImportPreview,
     dependencies=[Depends(require_permission(Permission.CALLS_CREATE))],
 )
-async def preview_import(file: UploadFile = File(...)) -> ImportPreview:
-    """Parse a CSV and report what WOULD happen. Writes nothing."""
+async def preview_import(
+    file: UploadFile = File(...),
+    default_country: Annotated[Optional[str], Query(min_length=2, max_length=2)] = None,
+    campaign_id: Annotated[Optional[str], Query(description="Read numbers with this campaign's country, as its import does")] = None,
+    current_user=Depends(get_current_user),
+    db_client=Depends(get_db_client),
+) -> ImportPreview:
+    """Parse a CSV and report what WOULD happen. Writes nothing.
+
+    Numbers are judged by the import's own rule and country (D2-8): request,
+    then campaign, then account; never a US guess.
+    """
+    from app.api.v1.endpoints._outbound_campaign import require_owned_outbound_campaign
+    from app.api.v1.endpoints.contacts import _check_optional_numbers, _resolve_country
+    from app.domain.services.phone_number_normalizer import normalize_phone_number, phone_number_error
+
+    campaign = None
+    if campaign_id:
+        campaign = require_owned_outbound_campaign(
+            db_client, campaign_id, tenant_id=current_user.tenant_id, extra_columns=("script_config",))
+    country = _resolve_country(db_client, current_user.tenant_id, campaign, default_country)
+
     raw = await file.read()
     try:
         text = raw.decode("utf-8-sig")
@@ -128,8 +156,11 @@ async def preview_import(file: UploadFile = File(...)) -> ImportPreview:
 
     mapping = map_headers(headers)
     unmapped = [h for h, k in mapping.items() if k is None]
+    # As on import, a Mobile column is the dial number when there is no Phone.
+    dial_mapped = any(k in ("phone_number", "mobile_number") for k in mapping.values())
 
     issues: list[dict] = []
+    normalized_rows: list[dict] = []
     seen: dict[str, int] = {}
     dupes: list[dict] = []
     sample: list[dict] = []
@@ -145,13 +176,34 @@ async def preview_import(file: UploadFile = File(...)) -> ImportPreview:
             if key and value and str(value).strip():
                 mapped[key] = str(value).strip()
 
-        row_issues = validate_row(mapped, row_num)
-        if row_issues:
-            issues.extend(
-                {"row": i.row, "field": i.field, "value": i.value, "reason": i.reason}
-                for i in row_issues
-            )
-        else:
+        # Phone fields are decided by the strict rule below, not the loose
+        # digit count in validate_row.
+        row_issues = [
+            {"row": i.row, "field": i.field, "value": i.value, "reason": i.reason}
+            for i in validate_row(mapped, row_num) if i.field not in _PHONE_KEYS
+        ]
+        numbers = {k: mapped[k] for k in _PHONE_KEYS if k in mapped}
+        row_issues.extend(
+            {"row": e.row, "field": e.field, "value": e.value, "reason": e.error}
+            for e in _check_optional_numbers(numbers, row_num, country)
+        )
+        dial_field = "phone_number" if numbers.get("phone_number") else "mobile_number"
+        dial_raw = numbers.get(dial_field)
+        dial = None
+        if dial_raw:
+            try:
+                dial = normalize_phone_number(dial_raw, default_country=country)
+            except ValueError:
+                row_issues.append({"row": row_num, "field": dial_field, "value": dial_raw[:40],
+                                   "reason": phone_number_error(dial_raw, country)})
+        elif dial_mapped:
+            row_issues.append({"row": row_num, "field": "phone_number", "value": "",
+                               "reason": "no phone number, so this row cannot be dialled"})
+        normalized_rows.append({"row": row_num, "phone_number": dial, **{
+            k: numbers[k] for k in ("mobile_number", "business_number")
+            if k in numbers and k != dial_field}})
+        issues.extend(row_issues)
+        if dial and not row_issues:
             valid += 1
 
         dk = dedupe_key(mapped)
@@ -164,7 +216,7 @@ async def preview_import(file: UploadFile = File(...)) -> ImportPreview:
         if len(sample) < 5:
             sample.append(mapped)
 
-    if not any(mapping.get(h) == "phone_number" for h in headers):
+    if not dial_mapped:
         # Not fatal here — preview is meant to TELL you, not refuse. The import
         # itself still requires a number.
         issues.insert(0, {
@@ -175,6 +227,7 @@ async def preview_import(file: UploadFile = File(...)) -> ImportPreview:
     return ImportPreview(
         headers=mapping, unmapped=unmapped, total_rows=total, valid_rows=valid,
         issues=issues[:200], duplicates_in_file=dupes[:200], sample=sample,
+        default_country=country, normalized_rows=normalized_rows,
     )
 
 
