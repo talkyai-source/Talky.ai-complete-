@@ -11,6 +11,7 @@ from app.core.postgres_adapter import Client
 from app.core.security.rbac import UserRole, normalize_role
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.reporting_time import reporting_zone
+from app.domain.services.subscription_status import SUSPENDED, canonical
 
 from ._shared import get_client_ip, get_user_agent, normalize_optional_text
 from .schemas import LegalAcceptanceRequest, MeResponse, UpdateMeRequest
@@ -31,6 +32,25 @@ def _derive_suspension_scope(
     return None
 
 
+def _derive_account_state(
+    suspended_scope: Optional[str], subscription_status: Optional[str]
+) -> tuple[str, Optional[str]]:
+    """One customer-facing account state plus a stable reason code.
+
+    Admin "Suspend" writes ``tenants.subscription_status``; a formal hold
+    writes ``tenants.status``. A hold outranks the subscription. Billing states
+    such as ``past_due`` are not suspensions and stay in ``subscription_status``.
+    The reason is a code, never the operator's free-text note.
+    """
+    if suspended_scope == "tenant":
+        return "suspended_hold", "tenant_hold"
+    if suspended_scope == "partner":
+        return "suspended_hold", "partner_hold"
+    if subscription_status == SUSPENDED:
+        return "suspended_subscription", "subscription_suspended"
+    return "active", None
+
+
 @router.get("/me", response_model=MeResponse)
 async def get_me(
     current_user: CurrentUser = Depends(get_current_user),
@@ -49,6 +69,7 @@ async def get_me(
             SELECT t.id                       AS tenant_id,
                    t.white_label_partner_id   AS partner_id,
                    t.status                   AS tenant_status,
+                   t.subscription_status      AS subscription_status,
                    t.calling_rules->>'timezone' AS account_timezone,
                    t.suspended_at             AS tenant_suspended_at,
                    t.suspension_reason        AS tenant_suspension_reason,
@@ -78,6 +99,8 @@ async def get_me(
         account_timezone = None
 
     suspended_scope = _derive_suspension_scope(tenant_status, partner_status)
+    subscription_status = canonical(row.get("subscription_status") if row else None) or None
+    account_state, account_state_reason = _derive_account_state(suspended_scope, subscription_status)
     # Pick the reason / timestamp from whichever scope is suspended.
     # Tenant takes precedence (same precedence rule as suspended_scope).
     if suspended_scope == "tenant":
@@ -107,6 +130,9 @@ async def get_me(
         suspended_scope=suspended_scope,
         suspension_reason=suspension_reason,
         suspended_at=suspended_at_dt.isoformat() if suspended_at_dt else None,
+        subscription_status=subscription_status,
+        account_state=account_state,
+        account_state_reason=account_state_reason,
     )
 
 

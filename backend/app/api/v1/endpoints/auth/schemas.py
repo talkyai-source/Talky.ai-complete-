@@ -98,6 +98,13 @@ class MeResponse(BaseModel):
     suspension_reason: Optional[str] = None
     suspended_at: Optional[str] = None          # ISO 8601
 
+    # One account state for the customer app's banner. Admin "Suspend" writes
+    # tenants.subscription_status; a formal hold writes tenants.status (above).
+    subscription_status: Optional[str] = None   # canonical spelling, null if unset
+    account_state: Literal["active", "suspended_subscription", "suspended_hold"] = "active"
+    # Stable code: subscription_suspended | tenant_hold | partner_hold | null.
+    account_state_reason: Optional[str] = None
+
 
 class UpdateMeRequest(BaseModel):
     name: Optional[AccountName] = None
