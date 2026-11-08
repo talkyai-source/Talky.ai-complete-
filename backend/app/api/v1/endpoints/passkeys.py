@@ -62,7 +62,7 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
-from app.core.security.principal import load_current_principal, PrincipalUnavailable, assert_expected_identity
+from app.core.security.principal import load_current_principal, PrincipalUnavailable, account_hold_refusal, assert_expected_identity
 from app.core.security.passkeys import (
     generate_authentication_options,
     generate_registration_options,
@@ -545,6 +545,10 @@ async def login_complete(
             assert_expected_identity(request, user_row)
             await require_current_passkey_ceremony(conn, user_id, body.ceremony_id)
         except PrincipalUnavailable as exc:
+            hold = account_hold_refusal(exc)
+            if hold is not None:
+                # The passkey proof already succeeded; name the hold (D4-5).
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=hold) from exc
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",

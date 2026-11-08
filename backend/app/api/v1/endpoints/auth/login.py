@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 from app.api.v1.dependencies import get_audit_logger, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
-from app.core.security.principal import PrincipalUnavailable, load_current_principal
+from app.core.security.principal import PrincipalUnavailable, account_hold_refusal, load_current_principal
 from app.core.security.credential_issuance import lock_user_credential_issuance
 from app.core.security.lockout import (
     check_account_locked,
@@ -231,6 +231,9 @@ async def login(
         except PrincipalUnavailable as exc:
             await record_login_attempt(conn,email=normalised_email,user_id=user_id,
                 ip_address=ip,success=False,failure_reason=exc.code)
+            hold = account_hold_refusal(exc)
+            if hold is not None:
+                raise _LoginRejected(status_code=403, detail=hold) from exc
             raise _LoginRejected(status_code=401,
                 detail="Account access is unavailable. Contact your account administrator.") from exc
         row = {**dict(row), **principal}
