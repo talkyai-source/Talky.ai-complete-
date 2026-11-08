@@ -24,6 +24,7 @@ on every call, so a systemd ``Environment=`` change needs only a restart.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Optional
@@ -90,3 +91,82 @@ def schedule_ignored(calling_config: Optional[dict]) -> bool:
     if not _ignore_schedule_allowed():
         return False
     return bool(calling_config.get(_IGNORE_KEY, False))
+
+
+def _json_dict(value) -> Optional[dict]:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return None
+    return value if isinstance(value, dict) else None
+
+
+def describe_schedule(
+    tenant_calling_rules,
+    calling_config,
+    own_timezone_counts: Optional[dict] = None,
+) -> dict:
+    """The schedule the dialer will enforce for one campaign, for display.
+
+    D2-1/2/3. Built from the dialer's own steps (account rules parsed as
+    ``_get_tenant_rules`` does, then :func:`effective_rules`,
+    :func:`schedule_ignored` and the lead-timezone precedence), so it cannot
+    drift from the gate. ``own_timezone_counts`` maps the campaign's stored
+    ``leads.timezone`` values to contact counts; None means not known.
+
+    The switches are read from this process's environment; the API and the
+    dialer load the same ``/opt/talky/backend/.env``.
+    """
+    from app.domain.services.dialer.lead_timezone import (
+        normalize_lead_timezone,
+        per_lead_timezone_enabled,
+    )
+
+    account = _json_dict(tenant_calling_rules) or {}
+    tenant_rules, configured = CallingRules.default(), False
+    if account:
+        try:
+            tenant_rules, configured = CallingRules.from_dict(account), True
+        except Exception:
+            pass  # the dialer logs and uses the defaults too
+    config = _json_dict(calling_config)
+    rules = effective_rules(tenant_rules, config)
+    overlaid = rules is not tenant_rules
+
+    sources = {}
+    for key in _OVERLAY_KEYS:
+        if overlaid and (config or {}).get(key) not in (None, "", []):
+            sources[key] = "campaign"
+        elif configured and account.get(key) not in (None, "", []):
+            sources[key] = "account"
+        else:
+            sources[key] = "platform_default"
+
+    own: dict = {}
+    for zone, contacts in (own_timezone_counts or {}).items():
+        name = normalize_lead_timezone(zone)
+        if name:
+            own[name] = own.get(name, 0) + int(contacts or 0)
+    ranked = sorted(own.items(), key=lambda item: (-item[1], item[0]))
+
+    return {
+        **{key: getattr(rules, key) for key in _OVERLAY_KEYS},
+        "sources": sources,
+        "account_rules": {
+            "configured": configured,
+            **{key: getattr(tenant_rules, key) for key in _OVERLAY_KEYS},
+        },
+        "ignore_schedule_requested": bool((config or {}).get(_IGNORE_KEY, False)),
+        "ignore_schedule_allowed": _ignore_schedule_allowed(),
+        "ignore_schedule": schedule_ignored(config),
+        "contact_timezones": {
+            # leads.timezone first, then (behind DIALER_PER_LEAD_TIMEZONE) a
+            # zone derived from the number, then the timezone above.
+            "contact_zone_first": True,
+            "phone_derived_zone": per_lead_timezone_enabled(),
+            "contacts_with_own_timezone": (
+                sum(own.values()) if own_timezone_counts is not None else None),
+            "own_timezones": [{"timezone": z, "contacts": n} for z, n in ranked[:10]],
+        },
+    }

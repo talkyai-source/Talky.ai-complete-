@@ -842,6 +842,30 @@ async def apply_tts_config(
     return {"updated": updated, "count": len(updated), "tts_provider": provider, "voice_id": voice_id}
 
 
+async def _effective_schedule(db_client: Client, tenant_id: str, campaign_id: str, calling_config) -> Optional[dict]:
+    """D2-1/2/3: the calling schedule the dialer enforces, for display.
+
+    Read-only and best-effort: a failed read returns None rather than failing
+    the campaign page. The dialer stays the enforcement point.
+    """
+    from app.domain.services.dialer.campaign_schedule import describe_schedule
+    try:
+        async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            account_rules = await conn.fetchval(
+                "SELECT calling_rules FROM tenants WHERE id = $1::uuid", tenant_id)
+            zones = await conn.fetch(
+                "SELECT timezone, count(*) AS contacts FROM leads"
+                " WHERE tenant_id = $1::uuid AND campaign_id = $2::uuid AND status <> 'deleted'"
+                " AND timezone IS NOT NULL AND btrim(timezone) <> '' GROUP BY timezone",
+                tenant_id, campaign_id)
+    except Exception as exc:
+        logger.warning("campaign_effective_schedule_unavailable campaign=%s error=%s",
+                       campaign_id, type(exc).__name__)
+        return None
+    return describe_schedule(account_rules, calling_config,
+                             {row["timezone"]: row["contacts"] for row in zones})
+
+
 @router.get("/{campaign_id}")
 async def get_campaign(
     campaign_id: ResourceUUID,
@@ -871,7 +895,11 @@ async def get_campaign(
         row_tenant_str = str(row_tenant) if row_tenant is not None else None
         if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
             raise CampaignNotFoundError(campaign_id)
-        return {"campaign": campaign}
+        return {
+            "campaign": campaign,
+            "effective_schedule": await _effective_schedule(
+                db_client, str(current_user.tenant_id), campaign_id, campaign.get("calling_config")),
+        }
     except HTTPException:
         raise
     except CampaignNotFoundError:
