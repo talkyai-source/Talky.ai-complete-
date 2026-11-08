@@ -559,7 +559,11 @@ async def _start_connector_authorization(*, connector_type, provider, name,
 async def authorize_connector_by_type(
     type: str,
     http_request: Request,
-    redirect_uri: str = Query(..., description="Frontend OAuth callback URL"),
+    redirect_uri: Optional[str] = Query(
+        None,
+        description="Ignored: the server always returns to its own /connectors/callback page. "
+                    "Accepted only so older clients keep working (D3-6).",
+    ),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):

@@ -604,6 +604,15 @@ class ConnectorLifecycle:
             retire = [str(row["id"]) for row in usable]
             if retire:
                 await self._retire(conn, tenant_id, retire)
+            # Other pending attempts of this provider (a sign-in window closed
+            # with no callback) can never complete once this one activates:
+            # close them here instead of leaving them pending forever (D3-6).
+            abandoned = [str(row["id"]) for row in parents
+                         if row["status"] == "pending" and str(row["id"]) != str(connector_id)]
+            if abandoned:
+                await conn.execute(
+                    "UPDATE connectors SET status='error' WHERE tenant_id=$1 AND id=ANY($2::uuid[]) "
+                    "AND status='pending'", UUID(str(tenant_id)), [UUID(value) for value in abandoned])
             # A pending parent is never reusable after disable; old accounts on
             # an otherwise pending row are retired atomically as well.
             await self._retire(conn, tenant_id, [connector_id])
@@ -618,7 +627,7 @@ class ConnectorLifecycle:
                 provider_revocation_status='not_requested' WHERE id=$1""", UUID(str(connector_id)), json.dumps(config))
             audit_id = await self._record(conn, tenant_id, connector_id, actor, "connector.oauth_activated",
                 account_id=str(account["id"]), generation=account["credential_generation"],
-                retired_connector_ids=retire, local_status="active")
+                retired_connector_ids=retire, abandoned_pending_ids=abandoned, local_status="active")
         return {**dict(account), "audit_event_id": str(audit_id), "operation_id": str(self.operation_id)}
 
     async def reject_pending(self, tenant_id, connector_id):
