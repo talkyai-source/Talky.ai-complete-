@@ -58,6 +58,8 @@ class BlockCode(str, Enum):
     # Per-lead
     LEAD_COOLDOWN = "lead_cooldown"
     DAILY_LEAD_CAP = "daily_lead_cap"
+    # The stored number is not a dialable phone number (D2-7); terminal.
+    INVALID_PHONE_NUMBER = "invalid_phone_number"
 
     # Capacity / pacing (self-clearing, benign)
     MAX_CONCURRENT_CALLS = "max_concurrent_calls"
@@ -624,6 +626,16 @@ def classify(
             severity="info", stage="pacing",
             next_eligible_at=_fallback_next(),
             retry_after_seconds=retry_after_seconds, details=extra,
+        )
+
+    # ---- contact data ---------------------------------------------------
+    if low == BlockCode.INVALID_PHONE_NUMBER.value:
+        return BlockReason(
+            BlockCode.INVALID_PHONE_NUMBER,
+            "This contact's phone number is not a valid number, so it will not "
+            "be dialled. Fix the number (with its country code) or remove the "
+            "contact.",
+            severity="error", stage="contact", details=extra,
         )
 
     # ---- safety ---------------------------------------------------------

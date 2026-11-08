@@ -36,6 +36,7 @@ from app.domain.models.calling_rules import CallingRules
 from app.domain.models.voice_contract import generate_talklee_call_id
 from app.domain.services.queue_service import DialerQueueService
 from app.domain.services.scheduling_rules import SchedulingRuleEngine
+from app.domain.services.phone_number_normalizer import is_strict_e164
 from app.core.db import init_db_pool, close_db_pool, Database
 from app.core.db_utils import acquire_with_tenant
 
@@ -486,6 +487,16 @@ class DialerWorker:
             stale_reason = await self._stale_payload_reason(job)
             if stale_reason is not None:
                 await self._drop_stale_payload(job, stale_reason)
+                return
+
+            # 0.45 Invalid-number gate (D2-7). A contact saved before strict
+            # validation can hold "12345", "+07700900123" or a national-format
+            # number. Without this the legal-hours gate held it every hour
+            # asking for a timezone it can never give, and only the call guard's
+            # shape check (later) refused it with a generic safety reason. The
+            # same shape rule, earlier and with its own reason.
+            if not is_strict_e164(job.phone_number or ""):
+                await self._skip_invalid_number(job)
                 return
 
             # 0.5 Minutes quota gate. Stop originating once the tenant has burned
@@ -2058,6 +2069,22 @@ class DialerWorker:
             job.job_id, reason=self._CAMPAIGN_NOT_RUNNABLE_SKIP
         )
         await self._update_job_status(job, JobStatus.SKIPPED, error=error)
+
+    async def _skip_invalid_number(self, job: DialerJob) -> None:
+        """End a job whose stored number is not dialable, with its own reason.
+
+        Terminal for this attempt (no retry can make the number valid); the
+        lead row is left alone so a corrected number can be dialled again.
+        The number itself is never logged.
+        """
+        reason = "invalid_phone_number"
+        logger.warning(
+            "dialer_invalid_number_skipped job=%s lead=%s campaign=%s",
+            job.job_id, job.lead_id, job.campaign_id,
+        )
+        await self._publish_block(job, reason)
+        await self.queue_service.mark_skipped(job.job_id, reason=reason)
+        await self._update_job_status(job, JobStatus.SKIPPED, error=reason)
 
     async def _stale_payload_reason(self, job: DialerJob) -> Optional[str]:
         """Why this dequeued payload must NOT be dialled, or ``None``.
