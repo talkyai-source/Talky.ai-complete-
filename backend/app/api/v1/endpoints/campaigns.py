@@ -842,12 +842,19 @@ async def apply_tts_config(
     return {"updated": updated, "count": len(updated), "tts_provider": provider, "voice_id": voice_id}
 
 
-async def _effective_schedule(db_client: Client, tenant_id: str, campaign_id: str, calling_config) -> Optional[dict]:
-    """D2-1/2/3: the calling schedule the dialer enforces, for display.
+async def _campaign_runtime(db_client: Client, tenant_id: str, campaign_id: str, campaign: dict):
+    """What the campaign page shows besides the row, read on one connection.
 
-    Read-only and best-effort: a failed read returns None rather than failing
-    the campaign page. The dialer stays the enforcement point.
+    effective_schedule (D2-1/2/3): the calling schedule the dialer enforces.
+    progress (D3-15/16): how many of the campaign's calls are still live or
+    ending, counted over the stop sweep's own status set, so after a partial
+    stop the number reaches 0 when the last fenced call is proved gone.
+
+    Read-only and best-effort: a failed read returns (None, None) rather than
+    failing the campaign page. The dialer stays the enforcement point.
     """
+    from app.api.v1.endpoints.telephony_bridge import CAMPAIGN_LIVE_CALL_STATUSES
+    from app.domain.services.campaign_service import campaign_phase
     from app.domain.services.dialer.campaign_schedule import describe_schedule
     try:
         async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
@@ -858,12 +865,17 @@ async def _effective_schedule(db_client: Client, tenant_id: str, campaign_id: st
                 " WHERE tenant_id = $1::uuid AND campaign_id = $2::uuid AND status <> 'deleted'"
                 " AND timezone IS NOT NULL AND btrim(timezone) <> '' GROUP BY timezone",
                 tenant_id, campaign_id)
+            live_calls = int(await conn.fetchval(
+                "SELECT count(*) FROM calls WHERE tenant_id = $1::uuid AND campaign_id = $2::uuid"
+                " AND status = ANY($3::text[])",
+                tenant_id, campaign_id, list(CAMPAIGN_LIVE_CALL_STATUSES)) or 0)
     except Exception as exc:
-        logger.warning("campaign_effective_schedule_unavailable campaign=%s error=%s",
+        logger.warning("campaign_runtime_unavailable campaign=%s error=%s",
                        campaign_id, type(exc).__name__)
-        return None
-    return describe_schedule(account_rules, calling_config,
-                             {row["timezone"]: row["contacts"] for row in zones})
+        return None, None
+    schedule = describe_schedule(account_rules, campaign.get("calling_config"),
+                                 {row["timezone"]: row["contacts"] for row in zones})
+    return schedule, {"live_calls": live_calls, "phase": campaign_phase(campaign.get("status"), live_calls)}
 
 
 @router.get("/{campaign_id}")
@@ -895,11 +907,9 @@ async def get_campaign(
         row_tenant_str = str(row_tenant) if row_tenant is not None else None
         if current_user.tenant_id and row_tenant_str not in (None, current_user.tenant_id):
             raise CampaignNotFoundError(campaign_id)
-        return {
-            "campaign": campaign,
-            "effective_schedule": await _effective_schedule(
-                db_client, str(current_user.tenant_id), campaign_id, campaign.get("calling_config")),
-        }
+        schedule, progress = await _campaign_runtime(
+            db_client, str(current_user.tenant_id), campaign_id, campaign)
+        return {"campaign": campaign, "effective_schedule": schedule, "progress": progress}
     except HTTPException:
         raise
     except CampaignNotFoundError:

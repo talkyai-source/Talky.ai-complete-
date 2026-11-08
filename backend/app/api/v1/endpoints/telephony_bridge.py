@@ -2990,6 +2990,21 @@ def _empty_campaign_termination_summary(
     }
 
 
+# The campaign calls the stop/pause sweep fences and must prove gone. Also the
+# "calls still ending" count on GET /campaigns/{id} (D3-15/16), so the count
+# reaches 0 exactly when the sweep has nothing left to prove.
+CAMPAIGN_LIVE_CALL_STATUSES = (
+    "queued",
+    "dialing",
+    "ringing",
+    "answered",
+    "in_call",
+    "initiated",
+    "in_progress",
+    "termination_pending",
+)
+
+
 async def hangup_calls_for_campaign(
     campaign_id: str, *, tenant_id: str | None = None,
 ) -> dict[str, object]:
@@ -3029,16 +3044,7 @@ async def hangup_calls_for_campaign(
             error="database_unavailable",
         )
 
-    active = (
-        "queued",
-        "dialing",
-        "ringing",
-        "answered",
-        "in_call",
-        "initiated",
-        "in_progress",
-        "termination_pending",
-    )
+    active = CAMPAIGN_LIVE_CALL_STATUSES
     active_leg_statuses = (
         "initiated",
         "ringing",

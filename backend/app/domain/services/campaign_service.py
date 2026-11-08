@@ -73,6 +73,20 @@ PAUSABLE_STATUSES = ("running",)
 STOPPABLE_STATUSES = ("running", "paused")
 
 
+def campaign_phase(status: Optional[str], live_calls: Optional[int]) -> Optional[str]:
+    """What a campaign is doing now, for display (D3-15).
+
+    Stop and Pause write their status at once; the calls they hang up can take
+    longer to end. While any are still live the phase is "stopping" or
+    "pausing". The status column keeps its value (0088 has no stopping state).
+    """
+    if live_calls and status == "stopped":
+        return "stopping"
+    if live_calls and status == "paused":
+        return "pausing"
+    return status
+
+
 class CampaignReadinessError(CampaignError):
     """The current outbound telephony route cannot safely start."""
 
