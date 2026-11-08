@@ -48,7 +48,9 @@ def effective_rules(tenant_rules: CallingRules, calling_config: Optional[dict]) 
     data = tenant_rules.model_dump()
     for key in _OVERLAY_KEYS:
         val = calling_config.get(key)
-        if val not in (None, ""):
+        # A stored empty day list (saved before D2-4 refused it) is unset, not
+        # "no day": the account's days apply.
+        if val not in (None, "", []):
             data[key] = val
     try:
         return CallingRules(**data)

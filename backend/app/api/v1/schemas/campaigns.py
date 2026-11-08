@@ -152,6 +152,11 @@ class CampaignCallingSchedule(BaseModel):
     def _validate_days(cls, v: Optional[List[int]]) -> Optional[List[int]]:
         if v is None:
             return None
+        if not v:
+            # An empty list would allow no day at all: the campaign could never
+            # dial and nothing would say why (D2-4). Unset means "use the
+            # account's days".
+            raise ValueError("Choose at least one calling day, or leave the days unset to use the account's days.")
         if any(d < 0 or d > 6 for d in v):
             raise ValueError("allowed_days entries must be 0–6 (Mon–Sun)")
         return sorted(set(v))
