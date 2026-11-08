@@ -95,3 +95,15 @@ async def test_auth_me_reports_mfa_enabled_and_this_sessions_verification(monkey
     body = response.json()
     assert body["mfa_enabled"] is enabled
     assert body["mfa_verified"] is verified
+
+
+def test_get_me_keeps_its_pre_g2_call_shape():
+    """G2 put ``request`` first, which broke every direct (current_user,
+    db_client) caller. It is last and optional; FastAPI still injects it."""
+    import inspect
+
+    from fastapi.dependencies.utils import get_dependant
+
+    params = list(inspect.signature(profile.get_me).parameters)
+    assert params[:2] == ["current_user", "db_client"]
+    assert get_dependant(path="/me", call=profile.get_me).request_param_name == "request"

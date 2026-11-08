@@ -53,9 +53,11 @@ def _derive_account_state(
 
 @router.get("/me", response_model=MeResponse)
 async def get_me(
-    request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
+    # Last and optional: FastAPI injects it by type; direct callers that
+    # predate G2 pass (current_user, db_client) and get mfa_verified=None.
+    request: Request = None,
 ) -> MeResponse:
     """Return the current authenticated user's profile plus suspension state.
 
@@ -136,7 +138,7 @@ async def get_me(
         account_state=account_state,
         account_state_reason=account_state_reason,
         mfa_enabled=bool(row and row.get("mfa_enabled") is True),
-        mfa_verified=getattr(request.state, "session_mfa_verified", None),
+        mfa_verified=getattr(getattr(request, "state", None), "session_mfa_verified", None),
     )
 
 
