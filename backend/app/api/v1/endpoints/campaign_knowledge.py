@@ -68,7 +68,12 @@ SELECT COALESCE(
 
 def _require_enabled() -> None:
     if not knowledge_enabled():
-        raise HTTPException(status_code=404, detail="Campaign knowledge is not enabled")
+        # Dedicated code (D3-11). The message is matched word for word by the
+        # frontend's "feature off" check: do not reword it.
+        raise HTTPException(status_code=404, detail={
+            "code": "knowledge_disabled",
+            "message": "Campaign knowledge is not enabled",
+        })
 
 
 def _require_tenant(current_user: CurrentUser) -> str:
