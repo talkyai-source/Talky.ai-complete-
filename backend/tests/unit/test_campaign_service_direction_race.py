@@ -88,6 +88,8 @@ async def test_start_endpoint_maps_typed_direction_error_without_message_matchin
 
     monkeypatch.setattr(campaigns, "_get_campaign_service", lambda _db: _Service())
     monkeypatch.setattr(campaigns, "_reject_inbound_campaign_mutation", lambda *_a, **_k: None)
+    # The account may call (D4-7 gate); this test is about the direction race.
+    monkeypatch.setattr(campaigns, "_require_account_can_call", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.domain.services.minutes_quota.tenant_minutes_status",
         AsyncMock(return_value=SimpleNamespace(exhausted=False, state="known")),

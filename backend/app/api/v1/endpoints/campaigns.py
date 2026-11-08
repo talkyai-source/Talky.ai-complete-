@@ -42,6 +42,7 @@ from app.domain.services.phone_number_normalizer import (
 )
 from app.domain.services.event_emitter import emit_event_via_pool
 from app.domain.services.audit_logger import AuditLogger
+from app.domain.services.telephony.call_authority import read_call_authority
 from app.services.campaign_duplication import CampaignDuplicationRefused, duplicate_campaign_snapshot
 from app.api.v1.dependencies import (
     get_db_client,
@@ -171,6 +172,43 @@ def _reject_inbound_campaign_mutation(
                 "campaign_ids": inbound_ids,
             },
         )
+
+
+_ACCOUNT_CANNOT_CALL_MESSAGES = {
+    "tenant_suspended": (
+        "This account is suspended, so campaigns cannot start. "
+        "Billing and Support stay available."
+    ),
+    "tenant_cancelled": "This account is closed, so campaigns cannot start.",
+}
+
+
+async def _require_account_can_call(db_client: Client, tenant_id: str) -> None:
+    """Refuse a start the call guard would refuse call by call (D4-7).
+
+    Same authority every call path reads (subscription status, formal holds,
+    the formal parent), read the same way the call guard reads it: the parent
+    and hold rows belong to other tenants, so the read is service-scoped with
+    the explicit tenant predicate inside ``read_call_authority``.
+    """
+    try:
+        async with acquire_with_tenant(db_client.pool, None) as conn:
+            authority = await read_call_authority(conn, tenant_id)
+    except Exception as exc:
+        logger.warning("campaign_start_authority_unavailable tenant=%s error=%s", tenant_id, type(exc).__name__)
+        raise HTTPException(status_code=503, detail={
+            "code": "account_status_unavailable",
+            "message": "Account status could not be checked. Retry shortly.",
+        }) from exc
+    if not authority.allowed:
+        raise HTTPException(status_code=403, detail={
+            "code": "tenant_suspended",
+            "reason": authority.reason,
+            "message": _ACCOUNT_CANNOT_CALL_MESSAGES.get(
+                authority.reason,
+                "This account is on hold, so campaigns cannot start. Contact support.",
+            ),
+        })
 
 
 def _update_owned_outbound_campaign(
@@ -1043,6 +1081,9 @@ async def start_campaign(
         # client ships in the body — clients shouldn't be able to start
         # someone else's campaign by spoofing tenant_id in JSON.
         tenant_id = current_user.tenant_id
+        # Before any pacing write or enqueue: a suspended or held account gets
+        # one clear coded refusal instead of a running campaign that dials nothing.
+        await _require_account_can_call(db_client, tenant_id)
         priority_override = (start_request.priority_override if start_request else None)
         first_speaker = (start_request.first_speaker if start_request else None)
 

@@ -206,6 +206,13 @@ def rig(monkeypatch):
     monkeypatch.setattr(
         "app.domain.services.minutes_quota.tenant_minutes_status", _fake_minutes_status,
     )
+
+    async def _account_may_call(_db_client, _tenant_id):
+        # The account-authority gate (D4-7) is covered by its own test; this
+        # rig proves where the event rows land.
+        return None
+
+    monkeypatch.setattr(campaigns_ep, "_require_account_can_call", _account_may_call)
     user = CurrentUser(id="user-1", email="u@t.example", tenant_id=TENANT_ID)
     return pool, db, user
 
