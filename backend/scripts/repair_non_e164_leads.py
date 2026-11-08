@@ -8,7 +8,10 @@ queued jobs hold their own phone copy and are deliberately not rewritten here.
 
 Only the exact QA population is selected: status <> 'deleted' and phone_number
 !~ '^\\+[1-9][0-9]{6,14}$'. Invalid numbers and canonical-number collisions are
-flagged and left unchanged. Each applied batch commits with its audit receipts;
+flagged and left unchanged. --all-numbers also reads live leads already in
+E.164 form and flags the ones that are not real numbers (for example
++12345678901234): the dialer skips those as invalid_phone_number (D2-7), so
+this lists them for the owner to fix; they are never rewritten. Each applied batch commits with its audit receipts;
 an error rolls back that batch, while earlier batches remain committed. Rerun
 after resolving the error. No rows are deleted and no CHECK is added: inbound
 lead creation still accepts unknown caller numbers, and owner repair is pending.
@@ -30,7 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app.domain.services.audit_logger import AuditEvent, AuditLogger  # noqa: E402
 from app.domain.services.phone_number_normalizer import (  # noqa: E402
     campaign_country,
+    is_strict_e164,
     normalize_phone_number,
+    normalize_suppression_key,
 )
 
 
@@ -46,6 +51,22 @@ _PAGE_SQL = f"""
     LEFT JOIN campaigns c ON c.id = l.campaign_id AND c.tenant_id = l.tenant_id
     LEFT JOIN tenants t ON t.id = l.tenant_id
     WHERE l.tenant_id = $1::uuid AND l.status <> 'deleted' AND l.{_NON_E164}
+      AND ($2::uuid IS NULL OR l.id > $2::uuid)
+    ORDER BY l.id LIMIT $3
+"""
+# --all-numbers: every live lead, so E.164-shaped numbers that are not real
+# numbers are found too (the regex above cannot judge validity).
+_COUNT_ALL_SQL = """
+    SELECT count(*) FROM leads
+    WHERE tenant_id = $1::uuid AND status <> 'deleted'
+"""
+_PAGE_ALL_SQL = """
+    SELECT l.id, l.tenant_id, l.campaign_id, l.phone_number,
+           c.script_config, t.calling_rules
+    FROM leads l
+    LEFT JOIN campaigns c ON c.id = l.campaign_id AND c.tenant_id = l.tenant_id
+    LEFT JOIN tenants t ON t.id = l.tenant_id
+    WHERE l.tenant_id = $1::uuid AND l.status <> 'deleted'
       AND ($2::uuid IS NULL OR l.id > $2::uuid)
     ORDER BY l.id LIMIT $3
 """
@@ -75,6 +96,13 @@ def _object(value):
 
 def plan_row(row):
     """Never salvage a damaged +country prefix by guessing its original form."""
+    if is_strict_e164(str(row.get("phone_number") or "")):
+        # Only --all-numbers reads these. Same key the dialer and call guard
+        # use: a valid number needs nothing; an invalid one is listed, never
+        # rewritten (there is nothing safe to rewrite it to).
+        if normalize_suppression_key(row["phone_number"]):
+            return {"action": "valid", "candidate": None}
+        return {"action": "invalid", "candidate": None, "reason": "invalid_e164_number"}
     try:
         country = campaign_country(
             {"script_config": _object(row.get("script_config"))},
@@ -98,18 +126,20 @@ async def _tenant_context(conn, tenant_id):
     )
 
 
-async def repair_tenant(conn, tenant_id, *, apply=False, batch_size=100, sample_limit=10, audit=None):
+async def repair_tenant(conn, tenant_id, *, apply=False, batch_size=100, sample_limit=10, audit=None,
+                        all_numbers=False):
     """Count and scan one tenant by keyset; commit writes with matching audits."""
     tenant_id = UUID(str(tenant_id))
     if not 1 <= batch_size <= 1000 or not 0 <= sample_limit <= 1000:
         raise ValueError("Invalid repair limits")
     if apply and audit is None:
         raise ValueError("An audit logger is required for apply")
+    count_sql, page_sql = (_COUNT_ALL_SQL, _PAGE_ALL_SQL) if all_numbers else (_COUNT_SQL, _PAGE_SQL)
     async with conn.transaction(readonly=True):
         await _tenant_context(conn, tenant_id)
-        matched = await conn.fetchval(_COUNT_SQL, tenant_id)
+        matched = await conn.fetchval(count_sql, tenant_id)
     result = {"tenant_id": str(tenant_id), "matched": matched, "proposed": 0,
-              "updated": 0, "invalid": 0, "conflicts": 0, "samples": []}
+              "updated": 0, "invalid": 0, "conflicts": 0, "valid": 0, "samples": []}
     cursor = None
     proposed_keys = set()
     while True:
@@ -118,13 +148,16 @@ async def repair_tenant(conn, tenant_id, *, apply=False, batch_size=100, sample_
             if apply:
                 await audit.lock_transaction(conn)
             rows = await conn.fetch(
-                _PAGE_SQL + (" FOR UPDATE OF l" if apply else ""),
+                page_sql + (" FOR UPDATE OF l" if apply else ""),
                 tenant_id, cursor, batch_size,
             )
             if not rows:
                 break
             for row in rows:
                 plan = plan_row(row)
+                if plan["action"] == "valid":
+                    result["valid"] += 1
+                    continue
                 sample = {"lead_id": str(row["id"]), "action": plan["action"],
                           "before": _masked(row["phone_number"]),
                           "after": _masked(plan["candidate"]) if plan["candidate"] else None}
@@ -191,6 +224,9 @@ def build_parser():
     parser.add_argument("--batch-size", type=_bounded_int(1, 1000), default=100)
     parser.add_argument("--sample-limit", type=_bounded_int(0, 1000), default=10,
                         help="Maximum masked samples per tenant.")
+    parser.add_argument("--all-numbers", action="store_true",
+                        help="Also check numbers already in E.164 form and list the ones that are "
+                             "not real numbers (never rewritten). Reads every live lead.")
     return parser
 
 
@@ -204,7 +240,7 @@ async def run(args):
     )
     try:
         audit = AuditLogger(pool) if args.apply else None
-        totals = {key: 0 for key in ("matched", "proposed", "updated", "invalid", "conflicts")}
+        totals = {key: 0 for key in ("matched", "proposed", "updated", "invalid", "conflicts", "valid")}
         async with pool.acquire(timeout=10) as conn:
             if args.tenant:
                 tenants = [args.tenant]
@@ -218,7 +254,7 @@ async def run(args):
             for tenant_id in tenants:
                 report = await repair_tenant(
                     conn, tenant_id, apply=args.apply, batch_size=args.batch_size,
-                    sample_limit=args.sample_limit, audit=audit,
+                    sample_limit=args.sample_limit, audit=audit, all_numbers=args.all_numbers,
                 )
                 print(json.dumps(report), flush=True)
                 for key in totals:
