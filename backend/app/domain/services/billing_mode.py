@@ -73,3 +73,29 @@ def checkout_permitted_in_test_mode(*, is_platform_admin: bool, email: str | Non
     if os.getenv("ENVIRONMENT", "").strip().lower() != "production":
         return True
     return is_billing_team(is_platform_admin=is_platform_admin, email=email)
+
+
+TEST_MODE_TEAM_ONLY_MESSAGE = "Payments are not open yet. Billing is in test mode for the Talk-Lee team."
+TOPUPS_OFF_MESSAGE = "Minute top-ups are not available yet."
+BILLING_UNAVAILABLE_MESSAGE = "Payments are temporarily unavailable."
+
+
+def checkout_availability(*, is_platform_admin: bool, email: str | None) -> tuple[bool, str | None]:
+    """Whether this caller may start a plan checkout now, and why not (G7).
+
+    The same refusals the checkout endpoints apply, known before the click.
+    """
+    if get_billing_mode() not in {"live", "test", "mock"}:
+        return False, BILLING_UNAVAILABLE_MESSAGE
+    if not checkout_permitted_in_test_mode(is_platform_admin=is_platform_admin, email=email):
+        return False, TEST_MODE_TEAM_ONLY_MESSAGE
+    return True, None
+
+
+def topup_availability(
+    *, is_platform_admin: bool, email: str | None, live_topups_enabled: bool
+) -> tuple[bool, str | None]:
+    """Whether this caller may buy minutes now, in the top-up checkout's order (G7)."""
+    if get_billing_mode() != "mock" and not live_topups_enabled:
+        return False, TOPUPS_OFF_MESSAGE
+    return checkout_availability(is_platform_admin=is_platform_admin, email=email)

@@ -165,6 +165,19 @@ class BalanceOut(BaseModel):
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def list_packages(current_user: CurrentUser = Depends(get_current_user)):
+    # A bundle the checkout would refuse is not offered (G7): top-ups switched
+    # off, or production Stripe test mode for someone outside the team. The
+    # reason is on GET /billing/config (topups_unavailable_reason).
+    from app.api.v1.endpoints.billing import _is_platform_admin
+    from app.domain.services.billing_mode import topup_availability
+
+    open_, _reason = topup_availability(
+        is_platform_admin=_is_platform_admin(current_user),
+        email=getattr(current_user, "email", None),
+        live_topups_enabled=_live_topups_enabled(),
+    )
+    if not open_:
+        return []
     try:
         audience = await _purchase_audience(_tenant(current_user))
     except HTTPException as exc:
