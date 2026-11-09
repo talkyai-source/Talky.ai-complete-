@@ -231,3 +231,17 @@ test("the 1h, 4h and 24h ranges show the hours they cover", async () => {
     fireEvent.click(screen.getByRole("button", { name: "24h" }));
     await waitFor(() => assert.equal(liveTotal(), 7, "24h covers every hour above"));
 });
+
+// QA F1-34 (QA-UI-092): on a slow connection the dashboard showed a lone
+// spinner for 10 s. It now shows the shape of the cards and chart it loads.
+test("while the dashboard loads, its cards and chart are shown as placeholders", async () => {
+    const pending = deferred<typeof savedSummary>();
+    summary = () => pending.promise;
+    render(<DashboardPage />);
+    const status = screen.getByRole("status");
+    assert.match(status.textContent ?? "", /Loading dashboard/);
+    assert.ok(status.querySelectorAll("[aria-busy='true']").length >= 5, "four card placeholders and a chart placeholder");
+    assert.equal(status.querySelector(".animate-spin"), null, "no lone spinner");
+    await act(async () => { pending.resolve(savedSummary); });
+    await waitFor(() => assert.equal(screen.queryByText("Loading dashboard"), null));
+});

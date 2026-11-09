@@ -4,6 +4,7 @@ import { minutesSummaryPresentation } from "@/lib/minutes-allowance";
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
+import { LoadingSkeleton } from "@/components/states/page-states";
 import { dashboardApi, DashboardSummary, Campaign } from "@/lib/dashboard-api";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
@@ -1466,9 +1467,19 @@ export default function DashboardPage() {
             <FirstCallSetup />
             <CallIssuesBanner />
             {loading ? (
-                <div className="flex items-center justify-center h-64" role="status" aria-live="polite">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200" aria-hidden="true" />
+                // QA F1-34: the shape of the cards and chart being loaded, not a lone spinner.
+                <div className="space-y-8" role="status" aria-live="polite">
                     <span className="sr-only">Loading dashboard</span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" aria-hidden="true">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="content-card">
+                                <LoadingSkeleton variant="text" lines={2} showAction={false} />
+                            </div>
+                        ))}
+                    </div>
+                    <div className="content-card" aria-hidden="true">
+                        <LoadingSkeleton variant="card" lines={2} showAction={false} />
+                    </div>
                 </div>
             ) : error ? (
                 <div className="content-card border-red-500/30 text-red-600 dark:text-red-400">
