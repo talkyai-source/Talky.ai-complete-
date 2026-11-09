@@ -617,6 +617,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setLoading(false);
         broadcastIdentityChange("changed");
+        // QA F1-32: the login answer has no account time zone (or the rest
+        // of the profile), so times showed in the browser's zone until a
+        // reload. Read the profile once, fenced to this sign-in: a sign-out
+        // or a later sign-in discards the answer, and a failure (such as the
+        // cookie race inside the fresh-login grace) keeps the seeded user.
+        // It only completes this same user (and tenant, when the login named
+        // one); it never switches the tab to a different account.
+        const epoch = identityEpoch.current;
+        const read = ++profileRead.current;
+        void api.getMe()
+            .then((me) => {
+                if (identityEpoch.current !== epoch || profileRead.current !== read) return;
+                if (me.id !== res.user_id || (res.tenant_id && me.tenant_id !== res.tenant_id)) return;
+                setUser(me);
+            })
+            .catch(() => { /* The next reload reads the profile again. */ });
     }, [invalidateIdentity, broadcastIdentityChange, setUser]);
 
     // Compute the AuthStatus from the underlying state. Order matters:
