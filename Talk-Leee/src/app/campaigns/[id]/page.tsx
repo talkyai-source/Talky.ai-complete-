@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -127,11 +127,21 @@ export default function CampaignDetailPage() {
     const params = useParams();
     const campaignId = params.id as string;
 
-    return <CampaignDetailScope key={campaignId} campaignId={campaignId} />;
+    // The scope reads useSearchParams (QA F1-31), which Next requires a boundary for.
+    return (
+        <Suspense fallback={null}>
+            <CampaignDetailScope key={campaignId} campaignId={campaignId} />
+        </Suspense>
+    );
 }
 
 function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const router = useRouter();
+    // QA F1-31: the wizard opens a new campaign with ?knowledge_error=1 when
+    // its knowledge upload failed; say so until the user dismisses it.
+    const searchParams = useSearchParams();
+    const [knowledgeNoticeDismissed, setKnowledgeNoticeDismissed] = useState(false);
+    const knowledgeUploadFailed = searchParams?.get("knowledge_error") === "1" && !knowledgeNoticeDismissed;
     const permissions = useEffectivePermissions();
     const canManageKnowledge = permissions.isSuccess && (
         permissions.data.role?.toLowerCase() === "platform_admin"
@@ -1052,6 +1062,23 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                           </>
                         )}
                     </motion.div>
+
+                    {knowledgeUploadFailed && (
+                        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                            <p>Your knowledge file was not added. The campaign was created; upload the file again below.</p>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setKnowledgeNoticeDismissed(true);
+                                    router.replace(`/campaigns/${campaignId}`);
+                                }}
+                            >
+                                Dismiss
+                            </Button>
+                        </div>
+                    )}
 
                     {/* Knowledge base — vectorless-RAG tree the agent answers from */}
                     <KnowledgePanel campaignId={campaignId} readOnly={!canManageKnowledge} />
