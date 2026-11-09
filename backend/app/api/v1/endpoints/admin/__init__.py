@@ -18,6 +18,7 @@ from .media import router as media_router
 from .inbound import router as inbound_router
 from .billing_packages import router as billing_packages_router
 from .dsar import router as dsar_router
+from .campaigns import router as campaigns_router
 from app.api.v1.endpoints.contact_enquiries import admin_router as contact_enquiries_router
 
 # Create main admin router
@@ -38,4 +39,5 @@ router.include_router(media_router)
 router.include_router(inbound_router)
 router.include_router(billing_packages_router)
 router.include_router(dsar_router)
+router.include_router(campaigns_router)
 router.include_router(contact_enquiries_router)

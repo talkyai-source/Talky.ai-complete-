@@ -9,6 +9,7 @@ PAGINATION = {
     "abuse_monitoring": ["get_abuse_alerts", "list_abuse_events"],
     "admin.actions": ["get_admin_actions"],
     "admin.calls": ["get_call_history"],
+    "admin.campaigns": ["list_admin_campaigns"],
     "admin.connectors": ["list_admin_connectors"],
     "admin.health.incidents": ["list_incidents"],
     "admin.inbound": ["list_inbound_reassignments"],

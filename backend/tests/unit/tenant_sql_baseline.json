@@ -12394,6 +12394,42 @@
       "count": 1,
       "reason": "Fixed SQL format binds tenant_id=$1. Its only optional fragment is OR tenant_id IS NULL for the intentional global DNC list; it never selects a different non-NULL tenant. expiry and limit remain server-owned/parameterized. Exact reviewed operation: fetch; app/domain/services/dnc_service.py:360.",
       "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "62a7012f54cb5f4251cf5525a6cd610f498b51614a26b4ae6ec3a3a4299482cf",
+      "file": "app/api/v1/endpoints/admin/campaigns.py",
+      "function": "list_admin_campaigns",
+      "line": 79,
+      "method": "fetchval",
+      "tables": [
+        "campaigns"
+      ],
+      "sql": "SELECT count(*) FROM campaigns c JOIN tenants t ON t.id=c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin campaign directory (G3, GET /admin/campaigns) intentionally lists every tenant's campaigns; the leads and calls counts join campaign_id and tenant_id together. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/campaigns.py:79.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "9f320a4940898913899d8ddcb21fb56a96e7869757dc818bac365a38949e2a41",
+      "file": "app/api/v1/endpoints/admin/campaigns.py",
+      "function": "list_admin_campaigns",
+      "line": 81,
+      "method": "fetch",
+      "tables": [
+        "calls",
+        "campaigns",
+        "leads"
+      ],
+      "sql": "SELECT c.id, c.tenant_id, t.business_name AS tenant_name, c.name, c.status, c.direction, c.created_at, c.updated_at, c.started_at, (SELECT count(*) FROM leads l WHERE l.campaign_id=c.id AND l.tenant_id=c.tenant_id AND l.status<>'deleted') AS contacts, (SELECT count(*) FROM calls k WHERE k.campaign_id=c.id AND k.tenant_id=c.tenant_id) AS calls, (SELECT count(*) FROM calls k WHERE k.campaign_id=c.id AND k.tenant_id=c.tenant_id AND k.status=ANY(${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=1)}::text[])) AS live_calls FROM campaigns c JOIN tenants t ON t.id=c.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])} ORDER BY c.created_at DESC NULLS LAST, c.id DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=2)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=3)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin campaign directory (G3, GET /admin/campaigns) intentionally lists every tenant's campaigns; the leads and calls counts join campaign_id and tenant_id together. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/campaigns.py:81.",
+      "category": "platform_admin"
     }
   ]
 }
