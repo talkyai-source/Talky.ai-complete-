@@ -18,6 +18,7 @@ from app.domain.services.minutes_quota import MinutesStatus, compute_minutes_sta
 
 logger = logging.getLogger(__name__)
 FAILURE_THRESHOLD = 5
+_MAX_ALERT_RECIPIENTS = 10
 _CONNECTED = frozenset({"answered", "goal_achieved", "goal_not_achieved", "voicemail"})
 _FAILED = frozenset({"no_answer", "busy", "failed", "timeout", "spam", "invalid",
                      "unavailable", "disconnected", "rejected"})
@@ -26,12 +27,20 @@ _FAILED = frozenset({"no_answer", "busy", "failed", "timeout", "spam", "invalid"
 async def _enqueue(conn, tenant_id, key, kind, title, description, *, campaign_id=None, call_id=None, lead_id=None):
     """Both visible event and mail intent commit with the source transition."""
     event_id = uuid5(NAMESPACE_URL, f"talklee:campaign-alert:{tenant_id}:{key}")
-    recipients = await conn.fetch(
-        """SELECT email FROM user_profiles
+    # D4-9: every active tenant admin gets the alert. No single "owner" is
+    # guessed among several (F3-08); with none, the intent is kept as
+    # recipient_missing. One admin keeps the plain key; several get one
+    # row each, so a repeat producer still adds nothing.
+    admins = await conn.fetch(
+        """SELECT id, email FROM user_profiles
            WHERE tenant_id=$1::uuid AND role='tenant_admin' AND is_active IS NOT FALSE
-           LIMIT 2""", tenant_id,
+             AND email IS NOT NULL
+           ORDER BY email LIMIT $2""", tenant_id, _MAX_ALERT_RECIPIENTS,
     )
-    recipient = recipients[0]["email"] if len(recipients) == 1 else None
+    if len(admins) == 1:
+        deliveries = [(key, admins[0]["email"])]
+    else:
+        deliveries = [(f"{key}:{admin['id']}", admin["email"]) for admin in admins] or [(key, None)]
     metadata = {"kind": kind}
     for name, value in (("related_campaign_id", campaign_id), ("call_id", call_id), ("lead_id", lead_id)):
         if value:
@@ -46,14 +55,15 @@ async def _enqueue(conn, tenant_id, key, kind, title, description, *, campaign_i
         event_id, tenant_id, kind, "INFO" if kind == "qualified_lead" else "MEDIUM",
         title, description, json.dumps(metadata), "System" if kind == "low_minutes" else "Campaign",
     )
-    await conn.execute(
-        """INSERT INTO campaign_alert_outbox
-           (id,tenant_id,event_id,delivery_key,kind,recipient,subject,body,status,last_error_code)
-           VALUES($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10)
-           ON CONFLICT(tenant_id,delivery_key) DO NOTHING""",
-        uuid4(), tenant_id, event_id, key, kind, recipient, title, body,
-        "pending" if recipient else "recipient_missing", None if recipient else "recipient_missing",
-    )
+    for delivery_key, recipient in deliveries:
+        await conn.execute(
+            """INSERT INTO campaign_alert_outbox
+               (id,tenant_id,event_id,delivery_key,kind,recipient,subject,body,status,last_error_code)
+               VALUES($1,$2::uuid,$3,$4,$5,$6,$7,$8,$9,$10)
+               ON CONFLICT(tenant_id,delivery_key) DO NOTHING""",
+            uuid4(), tenant_id, event_id, delivery_key, kind, recipient, title, body,
+            "pending" if recipient else "recipient_missing", None if recipient else "recipient_missing",
+        )
 
 
 async def record_terminal_call(conn, tenant_id, call_id, *, threshold=FAILURE_THRESHOLD):

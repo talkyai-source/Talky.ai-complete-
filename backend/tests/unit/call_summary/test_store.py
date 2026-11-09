@@ -123,10 +123,12 @@ def _make_lead_conn(lead_row, substance=_SUBSTANCE_OK):
 
     async def fetch(sql, *args):
         query = " ".join(sql.split())
-        assert query == ("SELECT email FROM user_profiles WHERE tenant_id=$1::uuid "
-                         "AND role='tenant_admin' AND is_active IS NOT FALSE LIMIT 2")
-        assert args == (_TENANT_ID,)
-        return [{"email": "owner@synthetic.example"}]
+        # D4-9: every active tenant admin is a recipient (bounded).
+        assert query == ("SELECT id, email FROM user_profiles WHERE tenant_id=$1::uuid "
+                         "AND role='tenant_admin' AND is_active IS NOT FALSE AND email IS NOT NULL "
+                         "ORDER BY email LIMIT $2")
+        assert args == (_TENANT_ID, 10)
+        return [{"id": "00000000-0000-0000-0000-0000000000ad", "email": "owner@synthetic.example"}]
 
     conn.fetchrow = AsyncMock(side_effect=fetchrow)
     conn.fetch = AsyncMock(side_effect=fetch)

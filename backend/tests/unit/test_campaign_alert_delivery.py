@@ -384,14 +384,29 @@ async def test_missing_recipient_is_not_delivered_or_global_admin_fallback(alert
 
 
 @pytest.mark.asyncio
-async def test_ambiguous_owner_does_not_guess_recipient(alerts, store):
+async def test_several_admins_each_get_the_alert_and_no_owner_is_guessed(alerts, store):
+    # D4-9: F3-08 refused to pick one "owner" among several admins, so a
+    # tenant with two admins got no email at all. No owner is guessed still;
+    # every active tenant admin receives the same alert, once each.
     store.db.execute("INSERT INTO user_profiles VALUES(?,?,?,?,?)",
                      (str(uuid4()), TENANT, "second@example.invalid", "tenant_admin", 1))
-    await seed_alert(alerts, store)
+    store.db.execute("INSERT INTO user_profiles VALUES(?,?,?,?,?)",
+                     (str(uuid4()), TENANT, "former@example.invalid", "tenant_admin", 0))
+    store.db.execute("INSERT INTO user_profiles VALUES(?,?,?,?,?)",
+                     (str(uuid4()), TENANT, "agent@example.invalid", "agent", 1))
+    await low(alerts, store, 19)
+    rows = store.rows("campaign_alert_outbox")
+    assert sorted(row["recipient"] for row in rows) == ["own@example.invalid", "second@example.invalid"]
+    assert len({row["delivery_key"] for row in rows}) == 2
+    assert len({row["event_id"] for row in rows}) == 1 and len(store.rows("security_events")) == 1
+
+    await low(alerts, store, 19)
+    assert len(store.rows("campaign_alert_outbox")) == 2, "a repeat producer adds no second copy"
+
     service = mail_service(store)
     await alerts.deliver_tenant_alerts(store, TENANT, service=service)
-    assert service.send_email.await_count == 0
-    assert store.rows("campaign_alert_outbox")[0]["status"] == "recipient_missing"
+    sent = sorted(call.kwargs["to_email"] for call in service.send_email.await_args_list)
+    assert sent == ["own@example.invalid", "second@example.invalid"]
 
 
 @pytest.mark.asyncio
