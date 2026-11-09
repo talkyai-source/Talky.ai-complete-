@@ -8,7 +8,7 @@ export default function UnauthorizedPage() {
             <div className="w-full max-w-md">
                 <Card>
                     <CardHeader>
-                        <CardTitle>403 Unauthorized</CardTitle>
+                        <CardTitle asChild><h1>403 Unauthorized</h1></CardTitle>
                         <CardDescription>You do not have permission to access this page.</CardDescription>
                     </CardHeader>
                     <CardContent className="flex flex-col gap-3">

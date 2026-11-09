@@ -2,6 +2,7 @@ import { Navbar } from "@/components/home/navbar";
 import { HomeLazySections } from "@/components/home/home-lazy-sections";
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { homeStructuredData, structuredDataJson } from "@/lib/structured-data";
 
 const satoshi = localFont({
   src: [
@@ -42,6 +43,7 @@ export default function Home() {
             'if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",a);else a()});',
         }}
       />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: structuredDataJson(homeStructuredData) }} />
       <main id="home" className={`home-navbar-offset homepage-bg ${satoshi.className} ${orbitron.variable}`}>
         <Navbar />
         <HomeLazySections />
