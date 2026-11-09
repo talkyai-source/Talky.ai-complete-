@@ -172,6 +172,44 @@ async def get_greeting_audio():
     )
 
 
+def _is_origin_allowed(websocket: WebSocket) -> bool:
+    """Reject cross-origin browser upgrades (same rule as the other sockets).
+    Non-browser clients (no Origin) carry no browser cookie."""
+    origin = websocket.headers.get("origin")
+    if not origin:
+        return True
+    from app.core.config import get_settings
+
+    return origin in get_settings().allowed_origins
+
+
+async def _signed_in_principal(websocket) -> Optional[dict]:
+    """QA F11-06: the demo socket serves signed-in sessions only, as the site does.
+
+    The ``talky_at`` HttpOnly cookie travels on the handshake (path /api/v1),
+    and is verified like REST: the token, then the revocable session and
+    account. No cookie, a bad token or an ended session is no principal; a
+    lookup failure raises, so it never opens the socket.
+    """
+    from app.api.v1.dependencies import get_db_client
+    from app.core.db_utils import acquire_with_tenant
+    from app.core.jwt_security import JWTValidationError, decode_and_validate_token
+    from app.core.security.principal import PrincipalUnavailable, load_session_principal
+
+    token = ((getattr(websocket, "cookies", None) or {}).get("talky_at") or "").strip()
+    if not token:
+        return None
+    try:
+        payload = decode_and_validate_token(token)
+    except JWTValidationError:
+        return None
+    try:
+        async with acquire_with_tenant(get_db_client().pool, None) as conn:
+            return await load_session_principal(conn, payload)
+    except PrincipalUnavailable:
+        return None
+
+
 @router.websocket("/ws/ask-ai/{session_id}")
 async def ask_ai_websocket(websocket: WebSocket, session_id: str):
     """
@@ -180,7 +218,25 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
     Lifecycle is managed by VoiceOrchestrator; this endpoint only handles
     the WebSocket message loop (transport concern).
     """
+    if not _is_origin_allowed(websocket):
+        logger.warning("Ask AI rejecting cross-origin upgrade from %r", websocket.headers.get("origin"))
+        await websocket.close(code=1008, reason="Origin not allowed")
+        return
     await websocket.accept()
+
+    # QA F11-06: before any provider or capacity slot, as the website only
+    # offers the demo after sign-in. 1008 sends the popup to the sign-in page.
+    try:
+        principal = await _signed_in_principal(websocket)
+    except Exception as exc:
+        logger.warning("Ask AI sign-in check unavailable session=%s error=%s", session_id, type(exc).__name__)
+        await websocket.send_json({"type": "error", "message": "The assistant is temporarily unavailable. Please try again."})
+        await websocket.close(code=1011)
+        return
+    if principal is None:
+        await websocket.send_json({"type": "error", "message": "Sign in to talk to the assistant."})
+        await websocket.close(code=1008, reason="Sign-in required")
+        return
 
     # Reject over-capacity connections immediately — before touching any provider.
     # RFC 6455 close code 1013 = "Try Again Later".
