@@ -43,6 +43,17 @@ def _saved_zone(value):
         return None
 
 
+def _account_zone(value):
+    """The account's reporting zone (D4-8), else its dialing zone."""
+    rules = _object(value)
+    for key in ("reporting_timezone", "timezone"):
+        try:
+            return reporting_zone(rules.get(key))
+        except ValueError:
+            continue
+    return None
+
+
 def _settings_row(query):
     try:
         response = query.limit(1).execute()
@@ -71,7 +82,7 @@ def resolve_reporting_zone(db_client, tenant_id, *, campaign_id=None, requested=
             return zone
     # tenants.id itself is the tenant boundary; this table has no tenant_id.
     row = _settings_row(db_client.table("tenants").select("calling_rules").eq("id", str(tenant_id)))
-    return _saved_zone(row.get("calling_rules")) or reporting_zone("UTC")
+    return _account_zone(row.get("calling_rules")) or reporting_zone("UTC")
 
 
 def _bound(value):

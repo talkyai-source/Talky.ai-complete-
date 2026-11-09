@@ -14,7 +14,13 @@ from app.domain.services.reporting_time import reporting_zone
 from app.domain.services.subscription_status import SUSPENDED, canonical
 
 from ._shared import get_client_ip, get_user_agent, normalize_optional_text
-from .schemas import LegalAcceptanceRequest, MeResponse, UpdateMeRequest
+from .schemas import (
+    AccountTimezoneRequest,
+    AccountTimezoneResponse,
+    LegalAcceptanceRequest,
+    MeResponse,
+    UpdateMeRequest,
+)
 
 router = APIRouter(tags=["auth"])
 
@@ -29,6 +35,16 @@ def _derive_suspension_scope(
         return "tenant"
     if partner_status == "suspended":
         return "partner"
+    return None
+
+
+def _zone_name(*candidates) -> Optional[str]:
+    """The first valid IANA zone among the candidates, as a name."""
+    for value in candidates:
+        try:
+            return reporting_zone(value).key
+        except ValueError:
+            continue
     return None
 
 
@@ -75,6 +91,7 @@ async def get_me(
                    t.status                   AS tenant_status,
                    t.subscription_status      AS subscription_status,
                    t.calling_rules->>'timezone' AS account_timezone,
+                   t.calling_rules->>'reporting_timezone' AS reporting_timezone,
                    t.suspended_at             AS tenant_suspended_at,
                    t.suspension_reason        AS tenant_suspension_reason,
                    p.status                   AS partner_status,
@@ -97,10 +114,9 @@ async def get_me(
     partner_id = str(row["partner_id"]) if row and row["partner_id"] else None
     tenant_status = row["tenant_status"] if row else None
     partner_status = row["partner_status"] if row else None
-    try:
-        account_timezone = reporting_zone(row.get("account_timezone") if row else None).key
-    except ValueError:
-        account_timezone = None
+    # D4-8: the saved reporting zone first, then the dialing zone.
+    reporting_timezone = _zone_name(row.get("reporting_timezone") if row else None)
+    account_timezone = reporting_timezone or _zone_name(row.get("account_timezone") if row else None)
 
     suspended_scope = _derive_suspension_scope(tenant_status, partner_status)
     subscription_status = canonical(row.get("subscription_status") if row else None) or None
@@ -124,6 +140,7 @@ async def get_me(
         name=current_user.name,
         business_name=current_user.business_name,
         account_timezone=account_timezone,
+        reporting_timezone=reporting_timezone,
         role=current_user.role,
         minutes_remaining=current_user.minutes_remaining,
         minutes_state=current_user.minutes_state,
@@ -139,6 +156,85 @@ async def get_me(
         account_state_reason=account_state_reason,
         mfa_enabled=bool(row and row.get("mfa_enabled") is True),
         mfa_verified=getattr(getattr(request, "state", None), "session_mfa_verified", None),
+    )
+
+
+@router.put("/account/timezone", response_model=AccountTimezoneResponse)
+async def set_account_timezone(
+    body: AccountTimezoneRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+    db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+) -> AccountTimezoneResponse:
+    """Set the account's reporting timezone (D4-8); null clears it.
+
+    Dashboards, analytics and /auth/me use it for dates. It is stored apart
+    from calling_rules.timezone, the dialer's fallback window zone, so
+    changing it never moves calling hours. Tenant-wide: tenant admins only,
+    like the business name.
+    """
+    if not normalize_role(current_user.role).can_access(UserRole.TENANT_ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only a tenant admin can change the account timezone.",
+        )
+    if not current_user.tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User is not associated with a tenant.",
+        )
+    zone = None
+    if body.timezone is not None and body.timezone.strip():
+        zone = _zone_name(body.timezone.strip())
+        if zone is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "invalid_timezone",
+                        "message": "Choose a valid IANA timezone, for example Asia/Karachi."},
+            )
+
+    async with acquire_with_tenant(db_client.pool, current_user.tenant_id) as conn:
+        async with conn.transaction():
+            before = await conn.fetchval(
+                "SELECT calling_rules->>'reporting_timezone' FROM tenants WHERE id = $1::uuid FOR UPDATE",
+                current_user.tenant_id,
+            )
+            row = await conn.fetchrow(
+                """
+                UPDATE tenants
+                SET calling_rules = CASE
+                        WHEN $2::text IS NULL
+                        THEN COALESCE(calling_rules, '{}'::jsonb) - 'reporting_timezone'
+                        ELSE jsonb_set(COALESCE(calling_rules, '{}'::jsonb),
+                                       '{reporting_timezone}', to_jsonb($2::text), true)
+                    END,
+                    updated_at = NOW()
+                WHERE id = $1::uuid
+                RETURNING calling_rules->>'reporting_timezone' AS reporting_timezone,
+                          calling_rules->>'timezone' AS dialing_timezone
+                """,
+                current_user.tenant_id,
+                zone,
+            )
+    if not row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Account not found.")
+
+    await audit_logger.log(
+        event_type=AuditEvent.TENANT_UPDATED,
+        action="tenant_reporting_timezone_changed",
+        actor_id=current_user.id,
+        actor_role=current_user.role,
+        tenant_id=current_user.tenant_id,
+        resource_type="tenant",
+        resource_id=current_user.tenant_id,
+        description="Account reporting timezone changed via PUT /auth/account/timezone",
+        before_state={"reporting_timezone": before},
+        after_state={"reporting_timezone": zone},
+    )
+    saved = _zone_name(row["reporting_timezone"])
+    return AccountTimezoneResponse(
+        reporting_timezone=saved,
+        account_timezone=saved or _zone_name(row["dialing_timezone"]),
     )
 
 

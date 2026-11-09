@@ -9369,16 +9369,16 @@
       "category": "external_query"
     },
     {
-      "id": "455b180ff71c000397e188dd7e781369cc8d37007efca2a5c379a36a4336b942",
+      "id": "a092f30397e0d2c49daef6c0d951f3cecebad01e9c9552ad4a1589ec964b0d9c",
       "file": "app/api/v1/endpoints/auth/profile.py",
       "function": "get_me",
-      "line": 68,
+      "line": 86,
       "method": "fetchrow",
       "tables": [
         "user_profiles",
         "white_label_partners"
       ],
-      "sql": "SELECT t.id AS tenant_id, up.mfa_enabled AS mfa_enabled, t.white_label_partner_id AS partner_id, t.status AS tenant_status, t.subscription_status AS subscription_status, t.calling_rules->>'timezone' AS account_timezone, t.suspended_at AS tenant_suspended_at, t.suspension_reason AS tenant_suspension_reason, p.status AS partner_status, p.suspended_at AS partner_suspended_at, p.suspension_reason AS partner_suspension_reason FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE up.id = $1 AND up.tenant_id IS NOT DISTINCT FROM $2::uuid",
+      "sql": "SELECT t.id AS tenant_id, up.mfa_enabled AS mfa_enabled, t.white_label_partner_id AS partner_id, t.status AS tenant_status, t.subscription_status AS subscription_status, t.calling_rules->>'timezone' AS account_timezone, t.calling_rules->>'reporting_timezone' AS reporting_timezone, t.suspended_at AS tenant_suspended_at, t.suspension_reason AS tenant_suspension_reason, p.status AS partner_status, p.suspended_at AS partner_suspended_at, p.suspension_reason AS partner_suspension_reason FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE up.id = $1 AND up.tenant_id IS NOT DISTINCT FROM $2::uuid",
       "scoped": false,
       "unresolved": false,
       "bypass": false,

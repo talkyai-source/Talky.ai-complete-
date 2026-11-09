@@ -75,6 +75,10 @@ class MeResponse(BaseModel):
     name: Optional[str] = None
     business_name: Optional[str] = None
     account_timezone: Optional[str] = None
+    # D4-8: the account's saved reporting timezone (None = not set).
+    # account_timezone above is the effective zone: this one, else the
+    # dialing zone in calling_rules.
+    reporting_timezone: Optional[str] = None
     role: str
     legal_acceptance_required: bool = False
     terms_version: Optional[str] = None
@@ -114,6 +118,17 @@ class MeResponse(BaseModel):
 class UpdateMeRequest(BaseModel):
     name: Optional[AccountName] = None
     business_name: Optional[AccountName] = None
+
+
+class AccountTimezoneRequest(BaseModel):
+    """D4-8: the account's reporting timezone; null or blank clears it."""
+    timezone: Optional[str] = Field(None, max_length=128)
+    model_config = {"extra": "forbid"}
+
+
+class AccountTimezoneResponse(BaseModel):
+    reporting_timezone: Optional[str] = None
+    account_timezone: Optional[str] = None
 
 
 class LegalAcceptanceRequest(BaseModel):
