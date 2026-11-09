@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import {
@@ -147,13 +148,14 @@ export default function EditCampaignPage() {
                 animate={{ opacity: 1, x: 0 }}
                 className="mb-6"
             >
-                <button
-                    onClick={() => router.push(backHref)}
-                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                {/* A link, so leaving with unsaved edits asks first (QA F1-22). */}
+                <Link
+                    href={backHref}
+                    className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4" />
                     Back to campaign
-                </button>
+                </Link>
             </motion.div>
 
             {loading ? (

@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
 import { dashboardApi, isCampaignVersionConflict, PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { CampaignVersionConflictNotice } from "@/components/campaigns/campaign-version-conflict";
+import { confirmLeave, useUnsavedChangesGuard } from "@/lib/unsaved-changes";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
     buildCampaignBrief,
@@ -558,6 +559,18 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         ? voices.filter((voice) => voice.provider === globalAiConfig.tts_provider)
         : voices;
 
+    // QA F1-22: an edit asks before unsaved changes are discarded. The clean
+    // snapshot is taken at the first interaction, after loaded defaults settle.
+    const editSnapshot = isEdit
+        ? JSON.stringify([voiceSelection, schedule, formData, personaType, companyName, agentNamesRaw, slotValues, briefDraft, leadFields.fields])
+        : "";
+    const [cleanSnapshot, setCleanSnapshot] = useState<string | null>(null);
+    const unsaved = isEdit && cleanSnapshot !== null && editSnapshot !== cleanSnapshot;
+    useUnsavedChangesGuard(unsaved && !submitting);
+    const noteInteraction = () => {
+        if (isEdit && cleanSnapshot === null) setCleanSnapshot(editSnapshot);
+    };
+
     async function handleSubmit(e: React.FormEvent) {
         e.preventDefault();
         if (leadFields.isLoading || leadFields.isError) {
@@ -641,6 +654,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             }
 
             await leadDetailsApi.setCampaignFields(targetCampaignId!, leadFields.fields);
+            if (isEdit) setCleanSnapshot(editSnapshot);
             router.push(!isEdit && afterCreateHref ? afterCreateHref(targetCampaignId!) : `/campaigns/${targetCampaignId}`);
         } catch (err) {
             if (isCampaignVersionConflict(err)) {
@@ -662,7 +676,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
     const submittingLabel = isEdit ? "Saving..." : "Creating...";
 
     return (
-        <div className="max-w-2xl">
+        <div className="max-w-2xl" onPointerDownCapture={noteInteraction} onKeyDownCapture={noteInteraction}>
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -1376,7 +1390,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                 submitLabel
                             )}
                         </Button>
-                        <Button type="button" variant="outline" onClick={() => router.back()} disabled={submitting}>
+                        <Button type="button" variant="outline" onClick={() => { if (confirmLeave(unsaved)) router.back(); }} disabled={submitting}>
                             Cancel
                         </Button>
                     </div>

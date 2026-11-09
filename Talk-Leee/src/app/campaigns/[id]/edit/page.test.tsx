@@ -17,7 +17,8 @@ import { leadDetailsApi } from "@/lib/lead-details-api";
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 const pushes: string[] = [];
-const router = { push(href: string) { pushes.push(href); }, replace() {}, back() {}, refresh() {}, prefetch: async () => {} };
+let backs = 0;
+const router = { push(href: string) { pushes.push(href); }, replace() {}, back() { backs++; }, refresh() {}, prefetch: async () => {} };
 loader._load = function (id, ...args) {
     if (id === "next/navigation") return {
         useParams: () => ({ id: "campaign-1" }), useRouter: () => router,
@@ -70,6 +71,7 @@ function conflict() {
 beforeEach(() => {
     updates = [];
     fieldSaves = 0;
+    backs = 0;
     pushes.splice(0);
     aiOptionsApi.getProviders = async () => ({
         realtime: { available: true, model: "gpt-realtime", voices: [{ id: "alloy", name: "Alloy" }] },
@@ -88,8 +90,10 @@ beforeEach(() => {
     })) as unknown as typeof dashboardApi.previewCampaignPrompt;
 });
 
+const originalConfirm = window.confirm;
 afterEach(() => {
     cleanup();
+    window.confirm = originalConfirm;
     clients.splice(0).forEach((client) => client.clear());
     Object.assign(dashboardApi, { getCampaign: original.getCampaign, updateCampaign: original.updateCampaign, previewCampaignPrompt: original.previewCampaignPrompt });
     Object.assign(aiOptionsApi, { getProviders: original.getProviders, getConfig: original.getConfig, getVoices: original.getVoices });
@@ -166,4 +170,94 @@ test("a failed campaign update in the classic form is not reported as saved", as
     await waitFor(() => assert.ok(document.body.textContent?.includes("Failed to update campaign")), { timeout: SLOW });
     assert.equal(document.body.textContent?.includes("Campaign details were saved"), false);
     assert.equal(fieldSaves, 0);
+});
+
+// QA F1-22 (QA-UI-042/094): leaving the edit page through the sidebar, a
+// reload or Cancel dropped unsaved edits without a word.
+function answerConfirm(answer: boolean) {
+    const asked: string[] = [];
+    window.confirm = ((message?: string) => { asked.push(String(message)); return answer; }) as typeof window.confirm;
+    return asked;
+}
+/** Clicks an in-app link (the sidebar's kind); true when the navigation went ahead. */
+function followAppLink() {
+    const link = document.createElement("a");
+    link.setAttribute("href", "/campaigns");
+    document.body.appendChild(link);
+    let wentAhead = false;
+    // Stands in for the router: jsdom cannot navigate.
+    const router = (event: Event) => { wentAhead = true; event.preventDefault(); };
+    document.addEventListener("click", router);
+    link.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    document.removeEventListener("click", router);
+    link.remove();
+    return wentAhead;
+}
+function reloadAsks() {
+    const event = new window.Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+}
+async function editName(value: string) {
+    const input = await screen.findByLabelText(/^Campaign name$/i, {}, { timeout: SLOW });
+    fireEvent.pointerDown(input);
+    fireEvent.change(input, { target: { value } });
+}
+async function loaded(editor: (typeof EDITORS)[number]) {
+    const button = await screen.findByRole("button", { name: editor.save }, { timeout: SLOW }) as HTMLButtonElement;
+    await waitFor(() => assert.equal(button.disabled, false), { timeout: SLOW });
+}
+
+for (const editor of EDITORS) {
+    test(`an edited ${editor.label} asks before an in-app link or a reload discards the edits`, async () => {
+        mountEditPage(editor.knowledgeDriven);
+        await loaded(editor);
+        await editName("Renamed but not saved");
+        const asked = answerConfirm(false);
+        assert.equal(followAppLink(), false, "declining keeps the page");
+        assert.equal(asked.length, 1);
+        assert.match(asked[0], /unsaved changes/);
+        assert.equal(reloadAsks(), true, "a reload or close asks first");
+        answerConfirm(true);
+        assert.equal(followAppLink(), true, "agreeing leaves");
+    });
+
+    test(`an untouched ${editor.label} leaves without asking`, async () => {
+        mountEditPage(editor.knowledgeDriven);
+        await loaded(editor);
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const asked = answerConfirm(false);
+        assert.equal(followAppLink(), true);
+        assert.equal(reloadAsks(), false);
+        assert.deepEqual(asked, []);
+    });
+
+    test(`Cancel on an edited ${editor.label} asks first and stays when declined`, async () => {
+        mountEditPage(editor.knowledgeDriven);
+        await loaded(editor);
+        await editName("Renamed but not saved");
+        const asked = answerConfirm(false);
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        assert.equal(asked.length, 1);
+        assert.deepEqual(pushes, []);
+        assert.equal(backs, 0);
+    });
+
+    test(`saving an edited ${editor.label} leaves without asking`, async () => {
+        mountEditPage(editor.knowledgeDriven);
+        await loaded(editor);
+        await editName("Renamed and saved");
+        const asked = answerConfirm(false);
+        await save(editor.save);
+        await waitFor(() => assert.deepEqual(pushes, ["/campaigns/campaign-1"]), { timeout: SLOW });
+        assert.equal(updates[0].data.name, "Renamed and saved");
+        assert.equal(reloadAsks(), false);
+        assert.deepEqual(asked, []);
+    });
+}
+
+test("the edit page's way back is a link to the campaign, so the guard covers it", async () => {
+    mountEditPage(false);
+    const back = await screen.findByRole("link", { name: /Back to campaign/ }, { timeout: SLOW });
+    assert.equal(back.getAttribute("href"), "/campaigns/campaign-1");
 });
