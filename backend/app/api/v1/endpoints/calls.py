@@ -347,6 +347,10 @@ class CallListResponse(BaseModel):
     page_size: int
     total: Optional[int]
     next_cursor: Optional[str] = None
+    # D4-12: whose list this is (as on /events), so the app can check that an
+    # alert built from it belongs to the signed-in account.
+    tenant_id: Optional[str] = None
+    user_id: Optional[str] = None
 
 
 class CallIssueItem(BaseModel):
@@ -1549,6 +1553,8 @@ async def list_calls(
             page_size=page_size,
             total=None if cursor_mode else total or 0,
             next_cursor=next_cursor,
+            tenant_id=str(current_user.tenant_id),
+            user_id=str(current_user.id),
         )
 
     except DatabasePoolTimeoutError:

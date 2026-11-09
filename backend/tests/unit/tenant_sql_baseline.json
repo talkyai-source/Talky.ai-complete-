@@ -1640,10 +1640,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "e70e660944699ab96bf22276c3b0a17064d923044d55595f1fd829c529a811bd",
+      "id": "2ca2c97ee438cd21bd54bf7b5cb1884ec5f1b473bbfd1d1c141281707e9cac53",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_call_issues",
-      "line": 1176,
+      "line": 1180,
       "method": "fetch",
       "tables": [
         "calls",
@@ -5916,10 +5916,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "0167d90838fd1fdd51a9a309b9f245d5c06805263675b582c525867a867c61f8",
+      "id": "8c1546804b59ddaad795360930888c69415d3ae0e238e387eb415b958f812b1c",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_rejected_inbound_calls",
-      "line": 1049,
+      "line": 1053,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7056,10 +7056,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "09bc79e1ed104eceba2c156bfc5834900355c12ac83e0fd06ebca0cec6af1edc",
+      "id": "68100d2724717246930dbc9c497fba8e017c4226c359dec886bd64cbdedf85e3",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "_list_inbound_call_issues",
-      "line": 444,
+      "line": 448,
       "method": "fetch",
       "tables": [
         "calls",
@@ -7744,10 +7744,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3f0db1579a653dbeb09bd2032ad4f7e0550e47a43fc6804585d17a6a6caa3dd7",
+      "id": "e41294c8f02f3b99a90f6c0792e20e2899a326ab7680a4a865083471de2f62e8",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_live_calls",
-      "line": 904,
+      "line": 908,
       "method": "fetch",
       "tables": [
         "call_legs",
@@ -11043,10 +11043,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "82230d7ea4ca6b7201cbd9235b8af3a95fb4576b43410b9720f53de30bad47ad",
+      "id": "5dcf6278cfc6554ed32e4de6ce3bab94ab2e63c7e3ef394ce2f8a64dbcd58756",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1478,
+      "line": 1482,
       "method": "fetchval",
       "tables": [
         "calls"
@@ -11907,10 +11907,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "6c7995721b6a5ecd01620967c2c4d119e7a4637ddbe51dd91780c4d68280b561",
+      "id": "31a7ecbac1167930c31988d20e9ec7d19836ef6b2a29d4952381e386df5bc9bf",
       "file": "app/api/v1/endpoints/calls.py",
       "function": "list_calls",
-      "line": 1434,
+      "line": 1438,
       "method": "fetch",
       "tables": [
         "call_feedback",
