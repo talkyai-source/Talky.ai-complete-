@@ -220,9 +220,12 @@ function downloadBlob(blob: Blob, filename: string) {
     URL.revokeObjectURL(url);
 }
 
-function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], rangeLabel: string) {
-    const w = window.open("", "_blank", "noopener,noreferrer");
+export function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], rangeLabel: string) {
+    // QA F1-18: with "noopener" browsers return null here, so the export never
+    // printed. Open normally and cut the opener link before writing anything.
+    const w = window.open("", "_blank");
     if (!w) return;
+    w.opener = null;
     const headCells = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
     const rows = campaigns
         .map((c) => {
