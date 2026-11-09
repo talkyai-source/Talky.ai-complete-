@@ -25,6 +25,7 @@ import { Select } from "@/components/ui/select";
 import { dashboardApi, isCampaignVersionConflict, PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { CampaignVersionConflictNotice } from "@/components/campaigns/campaign-version-conflict";
 import { confirmLeave, useUnsavedChangesGuard } from "@/lib/unsaved-changes";
+import { DraftRestoredNotice } from "@/components/campaigns/draft-restored-notice";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
     buildCampaignBrief,
@@ -59,10 +60,10 @@ import { ChevronDown, Loader2, Play, RefreshCw, Square, Volume2, Check } from "l
 import { motion } from "framer-motion";
 
 /**
- * Browser-only draft retention for `draftStorageKey` callers (currently just
- * `/inbound-campaigns/new` step 1 — see that page for the key scheme). Plain
- * outbound `/campaigns/new` and the edit routes pass no key, so they are
- * untouched: every read/write below is a no-op without one.
+ * Browser-only draft retention for `draftStorageKey` callers:
+ * `/inbound-campaigns/new` step 1 (see that page for the key scheme) and,
+ * since QA F1-22, outbound `/campaigns/new` (one key per account). The edit
+ * routes pass no key: every read/write below is a no-op without one.
  */
 import { CampaignVoiceSettings, type CampaignVoiceSettingsValue } from "@/components/realtime/campaign-settings";
 
@@ -79,6 +80,8 @@ type CampaignFormDraft = {
     slotValues: Record<string, string>;
     briefDraft: CampaignBriefDraft;
     leadFields: CampaignLeadField[] | null;
+    /** The outbound calling schedule as shown (absent in older drafts). */
+    schedule?: CampaignCallingSchedule;
     /**
      * Set once `dashboardApi.createCampaign` succeeds, so a later failure (in
      * lead-field save) can retry against the same row instead of creating a
@@ -98,6 +101,23 @@ function readFormDraft(key: string | undefined): Partial<CampaignFormDraft> | nu
     } catch {
         return null;
     }
+}
+
+function clearFormDraft(key: string | undefined): void {
+    if (!key || typeof window === "undefined") return;
+    try {
+        window.sessionStorage.removeItem(key);
+    } catch {
+        // Storage unavailable: nothing was kept.
+    }
+}
+
+/** A kept draft worth announcing: something the user typed. */
+function formDraftHasContent(draft: Partial<CampaignFormDraft> | null): boolean {
+    return Boolean(draft && (
+        draft.name?.trim() || draft.description?.trim() || draft.system_prompt?.trim() || draft.goal?.trim()
+        || draft.companyName?.trim() || draft.agentNamesRaw?.trim() || draft.createdCampaignId
+    ));
 }
 
 function writeFormDraft(key: string | undefined, draft: CampaignFormDraft): void {
@@ -153,6 +173,8 @@ interface Props {
      * for edit mode, which keep today's non-persisted behaviour.
      */
     draftStorageKey?: string;
+    /** Offered when a kept draft came back; the caller discards it and remounts. */
+    onStartOver?: () => void;
 }
 
 const EMPTY_INITIAL: CampaignFormInitial = {
@@ -167,7 +189,7 @@ const EMPTY_INITIAL: CampaignFormInitial = {
     slots: {},
 };
 
-export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, direction = "outbound", draftStorageKey }: Props) {
+export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, direction = "outbound", draftStorageKey, onStartOver }: Props) {
     const router = useRouter();
     const isEdit = mode === "edit";
     const seed = initialData ?? EMPTY_INITIAL;
@@ -202,7 +224,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
     // Outbound calling schedule. Create starts from the browser-local defaults
     // (every shown value is sent); edit shows ONLY what is saved, nothing implied.
     const [schedule, setSchedule] = useState<CampaignCallingSchedule>(() => (
-        isEdit ? (initialData?.calling_schedule ?? {}) : defaultCallingSchedule()
+        isEdit ? (initialData?.calling_schedule ?? {}) : restoredDraft?.schedule ?? defaultCallingSchedule()
     ));
     const isRealtime = voiceSelection.pipeline_mode === "realtime";
     const [voices, setVoices] = useState<VoiceInfo[]>([]);
@@ -286,9 +308,14 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         ...(restoredDraft?.briefDraft && typeof restoredDraft.briefDraft === "object" ? restoredDraft.briefDraft : {}),
     }));
 
+    // Set once an outbound campaign is created, so no later render writes
+    // the finished draft back.
+    const draftFinished = useRef(false);
+
     // Mirrors the current draft to sessionStorage on every change. No-op
-    // without `draftStorageKey` (outbound creation and edit mode).
+    // without `draftStorageKey` (edit mode).
     useEffect(() => {
+        if (draftFinished.current) return;
         writeFormDraft(draftStorageKey, {
             voiceSelection,
             name: formData.name,
@@ -302,9 +329,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             slotValues,
             briefDraft,
             leadFields: leadFields.fields,
+            schedule,
             createdCampaignId,
         });
-    }, [voiceSelection, draftStorageKey, formData, personaType, companyName, agentNamesRaw, slotValues, briefDraft, leadFields.fields, createdCampaignId]);
+    }, [voiceSelection, draftStorageKey, formData, personaType, companyName, agentNamesRaw, slotValues, briefDraft, leadFields.fields, schedule, createdCampaignId]);
 
     // Prompt preview (T4-B4) — backend renders the assembled system
     // prompt + spoken greeting from the current draft. Open the panel
@@ -655,6 +683,11 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
             await leadDetailsApi.setCampaignFields(targetCampaignId!, leadFields.fields);
             if (isEdit) setCleanSnapshot(editSnapshot);
+            // The outbound campaign exists: its draft must not come back.
+            if (!isEdit && direction !== "inbound") {
+                draftFinished.current = true;
+                clearFormDraft(draftStorageKey);
+            }
             router.push(!isEdit && afterCreateHref ? afterCreateHref(targetCampaignId!) : `/campaigns/${targetCampaignId}`);
         } catch (err) {
             if (isCampaignVersionConflict(err)) {
@@ -677,6 +710,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
     return (
         <div className="max-w-2xl" onPointerDownCapture={noteInteraction} onKeyDownCapture={noteInteraction}>
+            {!isEdit && onStartOver && formDraftHasContent(restoredDraft) && <DraftRestoredNotice onStartOver={onStartOver} />}
             <motion.div
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
