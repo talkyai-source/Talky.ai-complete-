@@ -3,21 +3,31 @@ import fs from "node:fs";
 import path from "node:path";
 import { test } from "node:test";
 import { docsPages, findDocsPage } from "./_content/registry";
+import sitemap from "../sitemap";
 
 const directory = path.join(process.cwd(), "src/app/docs/_content");
 const content = (name: string) => fs.readFileSync(path.join(directory, name), "utf8");
 
+// QA F17-01 (QA-UAT-008): the support desk and partner administration are
+// off in this release, so their pages are withheld from the catalog, the
+// generated pages and the sitemap. The drafts stay for a reviewed enablement.
 for (const slug of ["support", "partners"]) {
-    test(`${slug} published page is an honest availability notice while catalog withdrawal is owner-blocked`, () => {
-        const page = findDocsPage(slug);
-        assert.ok(page, "Do not silently claim that the protected publication catalog has been changed");
-        assert.match(page.description, /availability|not (?:available|enabled)/i);
-        const text = content(page.file);
-        assert.match(text, slug === "support" ? /(?:not enabled|disabled) by default/i : /(?:not available|unavailable) in this release/i);
-        assert.match(text, /contact.*(?:owner|form)|(?:owner|administrator).*contact/i);
-        assert.doesNotMatch(text, /Select \*\*Help\*\* to open|## Manage tenants|## Partner dashboard|### How to follow up/i);
+    test(`${slug} is absent from the docs catalog and generated pages until enabled`, () => {
+        assert.equal(findDocsPage(slug), undefined);
+        assert.ok(!docsPages.some((page) => page.slug === slug));
+        assert.ok(fs.existsSync(path.join(directory, `${slug}.md`)), "Keep the source draft for a separately reviewed enablement");
+    });
+    test(`${slug} is withheld from the sitemap`, () => {
+        assert.ok(!sitemap().some((entry) => entry.url.endsWith(`/docs/${slug}/`)));
     });
 }
+
+test("published docs do not link to the withheld pages", () => {
+    for (const page of docsPages) {
+        assert.doesNotMatch(content(page.file), /\]\(\/docs\/(?:support|partners)(?:[/#?)]|$)/,
+            `${page.file} must not send readers to a withheld page`);
+    }
+});
 
 test("enabled core documentation remains available after withholding optional workflows", () => {
     for (const slug of ["getting-started", "billing", "troubleshooting", "settings-and-security",

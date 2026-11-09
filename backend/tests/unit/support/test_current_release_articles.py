@@ -17,15 +17,13 @@ def shipped_sections():
 
 
 @pytest.mark.parametrize("page", ["support", "partners"])
-def test_default_shipped_import_uses_availability_notices_instead_of_disabled_workflows(shipped_sections, page):
-    import re
-
-    sections = [section for section in shipped_sections if section.url.split("#")[0] == f"/docs/{page}"]
-    assert sections, "Publication withdrawal remains blocked, not silently completed"
-    text = "\n".join(section.body_md for section in sections)
-    assert re.search(r"(?:not enabled|disabled) by default" if page == "support"
-                     else r"(?:not available|unavailable) in this release", text, re.I)
-    assert not re.search(r"Select \*\*Help\*\* to open|## Manage tenants|## Partner dashboard|### How to follow up", text, re.I)
+def test_default_shipped_import_withholds_disabled_feature_workflows(shipped_sections, page):
+    # QA F17-01: the support desk and partner administration are off in this
+    # release; their help pages are withheld, so the support bot must not
+    # republish them either.
+    assert not [section for section in shipped_sections if section.url.split("#")[0] == f"/docs/{page}"], (
+        f"Do not republish the withheld {page} workflow through the backend support bot"
+    )
 
 
 def test_default_shipped_import_does_not_reintroduce_trial_and_carrier_billing_promises(shipped_sections):

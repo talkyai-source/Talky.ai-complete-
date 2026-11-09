@@ -78,12 +78,6 @@ export const docsPages: DocsPage[] = [
     file: "settings-and-security.md",
   },
   {
-    slug: "partners",
-    title: "White-Label and Partner Administration",
-    description: "Availability notice for white-label and partner administration, which are not available in this release.",
-    file: "partners.md",
-  },
-  {
     slug: "workflows",
     title: "Recommended End-to-End Workflow",
     description: "The recommended order of steps for a new outbound campaign and for a new inbound agent.",
@@ -94,12 +88,6 @@ export const docsPages: DocsPage[] = [
     title: "Troubleshooting",
     description: "Quick fixes for common problems, and what to have ready when you contact support.",
     file: "troubleshooting.md",
-  },
-  {
-    slug: "support",
-    title: "Getting Support",
-    description: "Support availability and how to contact your account owner when in-app support is not enabled.",
-    file: "support.md",
   },
   {
     slug: "glossary",
