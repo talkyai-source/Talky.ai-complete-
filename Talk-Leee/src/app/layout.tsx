@@ -5,6 +5,7 @@ import { SuspensionStateProvider } from "@/components/admin/suspension-state-pro
 import { AppProviders } from "@/components/providers/app-providers";
 import { CallEndedNotice } from "@/components/ui/call-ended-notice";
 import { SignupPopup } from "@/components/ui/signup-popup";
+import { SkipToContent } from "@/components/ui/skip-to-content";
 import { sharedMetadata } from "@/lib/site-metadata";
 
 // Manrope is the navbar's typeface (navbar.tsx sets `font-family: var(--font-manrope)`
@@ -58,6 +59,7 @@ export default function RootLayout({
         {apiBaseUrl && <link rel="dns-prefetch" href={apiBaseUrl} />}
       </head>
       <body className={`font-sans antialiased ${manrope.variable}`}>
+        <SkipToContent />
         <AppProviders>
           <SuspensionStateProvider>
             {children}

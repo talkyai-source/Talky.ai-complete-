@@ -179,7 +179,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                 </header>
 
                 {/* Main Content */}
-                <main className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300">
+                <main id="main-content" className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300">
                     {/* pb-16: keeps every page's last content clear of the fixed
                         bottom-right chat launcher (its top edge sits 72px above
                         the viewport bottom; main's own padding is only 16-32px). */}
