@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useAuth } from "@/lib/auth-context";
 import { isPublicRoute } from "@/lib/public-routes";
 
 // One timer for the whole page load. It starts when the root layout mounts
@@ -25,10 +26,13 @@ const REGISTER_PATH = "/auth/register";
  *   arrival. A page cancelled once keeps that wait for the rest of the load.
  * - Shown only on the public routes in src/lib/public-routes.ts (exact
  *   match), so signed-in pages, auth pages and anything new get nothing.
- * - Cancel is the only way to close it: no Escape, no outside click.
+ * - Never shown to a signed-in visitor, or while the sign-in state is still
+ *   loading (QA F1-03).
+ * - Cancel or Escape closes it (QA F1-03); an outside click does not.
  */
 export function SignupPopup() {
     const pathname = usePathname();
+    const { status } = useAuth();
     const labelId = useId();
     const [armed, setArmed] = useState(false);
     // The pathname the popup is currently cleared to show on. Derived
@@ -62,7 +66,19 @@ export function SignupPopup() {
         setShownFor(null);
     }, [pathname]);
 
-    if (!armed || !isPublicRoute(pathname) || shownFor !== pathname) return null;
+    const visible = armed && isPublicRoute(pathname) && shownFor === pathname
+        && status !== "authenticated" && status !== "loading";
+
+    useEffect(() => {
+        if (!visible) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") cancel();
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [visible, cancel]);
+
+    if (!visible) return null;
 
     return (
         <Card
@@ -81,7 +97,7 @@ export function SignupPopup() {
                 >
                     <Link href={REGISTER_PATH}>Signup</Link>
                 </Button>
-                <Button type="button" variant="destructive" onClick={cancel}>
+                <Button type="button" variant="outline" onClick={cancel}>
                     Cancel
                 </Button>
             </div>

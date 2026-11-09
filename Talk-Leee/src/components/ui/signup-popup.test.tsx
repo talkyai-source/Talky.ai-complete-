@@ -7,10 +7,14 @@ import { act, cleanup, render } from "@testing-library/react";
 // Real SignupPopup; only next/navigation is stubbed so the test can drive the
 // route the component sees. `pathname` is mutable and read on every render.
 let pathname = "/";
+// QA F1-03: the popup reads the sign-in state. Anonymous by default, so every
+// timing test below describes a visitor; set it to test a signed-in user.
+let authStatus = "anonymous";
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (id, ...args) {
     if (id === "next/navigation") return { usePathname: () => pathname };
+    if (id === "@/lib/auth-context") return { useAuth: () => ({ status: authStatus }) };
     return originalLoad.call(this, id, ...args);
 };
 let SignupPopup: React.ComponentType;
@@ -26,6 +30,7 @@ const DELAY = 10_000;
 afterEach(() => {
     cleanup();
     pathname = "/";
+    authStatus = "anonymous";
 });
 
 function popup() {
@@ -252,6 +257,44 @@ test("writes nothing to storage", () => {
         assert.equal(window.localStorage.length, 0);
         assert.equal(window.sessionStorage.length, 0);
         assert.equal(document.cookie, "");
+    } finally {
+        restore();
+    }
+});
+
+// QA F1-03 (QA-UI-031, QA-UI-047): Escape closes it like Cancel, and a signed-in
+// user never sees an invitation to create an account.
+test("Escape closes it on that page, like Cancel", () => {
+    const { advance, restore } = mount();
+    try {
+        advance(DELAY);
+        assert.ok(popup(), "shown at 10 s");
+        act(() => {
+            window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+        });
+        assert.ok(!popup(), "Escape hid it");
+    } finally {
+        restore();
+    }
+});
+
+test("a signed-in user is never invited to create an account", () => {
+    authStatus = "authenticated";
+    const { advance, restore } = mount();
+    try {
+        advance(DELAY * 3);
+        assert.ok(!popup(), "hidden for a signed-in user");
+    } finally {
+        restore();
+    }
+});
+
+test("Cancel is not styled as a destructive action", () => {
+    const { advance, restore } = mount();
+    try {
+        advance(DELAY);
+        const cancel = [...popup()!.querySelectorAll("button")].find((b) => b.textContent === "Cancel");
+        assert.ok(cancel && !/destructive/.test(cancel.className), cancel?.className);
     } finally {
         restore();
     }
