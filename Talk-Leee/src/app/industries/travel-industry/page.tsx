@@ -277,7 +277,7 @@ export default function TravelIndustryIndustryPage() {
   const plans = [
     {
       name: "Starter",
-      price: "Free / 14-Day Trial",
+      price: "See pricing",
       blurb: "Perfect for hotels, vacation rentals, and small hospitality businesses exploring AI.",
       features: [
         "One Property Workspace",
@@ -286,7 +286,7 @@ export default function TravelIndustryIndustryPage() {
         "Reservation Management",
         "Email Support",
       ],
-      ctaLabel: "Start Free",
+      ctaLabel: "Get Started",
       ctaHref: "/auth/register",
       ctaVariant: "primary" as const,
     },

@@ -259,7 +259,7 @@ export default function RealEstateIndustryPage() {
   const pricingPlans = [
     {
       name: "Solo",
-      price: "Free / 14-Day Trial",
+      price: "See pricing",
       description: "For individual agents and small teams testing AI.",
       features: [
         "AI call answering",
@@ -268,7 +268,7 @@ export default function RealEstateIndustryPage() {
         "Appointment scheduling",
         "Essential call routing",
       ],
-      ctaLabel: "Try It Free",
+      ctaLabel: "Get Started",
       ctaHref: "/auth/register",
       ctaPrimary: true,
     },

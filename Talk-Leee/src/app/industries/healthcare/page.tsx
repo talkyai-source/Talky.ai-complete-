@@ -212,10 +212,10 @@ export default function HealthcareIndustryPage() {
   const plans = [
     {
       name: "Starter",
-      price: "Free / 14-day trial",
+      price: "See pricing",
       blurb: "For solo practices testing the waters.",
       features: ["Up to 1 phone line", "Call intake settings", "Appointment booking", "Email support"],
-      ctaLabel: "Start Free",
+      ctaLabel: "Get Started",
       ctaHref: "/auth/register",
       ctaVariant: "primary" as const,
     },
@@ -580,7 +580,7 @@ export default function HealthcareIndustryPage() {
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>
                 <Link href="/auth/register">
-                  Create Your Free Account
+                  Create Your Account
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>

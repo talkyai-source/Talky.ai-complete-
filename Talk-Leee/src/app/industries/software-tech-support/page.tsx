@@ -156,7 +156,7 @@ export default function SoftwareTechSupportIndustryPage() {
       name: "Launch",
       blurb: "For early-stage software companies building their first automated support experience.",
       features: ["AI customer support", "Basic call automation", "Onboarding assistance", "Essential workflows"],
-      ctaLabel: "Try It Free",
+      ctaLabel: "Get Started",
       ctaHref: "/auth/register",
       ctaVariant: "primary" as const,
     },
@@ -245,7 +245,7 @@ export default function SoftwareTechSupportIndustryPage() {
             </Button>
             <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>
               <Link href="/auth/register">
-                Start Your Free Trial
+                Get Started
               </Link>
             </Button>
           </div>
@@ -437,7 +437,7 @@ export default function SoftwareTechSupportIndustryPage() {
             <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
               <Button asChild size="lg" className={primaryButtonClassName}>
                 <Link href="/auth/register">
-                  Try AI Free
+                  Get Started
                 </Link>
               </Button>
               <Button asChild size="lg" variant="outline" className={outlineButtonClassName}>

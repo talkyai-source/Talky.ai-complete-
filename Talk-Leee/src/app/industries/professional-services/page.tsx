@@ -288,7 +288,7 @@ export default function ProfessionalServicesIndustryPage() {
 
   const plans = [
     {
-      price: "Free / 14-Day Trial",
+      price: "See pricing",
       blurb: "For independent professionals and small firms getting started with AI.",
       features: [
         "AI call answering",
@@ -297,7 +297,7 @@ export default function ProfessionalServicesIndustryPage() {
         "Business support automation",
         "Email support",
       ],
-      ctaLabel: "Try It Free",
+      ctaLabel: "Get Started",
       ctaHref: "/auth/register",
       ctaVariant: "primary" as const,
     },

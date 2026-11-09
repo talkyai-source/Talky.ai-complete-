@@ -120,7 +120,7 @@ export function Footer() {
               href="/auth/register" 
               className="font-semibold text-primary dark:text-foreground hover:text-primary/90 dark:hover:text-foreground/90 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background rounded-md relative after:content-[''] after:absolute after:left-0 after:bottom-[-4px] after:w-0 after:h-0.5 after:bg-primary after:transition-all hover:after:w-full"
             >
-              Start Free Trial
+              Get Started
             </Link>
           </div>
           </div>

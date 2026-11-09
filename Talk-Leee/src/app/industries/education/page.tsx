@@ -216,7 +216,7 @@ export default function EducationIndustryPage() {
   const plans = [
     {
       name: "Starter",
-      price: "Free / 14-Day Trial",
+      price: "See pricing",
       blurb: "For small schools and institutes exploring AI.",
       features: [
         "One phone line",
@@ -225,7 +225,7 @@ export default function EducationIndustryPage() {
         "Admission inquiry handling",
         "Email support",
       ],
-      ctaLabel: "Start Free",
+      ctaLabel: "Get Started",
       ctaHref: "/auth/register",
       ctaVariant: "primary" as const,
       ctaIcon: false,
@@ -319,7 +319,7 @@ export default function EducationIndustryPage() {
           <div className={ctaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Start Free &mdash; 2 Minutes
+                Get Started
               </Link>
             </Button>
             <Button asChild size="lg" className={outlineButtonClassName}>
@@ -329,7 +329,7 @@ export default function EducationIndustryPage() {
             </Button>
           </div>
           <p className="mt-6 text-sm sm:text-base font-medium text-gray-700 dark:text-muted-foreground">
-            No credit card needed. Go live with AI support in days.
+            See pricing for plans and minutes. Go live with AI support in days.
           </p>
         </header>
 
@@ -377,7 +377,7 @@ export default function EducationIndustryPage() {
           <div className={centeredCtaClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Start Free &mdash; 2 Minutes
+                Get Started
               </Link>
             </Button>
           </div>
@@ -549,7 +549,7 @@ export default function EducationIndustryPage() {
           <div className={ctaPairClassName}>
             <Button asChild size="lg" className={primaryButtonClassName}>
               <Link href="/auth/register">
-                Start Free
+                Get Started
               </Link>
             </Button>
             <Button asChild size="lg" className={outlineButtonClassName}>

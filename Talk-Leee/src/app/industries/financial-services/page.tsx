@@ -267,7 +267,7 @@ export default function FinancialServicesIndustryPage() {
   const plans = [
     {
       name: "Starter",
-      price: "Free / 14-Day Trial",
+      price: "See pricing",
       description: "Perfect for small financial businesses exploring AI customer support.",
       features: [
         "One Business Workspace",
@@ -276,7 +276,7 @@ export default function FinancialServicesIndustryPage() {
         "Customer Call Handling",
         "Email Support",
       ],
-      cta: "Start Free",
+      cta: "Get Started",
       href: "/auth/register",
       primary: true,
     },
