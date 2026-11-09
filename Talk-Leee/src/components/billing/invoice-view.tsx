@@ -78,7 +78,7 @@ export function InvoiceFacts({ invoice }: { invoice: BillingInvoice }) {
     currency?.toLowerCase() === invoice.currency?.toLowerCase() ? invoice.currency_exponent : null);
   const reference = invoice.invoice_number ?? invoice.stripe_invoice_id ?? invoice.id;
   return <div className="space-y-6">
-    <div className="flex flex-wrap gap-3"><Button asChild variant="outline" size="sm"><Link href="/billing/invoices"><ArrowLeft className="mr-1 h-4 w-4" aria-hidden /> Recent invoices</Link></Button>
+    <div className="flex flex-wrap gap-3 print:hidden"><Button asChild variant="outline" size="sm"><Link href="/billing/invoices"><ArrowLeft className="mr-1 h-4 w-4" aria-hidden /> Recent invoices</Link></Button>
       <Button variant="outline" size="sm" onClick={() => window.print()}><Printer className="mr-1 h-4 w-4" aria-hidden /> Print</Button><Documents invoice={invoice} /></div>
     <Card><CardHeader><div className="flex items-center justify-between gap-3"><CardTitle>{reference}</CardTitle><InvoiceStatus status={invoice.status} /></div>
       <CardDescription>{invoice.detail_source === "provider_snapshot" ? "Captured provider invoice" : "Stored invoice summary"}{invoice.captured_at ? ` · captured ${new Date(invoice.captured_at).toLocaleString()}` : ""}</CardDescription>

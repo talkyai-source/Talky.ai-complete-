@@ -1573,3 +1573,13 @@ details[open] > summary.home-menu-toggle {
     animation: none;
   }
 }
+
+/* QA F1-24 (QA-UI-034): a printed page is its content. The app shell is
+   hidden with `print:hidden` where it is rendered, a dark page prints in the
+   light theme (PrintInLightTheme), and a card is not split across pages. */
+@media print {
+  .content-card {
+    break-inside: avoid;
+    box-shadow: none;
+  }
+}

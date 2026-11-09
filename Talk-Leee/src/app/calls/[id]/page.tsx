@@ -6,6 +6,7 @@ import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
+import { PrintButton } from "@/components/ui/print-support";
 import { ArrowLeft, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
@@ -258,12 +259,14 @@ export default function CallDetailPage() {
             <motion.div
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="mb-6"
+                className="mb-6 flex items-center justify-between gap-2 print:hidden"
             >
                 <Button variant="ghost" size="sm" onClick={() => router.back()} className="gap-2 px-2">
                     <ArrowLeft className="h-4 w-4" />
                     Back to calls
                 </Button>
+                {/* QA F1-24: print this call's details. */}
+                {call ? <PrintButton /> : null}
             </motion.div>
 
             {callQuery.isLoading ? (
@@ -273,7 +276,7 @@ export default function CallDetailPage() {
             ) : error ? (
                 <CallLoadError message={error} onRetry={() => void callQuery.refetch()} />
             ) : call ? (
-                <div className="call-detail-page columns-1 xl:columns-2 gap-6">
+                <div className="call-detail-page columns-1 xl:columns-2 gap-6 print:columns-1">
                     {/* Call Info */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}

@@ -21,7 +21,7 @@ export function OfflineBanner() {
     const offline = useSyncExternalStore(subscribe, () => navigator.onLine === false, () => false);
     if (!offline) return null;
     return (
-        <div role="status" aria-live="polite" className="flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-800 dark:text-amber-300">
+        <div role="status" aria-live="polite" className="print:hidden flex items-center gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-medium text-amber-800 dark:text-amber-300">
             <WifiOff className="h-4 w-4 shrink-0" aria-hidden />
             You&apos;re offline. Changes can&apos;t be saved until you reconnect.
         </div>
