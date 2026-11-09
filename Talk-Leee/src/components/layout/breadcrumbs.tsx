@@ -17,6 +17,7 @@ const LABELS: Record<string, string> = {
     "inbound-campaigns": "Inbound Campaigns",
     calls: "Call History",
     contacts: "Contacts",
+    "do-not-call": "Do-Not-Call list",
     analytics: "Analytics",
     billing: "Billing",
     recordings: "Recordings",

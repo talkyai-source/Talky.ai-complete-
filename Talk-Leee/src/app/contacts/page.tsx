@@ -1167,6 +1167,12 @@ export default function ContactsPage() {
 
     return (
         <DashboardLayout title="Contacts" description="Import and manage the contacts for your campaigns">
+            {/* QA F1-15: the Do-Not-Call list had no screen. */}
+            <div className="mb-4 flex justify-end">
+                <Link href="/contacts/do-not-call" className="text-sm font-semibold text-foreground underline-offset-4 hover:underline">
+                    Do-Not-Call list
+                </Link>
+            </div>
             {loading ? (
                 <div className="flex h-64 items-center justify-center" role="status" aria-live="polite">
                     <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" aria-hidden />

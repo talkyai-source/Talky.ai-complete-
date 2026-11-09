@@ -77,3 +77,11 @@ test("a role that may change campaigns keeps adding, editing and deleting", asyn
     assert.ok(screen.getAllByRole("button", { name: /^Delete \+44/ }).length > 0);
     await waitFor(() => assert.equal(contactListsReadOnly, false));
 });
+
+// QA F1-15: the Do-Not-Call list is reachable from Contacts for every role
+// (reading it is open to the tenant; changing it is admin-only there).
+test("Contacts links to the Do-Not-Call list", async () => {
+    load(READ_ONLY);
+    const link = await screen.findByRole("link", { name: "Do-Not-Call list" }, { timeout: SLOW });
+    assert.equal(link.getAttribute("href"), "/contacts/do-not-call");
+});
