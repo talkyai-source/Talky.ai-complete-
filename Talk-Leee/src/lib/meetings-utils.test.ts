@@ -104,3 +104,26 @@ test("sanitizeMeetingNotesHtml removes scripts and event handlers", () => {
     assert.ok(!out.toLowerCase().includes("onerror"));
     assert.ok(out.includes("<b>Hi</b>"));
 });
+
+// QA F4-09 (QA-SEC-041): the deny-list let `java&#9;script:` and `da&#9;ta:`
+// links through, because browsers drop the tab when they follow the link.
+// Only http, https, mailto and relative links survive now.
+test("sanitizeMeetingNotesHtml keeps only http, https, mailto and relative links", () => {
+    const unsafe = [
+        `<a href="java&#9;script:alert(1)">x</a>`,
+        `<a href="da&#9;ta:text/html,&lt;script&gt;alert(1)&lt;/script&gt;">x</a>`,
+        `<a href=" JaVaScRiPt:alert(1)">x</a>`,
+        `<a href="java&#10;script:alert(1)">x</a>`,
+        `<a href="vbscript:msgbox(1)">x</a>`,
+        `<a href="javascript&colon;alert(1)">x</a>`,
+    ];
+    for (const input of unsafe) {
+        const out = sanitizeMeetingNotesHtml(input);
+        assert.ok(!/href/i.test(out), `unsafe link kept: ${input} -> ${out}`);
+        assert.ok(out.includes("x"), "the link text stays as plain text");
+    }
+    for (const href of ["https://example.com/a?b=1", "http://example.com", "mailto:lead@example.com", "/meetings"]) {
+        const out = sanitizeMeetingNotesHtml(`<a href="${href}">ok</a>`);
+        assert.ok(out.includes(`href="${href}"`), `safe link dropped: ${href} -> ${out}`);
+    }
+});
