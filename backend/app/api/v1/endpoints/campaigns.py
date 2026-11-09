@@ -848,7 +848,8 @@ async def _campaign_runtime(db_client: Client, tenant_id: str, campaign_id: str,
     effective_schedule (D2-1/2/3): the calling schedule the dialer enforces.
     progress (D3-15/16): how many of the campaign's calls are still live or
     ending, counted over the stop sweep's own status set, so after a partial
-    stop the number reaches 0 when the last fenced call is proved gone.
+    stop the number reaches 0 when the last fenced call is proved gone; and
+    (D3-14) how many of its jobs a Start has not queued yet.
 
     Read-only and best-effort: a failed read returns (None, None) rather than
     failing the campaign page. The dialer stays the enforcement point.
@@ -869,13 +870,19 @@ async def _campaign_runtime(db_client: Client, tenant_id: str, campaign_id: str,
                 "SELECT count(*) FROM calls WHERE tenant_id = $1::uuid AND campaign_id = $2::uuid"
                 " AND status = ANY($3::text[])",
                 tenant_id, campaign_id, list(CAMPAIGN_LIVE_CALL_STATUSES)) or 0)
+            # D3-14: durable jobs a Start has not queued yet.
+            awaiting = int(await conn.fetchval(
+                "SELECT count(*) FROM dialer_jobs WHERE tenant_id = $1::uuid AND campaign_id = $2::uuid"
+                " AND status = 'pending'",
+                tenant_id, campaign_id) or 0)
     except Exception as exc:
         logger.warning("campaign_runtime_unavailable campaign=%s error=%s",
                        campaign_id, type(exc).__name__)
         return None, None
     schedule = describe_schedule(account_rules, campaign.get("calling_config"),
                                  {row["timezone"]: row["contacts"] for row in zones})
-    return schedule, {"live_calls": live_calls, "phase": campaign_phase(campaign.get("status"), live_calls)}
+    return schedule, {"live_calls": live_calls, "jobs_awaiting_dispatch": awaiting,
+                      "phase": campaign_phase(campaign.get("status"), live_calls, awaiting)}
 
 
 @router.get("/{campaign_id}")
@@ -1221,6 +1228,8 @@ async def start_campaign(
         response_data = {
             "message": result.message,
             "jobs_enqueued": result.jobs_enqueued,
+            # D3-14: a large start answers before queueing; GET shows progress.
+            "jobs_dispatching": getattr(result, "jobs_dispatching", 0),
             "queue_stats": result.queue_stats,
             "campaign": {"id": result.campaign_id, "status": "running"}
         }

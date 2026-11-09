@@ -117,7 +117,7 @@ def endpoint(monkeypatch):
     class Conn:
         async def fetchval(self, query, *args):
             state.queries.append((query, args))
-            return 0 if "FROM calls" in query else state.account
+            return 0 if "count(*)" in query else state.account
 
         async def fetch(self, query, *args):
             state.queries.append((query, args))

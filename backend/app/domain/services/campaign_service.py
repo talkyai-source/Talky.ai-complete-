@@ -10,6 +10,8 @@ Responsibilities:
 
 Day 9+ refactoring: Business logic extracted from campaigns.py endpoints
 """
+import asyncio
+import os
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
@@ -27,6 +29,17 @@ logger = logging.getLogger(__name__)
 # Jobs dispatched between re-reads of the campaign's status (QA F6-04).
 _DISPATCH_STATUS_CHECK_EVERY = 100
 
+# D3-14: a start with more jobs than this answers once they are durable and
+# queues them in a background task. Held here so the task is not collected.
+_BACKGROUND_DISPATCHES: set = set()
+
+
+def _inline_dispatch_max() -> int:
+    try:
+        return max(0, int(os.getenv("CAMPAIGN_START_INLINE_DISPATCH_MAX", "200")))
+    except ValueError:
+        return 200
+
 
 @dataclass
 class StartCampaignResult:
@@ -37,6 +50,8 @@ class StartCampaignResult:
     campaign_id: str
     queue_stats: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    # D3-14: jobs a large start is still queueing in the background.
+    jobs_dispatching: int = 0
 
 
 class CampaignError(Exception):
@@ -73,13 +88,19 @@ PAUSABLE_STATUSES = ("running",)
 STOPPABLE_STATUSES = ("running", "paused")
 
 
-def campaign_phase(status: Optional[str], live_calls: Optional[int]) -> Optional[str]:
-    """What a campaign is doing now, for display (D3-15).
+def campaign_phase(
+    status: Optional[str], live_calls: Optional[int], awaiting_dispatch: Optional[int] = None,
+) -> Optional[str]:
+    """What a campaign is doing now, for display (D3-14, D3-15).
 
+    A large Start answers before its jobs are queued (D3-14): while a running
+    campaign still has jobs waiting to be queued the phase is "preparing".
     Stop and Pause write their status at once; the calls they hang up can take
     longer to end. While any are still live the phase is "stopping" or
-    "pausing". The status column keeps its value (0088 has no stopping state).
+    "pausing". The status column keeps its value (0088 has neither state).
     """
+    if awaiting_dispatch and status == "running":
+        return "preparing"
     if live_calls and status == "stopped":
         return "stopping"
     if live_calls and status == "paused":
@@ -568,17 +589,37 @@ class CampaignService:
                     campaign_id, status="running", tenant_id=scoping_tenant_id
                 )
 
+            # 7a. D3-14: a large start answers now. Every job is already a
+            # durable 'pending' row and the campaign is 'running', so the
+            # campaign reads "preparing" until they are queued, and a repeat
+            # Start replays any the background task could not queue.
+            if len(jobs_to_dispatch) > _inline_dispatch_max():
+                task = asyncio.create_task(
+                    self._dispatch_in_background(campaign_id, jobs_to_dispatch)
+                )
+                _BACKGROUND_DISPATCHES.add(task)
+                task.add_done_callback(_BACKGROUND_DISPATCHES.discard)
+                logger.info(
+                    "Campaign %s started; queueing %d jobs in the background",
+                    campaign_id, len(jobs_to_dispatch),
+                )
+                return StartCampaignResult(
+                    success=True,
+                    message=(
+                        f"Campaign {campaign_id} started; "
+                        f"{len(jobs_to_dispatch)} calls are being queued"
+                    ),
+                    jobs_enqueued=0,
+                    campaign_id=campaign_id,
+                    jobs_dispatching=len(jobs_to_dispatch),
+                )
+
             # 7. Dispatch the durable outbox. A false enqueue result is a real
             # failure, not a log line; rows that did not reach ``queued`` stay
             # pending so this same endpoint can reconcile them on retry.
             queue_service = await self._get_queue_service()
             try:
-                try:
-                    _redis = getattr(queue_service, "_redis", None)
-                    if _redis is not None:
-                        await _redis.delete(f"dialer:last_dial:{campaign_id}")
-                except Exception as _gap_exc:
-                    logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
+                await self._reset_gap_clock(queue_service, campaign_id)
 
                 jobs_created = await self._dispatch_durable_jobs(
                     queue_service,
@@ -603,6 +644,46 @@ class CampaignService:
         except Exception as e:
             logger.error(f"Error starting campaign {campaign_id}: {e}")
             raise CampaignError(f"Failed to start campaign: {str(e)}")
+
+    @staticmethod
+    async def _reset_gap_clock(queue_service, campaign_id: str) -> None:
+        try:
+            _redis = getattr(queue_service, "_redis", None)
+            if _redis is not None:
+                await _redis.delete(f"dialer:last_dial:{campaign_id}")
+        except Exception as _gap_exc:
+            logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
+
+    async def _dispatch_in_background(self, campaign_id: str, jobs: List[DialerJob]) -> None:
+        """D3-14: the same durable dispatch as an inline start, after answering.
+
+        A failure (or a process restart) leaves the rest 'pending'; the
+        campaign keeps reading "preparing" and a repeat Start replays them.
+        """
+        try:
+            queue_service = await self._get_queue_service()
+            try:
+                await self._reset_gap_clock(queue_service, campaign_id)
+                queued = await self._dispatch_durable_jobs(queue_service, jobs)
+            finally:
+                await self._cleanup_queue_service()
+            logger.info(
+                "campaign_background_dispatch_done campaign=%s queued=%d of %d",
+                campaign_id, queued, len(jobs),
+            )
+        except asyncio.CancelledError:
+            logger.warning(
+                "campaign_background_dispatch_cancelled campaign=%s jobs=%d; "
+                "unqueued jobs stay pending until Start is pressed again",
+                campaign_id, len(jobs),
+            )
+            raise
+        except Exception as exc:
+            logger.error(
+                "campaign_background_dispatch_failed campaign=%s jobs=%d error=%s; "
+                "unqueued jobs stay pending until Start is pressed again",
+                campaign_id, len(jobs), exc,
+            )
 
     # =========================================================================
     # Pause Campaign

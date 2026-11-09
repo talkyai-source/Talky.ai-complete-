@@ -80,11 +80,11 @@ async def _get():
 async def test_a_stopped_campaign_with_live_calls_reads_stopping_until_they_end(endpoint):
     first = await _get()
     assert first["campaign"]["status"] == "stopped"
-    assert first["progress"] == {"live_calls": 2, "phase": "stopping"}
+    assert first["progress"] == {"live_calls": 2, "jobs_awaiting_dispatch": 0, "phase": "stopping"}
 
     endpoint.live = 0
     later = await _get()
-    assert later["progress"] == {"live_calls": 0, "phase": "stopped"}
+    assert later["progress"] == {"live_calls": 0, "jobs_awaiting_dispatch": 0, "phase": "stopped"}
 
     query, args = next((q, a) for q, a in endpoint.queries if "FROM calls" in q)
     assert "tenant_id = $1" in query and "campaign_id = $2" in query
