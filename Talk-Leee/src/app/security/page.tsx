@@ -37,7 +37,6 @@ import {
     ChevronRight,
     Clock,
     Fingerprint,
-    Key,
     Loader2,
     Lock,
     Monitor,
@@ -522,18 +521,6 @@ export default function SecurityPage() {
                                 icon={Shield}
                                 title="Audit and access"
                                 description="Security events and access review"
-                            />
-                            <AdminLinkCard
-                                href="/admin/api-keys"
-                                icon={Key}
-                                title="API keys and tokens"
-                                description="Not available here — no key management API is served"
-                            />
-                            <AdminLinkCard
-                                href="/admin/voice-security"
-                                icon={ShieldCheck}
-                                title="Voice security"
-                                description="Not available here — call guards are not served"
                             />
                         </div>
                     </Section>
