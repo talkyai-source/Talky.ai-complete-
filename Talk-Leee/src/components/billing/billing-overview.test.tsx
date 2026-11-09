@@ -97,7 +97,7 @@ afterEach(() => {
 
 test("a failed billing request renders the error state, never '0 of 0 minutes used'", async () => {
     globalThis.fetch = routeFetch(
-        Object.fromEntries(Object.keys(ALL_EMPTY_OK).map((p) => [p, () => json({ detail: "Forbidden" }, 403)])),
+        Object.fromEntries(Object.keys(ALL_EMPTY_OK).map((p) => [p, () => json({ detail: "Billing is unavailable" }, 500)])),
     ) as typeof fetch;
 
     renderWithQueryClient(<BillingOverview />);
@@ -111,6 +111,26 @@ test("a failed billing request renders the error state, never '0 of 0 minutes us
     assert.equal(screen.queryByText("No invoices yet."), null);
     assert.equal(screen.queryByText("No call activity in the last 30 days."), null);
     assert.ok(screen.getByRole("alert"));
+});
+
+// QA F1-21 (QA-UI-041): a role without billing:read was shown "Billing data
+// did not load" with a Retry that could never work. It is told its role does
+// not include billing, still with no fabricated figures.
+test("a role without billing access is told so, with no retry and no figures", async () => {
+    globalThis.fetch = routeFetch(
+        Object.fromEntries(Object.keys(ALL_EMPTY_OK).map((p) => [p, () => json({ detail: "Forbidden" }, 403)])),
+    ) as typeof fetch;
+
+    renderWithQueryClient(<BillingOverview />);
+
+    await waitFor(() => {
+        assert.ok(screen.getByText("Billing is not part of your role"));
+    });
+    assert.ok(screen.getByText(/account owners, admins and billing users/));
+    assert.equal(screen.queryByText("Billing data did not load"), null);
+    assert.equal(screen.queryByRole("button", { name: /retry/i }), null);
+    assert.equal(screen.queryByText(/minutes used/), null);
+    assert.equal(screen.queryByText("No invoices yet."), null);
 });
 
 test("a genuinely empty successful response renders the empty state, not an error", async () => {

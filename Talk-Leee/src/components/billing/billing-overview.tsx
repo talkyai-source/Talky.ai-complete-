@@ -22,7 +22,7 @@ import {
   TrendingUp,
   XCircle,
 } from "lucide-react";
-import { ErrorState } from "@/components/states/page-states";
+import { EmptyState, ErrorState } from "@/components/states/page-states";
 import { api } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useTopupBalance } from "@/lib/topup-api";
@@ -215,12 +215,26 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
     );
   }
 
+  const coreFailure = planQ.isError ? planQ.error : usageQ.error;
+  if (coreError && isApiClientError(coreFailure) && coreFailure.status === 403) {
+    // QA F1-21: a role without billing:read did not fail to load; retrying
+    // cannot help. Still no figures, since none were read.
+    return (
+      <div className="space-y-6">
+        <EmptyState
+          title="Billing is not part of your role"
+          message="Plans, minutes and invoices are shown to account owners, admins and billing users. Ask one of them if you need these figures."
+        />
+      </div>
+    );
+  }
+
   if (coreError) {
     return (
       <div className="space-y-6">
         <ErrorState
           title="Billing data did not load"
-          message={`${formatBillingError(planQ.isError ? planQ.error : usageQ.error)} Your plan, minutes and invoices are unchanged — this page just could not read them.`}
+          message={`${formatBillingError(coreFailure)} Your plan, minutes and invoices are unchanged — this page just could not read them.`}
           troubleshooting={[
             "Retry below, or reload the page.",
             "If you have just signed in on another tab, sign in again here.",
