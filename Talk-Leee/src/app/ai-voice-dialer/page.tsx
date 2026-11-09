@@ -53,10 +53,11 @@ export default function AIVoiceDialerPage() {
     { value: "$0", label: "Return on missed dials and follow-ups." },
   ];
 
+  // QA F1-04: no unmeasured numbers or absolutes.
   const whatChanges = [
-    "10x more dialing capacity",
-    "Pre-qualified leads, every time",
-    "Zero missed follow-ups",
+    "More dialing capacity without more reps",
+    "Leads qualified on the call",
+    "Follow-ups you can track",
     "Real-time analytics on what’s working",
   ];
 
