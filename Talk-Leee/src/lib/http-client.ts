@@ -216,6 +216,14 @@ const PUBLIC_AUTH_PATHS = new Set([
 function managesSession(path: string) {
     return PUBLIC_AUTH_PATHS.has(path) || COOKIE_SESSION_PATHS.has(path);
 }
+// QA F1-27: a failed connection used to surface the browser's own text
+// ("Failed to fetch", "Load failed"), e.g. "Save failed — Failed to fetch".
+function networkErrorMessage() {
+    return typeof navigator !== "undefined" && navigator.onLine === false
+        ? "You appear to be offline. Reconnect, then try again."
+        : "Could not reach the server. Check your connection, then try again.";
+}
+
 // Requests that sign in or out, or establish the identity itself, are never fenced.
 function identityExempt(path: string, method: HttpMethod) {
     return managesSession(path) || (method === "GET" && (path === "/auth/me" || path === "/me" || path === "/health"));
@@ -695,7 +703,7 @@ export function createHttpClient(config: HttpClientConfig) {
             }
             throw new ApiClientError({
                 code: "network_error",
-                message: err instanceof Error ? err.message : "Network error",
+                message: networkErrorMessage(),
                 url,
                 method,
                 details: err,
@@ -835,7 +843,7 @@ export function createHttpClient(config: HttpClientConfig) {
             }
             throw new ApiClientError({
                 code: "network_error",
-                message: err instanceof Error ? err.message : "Network error",
+                message: networkErrorMessage(),
                 url,
                 method,
                 details: err,

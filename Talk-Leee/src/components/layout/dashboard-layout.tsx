@@ -9,6 +9,7 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { HealthIndicator } from "@/components/ui/health-indicator";
 import { useAuth } from "@/hooks/useAuth";
 import { SuspensionBanner, useSuspensionState } from "@/components/admin/suspension-state-provider";
+import { OfflineBanner } from "@/components/ui/offline-banner";
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -184,6 +185,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                         the viewport bottom; main's own padding is only 16-32px). */}
                     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-16">
                         <SuspensionBanner />
+                        <OfflineBanner />
                         <div className="relative">
                             {suspensionState.suspended ? (
                                 <div className="absolute inset-0 z-20 rounded-2xl border border-red-500/20 bg-background/55 backdrop-blur-[1px]" aria-hidden />

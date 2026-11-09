@@ -212,7 +212,8 @@ test("when the re-read holds no reply, Retry sends the same request_id and never
     await sendHello();
     const alert = document.querySelector("[role='alert']");
     assert.ok(alert, "the failure is shown after the re-read found nothing");
-    assert.match(alert.textContent ?? "", /Failed to fetch/);
+    // QA F1-27: the failure is described in plain words, not the browser's "Failed to fetch".
+    assert.match(alert.textContent ?? "", /Could not reach the server/);
     assert.equal(conversationReads(), 1, "re-read once before offering Retry");
     assert.equal(messageSends().length, 1);
     const retry = Array.from(alert.querySelectorAll("button")).find((button) => button.textContent === "Retry")!;
