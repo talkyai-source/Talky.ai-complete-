@@ -14,6 +14,8 @@ import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
 import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
 import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
 import { campaignActions, useKnownPermissions } from "@/lib/permissions";
+import { isApiClientError } from "@/lib/http-client";
+import { ReadError } from "@/components/ui/read-error";
 import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { ContactLists } from "@/components/campaigns/contact-lists";
@@ -242,6 +244,9 @@ export default function ContactsPage() {
     const [sentRowMap, setSentRowMap] = useState<Map<number, number>>(() => new Map());
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
+    // QA F1-27: a failed campaigns read is not "no campaigns". Kept apart from
+    // the upload card's error so it is never shown as "Create a campaign first".
+    const [campaignsLoadFailure, setCampaignsLoadFailure] = useState<{ requestId?: string } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Contacts-home state. `campaignHasContacts` (recomputed only on UNFILTERED
@@ -297,11 +302,12 @@ export default function ContactsPage() {
             const data = await dashboardApi.listCampaigns();
             const outbound = outboundCampaignsOnly(data.campaigns);
             setCampaigns(outbound);
+            setCampaignsLoadFailure(null);
             if (outbound.length > 0) {
                 setSelectedCampaign(outbound[0].id);
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to load campaigns");
+            setCampaignsLoadFailure({ requestId: isApiClientError(err) ? err.requestId : undefined });
         } finally {
             setLoading(false);
         }
@@ -1165,6 +1171,15 @@ export default function ContactsPage() {
                 <div className="flex h-64 items-center justify-center" role="status" aria-live="polite">
                     <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" aria-hidden />
                     <span className="sr-only">Loading campaigns…</span>
+                </div>
+            ) : campaignsLoadFailure ? (
+                <div className="max-w-5xl">
+                    <ReadError
+                        resource="your campaigns"
+                        requestId={campaignsLoadFailure.requestId}
+                        onRetry={() => { void loadCampaigns(); }}
+                        busy={loading}
+                    />
                 </div>
             ) : campaigns.length === 0 ? (
                 <div className="max-w-5xl space-y-6">
