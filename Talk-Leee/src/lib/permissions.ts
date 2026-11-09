@@ -20,6 +20,17 @@ export function permits(permissions: readonly string[] | undefined, required: st
     return !required || permissions === undefined || hasPermission(permissions, required);
 }
 
+/** What a role may do to campaigns, as the campaign endpoints gate it. */
+export type CampaignActions = { create: boolean; update: boolean; delete: boolean };
+
+export function campaignActions(permissions: readonly string[] | undefined): CampaignActions {
+    return {
+        create: permits(permissions, "campaigns:create"),
+        update: permits(permissions, "campaigns:update"),
+        delete: permits(permissions, "campaigns:delete"),
+    };
+}
+
 /** The effective permission list once the server has answered, else undefined. */
 export function useKnownPermissions(): readonly string[] | undefined {
     const query = useEffectivePermissions();

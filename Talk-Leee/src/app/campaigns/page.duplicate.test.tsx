@@ -51,6 +51,8 @@ loader._load = function (id, ...args) {
         queryKeys: { campaigns: () => ["campaigns"] },
         useOutboundCampaigns: () => ({ data: [SOURCE], isLoading: false, isError: false }),
     };
+    // Campaign actions follow effective permissions (QA F1-21); unknown offers all.
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => ({ isSuccess: false }) };
     if (id === "@tanstack/react-query") return { useQueryClient: () => queryClient };
     if (id.includes("lib/notifications-client")) return { useNotificationsActions: () => ({
         create: (notice: unknown) => { notices.push(notice); },

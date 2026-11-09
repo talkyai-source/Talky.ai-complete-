@@ -60,6 +60,8 @@ loader._load = function (id, ...args) {
         extendedApi: { getCallAnalytics: async () => { analyticsReads += 1; return analyticsRead(); } },
     };
     if (id.endsWith("lib/api-hooks")) return { useOutboundCampaigns: useCampaignRead, queryKeys: { campaigns: () => ["campaigns"] } };
+    // Campaign actions follow effective permissions (QA F1-21); unknown offers all.
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => ({ isSuccess: false }) };
     if (id === "@tanstack/react-query") return { useQueryClient: () => ({ setQueryData() {}, invalidateQueries: async () => undefined }) };
     if (id.endsWith("lib/notification-mutations")) return {
         useNotificationMutation: () => ({ mutateAsync: async () => { mutationCalls += 1; throw new Error("Read retry must never replay a mutation"); } }),

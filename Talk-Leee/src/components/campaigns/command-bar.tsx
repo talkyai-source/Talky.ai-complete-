@@ -5,6 +5,7 @@ import { Modal } from "@/components/ui/modal";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import type { Campaign } from "@/lib/dashboard-api";
+import type { CampaignActions } from "@/lib/permissions";
 import { parseCommandInput, CommandResultCategory } from "@/lib/campaign-performance";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
@@ -18,6 +19,8 @@ type Result = {
     href?: string;
     action?: () => void;
     disabled?: boolean;
+    /** Not offered to this role (QA F1-21). */
+    hidden?: boolean;
 };
 
 function matchScore(text: string, query: string) {
@@ -34,10 +37,13 @@ export function CommandBar({
     campaigns,
     onPause,
     onResume,
+    allowed = { create: true, update: true, delete: true },
 }: {
     campaigns: Campaign[];
     onPause: (id: string) => Promise<void>;
     onResume: (id: string) => Promise<void>;
+    /** What the signed-in role may do (QA F1-21); everything by default. */
+    allowed?: CampaignActions;
 }) {
     const router = useRouter();
     const [open, setOpen] = useState(false);
@@ -130,12 +136,14 @@ export function CommandBar({
                     title: "Create new campaign",
                     subtitle: "Navigate to create flow",
                     action: () => router.push("/campaigns/new"),
+                    hidden: !allowed.create,
                 },
                 {
                     id: "action-pause-active",
                     category: "Campaigns",
                     title: "Pause all active campaigns",
                     subtitle: "Prototype action",
+                    hidden: !allowed.update,
                     action: async () => {
                         for (const c of campaigns) {
                             if ((c.status || "").toLowerCase() === "running") await onPause(c.id);
@@ -148,6 +156,7 @@ export function CommandBar({
                     title: "Resume all paused campaigns",
                     subtitle: resumeReadiness.reason || "Calling routes are ready",
                     disabled: !resumeReadiness.ready,
+                    hidden: !allowed.update,
                     action: async () => {
                         if (!resumeReadiness.ready) return;
                         for (const c of campaigns) {
@@ -157,6 +166,7 @@ export function CommandBar({
                 },
             ];
             const scored = actions
+                .filter((r) => !r.hidden)
                 .map((r) => ({ r, score: matchScore(r.title, q) + (r.subtitle ? matchScore(r.subtitle, q) * 0.2 : 0) }))
                 .filter((x) => x.score > 0 || q.length === 0)
                 .sort((a, b) => b.score - a.score)
@@ -211,7 +221,7 @@ export function CommandBar({
             .map((x) => x.r);
 
         return scored;
-    }, [campaigns, onPause, onResume, parsed.prefix, parsed.query, router, resumeReadiness.ready, resumeReadiness.reason]);
+    }, [allowed.create, allowed.update, campaigns, onPause, onResume, parsed.prefix, parsed.query, router, resumeReadiness.ready, resumeReadiness.reason]);
 
     const runResult = async (r: Result) => {
         if (r.disabled || runningAction.current) return;

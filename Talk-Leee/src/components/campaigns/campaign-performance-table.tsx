@@ -30,6 +30,7 @@ import { ChevronDown, ChevronRight, Download, Pause, Trash2 } from "lucide-react
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { CampaignStartControl } from "@/components/campaigns/campaign-readiness";
+import type { CampaignActions } from "@/lib/permissions";
 
 type ColumnDef = { key: CampaignSortKey; label: string; numeric?: boolean };
 
@@ -316,6 +317,7 @@ export function CampaignPerformanceTable({
     onResume,
     onDelete,
     onDuplicate,
+    allowed = { create: true, update: true, delete: true },
 }: {
     campaigns: Campaign[];
     loading: boolean;
@@ -326,6 +328,8 @@ export function CampaignPerformanceTable({
     onResume: (id: string) => Promise<void>;
     onDelete: (id: string) => Promise<void>;
     onDuplicate: (id: string) => Promise<void>;
+    /** What the signed-in role may do (QA F1-21); everything by default. */
+    allowed?: CampaignActions;
 }) {
     const router = useRouter();
     const [sort, setSort] = useState<CampaignSortSpec[]>([]);
@@ -908,20 +912,33 @@ export function CampaignPerformanceTable({
                         >
                             Export
                         </Button>
-                        <Button
-                            asChild
-                            variant="outline"
-                            className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
-                        >
-                            <Link href="/campaigns/new" className="shrink-0">
-                                New Campaign
-                            </Link>
-                        </Button>
+                        {allowed.create ? (
+                            <Button
+                                asChild
+                                variant="outline"
+                                className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
+                            >
+                                <Link href="/campaigns/new" className="shrink-0">
+                                    New Campaign
+                                </Link>
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
             </div>
 
-            {bulkCount > 0 ? (
+            {bulkCount > 0 && !allowed.update && !allowed.delete ? (
+                // A role that may not change campaigns can still export them.
+                <div className="content-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-sm font-semibold text-foreground">
+                        {bulkCount} selected
+                    </div>
+                    <Button type="button" variant="secondary" size="sm" className="self-start sm:self-auto" onClick={() => setExportOpen(true)}>
+                        <Download className="h-4 w-4" />
+                        Export Selected
+                    </Button>
+                </div>
+            ) : bulkCount > 0 ? (
                 <div className="content-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="text-sm font-semibold text-foreground">
                         {bulkCount} selected
@@ -943,17 +960,22 @@ export function CampaignPerformanceTable({
                         notice's own mt-1 is zeroed at every width so the phone column keeps
                         this container's 8px gap above it instead of 12px. */}
                     <div className="flex flex-col items-start gap-2 [&>div:first-of-type]:contents [&>div:first-of-type>div]:mt-0 [&>div:first-of-type>div]:[overflow-wrap:anywhere] sm:grid sm:min-w-0 sm:flex-1 sm:grid-cols-[max-content_minmax(0,1fr)_max-content] sm:items-center sm:gap-x-4 sm:[&>div:first-of-type>button]:col-start-1 sm:[&>div:first-of-type>button]:row-start-2 sm:[&>div:first-of-type>button]:w-40 sm:[&>div:first-of-type>button]:justify-start sm:[&>div:first-of-type>div]:col-start-2 sm:[&>div:first-of-type>div]:row-start-1 sm:[&>div:first-of-type>div]:row-span-2 sm:[&>div:first-of-type>div]:self-center sm:[&>div:first-of-type>div]:justify-self-center sm:[&>div:first-of-type>div]:text-center sm:[&>div:first-of-type>p]:col-start-2 sm:[&>div:first-of-type>p]:row-start-3 sm:[&>div:first-of-type>p]:justify-self-center">
-                        <Button type="button" variant="outline" size="sm" className="sm:col-start-1 sm:row-start-1 sm:w-40 sm:justify-start" onClick={bulkPause}>
+                        <Button type="button" variant="outline" size="sm" className="sm:col-start-1 sm:row-start-1 sm:w-40 sm:justify-start" onClick={bulkPause} disabled={!allowed.update}>
                             <Pause className="h-4 w-4" />
                             Pause Selected
                         </Button>
-                        <CampaignStartControl campaignIds={resumableSelectedIds} onStart={bulkResume} label="Resume Selected" />
+                        {/* Same first-div shape as the start control, for the grid above. */}
+                        {allowed.update ? (
+                            <CampaignStartControl campaignIds={resumableSelectedIds} onStart={bulkResume} label="Resume Selected" />
+                        ) : (
+                            <div><Button type="button" variant="outline" size="sm" disabled>Resume Selected</Button></div>
+                        )}
                         <div className="flex flex-wrap items-center gap-2 sm:contents">
                             <Button type="button" variant="secondary" size="sm" className="sm:col-start-3 sm:row-start-1 sm:w-40 sm:justify-start" onClick={() => setExportOpen(true)}>
                                 <Download className="h-4 w-4" />
                                 Export Selected
                             </Button>
-                            <Button type="button" variant="destructive" size="sm" className="sm:col-start-3 sm:row-start-2 sm:w-40 sm:justify-start" onClick={() => setConfirmDeleteId("__bulk__")}>
+                            <Button type="button" variant="destructive" size="sm" className="sm:col-start-3 sm:row-start-2 sm:w-40 sm:justify-start" onClick={() => setConfirmDeleteId("__bulk__")} disabled={!allowed.delete}>
                                 <Trash2 className="h-4 w-4" />
                                 Delete Selected
                             </Button>
@@ -1293,7 +1315,7 @@ export function CampaignPerformanceTable({
                                     Open Page
                                 </Link>
                             </Button>
-                            {detailsCanResume ? <CampaignStartControl campaignIds={[detailsCampaign.id]} onStart={() => onResume(detailsCampaign.id)} label="Resume" /> : detailsCanPause ? (
+                            {!allowed.update ? null : detailsCanResume ? <CampaignStartControl campaignIds={[detailsCampaign.id]} onStart={() => onResume(detailsCampaign.id)} label="Resume" /> : detailsCanPause ? (
                                 <Button
                                     type="button"
                                     variant="outline"
@@ -1306,25 +1328,29 @@ export function CampaignPerformanceTable({
                                     {detailsCanPause ? "Pause" : "Resume"}
                                 </Button>
                             ) : null}
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={async () => {
-                                    await onDuplicate(detailsCampaign.id);
-                                }}
-                            >
-                                Duplicate
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                    setDetailsId(null);
-                                    router.push(`/campaigns/${detailsCampaign.id}/edit`);
-                                }}
-                            >
-                                Edit Campaign
-                            </Button>
+                            {allowed.create ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={async () => {
+                                        await onDuplicate(detailsCampaign.id);
+                                    }}
+                                >
+                                    Duplicate
+                                </Button>
+                            ) : null}
+                            {allowed.update ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setDetailsId(null);
+                                        router.push(`/campaigns/${detailsCampaign.id}/edit`);
+                                    }}
+                                >
+                                    Edit Campaign
+                                </Button>
+                            ) : null}
                             <Button
                                 type="button"
                                 variant="outline"
@@ -1332,16 +1358,18 @@ export function CampaignPerformanceTable({
                             >
                                 View Analytics
                             </Button>
-                            <Button
-                                type="button"
-                                variant="destructive"
-                                onClick={() => {
-                                    setDetailsId(null);
-                                    setConfirmDeleteId(detailsCampaign.id);
-                                }}
-                            >
-                                Delete
-                            </Button>
+                            {allowed.delete ? (
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    onClick={() => {
+                                        setDetailsId(null);
+                                        setConfirmDeleteId(detailsCampaign.id);
+                                    }}
+                                >
+                                    Delete
+                                </Button>
+                            ) : null}
                         </div>
                     </div>
                 ) : null}

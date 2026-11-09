@@ -12,6 +12,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useNotificationMutation } from "@/lib/notification-mutations";
 import { useNotificationsActions } from "@/lib/notifications-client";
 import { isApiClientError } from "@/lib/http-client";
+import { campaignActions, useKnownPermissions } from "@/lib/permissions";
 
 export default function CampaignsPage() {
     const { create: createNotification } = useNotificationsActions();
@@ -20,6 +21,8 @@ export default function CampaignsPage() {
     const campaigns = useMemo(() => campaignsQuery.data ?? [], [campaignsQuery.data]);
     const loading = campaignsQuery.isLoading;
     const error = campaignsQuery.isError ? "Could not load campaigns." : "";
+    // QA F1-21: offer only the campaign actions this role may take.
+    const allowed = campaignActions(useKnownPermissions());
 
     const pause = useNotificationMutation({
         mutationFn: (id: string) => dashboardApi.pauseCampaign(id),
@@ -126,7 +129,7 @@ export default function CampaignsPage() {
     return (
         <DashboardLayout title="Campaign Performance" description="Sorting, filtering, bulk actions, and live ops signals">
             <div className="space-y-6">
-                <CommandBar campaigns={campaigns} onPause={handlePause} onResume={handleResume} />
+                <CommandBar campaigns={campaigns} onPause={handlePause} onResume={handleResume} allowed={allowed} />
                 <CampaignPerformanceTable
                     campaigns={campaigns}
                     loading={loading}
@@ -137,6 +140,7 @@ export default function CampaignsPage() {
                     onResume={handleResume}
                     onDelete={handleDelete}
                     onDuplicate={handleDuplicate}
+                    allowed={allowed}
                 />
                 <EventStream campaigns={campaigns} />
                 <AlertTimeline campaigns={campaigns} />
