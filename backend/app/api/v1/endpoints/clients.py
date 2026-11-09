@@ -3,7 +3,7 @@ Clients Endpoints
 CRUD operations for client/contact management
 """
 from app.core.error_handlers import safe_exception_message
-from app.api.v1.validation import ResourceUUID
+from app.api.v1.validation import ResourceUUID, bounded_text
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, EmailStr, Field
 from typing import List, Optional
@@ -32,14 +32,14 @@ def _tenant_scoped(permission: Permission):
 
 
 class ClientCreate(BaseModel):
-    """Create client request"""
+    """Create client request (QA F2-13: name/company fit VARCHAR(255))."""
     default_country: Optional[str] = Field(None, min_length=2, max_length=2)
-    name: str
-    company: Optional[str] = None
-    phone: Optional[str] = None
+    name: bounded_text(255, min_length=1)
+    company: Optional[bounded_text(255)] = None
+    phone: Optional[bounded_text(32)] = None
     email: Optional[EmailStr] = None
-    tags: List[str] = []
-    notes: Optional[str] = None
+    tags: List[bounded_text(64)] = Field(default_factory=list, max_length=50)
+    notes: Optional[bounded_text(10_000)] = None
 
 
 class ClientResponse(BaseModel):

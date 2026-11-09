@@ -5,7 +5,7 @@ FastAPI endpoints for meeting booking and management.
 Day 25: Meeting Booking Feature
 """
 from app.core.error_handlers import safe_exception_message
-from app.api.v1.validation import ResourceUUID
+from app.api.v1.validation import ResourceUUID, bounded_text
 import logging
 from typing import Optional, List
 from datetime import datetime, time as dt_time, timezone as dt_timezone
@@ -37,27 +37,28 @@ _require_calendar_manage = require_permission(Permission.CALENDAR_MANAGE)
 
 class CreateMeetingRequest(BaseModel):
     """Request to create a meeting"""
-    title: str = Field(..., description="Meeting title")
-    start_time: str = Field(..., description="Start time in ISO format")
+    # QA F2-13: title fits VARCHAR(255), timezone VARCHAR(50).
+    title: bounded_text(255, min_length=1) = Field(..., description="Meeting title")
+    start_time: bounded_text(64) = Field(..., description="Start time in ISO format")
     duration_minutes: int = Field(30, ge=15, le=480, description="Duration in minutes")
-    attendees: List[str] = Field(default_factory=list, description="Attendee emails")
+    attendees: List[bounded_text(254)] = Field(default_factory=list, max_length=50, description="Attendee emails")
     lead_id: Optional[str] = Field(None, description="Lead ID if booking with a lead")
-    description: Optional[str] = Field(None, description="Meeting description")
+    description: Optional[bounded_text(10_000)] = Field(None, description="Meeting description")
     add_video_conference: bool = Field(True, description="Add Google Meet/Teams link")
-    timezone: str = Field("UTC", description="Meeting timezone")
+    timezone: bounded_text(50) = Field("UTC", description="Meeting timezone")
 
 
 class UpdateMeetingRequest(BaseModel):
     """Request to update a meeting"""
-    title: Optional[str] = None
-    start_time: Optional[str] = None
-    description: Optional[str] = None
-    attendees: Optional[List[str]] = None
+    title: Optional[bounded_text(255, min_length=1)] = None
+    start_time: Optional[bounded_text(64)] = None
+    description: Optional[bounded_text(10_000)] = None
+    attendees: Optional[List[bounded_text(254)]] = Field(None, max_length=50)
 
 
 class CancelMeetingRequest(BaseModel):
     """Request to cancel a meeting"""
-    reason: Optional[str] = None
+    reason: Optional[bounded_text(1_000)] = None
 
 
 class AvailabilitySlot(BaseModel):
