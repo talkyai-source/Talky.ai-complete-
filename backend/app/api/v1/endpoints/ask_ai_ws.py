@@ -12,6 +12,7 @@ Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 import os
 import json
 import time
+import uuid
 import asyncio
 import logging
 from typing import Optional
@@ -400,9 +401,15 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
         except WebSocketDisconnect:
             logger.info(f"Ask AI disconnected: {session_id}")
         except Exception as e:
-            logger.error(f"Ask AI error: {e}", exc_info=True)
+            # QA F2-07: the exception text stays in the log, under a reference
+            # the visitor can quote; the page gets a fixed message.
+            reference = uuid.uuid4().hex[:12]
+            logger.error("Ask AI error ref=%s session=%s: %s", reference, session_id, e, exc_info=True)
             try:
-                await websocket.send_json({"type": "error", "message": str(e)})
+                await websocket.send_json({
+                    "type": "error", "reference": reference,
+                    "message": f"Something went wrong on our side. Please try again (reference {reference}).",
+                })
                 # Close the socket so the client's onclose fires immediately and
                 # the UI leaves its "speaking" state. Without this the connection
                 # lingered until the 30s idle timeout while the user was stuck.
