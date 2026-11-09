@@ -18,6 +18,7 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const pushes: string[] = [];
 let backs = 0;
+let permissionsQuery: { isSuccess: boolean; data?: { permissions: string[] } } = { isSuccess: false };
 const router = { push(href: string) { pushes.push(href); }, replace() {}, back() { backs++; }, refresh() {}, prefetch: async () => {} };
 loader._load = function (id, ...args) {
     if (id === "next/navigation") return {
@@ -25,6 +26,7 @@ loader._load = function (id, ...args) {
         usePathname: () => "/campaigns/campaign-1/edit", useSearchParams: () => new URLSearchParams(),
     };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => permissionsQuery };
     return originalLoad.call(this, id, ...args);
 };
 let Page: React.ComponentType;
@@ -94,6 +96,7 @@ const originalConfirm = window.confirm;
 afterEach(() => {
     cleanup();
     window.confirm = originalConfirm;
+    permissionsQuery = { isSuccess: false };
     clients.splice(0).forEach((client) => client.clear());
     Object.assign(dashboardApi, { getCampaign: original.getCampaign, updateCampaign: original.updateCampaign, previewCampaignPrompt: original.previewCampaignPrompt });
     Object.assign(aiOptionsApi, { getProviders: original.getProviders, getConfig: original.getConfig, getVoices: original.getVoices });
@@ -260,4 +263,14 @@ test("the edit page's way back is a link to the campaign, so the guard covers it
     mountEditPage(false);
     const back = await screen.findByRole("link", { name: /Back to campaign/ }, { timeout: SLOW });
     assert.equal(back.getAttribute("href"), "/campaigns/campaign-1");
+});
+
+// QA F1-21 (QA-UI-041): a read-only role reached a full editor whose save
+// the server refuses (campaigns:update).
+test("a role that may not change campaigns is told so instead of shown an editor", async () => {
+    permissionsQuery = { isSuccess: true, data: { permissions: ["campaigns:read", "calls:read"] } };
+    mountEditPage(false);
+    await screen.findByText("Your role can't change campaigns", undefined, { timeout: SLOW });
+    assert.equal(screen.queryByRole("button", { name: /^Save Campaign$/ }) === null, true, "editor shown");
+    assert.equal(screen.getByRole("link", { name: "View campaign" }).getAttribute("href"), "/campaigns/campaign-1");
 });

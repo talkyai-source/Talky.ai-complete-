@@ -18,12 +18,14 @@ const pushes: string[] = [];
 const router = { push(href: string) { pushes.push(href); }, replace() {}, back() {}, refresh() {}, prefetch: async () => {} };
 type TestUser = { id: string; tenant_id?: string } | null;
 let currentUser: TestUser = null;
+let permissionsQuery: { isSuccess: boolean; data?: { permissions: string[] } } = { isSuccess: false };
 loader._load = function (id, ...args) {
     if (id === "next/navigation") return {
         useRouter: () => router, usePathname: () => "/campaigns/new", useSearchParams: () => new URLSearchParams(), useParams: () => ({}),
     };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("hooks/useAuth")) return { useAuth: () => ({ user: currentUser }) };
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => permissionsQuery };
     return originalLoad.call(this, id, ...args);
 };
 let Page: React.ComponentType;
@@ -70,6 +72,7 @@ afterEach(() => {
     cleanup();
     clients.splice(0).forEach((client) => client.clear());
     window.sessionStorage.clear();
+    permissionsQuery = { isSuccess: false };
     Object.assign(dashboardApi, { createCampaign: original.createCampaign, previewCampaignPrompt: original.previewCampaignPrompt });
     Object.assign(aiOptionsApi, { getProviders: original.getProviders, getConfig: original.getConfig, getVoices: original.getVoices });
     Object.assign(leadDetailsApi, { fieldSpec: original.fieldSpec, campaignFields: original.campaignFields, setCampaignFields: original.setCampaignFields });
@@ -168,4 +171,22 @@ test("a passing re-check of the sign-in keeps the editor and its text", async ()
     currentUser = ACCOUNT_A;
     view.rerender(tree(client));
     assert.equal(nameValue(), "Still here");
+});
+
+// QA F1-21 (QA-UI-041): a read-only user could open Create Campaign and fill
+// in a form the server refuses (campaigns:create).
+test("a role that may not create campaigns is told so instead of shown the form", async () => {
+    permissionsQuery = { isSuccess: true, data: { permissions: ["campaigns:read", "calls:read"] } };
+    mountPage(ACCOUNT_A);
+    await screen.findByText("Your role can't create campaigns", undefined, { timeout: SLOW });
+    assert.equal(screen.queryByLabelText(/^Campaign name$/i) === null, true, "form shown");
+    assert.equal(screen.queryByRole("button", { name: /Prefer the detailed form/ }) === null, true, "form toggle shown");
+    assert.equal(screen.getByRole("link", { name: "View campaigns" }).getAttribute("href"), "/campaigns");
+});
+
+test("a role that may create campaigns gets the wizard", async () => {
+    permissionsQuery = { isSuccess: true, data: { permissions: ["campaigns:read", "campaigns:create"] } };
+    mountPage(ACCOUNT_A);
+    await screen.findByLabelText(/^Campaign name$/i, {}, { timeout: SLOW });
+    assert.equal(screen.queryByText("Your role can't create campaigns"), null);
 });

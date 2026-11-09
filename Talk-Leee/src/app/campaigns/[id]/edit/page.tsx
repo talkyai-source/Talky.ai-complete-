@@ -22,6 +22,8 @@ import { CampaignBasicsEditor } from "@/components/campaigns/campaign-basics-edi
 import { dashboardApi, type PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
+import { campaignActions, useKnownPermissions } from "@/lib/permissions";
+import { RoleNotice } from "@/components/states/role-notice";
 import { ArrowLeft, RefreshCw } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -74,6 +76,8 @@ export default function EditCampaignPage() {
     const [callingSchedule, setCallingSchedule] = useState<CampaignCallingSchedule | null>(null);
     const [direction, setDirection] = useState<"outbound" | "inbound">("outbound");
     const [backHref, setBackHref] = useState(`/campaigns/${campaignId}`);
+    // QA F1-21: a role without campaigns:update is told so, not given an editor.
+    const mayChange = campaignActions(useKnownPermissions()).update;
 
     useEffect(() => {
         let cancelled = false;
@@ -168,6 +172,13 @@ export default function EditCampaignPage() {
                         {error}
                     </div>
                 </div>
+            ) : !mayChange ? (
+                <RoleNotice
+                    title="Your role can't change campaigns"
+                    message="You can view this campaign and its results. Ask an account admin if it needs changing."
+                    href={backHref}
+                    linkLabel="View campaign"
+                />
             ) : initial ? (
                 knowledgeDriven ? (
                     <div className="space-y-6">

@@ -6,6 +6,8 @@ import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CampaignForm } from "@/components/campaigns/campaign-form";
 import { CampaignWizard } from "@/components/campaigns/campaign-wizard";
 import { useAuth } from "@/hooks/useAuth";
+import { campaignActions, useKnownPermissions } from "@/lib/permissions";
+import { RoleNotice } from "@/components/states/role-notice";
 import { ArrowLeft } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -36,6 +38,8 @@ export default function NewCampaignPage() {
     const verified = user ? `${user.tenant_id ?? "no-tenant"}:${user.id}` : null;
     if (verified && verified !== scope) setScope(verified);
     const [restarts, setRestarts] = useState(0);
+    // QA F1-21: a role without campaigns:create is told so, not given a form.
+    const mayCreate = campaignActions(useKnownPermissions()).create;
     const startOver = (key: string) => {
         discardDraft(key);
         setRestarts((count) => count + 1);
@@ -55,15 +59,22 @@ export default function NewCampaignPage() {
                     <ArrowLeft className="w-4 h-4" />
                     Back to campaigns
                 </button>
-                <button
+                {mayCreate && <button
                     onClick={() => setClassic((c) => !c)}
                     className="text-sm text-muted-foreground hover:text-foreground transition-colors underline-offset-4 hover:underline"
                 >
                     {classic ? "← Use the guided wizard" : "Prefer the detailed form? →"}
-                </button>
+                </button>}
             </motion.div>
 
-            {scope && (classic
+            {!mayCreate ? (
+                <RoleNotice
+                    title="Your role can't create campaigns"
+                    message="You can view campaigns and their results. Ask an account admin if you need a new one."
+                    href="/campaigns"
+                    linkLabel="View campaigns"
+                />
+            ) : scope && (classic
                 ? <CampaignForm key={`${scope}:form:${restarts}`} mode="create" draftStorageKey={draftKey(scope, "form")} onStartOver={() => startOver(draftKey(scope, "form"))} />
                 : <CampaignWizard key={`${scope}:wizard:${restarts}`} draftStorageKey={draftKey(scope, "wizard")} onStartOver={() => startOver(draftKey(scope, "wizard"))} />)}
         </DashboardLayout>
