@@ -1,88 +1,42 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { flushSync } from "react-dom";
-import { api } from "@/lib/api";
-import { useAuth } from "@/lib/auth-context";
-import { isBearerFallbackEnabled } from "@/lib/auth-token";
-import { markFreshLogin } from "@/lib/http-client";
-import { captureException } from "@/lib/monitoring";
-import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import { Loader2 } from "lucide-react";
 
+/**
+ * QA F4-09 (QA-SEC-042): this page used to sign the visitor in with any
+ * access_token placed in the URL, so an attacker's link could sign a victim
+ * into the attacker's account (login CSRF). No flow links here with a token
+ * any more, so a URL token is never verified or applied: the page cleans the
+ * address bar, shows a provider error if one came back, and otherwise asks
+ * for a normal sign-in.
+ */
 function AuthCallbackInner() {
     const router = useRouter();
-    const { applyLoginResult, accessToken } = useAuth();
-    const identityRef = useRef(accessToken);
-    useEffect(() => { identityRef.current = accessToken; }, [accessToken]);
-    const [status, setStatus] = useState("Processing authentication...");
+    const [status] = useState("Processing authentication...");
     const [error, setError] = useState("");
 
     useEffect(() => {
-        let cancelled = false;
-        const previousIdentity = identityRef.current;
-        const id = window.setTimeout(async () => {
-            try {
-                const hash = new URLSearchParams(window.location.hash.substring(1));
-                const query = new URLSearchParams(window.location.search);
-                const token = hash.get("access_token") || query.get("access_token");
-                const errorCode = hash.get("error") || query.get("error");
-                const description = hash.get("error_description") || query.get("error_description");
+        const id = window.setTimeout(() => {
+            const hash = new URLSearchParams(window.location.hash.substring(1));
+            const query = new URLSearchParams(window.location.search);
+            const errorCode = hash.get("error") || query.get("error");
+            const description = hash.get("error_description") || query.get("error_description");
+            const carriedToken = Boolean(hash.get("access_token") || query.get("access_token"));
 
-                // Tokens and provider errors must not remain in browser history.
-                window.history.replaceState(window.history.state, "", window.location.pathname);
-                if (errorCode) {
-                    setError(description || `Authentication error: ${errorCode}`);
-                    return;
-                }
-                if (!token) {
-                    setError("This link could not confirm your account. Please sign in or request a new verification code.");
-                    return;
-                }
-                if (!isBearerFallbackEnabled()) {
-                    // A URL token cannot establish the HttpOnly cookie session
-                    // required in this mode. A reload would lose it or restore
-                    // an older cookie identity, so require the normal login.
-                    setError("Please sign in with your email and password to continue. This link cannot establish your browser session.");
-                    return;
-                }
-
-                setStatus("Verifying your account...");
-                // Check this exact token at the canonical authority before
-                // replacing an existing login. Never create a profile or fall
-                // back to the previous account's refresh cookie here.
-                const me = await api.getMe(token);
-                if (cancelled) return;
-                if (identityRef.current !== previousIdentity) {
-                    setError("Your sign-in changed while this link was being checked. Please sign in again.");
-                    return;
-                }
-                flushSync(() => {
-                    applyLoginResult({
-                        user_id: me.id,
-                        tenant_id: me.tenant_id,
-                        email: me.email,
-                        role: me.role,
-                        business_name: me.business_name,
-                        minutes_remaining: me.minutes_remaining,
-                        minutes_state: me.minutes_state,
-                        access_token: token,
-                    });
-                });
-                markFreshLogin();
-                window.location.assign(postAuthDashboard(me.role));
-            } catch (err) {
-                if (cancelled) return;
-                captureException(err, { area: "auth-callback" });
-                setError(err instanceof Error ? err.message : "Authentication failed. Please sign in again.");
+            // Tokens and provider errors must not remain in browser history.
+            window.history.replaceState(window.history.state, "", window.location.pathname);
+            if (errorCode) {
+                setError(description || `Authentication error: ${errorCode}`);
+            } else if (carriedToken) {
+                setError("Please sign in with your email and password to continue. This link cannot establish your browser session.");
+            } else {
+                setError("This link could not confirm your account. Please sign in or request a new verification code.");
             }
         }, 0);
-        return () => {
-            cancelled = true;
-            window.clearTimeout(id);
-        };
-    }, [applyLoginResult]);
+        return () => window.clearTimeout(id);
+    }, []);
 
     return (
         <div className="min-h-screen bg-neutral-50 flex items-center justify-center p-4">

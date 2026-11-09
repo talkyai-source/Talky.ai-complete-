@@ -32,11 +32,14 @@ test("registration hydrates auth state before performing a hard dashboard naviga
 test("login uses the validated return-target helper while other entry points retain their defaults", () => {
     const here = path.dirname(fileURLToPath(import.meta.url));
     const app = path.join(here, "..", "app", "auth");
+    // QA F4-09: the callback page no longer signs anyone in, so it is not a
+    // post-auth entry point; it must not apply a login at all.
     const sources = [
         path.join(app, "login", "login-client.tsx"),
         path.join(app, "register", "register-client.tsx"),
-        path.join(app, "callback", "page.tsx"),
     ].map((file) => readFileSync(file, "utf8"));
+    const callback = readFileSync(path.join(app, "callback", "page.tsx"), "utf8");
+    assert.doesNotMatch(callback, /applyLoginResult|setToken|getMe\s*\(/);
 
     for (const source of sources) {
         assert.match(source, /postAuthDashboard\s*\(/);
