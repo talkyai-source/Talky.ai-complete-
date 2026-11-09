@@ -15,6 +15,7 @@ PAGINATION = {
     "admin.inbound": ["list_inbound_reassignments"],
     "admin.media": ["list_admin_feedback", "list_admin_media_deletions", "list_admin_recordings"],
     "admin.partners": ["list_partners"],
+    "admin.sip_trunks": ["list_admin_sip_trunks"],
     "admin.supplier_evidence": ["list_statements"],
     "admin.tenants": ["list_tenants"],
     "admin.user_operations": ["list_user_operations"],

@@ -12430,6 +12430,40 @@
       "count": 1,
       "reason": "Platform-admin campaign directory (G3, GET /admin/campaigns) intentionally lists every tenant's campaigns; the leads and calls counts join campaign_id and tenant_id together. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/campaigns.py:81.",
       "category": "platform_admin"
+    },
+    {
+      "id": "415e98252b3af58ac66606adb05e5d39b5d1e745111998d227a0738119053d37",
+      "file": "app/api/v1/endpoints/admin/sip_trunks.py",
+      "function": "list_admin_sip_trunks",
+      "line": 77,
+      "method": "fetchval",
+      "tables": [
+        "tenant_sip_trunks"
+      ],
+      "sql": "SELECT count(*) FROM tenant_sip_trunks s WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin SIP trunk directory (G4, GET /admin/sip-trunks) intentionally lists every tenant's trunks; it selects only whether a password is stored, never the credential values. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/sip_trunks.py:77.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "5187a11c6d44215725f8d672f251575e870063490d4e6fc39fb7d69178230446",
+      "file": "app/api/v1/endpoints/admin/sip_trunks.py",
+      "function": "list_admin_sip_trunks",
+      "line": 79,
+      "method": "fetch",
+      "tables": [
+        "tenant_sip_trunks"
+      ],
+      "sql": "SELECT s.id, s.tenant_id, t.business_name AS tenant_name, s.trunk_name, s.sip_domain, s.port, s.transport, s.direction, s.is_active, (s.auth_password_encrypted IS NOT NULL) AS auth_configured, s.metadata->>'role' AS role, s.live_registration_status, s.live_status_detail, s.live_status_checked_at, s.last_tested_at, s.created_at, s.updated_at FROM tenant_sip_trunks s JOIN tenants t ON t.id=s.tenant_id WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='filters', ctx=Load())], keywords=[])} ORDER BY s.created_at DESC, s.id DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=2)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-admin SIP trunk directory (G4, GET /admin/sip-trunks) intentionally lists every tenant's trunks; it selects only whether a password is stored, never the credential values. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/sip_trunks.py:79.",
+      "category": "platform_admin"
     }
   ]
 }
