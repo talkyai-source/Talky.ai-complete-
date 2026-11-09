@@ -45,6 +45,28 @@ const eslintConfig = defineConfig([
       "react-hooks/gating": "warn",
     },
   },
+  // QA F12-09 (QA-CMP-017): accessibility checks beyond Next's defaults, as
+  // errors. Every rule here passes today, so a regression fails the lint gate.
+  // `ul`/`ol` with role="list" stay allowed: it keeps list semantics in Safari
+  // when list-style is none.
+  {
+    rules: {
+      "jsx-a11y/anchor-has-content": "error",
+      "jsx-a11y/anchor-is-valid": "error",
+      "jsx-a11y/aria-role": "error",
+      "jsx-a11y/heading-has-content": "error",
+      "jsx-a11y/html-has-lang": "error",
+      "jsx-a11y/iframe-has-title": "error",
+      "jsx-a11y/img-redundant-alt": "error",
+      "jsx-a11y/interactive-supports-focus": "error",
+      "jsx-a11y/no-access-key": "error",
+      "jsx-a11y/no-distracting-elements": "error",
+      "jsx-a11y/no-redundant-roles": ["error", { ul: ["list"], ol: ["list"] }],
+      "jsx-a11y/role-supports-aria-props": "error",
+      "jsx-a11y/scope": "error",
+      "jsx-a11y/tabindex-no-positive": "error",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:
