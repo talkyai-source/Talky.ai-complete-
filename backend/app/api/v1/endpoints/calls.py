@@ -28,6 +28,7 @@ from app.utils.tenant_filter import verify_tenant_access
 from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
 from app.domain.services.caller_identity import caller_identity_projection
 from app.domain.services.call_history_cursor import history_scope, encode_history_cursor, decode_history_cursor
+from app.domain.services.call_outcomes import FAILED_OUTCOME_LIST
 
 logger = logging.getLogger(__name__)
 
@@ -1295,6 +1296,11 @@ async def list_calls(
     search: Annotated[Optional[str], Query(max_length=200, description="Literal phone, DID or campaign text")] = None,
     pagination: Annotated[Literal["offset", "cursor"], Query(description="Cursor mode omits the expensive total count")] = "offset",
     cursor: Annotated[Optional[str], Query(max_length=1024, description="Continue the same tenant and filters")] = None,
+    failed: Annotated[Optional[bool], Query(
+        description="true: only calls that did not reach a live human (no answer, busy, "
+                    "voicemail, ...); false: only calls that did or have no outcome yet")] = None,
+    since: Annotated[Optional[datetime], Query(
+        description="Only calls created after this instant (ISO 8601; no zone means UTC)")] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1317,10 +1323,18 @@ async def list_calls(
         raise HTTPException(422, "Invalid call history search")
     search = search.strip() if search else None
     offset = pagination_offset(page, page_size)
-    scope = history_scope(str(current_user.tenant_id), {
+    scope_filters = {
         "status": status, "direction": direction, "inbound_campaign_id": str(inbound_campaign_id) if inbound_campaign_id else None,
         "from": from_date, "to": to_date, "search": search,
-    })
+    }
+    # D4-11: only when given, so cursors issued before these filters stay valid.
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    if failed is not None:
+        scope_filters["failed"] = failed
+    if since is not None:
+        scope_filters["since"] = since.isoformat()
+    scope = history_scope(str(current_user.tenant_id), scope_filters)
     try:
         boundary = decode_history_cursor(cursor, scope) if cursor is not None else None
     except ValueError:
@@ -1375,6 +1389,16 @@ async def list_calls(
         if to_bound is not None:
             conditions.append(f"c.created_at < ${idx}")
             params.append(to_bound)
+            idx += 1
+        if failed is not None:
+            # D4-11: the one definition of a failed call (did not reach a person).
+            match = f"c.outcome = ANY(${idx}::text[])"
+            conditions.append(match if failed else f"(c.outcome IS NULL OR NOT {match})")
+            params.append(FAILED_OUTCOME_LIST)
+            idx += 1
+        if since is not None:
+            conditions.append(f"c.created_at > ${idx}")
+            params.append(since)
             idx += 1
 
         if search:
