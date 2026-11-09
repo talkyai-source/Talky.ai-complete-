@@ -13,6 +13,7 @@ import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
 import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
 import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
+import { campaignActions, useKnownPermissions } from "@/lib/permissions";
 import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { ContactLists } from "@/components/campaigns/contact-lists";
@@ -256,6 +257,10 @@ export default function ContactsPage() {
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [selectedListId, setSelectedListId] = useState<string | null>(null);
     const [showUploadPanel, setShowUploadPanel] = useState(false);
+    // QA F1-21: adding, importing, editing and deleting contacts need
+    // campaigns:update; unknown permissions keep them offered.
+    const allowed = campaignActions(useKnownPermissions());
+    const canChange = allowed.update;
     const [listsRefreshToken, setListsRefreshToken] = useState(0);
 
     // Per-contact add/edit/delete (mirrors the campaign detail page).
@@ -1165,13 +1170,16 @@ export default function ContactsPage() {
                 <div className="max-w-5xl space-y-6">
                     <ContactRequirementsGuide />
                     <div className="content-card text-center">
-                        <h2 className="text-lg font-bold text-foreground">Create a campaign first</h2>
+                        <h2 className="text-lg font-bold text-foreground">{allowed.create ? "Create a campaign first" : "No campaigns yet"}</h2>
                         <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
                             Every contact belongs to a campaign so calls, recordings, and results stay organised in the right workspace.
+                            {allowed.create ? null : " Ask an account admin to create one."}
                         </p>
-                        <Button asChild className="mt-5">
-                            <Link href="/campaigns">Create a campaign</Link>
-                        </Button>
+                        {allowed.create ? (
+                            <Button asChild className="mt-5">
+                                <Link href="/campaigns">Create a campaign</Link>
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
             ) : !firstLoadDone ? (
@@ -1215,15 +1223,17 @@ export default function ContactsPage() {
                                 />
                             </div>
                         </div>
-                        <Button
-                            className="w-full sm:w-auto xl:shrink-0"
-                            aria-expanded={showUploadPanel}
-                            aria-controls="contacts-upload-panel"
-                            onClick={() => { setShowUploadPanel((v) => !v); clearResult(); }}
-                        >
-                            <Plus className="w-4 h-4" />
-                            Add more contacts
-                        </Button>
+                        {canChange && (
+                            <Button
+                                className="w-full sm:w-auto xl:shrink-0"
+                                aria-expanded={showUploadPanel}
+                                aria-controls="contacts-upload-panel"
+                                onClick={() => { setShowUploadPanel((v) => !v); clearResult(); }}
+                            >
+                                <Plus className="w-4 h-4" />
+                                Add more contacts
+                            </Button>
+                        )}
                     </motion.div>
 
                     {/* Collapsible upload panel + last import result */}
@@ -1255,6 +1265,7 @@ export default function ContactsPage() {
                         refreshToken={listsRefreshToken}
                         selectedListId={selectedListId}
                         onSelectList={setSelectedListId}
+                        readOnly={!canChange}
                     />
 
                     {/* Contacts table */}
@@ -1338,7 +1349,7 @@ export default function ContactsPage() {
                                             </div>
                                             {/* pr-12: keeps Edit/Delete clear of the fixed chat
                                                 launcher's lane while scrolling (Group C, 2026-10). */}
-                                            <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3 pr-12">
+                                            {canChange && <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3 pr-12">
                                                 <button
                                                     type="button"
                                                     onClick={() => startEditContact(contact)}
@@ -1356,7 +1367,7 @@ export default function ContactsPage() {
                                                 >
                                                     {deletingContactId === contact.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
                                                 </button>
-                                            </div>
+                                            </div>}
                                         </article>
                                     );
                                 })}
@@ -1407,7 +1418,7 @@ export default function ContactsPage() {
                                                     )}
                                                 </td>
                                                 <td className="whitespace-nowrap px-4 py-3 text-right">
-                                                    <div className="flex items-center justify-end gap-1">
+                                                    {canChange && <div className="flex items-center justify-end gap-1">
                                                         <button
                                                             type="button"
                                                             onClick={() => startEditContact(contact)}
@@ -1427,7 +1438,7 @@ export default function ContactsPage() {
                                                         >
                                                             {deletingContactId === contact.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                                         </button>
-                                                    </div>
+                                                    </div>}
                                                 </td>
                                             </tr>
                                         ))}
@@ -1447,6 +1458,28 @@ export default function ContactsPage() {
                             <AlertCircle className="h-4 w-4" /> {contactsError}
                         </div>
                     )}
+                    {!canChange ? (
+                        <div className="content-card space-y-3">
+                            <div>
+                                <h3 className="text-lg font-semibold text-foreground">No contacts in this campaign yet</h3>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Your role can view contacts but not add them. Ask an account admin to add contacts.
+                                </p>
+                            </div>
+                            <Select
+                                value={selectedCampaign}
+                                onChange={(next) => setSelectedCampaign(next)}
+                                ariaLabel="Select campaign"
+                                lightThemeGreen
+                                className="w-full sm:w-64"
+                                selectClassName="rounded-xl border border-border bg-background/70 px-3 py-2 text-sm font-semibold text-foreground shadow-sm outline-none focus:border-border focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 h-auto hover:bg-background/80"
+                            >
+                                {campaigns.map((campaign) => (
+                                    <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
+                                ))}
+                            </Select>
+                        </div>
+                    ) : (<>
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -1473,6 +1506,7 @@ export default function ContactsPage() {
                         {contactEditor}
                     </motion.div>
                     {uploadCard}
+                    </>)}
                     {resultCard}
                 </div>
             )}
