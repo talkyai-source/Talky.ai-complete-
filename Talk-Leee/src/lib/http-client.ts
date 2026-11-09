@@ -216,6 +216,36 @@ const PUBLIC_AUTH_PATHS = new Set([
 function managesSession(path: string) {
     return PUBLIC_AUTH_PATHS.has(path) || COOKIE_SESSION_PATHS.has(path);
 }
+// Requests that sign in or out, or establish the identity itself, are never fenced.
+function identityExempt(path: string, method: HttpMethod) {
+    return managesSession(path) || (method === "GET" && (path === "/auth/me" || path === "/me" || path === "/health"));
+}
+
+// QA F1-19: a page segment can start its first reads after AuthProvider armed
+// the identity fence but before /auth/me answered. Those reads wait for that
+// check and are then sent as the verified identity. Only a verification lets
+// them go; an account change, a sign-out or an anonymous result releases them
+// unsent. The bound outlasts /auth/me's own 12 s timeout. Writes never wait.
+const IDENTITY_WAIT_MS = 15_000;
+const identityWaiters = new Set<(verified: boolean) => void>();
+function releaseIdentityWaiters(verified: boolean) {
+    for (const release of [...identityWaiters]) release(verified);
+}
+function waitForRequestIdentity(signal?: AbortSignal) {
+    return new Promise<boolean>((resolve) => {
+        if (signal?.aborted) return resolve(false);
+        const release = (verified: boolean) => {
+            identityWaiters.delete(release);
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            resolve(verified);
+        };
+        const onAbort = () => release(false);
+        const timer = setTimeout(() => release(false), IDENTITY_WAIT_MS);
+        identityWaiters.add(release);
+        signal?.addEventListener("abort", onAbort);
+    });
+}
 
 export function setRequestIdentity(identity: RequestIdentity | null) {
     // Only replacing or clearing a verified identity is an account change. The
@@ -225,11 +255,13 @@ export function setRequestIdentity(identity: RequestIdentity | null) {
     // invalidate pending work through invalidateRequestIdentity().
     if (_requestIdentity !== null && JSON.stringify(identity) !== JSON.stringify(_requestIdentity)) advanceIdentityGeneration();
     _requestIdentity = identity ? { ...identity } : null;
+    releaseIdentityWaiters(identity !== null);
 }
 
 export function invalidateRequestIdentity() {
     advanceIdentityGeneration();
     _requestIdentity = null;
+    releaseIdentityWaiters(false);
 }
 
 export function setTokenProvider(fn: (() => string | null) | null, writer?: (token: string | null) => void) {
@@ -439,6 +471,19 @@ export function createHttpClient(config: HttpClientConfig) {
         return { token: getToken(), epoch: _identityEpoch, identity: _requestIdentity ? { ..._requestIdentity } : null };
     }
     type RequestScope = ReturnType<typeof captureScope>;
+    // A read that would meet the identity fence in raw() waits for the sign-in
+    // check instead (QA F1-19), and its scope is captured only after that.
+    function awaitsIdentity(opts: HttpRequestOptions) {
+        return (opts.method ?? "GET") === "GET" && !!_externalTokenProvider && !_requestIdentity && !identityExempt(opts.path, "GET");
+    }
+    async function verifiedScope(opts: HttpRequestOptions) {
+        if (!await waitForRequestIdentity(opts.signal)) {
+            const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
+            if (opts.signal?.aborted) throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method: "GET" });
+            throw new ApiClientError({ code: "identity_unverified", message: "Please wait while your sign-in is checked, then try again.", url, method: "GET" });
+        }
+        return captureScope();
+    }
     // The current token is the scope's own, or one this client rotated it into.
     function tokenStillOurs(scope: RequestScope) {
         const current = getToken();
@@ -526,8 +571,7 @@ export function createHttpClient(config: HttpClientConfig) {
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
-        const bootstrap = method === "GET" && (opts.path === "/auth/me" || opts.path === "/me" || opts.path === "/health");
-        if (_externalTokenProvider && !scope.identity && !managesSession(opts.path) && !bootstrap) {
+        if (_externalTokenProvider && !scope.identity && !identityExempt(opts.path, method)) {
             throw new ApiClientError({ code: "identity_unverified", message: "Please wait while your sign-in is checked, then try again.", url, method });
         }
         const headers: Record<string, string> = {};
@@ -623,7 +667,7 @@ export function createHttpClient(config: HttpClientConfig) {
     }
 
     async function request<TResponse = unknown, TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<TResponse> {
-        const scope = captureScope();
+        const scope = awaitsIdentity(opts) ? await verifiedScope(opts) : captureScope();
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
@@ -767,7 +811,7 @@ export function createHttpClient(config: HttpClientConfig) {
      * Throws {@link ApiClientError} on a non-OK response.
      */
     async function requestRaw<TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<Response> {
-        const scope = captureScope();
+        const scope = awaitsIdentity(opts) ? await verifiedScope(opts) : captureScope();
         const method = opts.method ?? "GET";
         const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
         const isRefreshCall = managesSession(opts.path);
