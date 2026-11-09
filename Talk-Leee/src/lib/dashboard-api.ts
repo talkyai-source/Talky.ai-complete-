@@ -1,6 +1,7 @@
 import type { MinutesState } from "@/lib/minutes-allowance";
 import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { sharedHttpClient } from "@/lib/api";
+import { isApiClientError } from "@/lib/http-client";
 import type { CampaignBrief } from "@/lib/campaign-brief";
 
 // Dashboard Types
@@ -88,6 +89,8 @@ export interface Campaign {
     calls_completed: number;
     calls_failed: number;
     created_at: string;
+    /** The campaign's version; editors send it back as `expected_updated_at`. */
+    updated_at?: string | null;
     started_at?: string;
     completed_at?: string;
     script_config?: CampaignVoiceSettingsValue & {
@@ -146,6 +149,17 @@ export interface CampaignCreate extends CampaignVoiceSettingsValue {
     tts_provider?: string;
     // Per-campaign calling hours + timezone (Phase 3c-v2).
     calling_schedule?: CampaignCallingSchedule;
+}
+
+/**
+ * QA H7 / F3-03: an edit carries the version (`updated_at`, the exact server
+ * string) its editor read. The server refuses a stale one with 409
+ * `campaign_version_conflict` instead of overwriting a newer save.
+ */
+export type CampaignUpdate = CampaignCreate & { expected_updated_at?: string };
+
+export function isCampaignVersionConflict(error: unknown): boolean {
+    return isApiClientError(error) && error.status === 409 && error.code === "campaign_version_conflict";
 }
 
 /**
@@ -516,7 +530,7 @@ class DashboardApi {
         return { campaign: response.campaign };
     }
 
-    async updateCampaign(id: string, data: CampaignCreate): Promise<{ campaign: Campaign }> {
+    async updateCampaign(id: string, data: CampaignUpdate): Promise<{ campaign: Campaign }> {
         const response = await this.client.request<{ campaign: Campaign | null }>({
             path: `/campaigns/${id}`,
             method: "PUT",

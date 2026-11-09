@@ -114,6 +114,8 @@ export default function EditCampaignPage() {
                     slots,
                     campaign_brief: scriptConfig.campaign_brief,
                     calling_schedule: (campaign as { calling_config?: CampaignCallingSchedule | null }).calling_config ?? null,
+                    // Sent back on save so a stale edit is refused (QA H7 / F3-03).
+                    updated_at: campaign.updated_at ?? null,
                 });
                 setKnowledgeDriven(
                     Boolean((scriptConfig as Record<string, unknown>).knowledge_driven),
@@ -182,6 +184,7 @@ export default function EditCampaignPage() {
                                 goal: initial.goal,
                                 callingSchedule,
                                 campaignBrief: initial.campaign_brief,
+                                updatedAt: initial.updated_at,
                             }}
                         />
                     </div>

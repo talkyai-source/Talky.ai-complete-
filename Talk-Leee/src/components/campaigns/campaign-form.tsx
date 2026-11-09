@@ -22,7 +22,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
-import { dashboardApi, PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
+import { dashboardApi, isCampaignVersionConflict, PersonaType, type CampaignCallingSchedule } from "@/lib/dashboard-api";
+import { CampaignVersionConflictNotice } from "@/components/campaigns/campaign-version-conflict";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import {
     buildCampaignBrief,
@@ -127,6 +128,8 @@ export interface CampaignFormInitial {
     campaign_brief?: CampaignBrief;
     /** Saved outbound calling schedule (`calling_config`); null when none is saved. */
     calling_schedule?: CampaignCallingSchedule | null;
+    /** The version (`updated_at`) the edit page read; a stale save is refused (QA H7). */
+    updated_at?: string | null;
 }
 
 interface Props {
@@ -174,6 +177,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
     const [submitting, setSubmitting] = useState(false);
     const [error, setError] = useState("");
+    // Edit: the version this form last read or wrote, and whether a save was
+    // refused because someone else saved in between (QA H7 / F3-03).
+    const [version, setVersion] = useState<string | null>(initialData?.updated_at ?? null);
+    const [conflict, setConflict] = useState(false);
     // If campaign creation succeeds but saving lead-field policy fails, retry
     // against the created id instead of creating a duplicate campaign.
     const [createdCampaignId, setCreatedCampaignId] = useState<string | null>(() => (
@@ -589,6 +596,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
         setSubmitting(true);
         setError("");
+        setConflict(false);
 
         const payload = {
             ...voiceSelection,
@@ -613,25 +621,35 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         };
 
         let targetCampaignId = isEdit ? campaignId : createdCampaignId ?? undefined;
+        // Only a campaign write that succeeded may be reported as saved.
+        let detailsSaved = !isEdit && Boolean(targetCampaignId);
         try {
             if (isEdit) {
                 if (!campaignId) {
                     throw new Error("Internal error: edit mode without a campaignId.");
                 }
-                const result = await dashboardApi.updateCampaign(campaignId, payload);
+                const result = await dashboardApi.updateCampaign(campaignId, version ? { ...payload, expected_updated_at: version } : payload);
                 targetCampaignId = result.campaign.id;
+                detailsSaved = true;
+                // A retry after a failed field-policy save is not a conflict with this write.
+                if (result.campaign.updated_at) setVersion(result.campaign.updated_at);
             } else if (!targetCampaignId) {
                 const result = await dashboardApi.createCampaign(payload);
                 targetCampaignId = result.campaign.id;
                 setCreatedCampaignId(targetCampaignId);
+                detailsSaved = true;
             }
 
             await leadDetailsApi.setCampaignFields(targetCampaignId!, leadFields.fields);
             router.push(!isEdit && afterCreateHref ? afterCreateHref(targetCampaignId!) : `/campaigns/${targetCampaignId}`);
         } catch (err) {
+            if (isCampaignVersionConflict(err)) {
+                setConflict(true);
+                return;
+            }
             const detail = err instanceof Error ? err.message : "Failed to save campaign";
             setError(
-                targetCampaignId
+                detailsSaved
                     ? `Campaign details were saved, but its contact-field policy was not. Retry to finish without creating a duplicate. ${detail}`
                     : detail,
             );
@@ -1340,6 +1358,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         />
                     </div>
 
+                    {conflict && <CampaignVersionConflictNotice />}
                     {error && (
                         <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
                             {error}

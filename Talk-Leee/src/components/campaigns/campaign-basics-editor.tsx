@@ -16,7 +16,8 @@ import { BookOpen, Check, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, PersonaType, CampaignCallingSchedule } from "@/lib/dashboard-api";
+import { dashboardApi, isCampaignVersionConflict, PersonaType, CampaignCallingSchedule } from "@/lib/dashboard-api";
+import { CampaignVersionConflictNotice } from "@/components/campaigns/campaign-version-conflict";
 import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
@@ -53,6 +54,8 @@ export type CampaignBasicsEditorInitial = {
     goal: string;
     callingSchedule?: CampaignCallingSchedule | null;
     campaignBrief?: CampaignBrief;
+    /** The version (`updated_at`) the edit page read; a stale save is refused (QA H7). */
+    updatedAt?: string | null;
 };
 
 export function CampaignBasicsEditor({
@@ -79,6 +82,10 @@ export function CampaignBasicsEditor({
 
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    // The version this editor last read or wrote, and whether a save was
+    // refused because someone else saved in between (QA H7 / F3-03).
+    const [version, setVersion] = useState<string | null>(initial.updatedAt ?? null);
+    const [conflict, setConflict] = useState(false);
 
     const agentNames = useMemo(() => parseAgentNames(agentNamesRaw), [agentNamesRaw]);
     const requiredLeadFields = leadFields.fields
@@ -106,8 +113,9 @@ export function CampaignBasicsEditor({
     const onSave = async () => {
         setSaving(true);
         setError(null);
+        setConflict(false);
         try {
-            await dashboardApi.updateCampaign(campaignId, {
+            const result = await dashboardApi.updateCampaign(campaignId, {
                 ...voiceSelection,
                 name: name.trim(),
                 description: initial.description,
@@ -123,17 +131,22 @@ export function CampaignBasicsEditor({
                 campaign_brief: campaignBrief,
                 knowledge_driven: true,
                 calling_schedule: callingSchedulePayload(schedule),
+                ...(version ? { expected_updated_at: version } : {}),
             });
+            // A retry after a failed field-policy save is not a conflict with this write.
+            if (result.campaign.updated_at) setVersion(result.campaign.updated_at);
             await leadDetailsApi.setCampaignFields(campaignId, leadFields.fields);
             router.push(`/campaigns/${campaignId}`);
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to save campaign");
+            if (isCampaignVersionConflict(err)) setConflict(true);
+            else setError(err instanceof Error ? err.message : "Failed to save campaign");
             setSaving(false);
         }
     };
 
     return (
         <div className="mx-auto max-w-3xl">
+            {conflict && <div className="mb-4"><CampaignVersionConflictNotice /></div>}
             {error && (
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
                     {error}
