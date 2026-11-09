@@ -181,6 +181,17 @@ for method, path, function, service_method in (
     helpers.append("app.domain.services.dnc_service._audit_dnc_change")
     AUDITED[method, path] = record("dnc", function, "unit/test_dnc_audit_trail.py", *helpers)
 
+# QA F12-10 (rest): the platform-admin aliases use the same audited service.
+for method, path, function, service_method in (
+    ("POST", "/admin/dnc", "add_dnc_entry", "add"),
+    ("DELETE", "/admin/dnc/{entry_id}", "remove_dnc_entry", "remove_any"),
+):
+    AUDITED[method, path] = record(
+        "call_limits", function, "unit/test_admin_dnc_audit.py",
+        "app.domain.services.dnc_service:DNCService." + service_method,
+        "app.domain.services.dnc_service._audit_dnc_change",
+    )
+
 for method, path, function, module, service_method, begin in (
     ("PATCH", "/admin/support/tickets/{ticket_id}", "patch_ticket", "staff_service", "patch_ticket", "_begin_staff_write"),
     ("POST", "/admin/support/tickets/{ticket_id}/messages", "staff_message", "staff_service", "add_staff_message", "_begin_staff_write"),
@@ -260,8 +271,6 @@ for method, path, module, function, reason in (
     ("POST", "/admin/audit/logs/export", "audit_logs", "export_audit_logs", "PII export access receipt uses buffered log after query; no fail-closed durable export receipt."),
     ("PUT", "/admin/tenants/{tenant_id}/call-limits", "call_limits", "update_tenant_call_limits", "Limit write commits before buffered audit; requires same-transaction before/after receipt."),
     ("PUT", "/admin/partners/{partner_id}/limits", "call_limits", "update_partner_limits", "Advisory-serialized partner upsert has no central audit call despite accepting AuditLogger."),
-    ("POST", "/admin/dnc", "call_limits", "add_dnc_entry", "Admin alias calls DNCService.add without optional audit argument; tenant DNC remediation did not cover this alias."),
-    ("DELETE", "/admin/dnc/{entry_id}", "call_limits", "remove_dnc_entry", "Admin alias directly deletes DNC row without before-state or audit; tenant DNC remediation did not cover this alias."),
     ("POST", "/dnc/bulk-import", "dnc", "bulk_import", "Previously accepted DNC bulk design uses bounded business batches then buffered summary; not one atomic audit transaction (user marked DNC done)."),
     ("PUT", "/recordings/policy", "recordings", "put_recording_policy", "Policy upsert commits before _safe_audit; changing protected consent/retention workflow requires dedicated tests/ownership."),
     ("POST", "/billing/cancel", "billing", "cancel_subscription", "Privileged Stripe cancellation crosses provider and local state; no central same-transaction before/after receipt."),

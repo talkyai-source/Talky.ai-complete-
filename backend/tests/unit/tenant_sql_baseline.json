@@ -9691,10 +9691,10 @@
       "category": "not_database_sql"
     },
     {
-      "id": "ff38a572f97ae831fba5d789dde3147def2864f9beb3368fece961694e246202",
+      "id": "98867f96af44858491931f6f04be12cff40493d24a715ddebec2c6d3dc46e4b8",
       "file": "app/api/v1/endpoints/call_limits.py",
       "function": "list_dnc_entries",
-      "line": 512,
+      "line": 515,
       "method": "fetch",
       "tables": [],
       "sql": "{branch} ORDER BY created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)}",
@@ -9883,23 +9883,6 @@
       "count": 1,
       "reason": "The string selects a Stripe SDK operation. It is not SQL or a database identifier. Exact reviewed operation: _stripe_call; app/domain/services/billing_service.py:270.",
       "category": "not_database_sql"
-    },
-    {
-      "id": "6918d83ed71f70bec773cee6296927d3e7db2e84acfdaeea505bd7444c395ca1",
-      "file": "app/api/v1/endpoints/call_limits.py",
-      "function": "remove_dnc_entry",
-      "line": 542,
-      "method": "execute",
-      "tables": [
-        "dnc_entries"
-      ],
-      "sql": "DELETE FROM dnc_entries WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Administrator-selected DNC removal uses its explicit row ID; route requires platform_admin at line 535 and includes global suppressions with no tenant. Exact reviewed operation: execute; app/api/v1/endpoints/call_limits.py:542.",
-      "category": "platform_admin"
     },
     {
       "id": "69211fc2ffc8f3f313f8145647bb03f7484c7cc320a7d31404496d4ea830d5d0",
@@ -12381,10 +12364,10 @@
       "category": "platform_admin"
     },
     {
-      "id": "d87b7ecbfb9b0947010ea2cd60e3f96892f901f6559189aa3a9dccdf24071e8f",
+      "id": "475acd063ecea22ef6edcabc8836f099b4ffd4f625e0e05654c8d04c104290a2",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.list_for_tenant",
-      "line": 360,
+      "line": 390,
       "method": "fetch",
       "tables": [],
       "sql": "{Call(func=Attribute(value=Constant(value='\\n            SELECT id, tenant_id, normalized_number, source, reason,\\n                   expires_at, created_at\\n            FROM dnc_entries\\n            WHERE (tenant_id = $1 {global_clause})\\n              AND (expires_at IS NULL OR expires_at > NOW())\\n            ORDER BY created_at DESC\\n            LIMIT $2\\n        '), attr='format', ctx=Load()), args=[], keywords=[keyword(arg='global_clause', value=IfExp(test=Name(id='include_global', ctx=Load()), body=Constant(value='OR tenant_id IS NULL'), orelse=Constant(value='')))])}",
@@ -12463,6 +12446,23 @@
       "bypass": true,
       "count": 1,
       "reason": "Platform-admin SIP trunk directory (G4, GET /admin/sip-trunks) intentionally lists every tenant's trunks; it selects only whether a password is stored, never the credential values. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/sip_trunks.py:79.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "1adf09fc40ac770d4cd6914c6b5ae7aef6261523634e96d9b7d83fdb7b3ad72b",
+      "file": "app/domain/services/dnc_service.py",
+      "function": "DNCService.remove_any",
+      "line": 349,
+      "method": "fetchrow",
+      "tables": [
+        "dnc_entries"
+      ],
+      "sql": "DELETE FROM dnc_entries WHERE id = $1 RETURNING id, tenant_id, normalized_number, source, reason, expires_at, created_at",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Administrator-selected DNC removal by explicit row ID (QA F12-10, moved from call_limits.remove_dnc_entry): the only caller is DELETE /admin/dnc/{entry_id}, which requires platform_admin, and global suppressions have no tenant. The removal and its audit row commit in one transaction. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:349.",
       "category": "platform_admin"
     }
   ]

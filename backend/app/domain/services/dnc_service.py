@@ -330,6 +330,36 @@ class DNCService:
                 )
         return row is not None
 
+    async def remove_any(
+        self,
+        *,
+        entry_id: str,
+        audit: Any,
+        actor_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ) -> bool:
+        """Platform-admin removal by id: any tenant's entry or the platform list.
+
+        The admin route resolves the entry before its tenant is known. The
+        removed entry, number included, is audited in the same transaction,
+        chain lock first (QA F12-10: this alias deleted with no trace).
+        """
+        async with acquire_with_tenant(self._db, None) as conn:
+            await audit.lock_transaction(conn)  # before the row lock
+            row = await conn.fetchrow(
+                "DELETE FROM dnc_entries WHERE id = $1 "
+                "RETURNING id, tenant_id, normalized_number, source, reason, "
+                "expires_at, created_at",
+                entry_id,
+            )
+            if row is not None:
+                await _audit_dnc_change(
+                    audit, conn, "dnc.entry.remove", row,
+                    tenant_id=str(row["tenant_id"]) if row["tenant_id"] else None,
+                    actor_id=actor_id, actor_role=actor_role, after=False,
+                )
+        return row is not None
+
     # ──────────────────────────────────────────────────────────────────
     # Read path
     # ──────────────────────────────────────────────────────────────────
