@@ -27,6 +27,7 @@ import { CallingScheduleLine, CallingScheduleStartNotice } from "@/components/ca
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
+import { campaignActions } from "@/lib/permissions";
 import {
     ArrowLeft,
     Play,
@@ -143,6 +144,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const [knowledgeNoticeDismissed, setKnowledgeNoticeDismissed] = useState(false);
     const knowledgeUploadFailed = searchParams?.get("knowledge_error") === "1" && !knowledgeNoticeDismissed;
     const permissions = useEffectivePermissions();
+    // QA F1-21: start, pause, stop, edit and every contact change need
+    // campaigns:update; unknown permissions keep them offered.
+    const canChange = campaignActions(permissions.isSuccess ? permissions.data.permissions : undefined).update;
     const canManageKnowledge = permissions.isSuccess && (
         permissions.data.role?.toLowerCase() === "platform_admin"
         || permissions.data.permissions.includes("campaigns:update")
@@ -553,11 +557,13 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                 disabled={actionLoading}
                                 agentName={campaign.script_config?.agent_names?.[0]}
                             />
-                            <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
-                                <Pencil className="w-4 h-4" />
-                                Edit
-                            </Button>
-                            {campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
+                            {canChange ? (
+                                <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
+                                    <Pencil className="w-4 h-4" />
+                                    Edit
+                                </Button>
+                            ) : null}
+                            {!canChange ? null : campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
                                 <Button
                                     onClick={handleStartClick}
                                     disabled={actionLoading || outOfMinutes || !readiness.ready}
@@ -580,7 +586,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             ) : null}
                         </div>
                     </motion.div>
-                    {canStart && <CampaignReadinessNotice readiness={readiness} />}
+                    {canChange && canStart && <CampaignReadinessNotice readiness={readiness} />}
 
                     {/* Running but not placing calls: say why, in the dialer's own
                         words, and when it will try again. */}
@@ -755,6 +761,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             refreshToken={listsRefreshToken}
                             onListsLoaded={setLists}
                             onCallStarted={() => { void loadData(); }}
+                            readOnly={!canChange}
                         />
                     </div>
 
@@ -767,7 +774,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                     >
                         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <h3 className="text-lg font-semibold text-foreground">Contacts</h3>
-                            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+                            {canChange && <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
                                 <Button size="sm" variant="outline" onClick={() => setCsvModalOpen(true)}>
                                     <Upload className="w-4 h-4" />
                                     Import CSV
@@ -776,7 +783,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Plus className="w-4 h-4" />
                                     Add Contact
                                 </Button>
-                            </div>
+                            </div>}
                         </div>
                         <SmartCsvImport
                             open={csvModalOpen}
@@ -1027,7 +1034,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                 </td>
                                                 <td className="px-4 py-3 text-right text-sm text-muted-foreground tabular-nums whitespace-nowrap">{contact.call_attempts}</td>
                                                 <td className="px-4 py-3 text-right whitespace-nowrap">
-                                                    <div className="flex items-center justify-end gap-1">
+                                                    {canChange && <div className="flex items-center justify-end gap-1">
                                                         <button
                                                             type="button"
                                                             onClick={() => startEditContact(contact)}
@@ -1051,7 +1058,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                                 <Trash2 className="h-3.5 w-3.5" />
                                                             )}
                                                         </button>
-                                                    </div>
+                                                    </div>}
                                                 </td>
                                             </tr>
                                         ))}

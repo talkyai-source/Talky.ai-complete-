@@ -48,6 +48,7 @@ export function ContactLists({
     onSelectList,
     onListsLoaded,
     onCallStarted,
+    readOnly = false,
 }: {
     campaignId: string;
     /** Bump to force a re-fetch (e.g. after a CSV import). */
@@ -60,6 +61,8 @@ export function ContactLists({
     onListsLoaded?: (lists: ContactList[]) => void;
     /** Fired after a "Call this list" enqueues jobs, so the parent can refresh stats. */
     onCallStarted?: () => void;
+    /** A role that may not change the campaign sees the lists without switches or calling (QA F1-21). */
+    readOnly?: boolean;
 }) {
     const { create: createNotification } = useNotificationsActions();
     const [lists, setLists] = useState<ContactList[]>([]);
@@ -254,7 +257,7 @@ export function ContactLists({
                                 </div>
                             </button>
 
-                            {!isUngrouped && (
+                            {!isUngrouped && !readOnly && (
                                 <div className="mt-4 flex items-center justify-between gap-2">
                                     {/* Active/inactive toggle */}
                                     <button

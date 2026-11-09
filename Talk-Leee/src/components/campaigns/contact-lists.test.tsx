@@ -17,11 +17,11 @@ const originalConfirm = window.confirm;
 const originalRequest = api.request;
 const clients: QueryClient[] = [];
 
-function mountLists(ready = true) {
+function mountLists(ready = true, readOnly?: boolean) {
     api.request = async <T,>() => ({ ready, reason: ready ? null : "Selected SIP trunk is not ready" }) as T;
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     clients.push(client);
-    render(<QueryClientProvider client={client}><ContactLists campaignId="campaign-a" /></QueryClientProvider>);
+    render(<QueryClientProvider client={client}><ContactLists campaignId="campaign-a" readOnly={readOnly} /></QueryClientProvider>);
 }
 
 const inactiveList: ContactList = {
@@ -132,4 +132,23 @@ test("a pending account-A call-list response cannot publish its private message 
             started: true, message: "Account A private campaign details" });
     });
     assert.deepEqual(notificationsStore.getSnapshot().notifications, []);
+});
+
+// QA F1-21: a role without campaigns:update sees its lists, not the switches
+// or "Call this list" the server would refuse.
+test("read-only lists show names and counts without switches or calling", async () => {
+    dashboardApi.listContactLists = async () => [inactiveList];
+    mountLists(true, true);
+    await screen.findByText("Priority leads");
+    assert.ok(screen.getByText(/3 contacts/));
+    assert.equal(screen.queryByRole("switch") === null, true, "switch offered");
+    assert.equal(screen.queryByRole("button", { name: "Call this list" }) === null, true, "calling offered");
+});
+
+test("lists keep their switches and calling by default", async () => {
+    dashboardApi.listContactLists = async () => [inactiveList];
+    mountLists(true);
+    await screen.findByText("Priority leads");
+    assert.ok(screen.getByRole("switch"));
+    assert.ok(screen.getByRole("button", { name: "Call this list" }));
 });
