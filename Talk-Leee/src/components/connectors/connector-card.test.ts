@@ -150,3 +150,32 @@ test("ConnectorCard confirms and calls disconnect", async () => {
 
     assert.equal(disconnected, 1);
 });
+
+// QA F1-21 (QA-UI-041): a read-only user was offered Connect, Reconnect and
+// Disconnect, which need connectors:create / connectors:delete.
+test("a role that may not connect sees the status without Connect or Reconnect", () => {
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "disconnected", mayConnect: false,
+        })
+    );
+    assert.equal(screen.queryByRole("button", { name: "Connect" }) === null, true, "Connect offered");
+    assert.ok(screen.getByText(/Your role can view connectors but not connect them/));
+    cleanup();
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "expired", mayConnect: false,
+        })
+    );
+    assert.equal(screen.queryByRole("button", { name: "Reconnect" }) === null, true, "Reconnect offered");
+});
+
+test("a role that may not disconnect sees a connected account without Disconnect", () => {
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "connected", mayDisconnect: false,
+        })
+    );
+    assert.equal(screen.queryByRole("button", { name: "Disconnect" }) === null, true, "Disconnect offered");
+    assert.ok(screen.getByText("Syncing enabled."));
+});

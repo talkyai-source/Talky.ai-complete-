@@ -10,6 +10,7 @@ import { SalesforceSettingsPanel } from "@/components/connectors/salesforce-sett
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
 import { isApiClientError } from "@/lib/http-client";
+import { permits, useKnownPermissions } from "@/lib/permissions";
 import type { ConnectorProviderStatus } from "@/lib/models";
 import type { ConnectorProviderType } from "@/lib/connectors-utils";
 import { cn } from "@/lib/utils";
@@ -73,6 +74,11 @@ export default function ConnectorsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const q = useConnectorStatuses();
+    // QA F1-21: offer only what the connector endpoints allow this role.
+    const permissions = useKnownPermissions();
+    const mayConnect = permits(permissions, "connectors:create");
+    const mayDisconnect = permits(permissions, "connectors:delete");
+    const mayConfigure = permits(permissions, "connectors:update");
     const seenEvents = useRef(new Set<string>());
     const lastRefreshEventRaw = useRef<string | null>(null);
 
@@ -226,6 +232,8 @@ export default function ConnectorsPage() {
                                         errorMessage={data?.error_message}
                                         oauthCallbackPath={`/connectors/${p.type}/callback`}
                                         available={p.type !== "salesforce" || Boolean(data)}
+                                        mayConnect={mayConnect}
+                                        mayDisconnect={mayDisconnect}
                                         unavailableReason={p.type === "salesforce" && !data
                                             ? "Salesforce is not enabled by this server yet (SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET missing). No OAuth request will be started until the backend advertises the capability."
                                             : undefined}
@@ -235,7 +243,7 @@ export default function ConnectorsPage() {
                         </div>
                     </CardContent>
                 </Card>
-                {byType.has("salesforce") ? <SalesforceSettingsPanel connected={byType.get("salesforce")?.status === "connected"} /> : null}
+                {byType.has("salesforce") && mayConfigure ? <SalesforceSettingsPanel connected={byType.get("salesforce")?.status === "connected"} /> : null}
             </div>
         </DashboardLayout>
     );
