@@ -25,13 +25,15 @@ const VoiceApiItemSchema = z
 
 const VoiceApiResponseSchema = z.array(VoiceApiItemSchema);
 
+// QA F1-08: 700 shades, so each initial meets 4.5:1 on its 50 tint (the 600
+// shades measured 3.1:1 for amber and 3.5:1 for emerald). See voice-contrast.test.ts.
 const accentStyles = [
-  { color: "text-indigo-600", bg: "bg-indigo-50" },
-  { color: "text-emerald-600", bg: "bg-emerald-50" },
-  { color: "text-purple-600", bg: "bg-purple-50" },
-  { color: "text-amber-600", bg: "bg-amber-50" },
+  { color: "text-indigo-700", bg: "bg-indigo-50" },
+  { color: "text-emerald-700", bg: "bg-emerald-50" },
+  { color: "text-purple-700", bg: "bg-purple-50" },
+  { color: "text-amber-700", bg: "bg-amber-50" },
   { color: "text-slate-900", bg: "bg-white" },
-  { color: "text-blue-600", bg: "bg-blue-50" },
+  { color: "text-blue-700", bg: "bg-blue-50" },
 ] as const;
 
 const FallbackVoices: Voice[] = [
@@ -40,7 +42,7 @@ const FallbackVoices: Voice[] = [
     name: "Sarah",
     description: "Professional female voice",
     initial: "S",
-    color: "text-indigo-600",
+    color: "text-indigo-700",
     bg: "bg-indigo-50",
     previewUrl: "",
   },
@@ -49,7 +51,7 @@ const FallbackVoices: Voice[] = [
     name: "Michael",
     description: "Confident male voice",
     initial: "M",
-    color: "text-emerald-600",
+    color: "text-emerald-700",
     bg: "bg-emerald-50",
     previewUrl: "",
   },
@@ -58,7 +60,7 @@ const FallbackVoices: Voice[] = [
     name: "Amelia",
     description: "Warm, friendly voice",
     initial: "A",
-    color: "text-purple-600",
+    color: "text-purple-700",
     bg: "bg-purple-50",
     previewUrl: "",
   },
@@ -67,7 +69,7 @@ const FallbackVoices: Voice[] = [
     name: "David",
     description: "Clear, upbeat voice",
     initial: "D",
-    color: "text-amber-600",
+    color: "text-amber-700",
     bg: "bg-amber-50",
     previewUrl: "",
   },
@@ -76,7 +78,7 @@ const FallbackVoices: Voice[] = [
     name: "Olivia",
     description: "Calm, modern voice",
     initial: "O",
-    color: "text-blue-600",
+    color: "text-blue-700",
     bg: "bg-blue-50",
     previewUrl: "",
   },
