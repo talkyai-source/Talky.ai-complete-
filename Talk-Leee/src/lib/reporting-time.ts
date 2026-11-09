@@ -24,7 +24,12 @@ export function formatCalendarDate(value: string): string {
 }
 
 function calendarMidnightMs(day: string, timeZone: string): number {
-    const target = Date.parse(`${day}T00:00:00Z`);
+    return calendarWallTimeMs(`${day}T00:00`, timeZone);
+}
+
+/** The instant a wall-clock time ("YYYY-MM-DDTHH:MM") happens in a zone. */
+function calendarWallTimeMs(wallTime: string, timeZone: string): number {
+    const target = Date.parse(`${wallTime}:00Z`);
     if (!Number.isFinite(target)) throw new Error("Invalid reporting calendar date");
     const formatter = new Intl.DateTimeFormat("en-GB", {
         timeZone, year: "numeric", month: "2-digit", day: "2-digit",
@@ -45,6 +50,18 @@ function calendarMidnightMs(day: string, timeZone: string): number {
         guess = next;
     }
     throw new Error("Unable to resolve reporting calendar boundary");
+}
+
+/** QA F1-30: bounds of an hourly bucket, "YYYY-MM-DDTHH:00" in the account zone. */
+export function calendarHourBounds(hour: string, timeZone: string) {
+    const label = hour.slice(0, 13);
+    const next = new Date(`${label}:00:00Z`);
+    if (!Number.isFinite(next.getTime())) throw new Error("Invalid reporting calendar hour");
+    next.setUTCHours(next.getUTCHours() + 1);
+    return {
+        startMs: calendarWallTimeMs(`${label}:00`, timeZone),
+        endMs: calendarWallTimeMs(next.toISOString().slice(0, 16), timeZone),
+    };
 }
 
 export function calendarBucketBounds(day: string, timeZone: string) {

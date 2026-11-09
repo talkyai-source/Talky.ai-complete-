@@ -15,6 +15,7 @@ type Call = { method: string; args: unknown[] };
 let calls: Call[];
 let summary: () => Promise<typeof savedSummary>;
 let daily: () => Promise<Analytics>;
+let hourlySeries: { date: string; total_calls: number; answered: number; failed: number; goal_achieved: number }[];
 const dashboard = {
     getDashboardSummary: async (...args: unknown[]) => { calls.push({ method: "summary", args }); return summary(); },
     listCampaigns: async () => ({ campaigns: [] }),
@@ -22,7 +23,7 @@ const dashboard = {
 const extended = {
     getCallAnalytics: async (...args: unknown[]) => {
         calls.push({ method: args[2] === "day" ? "daily" : "hourly", args });
-        return args[2] === "day" ? daily() : { timezone: zone, series: [] };
+        return args[2] === "day" ? daily() : { timezone: zone, series: hourlySeries };
     },
     getCallAnalyticsByCampaign: async (...args: unknown[]) => {
         calls.push({ method: "campaign", args }); return { timezone: zone, campaigns: [] };
@@ -106,6 +107,7 @@ beforeEach(() => {
     calls = []; externalRequests = []; sockets = []; intervals = new Map(); timerId = 0;
     summary = async () => savedSummary;
     daily = async () => ({ timezone: zone, series: originalSeries });
+    hourlySeries = [];
     delete process.env.NEXT_PUBLIC_DASHBOARD_WS_URL;
     mock.timers.enable({ apis: ["Date"], now: new Date("2026-11-06T10:00:00Z") });
     mock.method(globalThis, "fetch", async (...args: unknown[]) => {
@@ -170,7 +172,11 @@ test("one periodic daily refresh updates both consumers and unmount releases pol
     await tick();
     await charts(7, 2);
     assert.equal(count("daily"), before + 1);
-    assert.equal(count("hourly"), 1, "Daily refresh does not repeat independent hourly data");
+    // QA F1-30: each poll also refreshes the live chart's recent hours (three
+    // calendar days), never the month of hourly data behind the heatmap.
+    const hourly = calls.filter((call) => call.method === "hourly");
+    assert.equal(hourly.length, 2);
+    assert.deepEqual(hourly[1].args, ["2026-11-04", "2026-11-06", "hour", "outbound", false, zone]);
     assert.equal(count("campaign"), 1);
     assert.equal(count("summary"), 2, "The separate REST summary fallback remains active");
     view.unmount();
@@ -203,4 +209,25 @@ test("a transient daily poll failure preserves both snapshots and the next poll 
     await tick();
     await charts(7, 2);
     assert.equal(count("daily"), before + 2);
+});
+
+// QA F1-30 (QA-UI-139): the live chart was built from day rows, so the 1h, 4h
+// and 24h ranges all showed the same single day.
+test("the 1h, 4h and 24h ranges show the hours they cover", async () => {
+    mock.timers.setTime(Date.parse("2026-11-06T10:30:00Z")); // 15:30 in Karachi
+    hourlySeries = [
+        { date: "2026-11-06T08:00", total_calls: 4, answered: 4, failed: 0, goal_achieved: 0 }, // 03:00-04:00Z
+        { date: "2026-11-06T13:00", total_calls: 2, answered: 1, failed: 1, goal_achieved: 0 }, // 08:00-09:00Z
+        { date: "2026-11-06T15:00", total_calls: 1, answered: 1, failed: 0, goal_achieved: 0 }, // 10:00-11:00Z
+    ];
+    render(<DashboardPage />);
+    const liveTotal = () => {
+        const live = JSON.parse(screen.getByTestId("live-chart").textContent!) as LiveProps;
+        return live.buckets.reduce((sum, bucket) => sum + bucket.total, 0);
+    };
+    await waitFor(() => assert.equal(liveTotal(), 3, "4h (default) covers 06:30-10:30Z"));
+    fireEvent.click(screen.getByRole("button", { name: "1h" }));
+    await waitFor(() => assert.equal(liveTotal(), 1, "1h covers 09:30-10:30Z"));
+    fireEvent.click(screen.getByRole("button", { name: "24h" }));
+    await waitFor(() => assert.equal(liveTotal(), 7, "24h covers every hour above"));
 });

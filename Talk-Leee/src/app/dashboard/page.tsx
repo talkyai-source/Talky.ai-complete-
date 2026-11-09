@@ -29,7 +29,7 @@ import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
-import { calendarBucketBounds, formatCalendarDate, reportingDateRange } from "@/lib/reporting-time";
+import { calendarBucketBounds, calendarHourBounds, formatCalendarDate, reportingDateRange } from "@/lib/reporting-time";
 
 function Counter({ value }: { value: number }) {
     const nodeRef = useRef<HTMLSpanElement>(null);
@@ -191,6 +191,31 @@ function dailySnapshot(series: CallSeriesItem[], timeZone: string) {
     }
     buckets.sort((a, b) => a.startMs - b.startMs);
     return { series, buckets, lastUpdatedMs: Date.now() };
+}
+
+// QA F1-30: windows of a day or less are drawn from hourly rows; day rows
+// made 1h, 4h, 8h and 24h all show the same single day.
+const HOURLY_RANGE_MAX_MS = 24 * 60 * 60 * 1000;
+
+function hourlyBuckets(series: CallSeriesItem[], timeZone: string) {
+    const buckets: LiveTimeBucket[] = [];
+    for (const s of series) {
+        let bounds: { startMs: number; endMs: number };
+        try {
+            bounds = calendarHourBounds(s.date, timeZone);
+        } catch {
+            continue;
+        }
+        buckets.push({
+            startMs: bounds.startMs,
+            endMs: bounds.endMs,
+            total: s.total_calls ?? 0,
+            answered: s.answered ?? 0,
+            failed: s.failed ?? 0,
+            avgDurationSec: null,
+        });
+    }
+    return buckets.sort((a, b) => a.startMs - b.startMs);
 }
 
 function toDatetimeLocalValue(ms: number) {
@@ -646,6 +671,8 @@ export default function DashboardPage() {
     const series = daily.series;
     // Real hourly buckets (heatmap) + real per-campaign series (campaign lines).
     const [hourSeries, setHourSeries] = useState<CallSeriesItem[]>([]);
+    // Hourly buckets for the live chart's windows of a day or less (QA F1-30).
+    const [hourBuckets, setHourBuckets] = useState<LiveTimeBucket[]>([]);
     const [campaignSeries, setCampaignSeries] = useState<Array<{ campaign_id: string; name: string; series: CallSeriesItem[] }>>([]);
     const [liveBars, setLiveBars] = useState<DualSeriesPoint[]>([]);
     const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "retrying" | "offline">("connecting");
@@ -691,20 +718,25 @@ export default function DashboardPage() {
         setCustomStartMs(start);
     }, [callRangeMode, customEndMs, customStartMs, liveRangeHours, sim.lastUpdatedMs]);
 
+    const rangeBuckets = useMemo(() => {
+        const short = activeRange.endMs - activeRange.startMs <= HOURLY_RANGE_MAX_MS;
+        return short && hourBuckets.length > 0 ? hourBuckets : sim.buckets;
+    }, [activeRange.endMs, activeRange.startMs, hourBuckets, sim.buckets]);
+
     const liveBucketsBase = useMemo(() => {
-        if (sim.buckets.length === 0) return [];
+        if (rangeBuckets.length === 0) return [];
         const startMs = activeRange.startMs;
         const endMs = activeRange.endMs;
-        return sim.buckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
-    }, [activeRange.endMs, activeRange.startMs, sim.buckets]);
+        return rangeBuckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
+    }, [activeRange.endMs, activeRange.startMs, rangeBuckets]);
 
     const previousBucketsBase = useMemo(() => {
-        if (sim.buckets.length === 0) return [];
+        if (rangeBuckets.length === 0) return [];
         const rangeMs = Math.max(1, activeRange.endMs - activeRange.startMs);
         const endMs = activeRange.startMs;
         const startMs = endMs - rangeMs;
-        return sim.buckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
-    }, [activeRange.endMs, activeRange.startMs, sim.buckets]);
+        return rangeBuckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
+    }, [activeRange.endMs, activeRange.startMs, rangeBuckets]);
 
     const liveBuckets = useMemo(() => {
         const totals = liveBucketsBase.map((b) => b.total).filter((v): v is number => typeof v === "number");
@@ -956,6 +988,7 @@ export default function DashboardPage() {
             setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
             setDaily(snapshot);
             setHourSeries(hourly.series ?? []);
+            setHourBuckets(hourlyBuckets(hourly.series ?? [], summaryData.timezone));
             setCampaignSeries(byCampaign.campaigns ?? []);
         } catch (err) {
             setError(err instanceof Error ? err.message : "Failed to load dashboard");
@@ -984,8 +1017,16 @@ export default function DashboardPage() {
             inFlight = true;
             try {
                 const month = reportingDateRange(timeZone, "month");
-                const response = await extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false, timeZone);
-                if (!cancelled) setDaily(dailySnapshot(response.series ?? [], timeZone));
+                // QA F1-30: the live chart's short windows also need fresh hours,
+                // but only the last three calendar days, never the month again.
+                const recent = reportingDateRange(timeZone, 2);
+                const [days, hours] = await Promise.allSettled([
+                    extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false, timeZone),
+                    extendedApi.getCallAnalytics(recent.from, recent.to, "hour", "outbound", false, timeZone),
+                ]);
+                if (cancelled) return;
+                if (days.status === "fulfilled") setDaily(dailySnapshot(days.value.series ?? [], timeZone));
+                if (hours.status === "fulfilled") setHourBuckets(hourlyBuckets(hours.value.series ?? [], timeZone));
             } catch {
                 // Keep both last-good charts; the next scheduled poll retries.
             } finally {
