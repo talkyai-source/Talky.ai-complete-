@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { Navbar } from "@/components/home/navbar";
 import { Footer } from "@/components/home/footer";
 import { motion } from "framer-motion";
@@ -21,6 +21,12 @@ export default function AiVoicesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [playingId, setPlayingId] = useState<string | null>(null);
+  // The sample playing now. Only touched in handlers and effects.
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => () => {
+    audioRef.current?.pause();
+  }, []);
 
   useEffect(() => {
     const fetchVoices = async () => {
@@ -50,18 +56,20 @@ export default function AiVoicesPage() {
     fetchVoices();
   }, []);
 
-  const handlePreview = (voiceId: string) => {
-    if (playingId === voiceId) {
+  // QA F1-07: play the voice's real sample. Voices without one show no
+  // Preview control at all, rather than a button that plays nothing.
+  const handlePreview = (voice: Voice) => {
+    audioRef.current?.pause();
+    audioRef.current = null;
+    if (playingId === voice.id || !voice.previewUrl) {
       setPlayingId(null);
-      // Logic to stop audio would go here
-    } else {
-      setPlayingId(voiceId);
-      // Logic to play audio would go here
-      // Auto-stop after 3 seconds for demo
-      setTimeout(() => {
-        setPlayingId((prev) => (prev === voiceId ? null : prev));
-      }, 3000);
+      return;
     }
+    const audio = new Audio(voice.previewUrl);
+    audio.onended = () => setPlayingId((prev) => (prev === voice.id ? null : prev));
+    audioRef.current = audio;
+    setPlayingId(voice.id);
+    audio.play().catch(() => setPlayingId((prev) => (prev === voice.id ? null : prev)));
   };
 
   return (
@@ -130,23 +138,25 @@ export default function AiVoicesPage() {
                   {voice.description}
                 </p>
                 
-                <button
-                  type="button"
-                  onClick={() => handlePreview(voice.id)}
-                  className="px-6 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 flex items-center gap-2"
-                  aria-label={`Preview voice of ${voice.name}`}
-                  aria-pressed={playingId === voice.id}
-                >
-                  {playingId === voice.id ? (
-                    <>
-                      <Pause className="w-4 h-4" aria-hidden /> Stop Preview
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-4 h-4" aria-hidden /> Preview Voice
-                    </>
-                  )}
-                </button>
+                {voice.previewUrl ? (
+                  <button
+                    type="button"
+                    onClick={() => handlePreview(voice)}
+                    className="px-6 py-2.5 bg-indigo-600 text-white font-medium rounded-lg hover:bg-indigo-700 transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 flex items-center gap-2"
+                    aria-label={`Preview voice of ${voice.name}`}
+                    aria-pressed={playingId === voice.id}
+                  >
+                    {playingId === voice.id ? (
+                      <>
+                        <Pause className="w-4 h-4" aria-hidden /> Stop Preview
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4" aria-hidden /> Preview Voice
+                      </>
+                    )}
+                  </button>
+                ) : null}
               </motion.div>
             ))}
           </div>

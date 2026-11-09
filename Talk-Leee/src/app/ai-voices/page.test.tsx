@@ -117,44 +117,66 @@ describe("AiVoicesPage", () => {
     assert.ok(screen.getByText("Retry"));
   });
 
-  test("toggles play state on button click", async () => {
-    const mockVoices = [
-        {
-          id: "sarah",
-          name: "Sarah",
-          description: "Professional female voice",
-          initial: "S",
-          color: "text-indigo-600",
-          bg: "bg-indigo-50",
-          previewUrl: "/audio/sarah.mp3",
-        }
-    ];
+  // QA F1-07: Preview used to flip to "Stop Preview" without playing anything.
+  // A real clip is now played and stopped; a voice without one has no control.
+  test("plays and stops the voice's real sample", async () => {
+    const played: { src: string; paused: boolean }[] = [];
+    class FakeAudio {
+      src: string;
+      paused = true;
+      onended: (() => void) | null = null;
+      constructor(src: string) {
+        this.src = src;
+        played.push(this);
+      }
+      play() {
+        this.paused = false;
+        return Promise.resolve();
+      }
+      pause() {
+        this.paused = true;
+      }
+    }
+    const originalAudio = globalThis.Audio;
+    globalThis.Audio = FakeAudio as unknown as typeof Audio;
+    try {
+      global.fetch = async () => ({
+        ok: true,
+        json: async () => [{
+          id: "sarah", name: "Sarah", description: "Professional female voice",
+          initial: "S", color: "text-indigo-600", bg: "bg-indigo-50", previewUrl: "/audio/sarah.mp3",
+        }],
+      }) as unknown as Promise<Response>;
 
+      renderPage();
+      await waitFor(() => assert.ok(screen.getByText("Sarah")));
+
+      fireEvent.click(screen.getByText("Preview Voice"));
+      await waitFor(() => assert.ok(screen.getByText("Stop Preview")));
+      assert.equal(played.length, 1);
+      assert.equal(played[0].src, "/audio/sarah.mp3");
+      assert.equal(played[0].paused, false);
+
+      fireEvent.click(screen.getByText("Stop Preview"));
+      await waitFor(() => assert.ok(screen.getByText("Preview Voice")));
+      assert.equal(played[0].paused, true);
+    } finally {
+      globalThis.Audio = originalAudio;
+    }
+  });
+
+  test("a voice without a sample has no preview control", async () => {
     global.fetch = async () => ({
       ok: true,
-      json: async () => mockVoices,
+      json: async () => [{
+        id: "ava", name: "Ava", description: "Warm voice",
+        initial: "A", color: "text-indigo-600", bg: "bg-indigo-50", previewUrl: "",
+      }],
     }) as unknown as Promise<Response>;
 
     renderPage();
-
-    await waitFor(() => {
-      assert.ok(screen.getByText("Sarah"));
-    });
-
-    const buttons = screen.getAllByText("Preview Voice");
-    fireEvent.click(buttons[0]);
-
-    await waitFor(() => {
-      assert.ok(screen.getByText("Stop Preview"));
-    });
-
-    fireEvent.click(screen.getByText("Stop Preview"));
-
-    await waitFor(() => {
-      // It should revert to "Preview Voice"
-      // Since there is only one button, getAllByText might return 1 or 0 depending on timing.
-      // But we can check if "Preview Voice" exists.
-      assert.ok(screen.getAllByText("Preview Voice").length > 0);
-    });
+    await waitFor(() => assert.ok(screen.getByText("Ava")));
+    assert.equal(screen.queryByText("Preview Voice"), null);
+    assert.equal(screen.queryByRole("button", { name: /Preview voice of Ava/ }), null);
   });
 });
