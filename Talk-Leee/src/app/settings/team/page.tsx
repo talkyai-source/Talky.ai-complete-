@@ -76,8 +76,9 @@ export default function TeamPage() {
                     <ul className="divide-y divide-border">
                         {(members.data ?? []).map((member) => {
                             const isSelf = member.email.toLowerCase() === ownEmail;
-                            // Your own row and the workspace owner's are never changed from here.
-                            const changeable = canManage && !isSelf && !member.is_primary;
+                            // Your own row is never changed from here; the server refuses it too.
+                            // is_primary is the member's home workspace, not ownership.
+                            const changeable = canManage && !isSelf;
                             const who = displayName(member);
                             return (
                                 <li key={member.id} className="flex flex-col gap-3 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -85,7 +86,6 @@ export default function TeamPage() {
                                         <p className="truncate font-medium text-foreground">
                                             {who}
                                             {isSelf ? <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">You</span> : null}
-                                            {member.is_primary ? <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">Owner</span> : null}
                                         </p>
                                         <p className="truncate text-sm text-muted-foreground">
                                             {member.name ? `${member.email} · ` : ""}{roleName(member.role)}

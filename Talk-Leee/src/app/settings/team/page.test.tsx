@@ -11,7 +11,9 @@ import { teamApi, type TeamMember } from "@/lib/team-api";
 
 // QA F1-15 (QA-UI-151): team management (/rbac/tenant-users) had no screen.
 // Settings → Team lists the workspace's members; admins can change another
-// member's role or remove them, after a confirmation.
+// member's role or remove them, after a confirmation. is_primary marks a
+// member's home workspace (one per person), so nearly every member has it:
+// it is not ownership, and it never hides the controls.
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 let role = "tenant_admin";
@@ -32,9 +34,9 @@ const SLOW = 15_000;
 const clients: QueryClient[] = [];
 afterEach(() => { cleanup(); mock.restoreAll(); clients.splice(0).forEach((client) => client.clear()); role = "tenant_admin"; });
 
-const OWNER: TeamMember = { id: "m-owner", email: "owner@example.test", name: "Olive Owner", role: "tenant_admin", is_primary: true, status: "active", joined_at: "2026-09-01T09:00:00Z" };
-const ME: TeamMember = { id: "m-me", email: "admin@example.test", name: "Ada Admin", role: "tenant_admin", is_primary: false, status: "active", joined_at: "2026-10-01T09:00:00Z" };
-const AGENT: TeamMember = { id: "m-agent", email: "sam@example.test", name: "Sam Agent", role: "agent", is_primary: false, status: "active", joined_at: "2026-10-15T09:00:00Z" };
+const OLIVE: TeamMember = { id: "m-olive", email: "olive@example.test", name: "Olive Admin", role: "tenant_admin", is_primary: true, status: "active", joined_at: "2026-09-01T09:00:00Z" };
+const ME: TeamMember = { id: "m-me", email: "admin@example.test", name: "Ada Admin", role: "tenant_admin", is_primary: true, status: "active", joined_at: "2026-10-01T09:00:00Z" };
+const AGENT: TeamMember = { id: "m-agent", email: "sam@example.test", name: "Sam Agent", role: "agent", is_primary: true, status: "active", joined_at: "2026-10-15T09:00:00Z" };
 
 function mount(members: () => Promise<TeamMember[]>) {
     const list = mock.method(teamApi, "list", members);
@@ -45,19 +47,19 @@ function mount(members: () => Promise<TeamMember[]>) {
 }
 const none = (role: "button" | "combobox", name: RegExp) => screen.queryAllByRole(role, { name }).length === 0;
 
-test("everyone sees the members, their roles, and which one is them and the owner", async () => {
+test("everyone sees the members, their roles, and which one is them", async () => {
     role = "readonly";
-    mount(async () => [OWNER, ME, AGENT]);
+    mount(async () => [OLIVE, ME, AGENT]);
     await screen.findByText("Sam Agent", undefined, { timeout: SLOW });
     assert.ok(screen.getByText("You"));
-    assert.ok(screen.getByText("Owner"));
+    assert.equal(screen.queryAllByText("Owner").length, 0, "a home-workspace flag is shown as ownership");
     assert.ok(screen.getByText(/sam@example\.test · Agent/));
     assert.equal(none("combobox", /^Role for/), true, "a read-only role is offered role changes");
     assert.equal(none("button", /^Remove/), true, "a read-only role is offered removal");
 });
 
 test("an admin changes another member's role only after confirming", async () => {
-    const list = mount(async () => [OWNER, ME, AGENT]);
+    const list = mount(async () => [OLIVE, ME, AGENT]);
     const change = mock.method(teamApi, "changeRole", async () => undefined);
     fireEvent.click(await screen.findByRole("combobox", { name: "Role for Sam Agent" }, { timeout: SLOW }));
     fireEvent.click(await screen.findByRole("option", { name: "Read only" }));
@@ -74,18 +76,35 @@ test("an admin changes another member's role only after confirming", async () =>
     await waitFor(() => assert.ok(list.mock.callCount() >= 2, "the list is read again"));
 });
 
-test("an admin removes another member after confirming; their own row and the owner's offer neither", async () => {
-    mount(async () => [OWNER, ME, AGENT]);
+test("an admin removes another member after confirming; only their own row offers neither", async () => {
+    mount(async () => [OLIVE, ME, AGENT]);
     const remove = mock.method(teamApi, "remove", async () => undefined);
     await screen.findByText("Sam Agent", undefined, { timeout: SLOW });
-    assert.equal(none("combobox", /Role for (Ada Admin|Olive Owner)/), true, "own or owner role offered");
-    assert.equal(none("button", /Remove (Ada Admin|Olive Owner)/), true, "own or owner removal offered");
+    assert.equal(none("combobox", /Role for Ada Admin/), true, "own role change offered");
+    assert.equal(none("button", /Remove Ada Admin/), true, "own removal offered");
+    assert.equal(none("combobox", /Role for Olive Admin/), false, "another admin's role is not offered");
+    assert.equal(none("button", /Remove Olive Admin/), false, "another admin's removal is not offered");
     fireEvent.click(screen.getByRole("button", { name: "Remove Sam Agent" }));
     const dialog = within(await screen.findByRole("dialog"));
     assert.ok(dialog.getByText("Sam Agent will lose access to this workspace."));
     await act(async () => { fireEvent.click(dialog.getByRole("button", { name: "Remove" })); });
     await waitFor(() => assert.equal(remove.mock.callCount(), 1));
     assert.deepEqual(remove.mock.calls[0].arguments, ["m-agent"]);
+});
+
+test("a change the server refuses stays open and says why", async () => {
+    const list = mount(async () => [OLIVE, ME, AGENT]);
+    const refusal = "This is the workspace's last active administrator. Make someone else an administrator first.";
+    mock.method(teamApi, "changeRole", async () => {
+        throw new ApiClientError({ status: 409, code: "http_error", message: refusal, url: "http://example.test/rbac/tenant-users/m-olive", method: "PATCH" });
+    });
+    fireEvent.click(await screen.findByRole("combobox", { name: "Role for Olive Admin" }, { timeout: SLOW }));
+    fireEvent.click(await screen.findByRole("option", { name: "Read only" }));
+    const dialog = within(await screen.findByRole("dialog"));
+    await act(async () => { fireEvent.click(dialog.getByRole("button", { name: "Change role" })); });
+    await waitFor(() => assert.equal(dialog.queryAllByText(refusal).length, 1));
+    assert.equal(screen.queryAllByRole("dialog").length, 1, "the dialog closed on a refusal");
+    assert.equal(list.mock.callCount(), 1, "the list was re-read as if the change happened");
 });
 
 test("a failed read is a load error with a retry, never an empty team", async () => {
