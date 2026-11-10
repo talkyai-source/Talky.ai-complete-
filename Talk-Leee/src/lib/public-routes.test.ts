@@ -12,10 +12,10 @@ test("the sitemap publishes exactly the shared public route list, in order", () 
 });
 
 // 39 since QA F17-01 withheld /docs/support and /docs/partners until those
-// features are enabled.
-test("the list holds 39 distinct routes without trailing slashes", () => {
-    assert.equal(PUBLIC_ROUTES.length, 39);
-    assert.equal(new Set(PUBLIC_ROUTES).size, 39);
+// features are enabled; 40 with the accessibility statement (QA F12-09).
+test("the list holds 40 distinct routes without trailing slashes", () => {
+    assert.equal(PUBLIC_ROUTES.length, 40);
+    assert.equal(new Set(PUBLIC_ROUTES).size, 40);
     for (const route of PUBLIC_ROUTES) {
         if (route !== "/") assert.doesNotMatch(route, /\/$/, `${route} carries a trailing slash`);
     }

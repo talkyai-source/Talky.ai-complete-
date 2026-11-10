@@ -22,6 +22,7 @@ export const PUBLIC_ROUTES = [
   "/pricing",
   "/privacy",
   "/terms",
+  "/accessibility",
   "/docs",
   "/docs/getting-started",
   "/docs/outbound-campaigns",
