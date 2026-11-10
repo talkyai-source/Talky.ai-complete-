@@ -409,3 +409,21 @@ test("while a checkout return is being confirmed the plan tile says so instead o
     assert.ok(screen.getByText("Active"));
     assert.ok(absent("Confirming your purchase with Stripe…"));
 });
+
+// QA F13-13 (QA-BIL-011): usage was always labelled a calendar month, but a
+// paid plan's allowance renews monthly from its purchase; and the counting
+// rule (seconds added up, shown in whole minutes, rounded down) was unstated.
+for (const [period, label] of [
+    ["calendar_month", /Calendar-month call usage/],
+    ["anchored_month", /Usage since your plan's monthly renewal/],
+] as const) {
+    test(`a ${period} meter is described as such, with its counting rule`, async () => {
+        globalThis.fetch = routeFetch({
+            ...ALL_EMPTY_OK,
+            "/billing/usage": () => json({ ...EMPTY_USAGE, unlimited: false, allocated: 300, total_used: 12, remaining: 288, metering_period: period }),
+        }) as typeof fetch;
+        renderWithQueryClient(<BillingOverview />);
+        await waitFor(() => assert.ok(screen.getByText(label)));
+        assert.ok(screen.getByText(/added up and shown in whole minutes, rounded down/));
+    });
+}

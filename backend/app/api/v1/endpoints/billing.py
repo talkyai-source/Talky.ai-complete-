@@ -110,7 +110,7 @@ class UsageSummaryResponse(BaseModel):
     remaining: int
     overage: int
     unlimited: bool
-    metering_period: Literal["calendar_month"]
+    metering_period: Literal["calendar_month", "anchored_month"]
 
 
 # ============================================

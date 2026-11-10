@@ -57,7 +57,7 @@ export const invoiceListSchema = z.union([z.array(invoiceSchema), z.object({ inv
 
 export const usageSchema = z.object({ usage_type: z.string(), total_used: z.number().finite().nonnegative(),
   allocated: z.number().finite().nonnegative(), remaining: z.number().finite().nonnegative(), overage: z.number().finite().nonnegative(),
-  unlimited: z.boolean(), metering_period: z.literal("calendar_month"),
+  unlimited: z.boolean(), metering_period: z.enum(["calendar_month", "anchored_month"]),
 });
 export type BillingUsage = z.infer<typeof usageSchema>;
 export const dailyUsageSchema = z.array(z.object({ date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),

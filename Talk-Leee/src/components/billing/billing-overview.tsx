@@ -414,7 +414,13 @@ function MinutesTracker({ usage }: { usage: UsageSummary | null }) {
     <Card>
       <CardHeader>
         <CardTitle className="flex items-center gap-2"><Phone className="h-5 w-5" aria-hidden /> Minutes Usage</CardTitle>
-        <CardDescription>Calendar-month call usage, separate from invoice charges.</CardDescription>
+        {/* QA F13-13: the month the allowance really uses, and how minutes are counted. */}
+        <CardDescription>
+          {usage.metering_period === "anchored_month"
+            ? "Usage since your plan's monthly renewal, separate from invoice charges."
+            : "Calendar-month call usage, separate from invoice charges."}
+          {" "}Call time is added up and shown in whole minutes, rounded down.
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="flex items-end justify-between gap-2">

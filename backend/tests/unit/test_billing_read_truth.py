@@ -17,10 +17,12 @@ from app.domain.services.minutes_quota import _status_from
 
 
 class Pool:
-    def __init__(self):
+    def __init__(self, anchored=False):
         self.queries = []
+        # The tenant row read: NULL when absent, else whether a paid plan's
+        # purchase anchor sets the allowance month (QA F13-13).
         self.conn = SimpleNamespace(
-            execute=AsyncMock(side_effect=self.execute), fetchval=AsyncMock(return_value=True)
+            execute=AsyncMock(side_effect=self.execute), fetchval=AsyncMock(return_value=anchored)
         )
         self.conn.transaction = self.transaction
 
@@ -341,3 +343,27 @@ def test_legacy_invalid_document_or_unsafe_integer_is_unavailable_without_losing
     assert result["invoice_pdf"] is None and result["amount_due"] is None
     assert result["hosted_invoice_url"] == "https://invoice.stripe.com/i/synthetic"
     assert result["id"] == str(row["id"]) and result["amount_paid"] == 800
+
+
+# QA F13-13 (QA-BIL-011): the usage summary always said "calendar_month",
+# but a paid plan's allowance renews monthly from its purchase.
+@pytest.mark.asyncio
+@pytest.mark.parametrize("anchored,period", [(False, "calendar_month"), (True, "anchored_month")])
+async def test_usage_names_the_period_its_allowance_actually_uses(monkeypatch, anchored, period):
+    pool, tenant = Pool(anchored=anchored), str(uuid4())
+    monkeypatch.setattr(
+        "app.domain.services.minutes_quota.compute_minutes_status",
+        AsyncMock(return_value=_status_from(350, 150 * 60)),
+    )
+    result = await service(pool).get_usage_summary(tenant)
+    assert result["metering_period"] == period
+    sql, args = pool.conn.fetchval.await_args.args[0], pool.conn.fetchval.await_args.args[1:]
+    assert "allowance_anchor_at" in sql and "WHERE id=$1" in sql and str(args[0]) == tenant
+
+
+@pytest.mark.asyncio
+async def test_usage_for_a_missing_tenant_is_unavailable_not_calendar_month(monkeypatch):
+    pool = Pool(anchored=None)
+    monkeypatch.setattr("app.domain.services.minutes_quota.compute_minutes_status", AsyncMock())
+    with pytest.raises(RuntimeError, match="Usage tenant unavailable"):
+        await service(pool).get_usage_summary(str(uuid4()))

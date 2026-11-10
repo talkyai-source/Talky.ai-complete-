@@ -564,10 +564,13 @@ class BillingService:
     async def get_usage_summary(
         self, tenant_id: str, usage_type: str = "minutes"
     ) -> Dict[str, Any]:
-        """Current calendar-month meter, not an invoice-period estimate.
+        """Current allowance-month meter, not an invoice-period estimate.
 
         Reuse the quota's settled-call definition and purchased allowance. A
         failed/missing read is unavailable, never evidence of zero usage.
+        ``metering_period`` names the month the allowance uses (QA F13-13): a
+        paid plan's renews monthly from its purchase (``anchored_month``, see
+        minutes_quota.allowance_window_start_sql), otherwise ``calendar_month``.
         """
         if usage_type != "minutes":
             raise ValueError("Unsupported usage_type; only minutes are metered")
@@ -577,8 +580,13 @@ class BillingService:
 
         tenant_uuid = UUID(str(tenant_id))
         async with acquire_with_tenant(self.db_client.pool, str(tenant_uuid), timeout=5) as conn:
-            exists = await conn.fetchval("SELECT EXISTS(SELECT 1 FROM tenants WHERE id=$1)", tenant_uuid)
-            if not exists:
+            # NULL when the tenant is absent; else whether the purchase anchor
+            # (not the calendar) sets this allowance month.
+            anchored = await conn.fetchval(
+                "SELECT allowance_anchor_at IS NOT NULL AND allowance_anchor_at <= NOW() FROM tenants WHERE id=$1",
+                tenant_uuid,
+            )
+            if anchored is None:
                 raise RuntimeError("Usage tenant unavailable")
             quota = (await compute_minutes_status(conn, tenant_uuid)).require_available()
         return {
@@ -588,5 +596,5 @@ class BillingService:
             "remaining": quota.remaining_minutes,
             "overage": 0 if quota.unlimited else max(0, quota.used_minutes - quota.allocated),
             "unlimited": quota.unlimited,
-            "metering_period": "calendar_month",
+            "metering_period": "anchored_month" if anchored else "calendar_month",
         }
