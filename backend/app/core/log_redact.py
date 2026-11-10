@@ -264,6 +264,28 @@ _PROFILE_DIGEST_RE = re.compile(
     r'''(?P<digest>[a-fA-F0-9]{64})(?![a-zA-Z0-9])'''
 )
 
+# Request ids, call ids and every other UUID are opaque identifiers, never a
+# phone or card number, yet about 1 in 280 random UUIDs ends in an all-digit
+# group, which `longrun` ate (observed in the unit suite, 2026-11-10):
+#
+#     HTTP operation failed request_id=7a08427a-4d5f-4aa2-b54f-[redacted digits=12 ..11]
+#
+# so the "Request reference" a customer reads no longer matched the server
+# log. A digit run wholly inside a complete 8-4-4-4-12 hex token is left
+# alone; one that only borders a UUID, or sits in a partial one, is masked.
+_UUID_RE = re.compile(
+    r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Fa-f])"
+)
+
+
+def _inside_uuid(match: "re.Match[str]") -> bool:
+    text, start, end = match.string, match.start(), match.end()
+    for uuid in _UUID_RE.finditer(text, max(0, start - 36), min(len(text), end + 36)):
+        if uuid.start() <= start and end <= uuid.end():
+            return True
+    return False
+
+
 #: Values that cannot carry speech — never rewritten, even in a sensitive slot.
 _NON_TEXT_TYPES = (bool, int, float, complex, type(None))
 
@@ -334,7 +356,7 @@ def _mask_match(match: "re.Match[str]") -> str:
     if match.lastgroup in ("grouped", "longrun") or (
         match.group("grouped") is not None or match.group("longrun") is not None
     ):
-        if _NON_PII_CONTEXT_RE.search(match.string, 0, match.start()):
+        if _NON_PII_CONTEXT_RE.search(match.string, 0, match.start()) or _inside_uuid(match):
             return raw
 
     digits = [c for c in raw if c.isdigit()]

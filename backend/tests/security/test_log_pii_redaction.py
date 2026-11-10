@@ -409,3 +409,33 @@ def test_complete_profile_digest_survives_inside_json(field):
 def test_profile_field_name_does_not_exempt_arbitrary_identifier(field, value):
     scrubbed = log_redact.scrub_text('{"' + field + '": "' + value + '"}')
     assert "447754566590" not in scrubbed
+
+
+# ---------------------------------------------------------------------------
+# Precision: request ids and other UUIDs must NOT be eaten
+# ---------------------------------------------------------------------------
+# Observed in the unit suite (2026-11-10): a request id whose last group was
+# all digits logged as "request_id=7a08427a-4d5f-4aa2-b54f-[redacted digits=12
+# ..11]", so the "Request reference" a customer reads no longer matched the
+# server log. About 1 in 280 random UUIDs ends in an all-digit group.
+
+
+@pytest.mark.parametrize("line", [
+    "HTTP operation failed request_id=7a08427a-4d5f-4aa2-b54f-437141468111 error_type=RuntimeError",
+    "call_id=12345678-1234-4234-8234-123456789012 ended",
+    "tenant 7A08427A-4D5F-4AA2-B54F-437141468111 synced",
+    "key call-7a08427a-4d5f-4aa2-b54f-437141468111 stored",
+])
+def test_uuids_survive_even_when_a_group_is_all_digits(line):
+    assert log_redact.scrub_text(line) == line
+
+
+@pytest.mark.parametrize("line,must_not_contain", [
+    ("request_id=7a08427a-4d5f-4aa2-b54f-437141468111 callback 447754566590", "447754566590"),
+    ("ref 7a08427a-4d5f-4aa2-b54f-437141468111447754566590", "447754566590"),
+    ("partial 4d5f-4aa2-b54f-437141468111 only", "437141468111"),
+])
+def test_the_uuid_exemption_covers_only_a_whole_uuid(line, must_not_contain):
+    out = log_redact.scrub_text(line)
+    assert must_not_contain not in out
+    assert log_redact.REDACTED_PREFIX in out
