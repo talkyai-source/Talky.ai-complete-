@@ -27,7 +27,7 @@ _PUBLIC = {
         "/api/v1/auth/passkey-check", "/api/v1/auth/forgot-password", "/api/v1/auth/reset-password",
         "/api/v1/auth/mfa/verify", "/api/v1/auth/passkeys/login/begin",
         "/api/v1/auth/passkeys/login/complete", "/api/v1/admin/secrets/validate-api-key",
-        "/api/v1/public/contact-enquiries",
+        "/api/v1/public/contact-enquiries", "/api/v1/auth/invites/preview", "/api/v1/auth/invites/accept",
     )
 }
 _HEADER_SCHEMES = {

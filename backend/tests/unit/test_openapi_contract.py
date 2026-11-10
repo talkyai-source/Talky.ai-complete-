@@ -77,6 +77,7 @@ def test_global_security_matches_real_user_credentials_and_uses_or_not_and(contr
     ("post", "/api/v1/auth/forgot-password"), ("post", "/api/v1/auth/reset-password"),
     ("get", "/api/v1/auth/verify-email"), ("post", "/api/v1/auth/mfa/verify"),
     ("post", "/api/v1/auth/passkeys/login/begin"), ("post", "/api/v1/auth/passkeys/login/complete"),
+    ("post", "/api/v1/auth/invites/preview"), ("post", "/api/v1/auth/invites/accept"),
 ])
 def test_public_and_body_credential_routes_do_not_inherit_user_bearer(method, path, contract_snapshot):
     assert contract_snapshot.schema["paths"][path][method].get("security") == []
