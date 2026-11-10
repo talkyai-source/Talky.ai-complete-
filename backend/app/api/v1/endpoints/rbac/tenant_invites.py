@@ -26,6 +26,7 @@ from app.api.v1.dependencies import (
 )
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
+from app.core.security.auth_abuse import enforce_budget
 from app.core.security.rbac import normalize_role
 from app.domain.services import team_invites
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
@@ -112,6 +113,11 @@ async def invite_teammate(
         await audit_logger.lock_transaction(conn)
         user_role = await _current_target_admin(conn, current_user, tenant_id)
         _check_role_ceiling(user_role, request.role_name)
+        # Security review: cap invite emails per workspace and per recipient,
+        # which also bounds how often the account check below can be asked
+        # (public signup already answers it). Claimed only once authorized.
+        await enforce_budget(redis, "invite-tenant", tenant_id, limit=20, seconds=24 * 60 * 60)
+        await enforce_budget(redis, "invite-recipient", email, limit=3, seconds=24 * 60 * 60)
         if await conn.fetchval("SELECT 1 FROM user_profiles WHERE LOWER(email) = $1", email):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

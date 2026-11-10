@@ -33,3 +33,21 @@ async def test_the_invite_email_links_to_the_accept_page_and_escapes_names(monke
     assert f'href="{link}"' in sent["html_body"]
     assert "<b>Ltd</b>" not in sent["html_body"] and "&lt;b&gt;Ltd&lt;/b&gt;" in sent["html_body"]
     assert "as an agent" in sent["text_body"] and "18 November 2026" in sent["text_body"]
+
+
+async def test_names_in_the_invite_email_are_kept_short(monkeypatch):
+    service = EmailService(sender_email="noreply@example.com", sender_password="unused")
+    service.frontend_url = "https://app.example.com"
+    sent = {}
+
+    async def capture(**message):
+        sent.update(message)
+        return True
+
+    monkeypatch.setattr(service, "send_email", capture)
+    await service.send_team_invite_email(
+        recipient_email="sam@example.com", workspace_name="W" * 300, inviter="I" * 300,
+        role_name="user", token="tok", expires_at="2026-11-18T09:00:00+00:00",
+    )
+    assert "W" * 81 not in sent["text_body"] and "I" * 81 not in sent["text_body"]
+    assert len(sent["subject"]) < 220

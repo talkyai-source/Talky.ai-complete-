@@ -23,6 +23,7 @@ from app.core.error_handlers import safe_exception_message
 from app.core.postgres_adapter import Client
 from app.core.security.auth_abuse import enforce_budget
 from app.core.security.password import PasswordValidationError, hash_password, validate_password_strength
+from app.core.security.rbac import UserRole, get_user_role_in_tenant, normalize_role
 from app.domain.services import team_invites
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.legal_acceptance import record_acceptance, validate_signup_acceptance
@@ -102,6 +103,12 @@ async def accept_invite(
         await audit_logger.lock_transaction(conn)
         tenant = await conn.fetchrow("SELECT id, status FROM tenants WHERE id = $1", invite.tenant_id)
         if tenant is None or (tenant["status"] or "active") != "active":
+            raise _no_longer_valid()
+        # Security review: an invite is only as good as its inviter's rights
+        # now. A demoted or removed admin's invites stop letting anyone in.
+        inviter_role = await get_user_role_in_tenant(conn, invite.invited_by, invite.tenant_id)
+        needed = max(UserRole.TENANT_ADMIN.level, normalize_role(invite.role_name).level)
+        if inviter_role is None or inviter_role.level < needed:
             raise _no_longer_valid()
         if await conn.fetchval("SELECT 1 FROM user_profiles WHERE LOWER(email) = $1", invite.email):
             raise _already_has_account()

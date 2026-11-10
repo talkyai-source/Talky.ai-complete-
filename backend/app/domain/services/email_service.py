@@ -352,9 +352,10 @@ If you did not request this code, please ignore this email.
         a server, so it stays out of access logs and Referer headers.
         """
         link = frontend_link(f"/auth/accept-invite#token={token}", base_url=self.frontend_url)
-        # One line each: a workspace or person name must never add a header.
-        workspace = " ".join(str(workspace_name).split()) or "a workspace"
-        who = " ".join(str(inviter).split()) or "Someone"
+        # One short line each: a workspace or person name must never add a
+        # header, nor carry a long message of its own.
+        workspace = _invite_name(workspace_name) or "a workspace"
+        who = _invite_name(inviter) or "Someone"
         role = _INVITE_ROLE_LABELS.get(role_name, role_name)
         until = datetime.fromisoformat(expires_at).strftime("%d %B %Y")
         subject = f"{who} invited you to {workspace} on {self.brand_name}"
@@ -374,6 +375,11 @@ If you did not request this code, please ignore this email.
             <p>— {escape(self.brand_name)}</p></div></body></html>"""
         return await self.send_email(recipient_email=recipient_email, subject=subject,
                                      html_body=html_body, text_body=text_body)
+
+
+def _invite_name(value, limit: int = 80) -> str:
+    text = " ".join(str(value).split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
 
 
 # The names the Team page shows for each role an invite can carry.

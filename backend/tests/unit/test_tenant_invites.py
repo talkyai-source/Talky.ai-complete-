@@ -379,3 +379,43 @@ async def test_guessing_tokens_is_rate_limited(redis):
         except HTTPException as exc:
             statuses.append(exc.status_code)
     assert statuses[:20] == [410] * 20 and statuses[20] == 429
+
+
+# --- security review, 11 Nov 2026 -------------------------------------------
+
+@pytest.mark.parametrize("inviter_now", ["user", None], ids=["demoted", "removed"])
+async def test_an_invite_dies_with_its_inviters_admin_rights(redis, mailer, inviter_now):
+    db = FakeDB()
+    await invite(db, role="tenant_admin")
+    db.caller_role = inviter_now
+    with pytest.raises(HTTPException) as caught:
+        await accept(db, mailer.sent[0]["token"])
+    assert caught.value.status_code == 410
+    assert db.users == [] and db.members == []
+
+
+async def test_invites_are_capped_per_recipient_and_per_workspace(redis, mailer):
+    db = FakeDB()
+    for _ in range(3):
+        await invite(db)
+    with pytest.raises(HTTPException) as recipient:
+        await invite(db)
+    assert recipient.value.status_code == 429
+    # Every authorized attempt counts toward the workspace's 20 a day, the
+    # refused one included: the cap bounds attempts, not only emails.
+    for n in range(16):
+        await invite(db, email=f"person{n}@example.com")
+    with pytest.raises(HTTPException) as workspace:
+        await invite(db, email="one-more@example.com")
+    assert workspace.value.status_code == 429
+    assert len(mailer.sent) == 19 and all(m["recipient_email"] != "one-more@example.com" for m in mailer.sent)
+
+
+async def test_a_caller_who_is_not_an_admin_spends_no_invite_budget(redis, mailer):
+    db = FakeDB(caller_role=None)
+    for _ in range(25):
+        with pytest.raises(HTTPException) as caught:
+            await invite(db)
+        assert caught.value.status_code == 403
+    db.caller_role = "tenant_admin"
+    assert (await invite(db)).email_sent is True
