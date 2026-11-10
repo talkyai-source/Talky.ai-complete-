@@ -71,6 +71,8 @@ AUDITED = {
     ("POST", "/rbac/tenant-users"): record("rbac.tenant_users", "add_user_to_tenant"),
     ("PATCH", "/rbac/tenant-users/{tenant_user_id}"): record("rbac.tenant_users", "update_tenant_user"),
     ("DELETE", "/rbac/tenant-users/{tenant_user_id}"): record("rbac.tenant_users", "remove_user_from_tenant"),
+    ("POST", "/rbac/tenant-invites"): record("rbac.tenant_invites", "invite_teammate", "unit/test_tenant_invites.py"),
+    ("DELETE", "/rbac/tenant-invites/{invite_id}"): record("rbac.tenant_invites", "withdraw_invite", "unit/test_tenant_invites.py"),
     ("POST", "/admin/abuse/rules"): record("abuse_monitoring", "create_abuse_rule"),
     ("PUT", "/admin/abuse/rules/{rule_id}"): record("abuse_monitoring", "update_abuse_rule"),
     ("DELETE", "/admin/abuse/rules/{rule_id}"): record("abuse_monitoring", "delete_abuse_rule"),

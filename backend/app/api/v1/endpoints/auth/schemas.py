@@ -187,3 +187,32 @@ class SignupCompleteRequest(BaseModel):
     terms_version: Optional[str] = Field(None, min_length=1, max_length=128)
     privacy_version: Optional[str] = Field(None, min_length=1, max_length=128)
     model_config = {"extra": "forbid"}
+
+
+# QA F1-15 / D4-2: accepting a team invite. The token comes from the email
+# link's fragment and travels only in these bodies, never in a URL.
+class InviteTokenRequest(BaseModel):
+    token: str = Field(..., min_length=20, max_length=128)
+    model_config = {"extra": "forbid"}
+
+
+class InvitePreviewResponse(BaseModel):
+    email: str
+    workspace_name: str
+    role: str
+    expires_at: str
+
+
+class InviteAcceptRequest(BaseModel):
+    token: str = Field(..., min_length=20, max_length=128)
+    name: AccountName
+    password: str
+    confirm_password: str
+    terms_version: Optional[str] = Field(None, min_length=1, max_length=128)
+    privacy_version: Optional[str] = Field(None, min_length=1, max_length=128)
+    model_config = {"extra": "forbid"}
+
+
+class InviteAcceptResponse(BaseModel):
+    email: str
+    message: str

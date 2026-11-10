@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import datetime
 from html import escape
 from typing import Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -335,6 +336,55 @@ If you did not request this code, please ignore this email.
             <p>— {escape(self.brand_name)}</p></div></body></html>"""
         return await self.send_email(recipient_email=recipient_email, subject=subject,
                                      html_body=html_body, text_body=text_body)
+
+    async def send_team_invite_email(
+        self,
+        recipient_email: str,
+        workspace_name: str,
+        inviter: str,
+        role_name: str,
+        token: str,
+        expires_at: str,
+    ) -> bool:
+        """QA F1-15 / D4-2: invite someone to join a workspace.
+
+        The token rides in the link's fragment, which browsers never send to
+        a server, so it stays out of access logs and Referer headers.
+        """
+        link = frontend_link(f"/auth/accept-invite#token={token}", base_url=self.frontend_url)
+        # One line each: a workspace or person name must never add a header.
+        workspace = " ".join(str(workspace_name).split()) or "a workspace"
+        who = " ".join(str(inviter).split()) or "Someone"
+        role = _INVITE_ROLE_LABELS.get(role_name, role_name)
+        until = datetime.fromisoformat(expires_at).strftime("%d %B %Y")
+        subject = f"{who} invited you to {workspace} on {self.brand_name}"
+        text_body = (
+            f"Hi,\n\n{who} invited you to join {workspace} on {self.brand_name} as {role}.\n\n"
+            f"Accept the invite and choose your password here:\n{link}\n\n"
+            f"The link works until {until} and can be used once.\n"
+            f"If you were not expecting this, ignore this email.\n\n— {self.brand_name}"
+        )
+        html_body = f"""<html><body style="font-family: Arial, sans-serif; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto;">
+            <h2>You're invited</h2><p>Hi,</p>
+            <p>{escape(who)} invited you to join {escape(workspace)} on {escape(self.brand_name)} as {escape(role)}.</p>
+            <p><a href="{escape(link, quote=True)}">Accept the invite and choose your password</a></p>
+            <p>The link works until {escape(until)} and can be used once.</p>
+            <p>If you were not expecting this, ignore this email.</p>
+            <p>— {escape(self.brand_name)}</p></div></body></html>"""
+        return await self.send_email(recipient_email=recipient_email, subject=subject,
+                                     html_body=html_body, text_body=text_body)
+
+
+# The names the Team page shows for each role an invite can carry.
+_INVITE_ROLE_LABELS = {
+    "tenant_admin": "an admin",
+    "campaign_manager": "a campaign manager",
+    "user": "a standard user",
+    "agent": "an agent",
+    "billing_user": "a billing contact",
+    "readonly": "a read-only member",
+}
 
 
 # Singleton instance

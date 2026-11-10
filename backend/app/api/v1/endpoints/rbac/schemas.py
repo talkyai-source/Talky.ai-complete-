@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, EmailStr, Field
 
 
 class RoleResponse(BaseModel):
@@ -69,3 +69,27 @@ class TenantMemberResponse(BaseModel):
     is_primary: bool
     status: str
     joined_at: Optional[str]
+
+
+# QA F1-15 / D4-2: inviting a teammate. Owner decision, 11 Nov 2026: any
+# role up to tenant admin may be invited.
+class InviteTeammateRequest(BaseModel):
+    email: EmailStr
+    role_name: str = Field(default="user", pattern="^(tenant_admin|campaign_manager|user|agent|billing_user|readonly)$")
+    model_config = {"extra": "forbid"}
+
+
+class TenantInviteResponse(BaseModel):
+    id: str
+    email: str
+    role: str
+    created_at: str
+    expires_at: str
+
+
+class TenantInviteCreatedResponse(TenantInviteResponse):
+    email_sent: bool
+
+
+class TenantInviteWithdrawnResponse(BaseModel):
+    detail: str

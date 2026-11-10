@@ -32,6 +32,7 @@ from __future__ import annotations
 from fastapi import APIRouter
 
 from . import (
+    invites as _invites_mod,
     login as _login_mod,
     passkey as _passkey_mod,
     password as _password_mod,
@@ -63,6 +64,7 @@ router.include_router(_passkey_mod.router)
 router.include_router(_password_mod.router)
 router.include_router(_password_reset_mod.router)
 router.include_router(_verify_email_mod.router)
+router.include_router(_invites_mod.router)
 
 
 __all__ = [

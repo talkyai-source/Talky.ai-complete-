@@ -25,6 +25,11 @@ Endpoints:
     PATCH  /rbac/tenant-users/{id}        Update user role in tenant (tenant admin+)
     DELETE /rbac/tenant-users/{id}        Remove user from tenant (tenant admin+)
 
+  Team Invites (QA F1-15 / D4-2):
+    GET    /rbac/tenant-invites           List open invites (tenant admin+)
+    POST   /rbac/tenant-invites           Invite someone by email (tenant admin+)
+    DELETE /rbac/tenant-invites/{id}      Withdraw an invite (tenant admin+)
+
   Permissions:
     GET    /rbac/permissions              List all permissions
 
@@ -38,6 +43,7 @@ from fastapi import APIRouter
 from . import (
     permissions as _permissions_mod,
     roles as _roles_mod,
+    tenant_invites as _tenant_invites_mod,
     tenant_users as _tenant_users_mod,
     users as _users_mod,
 )
@@ -57,6 +63,7 @@ router.include_router(_roles_mod.router)
 router.include_router(_permissions_mod.router)
 router.include_router(_users_mod.router)
 router.include_router(_tenant_users_mod.router)
+router.include_router(_tenant_invites_mod.router)
 
 
 __all__ = [

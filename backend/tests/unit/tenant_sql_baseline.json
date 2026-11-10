@@ -12464,6 +12464,75 @@
       "count": 1,
       "reason": "Administrator-selected DNC removal by explicit row ID (QA F12-10, moved from call_limits.remove_dnc_entry): the only caller is DELETE /admin/dnc/{entry_id}, which requires platform_admin, and global suppressions have no tenant. The removal and its audit row commit in one transaction. Exact reviewed operation: fetchrow; app/domain/services/dnc_service.py:349.",
       "category": "platform_admin"
+    },
+    {
+      "id": "c7ade5e48221b290c714cf86a62c17f9f5eb54d99ab525af3d796dcfd3197e93",
+      "file": "app/api/v1/endpoints/auth/invites.py",
+      "function": "accept_invite",
+      "line": 106,
+      "method": "fetchval",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "SELECT 1 FROM user_profiles WHERE LOWER(email) = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Accepting an invite creates a new platform account, so it repeats the global normalized-email uniqueness check before the insert, as signup completion does; the unique database constraint remains authoritative. Only existence is read. Exact reviewed operation: fetchval; app/api/v1/endpoints/auth/invites.py:106.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "136feb9a434333051c115697ea632386581c8a688907dd9aa3ed319d3da16f44",
+      "file": "app/api/v1/endpoints/auth/invites.py",
+      "function": "accept_invite",
+      "line": 113,
+      "method": "execute",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "INSERT INTO user_profiles (id, email, name, tenant_id, role, password_hash, is_verified, email_verified_at) VALUES ($1, $2, $3, $4, $5, $6, TRUE, NOW())",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Reviewed tenant-bound INSERT: user_profiles.tenant_id is the fourth column and $4 is the workspace the invite was issued for, read from the invite the token unlocked. NOW() puts this VALUES expression outside the conservative simple-insert parser, as in signup. Exact reviewed operation: execute; app/api/v1/endpoints/auth/invites.py:113.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "22eb22c708bc826bc8fd646633680a09fb4b3a744091f819657acb487f8900a1",
+      "file": "app/api/v1/endpoints/auth/invites.py",
+      "function": "accept_invite",
+      "line": 126,
+      "method": "fetchval",
+      "tables": [
+        "tenant_users",
+        "user_profiles"
+      ],
+      "sql": "INSERT INTO tenant_users (user_id, tenant_id, role_id, is_primary, status, invited_by, invited_at, joined_at) VALUES ($1, $2, $3, TRUE, 'active', (SELECT id FROM user_profiles WHERE id = $4), $5, NOW()) RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reviewed tenant-bound INSERT: tenant_users.tenant_id is the second column and $2 is the invite's workspace. The subquery only keeps invited_by a valid user id (NULL if the inviter's account is gone). NOW() and the subquery put it outside the simple-insert parser. Exact reviewed operation: fetchval; app/api/v1/endpoints/auth/invites.py:126.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "e76a8699d874f4d3f6a0681237d1553f1fc4926a5aac84715cdda84ee6e1b2b7",
+      "file": "app/api/v1/endpoints/rbac/tenant_invites.py",
+      "function": "invite_teammate",
+      "line": 115,
+      "method": "fetchval",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "SELECT 1 FROM user_profiles WHERE LOWER(email) = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Owner decision D4-2 (11 Nov 2026): an email that already has an account in any workspace is refused, so this checks the globally unique normalized account email, as signup does. A tenant predicate would miss accounts in other workspaces. Only existence is read. The caller was authorized for its own tenant in the same transaction (_current_target_admin). Exact reviewed operation: fetchval; app/api/v1/endpoints/rbac/tenant_invites.py:115.",
+      "category": "individually_reviewed"
     }
   ]
 }
