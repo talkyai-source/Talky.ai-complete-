@@ -212,6 +212,8 @@ const PUBLIC_AUTH_PATHS = new Set([
     "/auth/login", "/auth/verify-otp", "/auth/signup/start", "/auth/signup/verify-code",
     "/auth/signup/complete", "/auth/register", "/auth/forgot-password", "/auth/reset-password",
     "/auth/passkey-check", "/auth/passkeys/login/begin", "/auth/passkeys/login/complete", "/auth/mfa/verify",
+    // QA F1-15 / D4-2: an invited person is signed out when they join.
+    "/auth/invites/preview", "/auth/invites/accept",
 ]);
 function managesSession(path: string) {
     return PUBLIC_AUTH_PATHS.has(path) || COOKIE_SESSION_PATHS.has(path);
