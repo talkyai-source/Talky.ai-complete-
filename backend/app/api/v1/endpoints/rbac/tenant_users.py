@@ -316,6 +316,16 @@ async def update_tenant_user(
         user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
         _check_role_ceiling(user_role, current["current_role"])
 
+        # QA F1-15: nobody changes their own role or status here; a slip would
+        # leave the workspace without an administrator. Another one does it.
+        if str(current["user_id"]) == str(current_user.id) and (
+            request.role_name is not None or request.status is not None
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot change your own role or status. Ask another administrator.",
+            )
+
         # Build update
         updates = []
         values = []

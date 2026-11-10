@@ -8838,10 +8838,10 @@
       "category": "system_retention"
     },
     {
-      "id": "361ee6ad8c1c908f30edbaf8ce56dc44952df89437c23e88032d775b69fa6896",
+      "id": "9e389f2b8d3c269bc1cfe3e085288c8644eb248c2ee5007afe3d658ef96537f0",
       "file": "app/api/v1/endpoints/rbac/tenant_users.py",
       "function": "update_tenant_user",
-      "line": 375,
+      "line": 385,
       "method": "fetchrow",
       "tables": [
         "tenant_users"

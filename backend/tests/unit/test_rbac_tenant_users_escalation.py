@@ -297,3 +297,32 @@ async def test_patch_tenant_admin_can_grant_role_at_own_tier():
         before={"id": "tu-1", "user_id": "target-user", "tenant_id": caller.tenant_id,
                 "role_id": "old-role-id", "is_primary": False, "status": "active"},
     )
+
+
+# QA F1-15: the Team screen lets administrators change roles. Nobody changes
+# their own role or status there: a slip would leave the workspace without an
+# administrator, so another administrator does it.
+@pytest.mark.parametrize("fields", [{"role_name": "readonly"}, {"status": "suspended"}])
+async def test_patch_refuses_changing_your_own_role_or_status(fields):
+    caller = _tenant_admin_user()
+    conn = AsyncMock()
+    conn.fetchrow.return_value = {
+        "id": "tu-1",
+        "user_id": caller.id,
+        "tenant_id": caller.tenant_id,
+        "role_id": "old-role-id",
+        "is_primary": False,
+        "status": "active",
+    }
+    db_client = _fake_db_client(conn)
+    with pytest.raises(HTTPException) as exc_info:
+        await update_tenant_user(
+            tenant_user_id="tu-1",
+            request=UpdateTenantUserRequest(**fields),
+            current_user=caller,
+            db_client=db_client,
+            audit_logger=conn.fixture_audit,
+        )
+    assert exc_info.value.status_code == 400
+    assert "your own role or status" in str(exc_info.value.detail)
+    assert conn.fixture_audit.events == [] and conn.fixture_writes == []
