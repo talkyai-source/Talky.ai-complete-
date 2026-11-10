@@ -438,18 +438,36 @@ async def test_one_workspace_cannot_use_up_anothers_invites_to_a_person(redis, m
     assert (await invite(db)).email_sent is True
 
 
-async def test_many_workspaces_together_cannot_flood_one_person(redis, mailer):
-    db = FakeDB()
+def rival_workspaces(db, count):
     callers = []
-    for n in range(4):
+    for n in range(count):
         admin_id, tenant_id = f"5555555{n}-5555-4555-8555-555555555555", f"6666666{n}-6666-4666-8666-666666666666"
         db.other_admins[(admin_id, tenant_id)] = "tenant_admin"
         callers.append(CurrentUser(id=admin_id, email=f"a{n}@example.com", tenant_id=tenant_id, role="tenant_admin"))
-    for caller in callers[:3]:
+    return callers
+
+
+async def test_many_workspaces_together_cannot_flood_one_person(redis, mailer):
+    # Each workspace's first invite of the day is free; repeats share a cap
+    # of 10 a day per person across all workspaces.
+    db = FakeDB()
+    callers = rival_workspaces(db, 6)
+    for caller in callers[:5]:
         for _ in range(3):
             await invite(db, caller=caller)
-    await invite(db, caller=callers[3])
+    await invite(db, caller=callers[5])
     with pytest.raises(HTTPException) as flooded:
-        await invite(db, caller=callers[3])
+        await invite(db, caller=callers[5])
     assert flooded.value.status_code == 429
-    assert len(mailer.sent) == 10
+    assert len(mailer.sent) == 16
+
+
+async def test_other_workspaces_cannot_block_a_first_invite(redis, mailer):
+    db = FakeDB()
+    for caller in rival_workspaces(db, 5):
+        for _ in range(3):
+            await invite(db, caller=caller)
+    assert (await invite(db)).email_sent is True
+    with pytest.raises(HTTPException) as resend:
+        await invite(db)
+    assert resend.value.status_code == 429
