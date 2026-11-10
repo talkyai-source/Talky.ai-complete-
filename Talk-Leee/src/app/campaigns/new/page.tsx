@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CampaignForm } from "@/components/campaigns/campaign-form";
@@ -74,9 +74,9 @@ export default function NewCampaignPage() {
                     href="/campaigns"
                     linkLabel="View campaigns"
                 />
-            ) : scope && (classic
+            ) : scope && <Suspense fallback={null}>{classic
                 ? <CampaignForm key={`${scope}:form:${restarts}`} mode="create" draftStorageKey={draftKey(scope, "form")} onStartOver={() => startOver(draftKey(scope, "form"))} />
-                : <CampaignWizard key={`${scope}:wizard:${restarts}`} draftStorageKey={draftKey(scope, "wizard")} onStartOver={() => startOver(draftKey(scope, "wizard"))} />)}
+                : <CampaignWizard key={`${scope}:wizard:${restarts}`} draftStorageKey={draftKey(scope, "wizard")} onStartOver={() => startOver(draftKey(scope, "wizard"))} />}</Suspense>}
         </DashboardLayout>
     );
 }

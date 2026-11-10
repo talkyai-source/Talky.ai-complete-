@@ -21,7 +21,8 @@ let currentUser: TestUser = null;
 let permissionsQuery: { isSuccess: boolean; data?: { permissions: string[] } } = { isSuccess: false };
 loader._load = function (id, ...args) {
     if (id === "next/navigation") return {
-        useRouter: () => router, usePathname: () => "/campaigns/new", useSearchParams: () => new URLSearchParams(), useParams: () => ({}),
+        // Like Next's router, the search params follow the address (the wizard's steps live there).
+        useRouter: () => router, usePathname: () => "/campaigns/new", useSearchParams: () => new URLSearchParams(window.location.search), useParams: () => ({}),
     };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("hooks/useAuth")) return { useAuth: () => ({ user: currentUser }) };
@@ -54,6 +55,7 @@ beforeEach(() => {
     created = null;
     pushes.splice(0);
     window.sessionStorage.clear();
+    window.history.replaceState(null, "", "/campaigns/new");
     aiOptionsApi.getProviders = async () => ({
         realtime: { available: true, model: "gpt-realtime", voices: [{ id: "alloy", name: "Alloy" }] },
     }) as unknown as Awaited<ReturnType<typeof aiOptionsApi.getProviders>>;

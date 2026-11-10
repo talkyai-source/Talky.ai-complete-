@@ -14,7 +14,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, ArrowRight, BookOpen, Check, FileText, Loader2, Upload, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -121,6 +121,20 @@ function writeWizardDraft(key: string | undefined, draft: CampaignWizardDraft): 
 
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
 const STEPS = ["Basics", "Knowledge", "Review"] as const;
+
+/** The step an address names (`?step=1`), or the first step. */
+function stepFromAddress(value: string | null | undefined): number {
+    const step = Number(value);
+    return Number.isInteger(step) && step >= 0 && step < STEPS.length ? step : 0;
+}
+
+/** The current address with `step` set (or removed for the first step). */
+function addressForStep(step: number): string {
+    const url = new URL(window.location.href);
+    if (step > 0) url.searchParams.set("step", String(step));
+    else url.searchParams.delete("step");
+    return `${url.pathname}${url.search}${url.hash}`;
+}
 
 function fmtBytes(n: number): string {
     if (n < 1024) return `${n} B`;
@@ -283,12 +297,60 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         setFileRestoreNotice(false);
     };
 
-    const goToReview = async () => {
+    // QA F1-22 (QA-UI-042): each step has its own history entry (?step=), so
+    // browser Back and Forward move between steps instead of leaving the
+    // wizard. Outside the app router (no search params) steps stay plain state.
+    const searchParams = useSearchParams();
+    const routed = searchParams !== null;
+    const addressStep = searchParams ? stepFromAddress(searchParams.get("step")) : null;
+    const [seenAddressStep, setSeenAddressStep] = useState(addressStep);
+    if (addressStep !== null && addressStep !== seenAddressStep) {
+        // The address moved (browser Back/Forward): follow it, but never to a
+        // step the basics do not allow yet.
+        setSeenAddressStep(addressStep);
+        setStep(addressStep > 0 && !basicsValid ? 0 : addressStep);
+    }
+    // Entries this wizard pushed, so its own Back steps back through them.
+    const pushedSteps = useRef(0);
+    const goToStep = (next: number) => {
+        if (!routed) {
+            setStep(next);
+            return;
+        }
+        if (next < step && pushedSteps.current > 0) {
+            pushedSteps.current -= 1;
+            window.history.back(); // the address change brings the step back
+            return;
+        }
+        if (next > step) {
+            window.history.pushState(null, "", addressForStep(next));
+            pushedSteps.current += 1;
+        } else {
+            window.history.replaceState(null, "", addressForStep(next));
+        }
+        setSeenAddressStep(next);
+        setStep(next);
+    };
+    // The address names the step shown: a restored draft's step, or the
+    // first step when the address asked for one the basics do not allow.
+    useEffect(() => {
+        if (!routed) return;
+        if (stepFromAddress(new URLSearchParams(window.location.search).get("step")) !== step) {
+            window.history.replaceState(null, "", addressForStep(step));
+        }
+    }, [routed, step]);
+
+    const goToReview = () => {
         if (!isRealtime && (briefError || !guidance.valid)) {
             setError(briefError ?? guidance.message ?? "Campaign guidance is invalid.");
             return;
         }
-        setStep(2);
+        goToStep(2);
+    };
+
+    // The review step reads a fresh preview each time it is entered: by Next,
+    // by browser Forward, or from a restored draft.
+    const loadPreview = async (isCurrent: () => boolean) => {
         setPreviewLoading(true);
         setPreview(null);
         try {
@@ -303,6 +365,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                 direction: inbound ? "inbound" : "outbound",
                 knowledge_driven: true,
             });
+            if (!isCurrent()) return;
             setPreview({
                 system_prompt: res.system_prompt,
                 greeting: res.greeting,
@@ -310,11 +373,20 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                 layers: res.layers,
             });
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Couldn't build a preview");
+            if (isCurrent()) setError(err instanceof Error ? err.message : "Couldn't build a preview");
         } finally {
-            setPreviewLoading(false);
+            if (isCurrent()) setPreviewLoading(false);
         }
     };
+    useEffect(() => {
+        if (step !== 2) return;
+        let current = true;
+        // Entering the review step starts its preview read (an external fetch).
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the read sets its own loading state as it starts
+        void loadPreview(() => current);
+        return () => { current = false; };
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- once per entry into the review step, with the inputs as they are then
+    }, [step]);
 
     const onCreate = async () => {
         if (!isRealtime && (briefError || !guidance.valid)) {
@@ -494,7 +566,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                         )}
 
                         <div className="flex justify-end pt-1">
-                            <Button onClick={() => { setError(null); setStep(1); }} disabled={!basicsValid}>
+                            <Button onClick={() => { setError(null); goToStep(1); }} disabled={!basicsValid}>
                                 Next: Knowledge <ArrowRight className="h-4 w-4" />
                             </Button>
                         </div>
@@ -566,7 +638,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                         </div>
 
                         <div className="flex justify-between pt-1">
-                            <Button variant="ghost" onClick={() => setStep(0)}><ArrowLeft className="h-4 w-4" /> Back</Button>
+                            <Button variant="ghost" onClick={() => goToStep(0)}><ArrowLeft className="h-4 w-4" /> Back</Button>
                             <Button onClick={goToReview}>Next: Review <ArrowRight className="h-4 w-4" /></Button>
                         </div>
                     </div>
@@ -612,7 +684,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                         ) : null}
 
                         <div className="flex justify-between pt-1">
-                            <Button variant="ghost" onClick={() => setStep(1)} disabled={submitting}><ArrowLeft className="h-4 w-4" /> Back</Button>
+                            <Button variant="ghost" onClick={() => goToStep(1)} disabled={submitting}><ArrowLeft className="h-4 w-4" /> Back</Button>
                             <Button onClick={onCreate} disabled={submitting || leadFields.isLoading || leadFields.isError}>
                                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                                 {submitting ? "Creating…" : "Create campaign"}
