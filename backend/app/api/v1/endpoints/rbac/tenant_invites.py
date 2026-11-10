@@ -129,7 +129,7 @@ async def invite_teammate(
         # 3 times (above): one inbox gets at most 30 invites a day, and
         # blocking someone's invites takes 10 workspaces, not one. The
         # refusal reads like every other cap, revealing nothing else.
-        if not await team_invites.admit_workspace(redis, email, tenant_id, limit=10):
+        if not await team_invites.admit_workspace(redis, email, tenant_id, limit=10, now=datetime.now(timezone.utc)):
             raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.",
                                 headers={"Retry-After": str(24 * 60 * 60)})
         workspace = await conn.fetchval("SELECT business_name FROM tenants WHERE id = $1", tenant_id)

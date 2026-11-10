@@ -82,3 +82,14 @@ async def test_invites_for_different_emails_are_independent_and_newest_first(red
     second, _, previous = await invite(redis, email="b@example.test", now=NOW + timedelta(minutes=5))
     assert previous is None
     assert await team_invites.pending(redis, TENANT, now=NOW) == [second, first]
+
+
+async def test_the_per_person_workspace_cap_resets_each_day_however_busy(redis):
+    # Security review: a sliding expiry let ten busy workspaces keep the
+    # set alive for ever. Each UTC day starts empty.
+    email = "sam@example.test"
+    for n in range(10):
+        assert await team_invites.admit_workspace(redis, email, f"ws-{n}", limit=10, now=NOW) is True
+    assert await team_invites.admit_workspace(redis, email, "ws-late", limit=10, now=NOW) is False
+    assert await team_invites.admit_workspace(redis, email, "ws-0", limit=10, now=NOW + timedelta(hours=10)) is True
+    assert await team_invites.admit_workspace(redis, email, "ws-late", limit=10, now=NOW + timedelta(days=1)) is True
