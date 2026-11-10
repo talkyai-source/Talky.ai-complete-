@@ -3,8 +3,8 @@ import { PUBLIC_ROUTES } from "@/lib/public-routes";
 
 const SITE_URL = "https://talkleeai.com";
 
-// The route list lives in src/lib/public-routes.ts, shared with the sign-up
-// popup so both change together.
+// The route list lives in src/lib/public-routes.ts, shared with the Book a
+// Demo popup so both change together.
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();

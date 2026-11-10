@@ -62,13 +62,14 @@ export default function RootLayout({
           <SuspensionStateProvider>
             {children}
           </SuspensionStateProvider>
+          {/* Mounted once here, outside any page, so its 10 s timer and per-page
+              cancel state survive client-side navigation and reset on reload.
+              Inside AppProviders because it reads the sign-in state. */}
+          <SignupPopup />
         </AppProviders>
         {/* Renders null unless the Ask AI popup flagged a call as dropped by
             navigation — see ASKAI_CALL_ENDED_FLAG in call-ended-notice.tsx. */}
         <CallEndedNotice />
-        {/* Mounted once here, outside any page, so its 10 s timer and per-page
-            cancel state survive client-side navigation and reset on reload. */}
-        <SignupPopup />
       </body>
     </html>
   );

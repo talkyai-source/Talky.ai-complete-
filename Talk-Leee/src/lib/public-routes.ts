@@ -1,8 +1,8 @@
 // The public, unauthenticated routes, in one place for two consumers: the
-// sitemap (src/app/sitemap.ts) publishes exactly these, and the sign-up popup
-// (src/components/ui/signup-popup.tsx) shows only on these. A public page
-// added here is published and gets the popup in a single edit; a page added
-// anywhere else gets neither by default.
+// sitemap (src/app/sitemap.ts) publishes exactly these, and the Book a Demo
+// popup (src/components/ui/signup-popup.tsx) shows only on these, less the
+// demo page itself. A public page added here is published and gets the popup
+// in a single edit; a page added anywhere else gets neither by default.
 //
 // Every entry must be a confirmed public, unauthenticated route (see
 // isPublicPath in src/proxy.ts and the static marketing pages under
