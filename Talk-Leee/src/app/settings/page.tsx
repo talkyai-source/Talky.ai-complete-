@@ -2,6 +2,7 @@
 
 import { remainingMinutesLabel } from "@/lib/minutes-allowance";
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -112,6 +113,17 @@ export default function SettingsPage() {
                  * Connectors used to live in this same row as a Quick-link
                  * tile and was promoted to a top-level sidebar item.
                  */}
+                {/* QA F1-15: who is in this workspace, and their roles. */}
+                <Link
+                    href="/settings/team"
+                    className="block rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm transition-colors hover:bg-background/90 dark:border-white/10 dark:bg-white/5"
+                >
+                    <span className="text-sm font-semibold text-foreground">Team</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">
+                        See who is in this workspace and their roles. Admins can change a role or remove someone.
+                    </span>
+                </Link>
+
                 <div
                     className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm dark:border-white/10 dark:bg-white/5"
                     aria-label="Assistant — Coming soon"
