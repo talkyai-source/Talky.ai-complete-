@@ -125,12 +125,13 @@ async def invite_teammate(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="This email already has an account, so it cannot be invited.",
             )
-        # Across all workspaces one person gets at most 10 repeat invites a
-        # day, so many workspaces together cannot flood an inbox. A
-        # workspace's first invite to someone each day never waits on what
-        # other workspaces did, so they cannot block it either.
-        if not await team_invites.first_today(redis, email, tenant_id):
-            await enforce_budget(redis, "invite-recipient-any", email, limit=10, seconds=24 * 60 * 60)
+        # At most 10 workspaces may invite one person in a day, each at most
+        # 3 times (above): one inbox gets at most 30 invites a day, and
+        # blocking someone's invites takes 10 workspaces, not one. The
+        # refusal reads like every other cap, revealing nothing else.
+        if not await team_invites.admit_workspace(redis, email, tenant_id, limit=10):
+            raise HTTPException(status_code=429, detail="Too many attempts. Please try again later.",
+                                headers={"Retry-After": str(24 * 60 * 60)})
         workspace = await conn.fetchval("SELECT business_name FROM tenants WHERE id = $1", tenant_id)
         invite, token, previous = await team_invites.issue(
             redis, tenant_id=tenant_id, email=email, role_name=request.role_name,

@@ -124,12 +124,16 @@ async def forget(redis, invite: Invite) -> None:
     await redis.hdel(_WORKSPACE_KEY.format(invite.tenant_id), invite.id)
 
 
-async def first_today(redis, email: str, tenant_id: str) -> bool:
-    """True the first time in a day this workspace invites this person.
+async def admit_workspace(redis, email: str, tenant_id: str, *, limit: int) -> bool:
+    """Whether this workspace may invite this person today.
 
-    The key holds a hash of the email, never the address itself.
+    At most ``limit`` different workspaces may invite one person in a day; a
+    workspace already among them may invite again, within its own caps. The
+    key holds a hash of the email, never the address itself.
     """
     key = _RECIPIENT_KEY.format(hashlib.sha256(email.encode("utf-8")).hexdigest())
-    added = await redis.sadd(key, tenant_id)
+    if await redis.sadd(key, tenant_id) and await redis.scard(key) > limit:
+        await redis.srem(key, tenant_id)
+        return False
     await redis.expire(key, 24 * 60 * 60)
-    return bool(added)
+    return True
