@@ -436,3 +436,20 @@ async def test_one_workspace_cannot_use_up_anothers_invites_to_a_person(redis, m
         await invite(db, caller=rival)
     assert capped.value.status_code == 429
     assert (await invite(db)).email_sent is True
+
+
+async def test_many_workspaces_together_cannot_flood_one_person(redis, mailer):
+    db = FakeDB()
+    callers = []
+    for n in range(4):
+        admin_id, tenant_id = f"5555555{n}-5555-4555-8555-555555555555", f"6666666{n}-6666-4666-8666-666666666666"
+        db.other_admins[(admin_id, tenant_id)] = "tenant_admin"
+        callers.append(CurrentUser(id=admin_id, email=f"a{n}@example.com", tenant_id=tenant_id, role="tenant_admin"))
+    for caller in callers[:3]:
+        for _ in range(3):
+            await invite(db, caller=caller)
+    await invite(db, caller=callers[3])
+    with pytest.raises(HTTPException) as flooded:
+        await invite(db, caller=callers[3])
+    assert flooded.value.status_code == 429
+    assert len(mailer.sent) == 10
