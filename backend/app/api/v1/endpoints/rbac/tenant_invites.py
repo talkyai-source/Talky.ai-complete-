@@ -116,8 +116,10 @@ async def invite_teammate(
         # Security review: cap invite emails per workspace and per recipient,
         # which also bounds how often the account check below can be asked
         # (public signup already answers it). Claimed only once authorized.
+        # The recipient cap is per workspace, so one workspace cannot use up
+        # another's invites to the same person.
         await enforce_budget(redis, "invite-tenant", tenant_id, limit=20, seconds=24 * 60 * 60)
-        await enforce_budget(redis, "invite-recipient", email, limit=3, seconds=24 * 60 * 60)
+        await enforce_budget(redis, "invite-recipient", f"{tenant_id}:{email}", limit=3, seconds=24 * 60 * 60)
         if await conn.fetchval("SELECT 1 FROM user_profiles WHERE LOWER(email) = $1", email):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,

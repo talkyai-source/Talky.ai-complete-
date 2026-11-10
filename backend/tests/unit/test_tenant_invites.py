@@ -43,6 +43,7 @@ class FakeDB:
         self.depth = 0
         self.locked = False
         self.users, self.members, self.receipts, self.acceptances = [], [], [], []
+        self.other_admins = {}
 
     def is_in_transaction(self):
         return self.depth > 0
@@ -104,7 +105,10 @@ class FakeDB:
         query = self.sql(sql)
         if query.startswith("select r.name from tenant_users tu"):
             mine = (str(args[0]), str(args[1])) == (ADMIN, TENANT)
-            return {"name": self.caller_role} if mine and self.caller_role else None
+            if not mine:
+                other = self.other_admins.get((str(args[0]), str(args[1])))
+                return {"name": other} if other else None
+            return {"name": self.caller_role} if self.caller_role else None
         if query == "select id, status from tenants where id = $1":
             return {"id": args[0], "status": self.tenant_status} if str(args[0]) == TENANT else None
         raise AssertionError(query)
@@ -418,4 +422,17 @@ async def test_a_caller_who_is_not_an_admin_spends_no_invite_budget(redis, maile
             await invite(db)
         assert caught.value.status_code == 403
     db.caller_role = "tenant_admin"
+    assert (await invite(db)).email_sent is True
+
+
+async def test_one_workspace_cannot_use_up_anothers_invites_to_a_person(redis, mailer):
+    rival_admin = "44444444-4444-4444-8444-444444444444"
+    db = FakeDB()
+    db.other_admins[(rival_admin, OTHER)] = "tenant_admin"
+    rival = CurrentUser(id=rival_admin, email="rival@example.com", tenant_id=OTHER, role="tenant_admin", name="Rival")
+    for _ in range(3):
+        await invite(db, caller=rival)
+    with pytest.raises(HTTPException) as capped:
+        await invite(db, caller=rival)
+    assert capped.value.status_code == 429
     assert (await invite(db)).email_sent is True
