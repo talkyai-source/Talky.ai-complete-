@@ -64,6 +64,50 @@ def _membership_state(row):
             ("id", "user_id", "tenant_id", "role_id", "is_primary", "status")}
 
 
+# QA F1-15: the Team screen's limits, held here for every route.
+# is_primary marks a member's home workspace (one per person,
+# idx_tu_user_primary), not an owner; only the platform team changes it.
+_HOME_WORKSPACE_DETAIL = "Only the platform team can change a member's home workspace."
+# The roles that administer a workspace: what _current_target_admin accepts.
+_WORKSPACE_ADMIN_ROLES = (UserRole.TENANT_ADMIN.value, UserRole.PARTNER_ADMIN.value)
+
+
+def _refuse_own_membership(row, current_user):
+    # A slip would leave the workspace without an administrator; another one does it.
+    if row and str(row["user_id"]) == str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot change your own membership. Ask another administrator.",
+        )
+
+
+async def _keep_an_administrator(conn, row, *, role_name=None, new_status=None, removing=False):
+    """Refuse a change that would leave the workspace with no active administrator."""
+    if row["status"] != "active" or row["current_role"] not in _WORKSPACE_ADMIN_ROLES:
+        return
+    if not removing and (role_name is None or role_name in _WORKSPACE_ADMIN_ROLES) and (
+        new_status is None or new_status == "active"
+    ):
+        return
+    others = await conn.fetch(
+        """
+        SELECT tu.id FROM tenant_users tu
+        JOIN roles r ON r.id = tu.role_id
+        WHERE tu.tenant_id = $1 AND tu.id <> $2
+          AND tu.status = 'active' AND r.name = ANY($3::text[])
+        FOR UPDATE OF tu
+        """,
+        row["tenant_id"],
+        row["id"],
+        list(_WORKSPACE_ADMIN_ROLES),
+    )
+    if not others:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This is the workspace's last active administrator. Make someone else an administrator first.",
+        )
+
+
 @router.get("/tenant-users", response_model=List[TenantMemberResponse])
 async def list_tenant_members(
     tenant_id: Optional[str] = Query(None, description="Tenant ID (defaults to user's tenant)"),
@@ -159,6 +203,8 @@ async def add_user_to_tenant(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot grant a role above your own tier",
         )
+    if request.is_primary and user_role != UserRole.PLATFORM_ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_HOME_WORKSPACE_DETAIL)
 
     async with acquire_with_tenant(db_client.pool, str(request.tenant_id)) as conn:
         await audit_logger.lock_transaction(conn)
@@ -170,6 +216,10 @@ async def add_user_to_tenant(
             request.user_id, request.tenant_id,
         )
         _check_role_ceiling(user_role, before["current_role"] if before else None)
+        # An existing membership is re-activated with the requested role.
+        _refuse_own_membership(before, current_user)
+        if before:
+            await _keep_an_administrator(conn, before, role_name=request.role_name, new_status="active")
         # Verify user exists
         user_row = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE id = $1",
@@ -316,15 +366,10 @@ async def update_tenant_user(
         user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
         _check_role_ceiling(user_role, current["current_role"])
 
-        # QA F1-15: nobody changes their own role or status here; a slip would
-        # leave the workspace without an administrator. Another one does it.
-        if str(current["user_id"]) == str(current_user.id) and (
-            request.role_name is not None or request.status is not None
-        ):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You cannot change your own role or status. Ask another administrator.",
-            )
+        if request.is_primary is not None and user_role != UserRole.PLATFORM_ADMIN:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_HOME_WORKSPACE_DETAIL)
+        if request.role_name is not None or request.status is not None or request.is_primary is not None:
+            _refuse_own_membership(current, current_user)
 
         # Build update
         updates = []
@@ -369,6 +414,7 @@ async def update_tenant_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No fields to update",
             )
+        await _keep_an_administrator(conn, current, role_name=request.role_name, new_status=request.status)
 
         updates.append("updated_at = NOW()")
         values.append(tenant_user_id)
@@ -472,15 +518,10 @@ async def remove_user_from_tenant(
                     detail="Can only remove users from your own tenant",
                 )
 
-            # Can't remove yourself if you're the primary admin
-            if str(current["user_id"]) == current_user.id and current["is_primary"]:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot remove yourself as primary tenant member",
-                )
-
+        _refuse_own_membership(current, current_user)
         user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
         _check_role_ceiling(user_role, current["current_role"])
+        await _keep_an_administrator(conn, current, removing=True)
 
         # Soft delete
         await conn.execute(

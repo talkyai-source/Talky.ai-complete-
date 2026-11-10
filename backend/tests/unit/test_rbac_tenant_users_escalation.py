@@ -324,5 +324,5 @@ async def test_patch_refuses_changing_your_own_role_or_status(fields):
             audit_logger=conn.fixture_audit,
         )
     assert exc_info.value.status_code == 400
-    assert "your own role or status" in str(exc_info.value.detail)
+    assert "your own membership" in str(exc_info.value.detail)
     assert conn.fixture_audit.events == [] and conn.fixture_writes == []
