@@ -1,8 +1,9 @@
 """
 Ask AI WebSocket - Simplified Voice Assistant Demo
 
-One-click voice interaction without voice selection.
-Uses Cartesia Tessa (sonic-3) TTS + Gemini 2.5 Flash (no thinking).
+One-click voice interaction without voice selection, open to every visitor.
+Uses AssemblyAI Universal-3.6 Pro STT + DeepSeek V4.1 Flash (thinking off) +
+Cartesia Tessa (sonic-3) TTS; see ask_ai_session_config.
 
 Sample Rate: 24000 Hz (Cartesia recommended for streaming TTS)
 

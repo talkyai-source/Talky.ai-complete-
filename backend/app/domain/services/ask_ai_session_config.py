@@ -34,28 +34,23 @@ from app.domain.services.voice_orchestrator import VoiceSessionConfig
 # source the campaign agents use, so Tessa holds the same standard.
 from app.services.scripts.prompts.guardrails import COMMUNICATION_PRINCIPLES
 
-# Fixed configuration for Ask AI — using Cartesia Tessa (Kind Companion) +
-# Gemini 2.5 Flash with thinking DISABLED. Thinking tokens are wasted latency
-# for short conversational replies; turning them off drops TTFT meaningfully.
+# Fixed configuration for Ask AI (owner decision 12 Nov 2026): AssemblyAI
+# Universal-3.6 Pro hears the visitor, DeepSeek V4.1 Flash answers with thinking
+# off (DeepSeekLLMProvider always disables it), and one voice speaks: Cartesia
+# Tessa (Kind Companion), the platform's default voice.
 ASK_AI_CONFIG = {
     "tts_provider": "cartesia",
     "voice_id": "6ccbfb76-1fc6-48f7-b71d-91ac6298247b",  # Tessa - Kind Companion
     "model_id": "sonic-3",
     "sample_rate": 24000,
-    # Switched from Groq llama-3.1-8b to Gemini 2.5 Flash (no thinking) on
-    # 2026-04-23. Revert to "llama-3.1-8b-instant" + llm_provider "groq" if
-    # Gemini quality regresses — see voice_orchestrator._LLM_API_KEY_ENV.
-    "llm_provider": "gemini",
-    # 2026-05-22: switched from gemini-2.5-flash to gemini-3.1-flash-lite-preview.
-    # 3.1 Flash-Lite is ~2.5× faster TTFT and ~64% higher throughput — both
-    # directly reduce the perceived response delay in this voice popup.
-    "llm_model": "gemini-3.1-flash-lite-preview",
+    # Was Gemini 3.1 Flash-Lite until 12 Nov 2026 (and Groq llama before that);
+    # see voice_orchestrator._LLM_API_KEY_ENV for the key each provider reads.
+    "llm_provider": "deepseek",
+    "llm_model": "deepseek-flash",
     "llm_temperature": 0.6,
     # 90 tokens covers 4-sentence pricing answers while keeping normal replies short.
     "llm_max_tokens": 90,
-    # 0 = disable Gemini's internal reasoning ("thinking") tokens entirely.
-    # Keeps TTFT low on the conversational hot path. Flip to None if you ever
-    # want the model to use its reasoning budget again.
+    # Gemini-only knob; DeepSeek ignores it.
     "llm_thinking_budget": 0,
 }
 
@@ -124,13 +119,21 @@ def create_ask_ai_agent_config() -> AgentConfig:
 
 def build_ask_ai_session_config() -> VoiceSessionConfig:
     """Build the shared Ask AI VoiceSessionConfig."""
+    from app.domain.models.assemblyai_config import ASSEMBLYAI_MODEL, AssemblyAISettings
+
     return VoiceSessionConfig(
-        stt_provider_type="deepgram_flux",
+        # AssemblyAI keeps one connection per call_id, so the prewarmed
+        # provider is shared across demo sessions as Flux was.
+        stt_provider_type="assemblyai",
         llm_provider_type=ASK_AI_CONFIG["llm_provider"],
         tts_provider_type=ASK_AI_CONFIG["tts_provider"],
-        stt_model="flux-general-en",
+        stt_model=ASSEMBLYAI_MODEL,
+        stt_language="en",
+        assemblyai_settings=AssemblyAISettings().model_dump(mode="json"),
         stt_sample_rate=16000,
         stt_encoding="linear16",
+        # The end-of-turn values below apply to the Deepgram secondary when
+        # STT_FAILOVER_ENABLED is on; AssemblyAI uses its own turn detection.
         stt_eot_threshold=0.7,
         # Eager EOT enables a speculative LLM start ~150–250ms before the final
         # end-of-turn — telephony already runs this; the web demo had it off
