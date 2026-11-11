@@ -106,3 +106,38 @@ automatic remote retention is provided.
 
 See [PITR preparation and proposed recovery targets](PITR.md). Daily logical
 backup plus a local WAL tool does not meet a15-minute off-host RPO by itself.
+
+## FTP copies (`offsite_ftp.py`, owner decision 12 Nov 2026)
+
+When `TALKY_FTP_BACKUP_URL` is set in `/etc/talky/db-backup.env`, every nightly
+dump also goes to the owner's FTP server, after the local dump is published:
+
+1. It is encrypted with the same gpg AES256 primitive (`TALKY_FTP_PASSPHRASE_FILE`,
+   mode 0600, 24+ characters). The owner keeps a copy of that passphrase off the
+   server: without it no FTP copy can be restored.
+2. The encrypted copy must decrypt to the dump's exact bytes before upload.
+3. It is uploaded with TLS required (`curl --ssl-reqd`, certificate checked).
+   The login is read only from `TALKY_FTP_NETRC` (mode 0600).
+4. Its size is confirmed on the server. Copies older than `TALKY_FTP_KEEP_DAYS`
+   (default 30) are deleted, but the newest three always stay.
+
+A failed copy fails `talky-db-backup.service`, and local retention waits, as
+with the mount-based copy above.
+
+Settings in `/etc/talky/db-backup.env` (values are examples):
+
+```
+TALKY_FTP_BACKUP_URL=ftp://ftp.example.invalid/talky-db-backups/
+TALKY_FTP_NETRC=/etc/talky/offsite-ftp.netrc
+TALKY_FTP_PASSPHRASE_FILE=/etc/talky/offsite-backup.passphrase
+TALKY_FTP_KEEP_DAYS=30
+```
+
+**Prove a restore works** (on the server, as root, with the same settings):
+`set -a; . /etc/talky/db-backup.env; set +a; python3 scripts/database/offsite_ftp.py verify`.
+This downloads the newest copy, decrypts it, and checks it against the local `.sha256`.
+
+**Restore after losing the server:**
+1. Download the newest `talky-<stamp>.dump.gpg` from the FTP server.
+2. Decrypt it: `gpg --batch --pinentry-mode loopback --passphrase-file <passphrase> -d talky-<stamp>.dump.gpg > talky-<stamp>.dump`.
+3. Restore it into a NEW database: see docs/RUNBOOK.md "Restore test".
