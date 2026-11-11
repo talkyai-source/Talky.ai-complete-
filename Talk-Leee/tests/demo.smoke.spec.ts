@@ -1,4 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
+import { mockDashboardApi, mockPageApis, signInAsE2eUser } from "./support/session";
 
 test.setTimeout(120_000);
 
@@ -11,7 +12,9 @@ function trackConsoleIssues(page: Page) {
     });
     page.on("console", (msg) => {
         const t = msg.type();
-        if (t === "error" || t === "warning") issues.push(`${t}: ${msg.text()}`);
+        // For a failed request Chrome's message ("Failed to load resource: ... 404") does not name it: add its URL.
+        const where = msg.location().url;
+        if (t === "error" || t === "warning") issues.push(`${t}: ${msg.text()}${where ? ` (${where})` : ""}`);
     });
     page.on("requestfailed", (req) => {
         const failure = req.failure();
@@ -55,13 +58,25 @@ const auditRoutes = [
     "/meetings",
     "/reminders",
     "/settings",
-    "/settings/connectors",
+    "/connectors",
     "/notifications",
 ] as const;
 
+// Public, sign-in and OAuth-callback routes. They are not signed-in app pages, so "was not bounced to the
+// sign-in page" is not a property they have to keep (a signed-in visitor may legitimately be sent on).
+const redirectingRoutes = new Set<string>([
+    "/",
+    "/auth/login",
+    "/auth/register",
+    "/auth/callback",
+    "/connectors/callback?ok=1&type=email",
+    "/connectors/email/callback?ok=1",
+]);
+
 test("sidebar fits without scrolling at common resolutions", async ({ page }) => {
     const issues = isProdAudit ? trackConsoleIssues(page) : [];
-    await page.context().addCookies([{ name: "talklee_auth_token", value: "e2e-token", url: "http://127.0.0.1:3100" }]);
+    await signInAsE2eUser(page);
+    await mockDashboardApi(page);
 
     await page.route(/\/(?:api\/v1\/)?connectors\/status\/?(\?.*)?$/, async (route) => {
         const req = route.request();
@@ -79,9 +94,11 @@ test("sidebar fits without scrolling at common resolutions", async ({ page }) =>
         await page.goto("/dashboard", { waitUntil: "domcontentloaded", timeout: 60_000 });
         await page.evaluate(() => document.fonts?.ready);
 
+        // The sidebar renders after hydration and the mocked /auth/me answer; the first visit
+        // also compiles /dashboard in dev mode, which can take longer than expect()'s 5 s.
         if (vp.width >= 1024) {
             const sidebar = page.locator("aside.talklee-sidebar");
-            await expect(sidebar).toBeVisible();
+            await expect(sidebar).toBeVisible({ timeout: 30_000 });
 
             const metrics = await sidebar.evaluate((el) => {
                 const rect = el.getBoundingClientRect();
@@ -114,25 +131,41 @@ test("sidebar fits without scrolling at common resolutions", async ({ page }) =>
     if (isProdAudit) expect(issues, "No console warnings/errors or failed requests in production").toEqual([]);
 });
 
-test("console clean across key routes", async ({ page }) => {
-    const issues = trackConsoleIssues(page);
-    await page.addInitScript(() => {
-        localStorage.setItem("talklee.auth.token", "e2e-token");
-    });
-    await page.context().addCookies([{ name: "talklee_auth_token", value: "e2e-token", url: "http://127.0.0.1:3100" }]);
+// One test per route: visiting all of them in a single test compiled every route in dev mode inside one
+// 120 s timeout, and a failure did not say which route it came from.
+for (const route of auditRoutes) {
+    test(`console clean: ${route}`, async ({ page }) => {
+        const issues = trackConsoleIssues(page);
+        await signInAsE2eUser(page);
+        await mockDashboardApi(page);
+        await mockPageApis(page);
 
-    for (const route of auditRoutes) {
+        // The app boots after the document has loaded, and `networkidle` alone can fire in the gap before its
+        // first request in dev mode. Wait for its sign-in check (GET /auth/me), then for what that triggers.
+        const signInChecked = page
+            .waitForResponse((res) => res.request().method() === "GET" && /\/api\/v1\/auth\/me\/?$/.test(new URL(res.url()).pathname), {
+                timeout: 30_000,
+            })
+            .catch(() => undefined);
         await page.goto(route, { waitUntil: "domcontentloaded", timeout: 60_000 });
         await page.evaluate(() => document.fonts?.ready);
-        await page.waitForTimeout(250);
-    }
+        await signInChecked;
+        await page.waitForLoadState("networkidle", { timeout: 20_000 }).catch(() => undefined);
+        await page.waitForTimeout(500);
 
-    expect(issues, "No console warnings/errors or failed requests").toEqual([]);
-});
+        // A lost session would send every app page to /auth/login, which is itself console clean.
+        if (!redirectingRoutes.has(route)) {
+            const requested = new URL(route, page.url()).pathname.replace(/\/+$/, "");
+            expect(new URL(page.url()).pathname.replace(/\/+$/, ""), "stayed on the requested page").toBe(requested);
+        }
+        expect(issues, "No console warnings/errors or failed requests").toEqual([]);
+    });
+}
 
 test("demo path: dashboard, meetings, reminders, email, connectors", async ({ page }) => {
     const issues = isProdAudit ? trackConsoleIssues(page) : [];
-    await page.context().addCookies([{ name: "talklee_auth_token", value: "e2e-token", url: "http://127.0.0.1:3100" }]);
+    await signInAsE2eUser(page);
+    await mockDashboardApi(page);
 
     await page.route(/\/(?:api\/v1\/)?connectors\/status\/?(\?.*)?$/, async (route) => {
         const req = route.request();
@@ -177,31 +210,32 @@ test("demo path: dashboard, meetings, reminders, email, connectors", async ({ pa
         return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ items: [] }) });
     });
 
+    // Headings are the pages' own titles (DashboardLayout `title`). Meetings, Reminders and Email are no
+    // longer sidebar entries (removed in b5351a50), so each is opened by URL; exact names because
+    // getByRole's default name match is a case-insensitive substring ("Save your agent settings" is a link).
     await page.goto("/dashboard", { waitUntil: "domcontentloaded", timeout: 60_000 });
     await expect(page).toHaveURL(/\/dashboard/);
-    await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("heading", { name: "Dashboard", exact: true })).toBeVisible({ timeout: 30_000 });
 
-    await expect(page.getByRole("link", { name: "Meetings" })).toBeVisible();
     await page.goto("/meetings", { waitUntil: "domcontentloaded", timeout: 60_000 });
     await expect(page).toHaveURL(/\/meetings/);
     await expect(page.getByRole("heading", { name: /^Meetings$/ })).toBeVisible({ timeout: 20_000 });
 
-    await expect(page.getByRole("link", { name: "Reminders" })).toBeVisible();
     await page.goto("/reminders", { waitUntil: "networkidle", timeout: 60_000 });
     await expect(page).toHaveURL(/\/reminders/);
     await expect(page.getByRole("heading", { name: /^Reminders$/ })).toBeVisible({ timeout: 20_000 });
 
-    await expect(page.getByRole("link", { name: "Email" })).toBeVisible();
     await page.goto("/email", { waitUntil: "domcontentloaded", timeout: 60_000 });
     await expect(page).toHaveURL(/\/email/);
-    await expect(page.getByRole("heading", { name: "Email" })).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("heading", { name: "Email", exact: true })).toBeVisible({ timeout: 20_000 });
 
-    await expect(page.getByRole("link", { name: "Settings" })).toBeVisible();
+    await expect(page.getByRole("link", { name: "Settings", exact: true })).toBeVisible();
     await page.goto("/settings", { waitUntil: "domcontentloaded", timeout: 60_000 });
     await expect(page).toHaveURL(/\/settings/);
-    await page.goto("/settings/connectors", { waitUntil: "domcontentloaded", timeout: 90_000 });
-    await expect(page).toHaveURL(/\/settings\/connectors/);
-    await expect(page.getByRole("heading", { name: "Connectors" })).toBeVisible({ timeout: 20_000 });
+    // There is no /settings/connectors route; Connectors is a page of its own (sidebar entry "Connectors").
+    await page.goto("/connectors", { waitUntil: "domcontentloaded", timeout: 90_000 });
+    await expect(page).toHaveURL(/\/connectors/);
+    await expect(page.getByRole("heading", { name: "Connectors", exact: true })).toBeVisible({ timeout: 20_000 });
 
     if (isProdAudit) expect(issues, "No console warnings/errors or failed requests in production").toEqual([]);
 });
