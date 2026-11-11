@@ -19,6 +19,11 @@ export default function BookADemoPage() {
           <p className="text-gray-700 dark:text-muted-foreground mb-8">
             Choose a time for your 30-minute demo.
           </p>
+          <div className="w-fit max-w-full mx-auto space-y-2 mb-8 text-sm text-gray-900 dark:text-foreground font-semibold">
+            <p>1- Business Name</p>
+            <p>2- What services does your business offer?</p>
+            <p>3- What can be made better in your business using Talklee AI?</p>
+          </div>
           <iframe
             src="https://calendar.google.com/calendar/appointments/schedules/AcZssZ3VEktu7gPGKJcZVfxi45o6GcDdU8RYpSelY9EDJqje_tQn9L6ts1TX0FtnfDH1HyNVeDkBLXM8?gv=true"
             className="dark:bg-white dark:[filter:invert(1)_hue-rotate(180deg)]"
