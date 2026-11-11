@@ -14,11 +14,11 @@ import pytest
 from starlette.datastructures import Headers
 
 from app.api.v1.endpoints import ask_ai_ws
-from tests.unit.test_bh_voice_pipeline_ask_ai_limits import _Gateway, _Orchestrator, _Ws
+from tests.unit.test_bh_voice_pipeline_ask_ai_limits import WEBSITE, _Gateway, _Orchestrator, _Ws, allow_website
 
 
 class _CookieWs(_Ws):
-    def __init__(self, gateway, *, cookie=None, origin=None, **kwargs):
+    def __init__(self, gateway, *, cookie=None, origin=WEBSITE, **kwargs):
         super().__init__(gateway, **kwargs)
         self.cookies = {"talky_at": cookie} if cookie is not None else {}
         headers = {"x-real-ip": "203.0.113.7"}
@@ -48,6 +48,7 @@ def env(monkeypatch):
     monkeypatch.setattr(ask_ai_ws, "_ask_ai_semaphore", None)
     monkeypatch.setattr(ask_ai_ws, "_sessions_by_ip", {}, raising=False)
     monkeypatch.setattr(ask_ai_ws, "_MAX_SESSION_SECONDS", 0.1, raising=False)
+    allow_website(monkeypatch)
     return SimpleNamespace(gateway=gateway, orch=orch, created=created)
 
 
@@ -68,18 +69,23 @@ async def test_a_signed_in_visitor_still_gets_the_demo(env):
     assert len(env.created) == 1
 
 
-async def test_a_cross_site_page_cannot_open_it(env, monkeypatch):
-    monkeypatch.setattr("app.core.config.get_settings",
-                        lambda: SimpleNamespace(allowed_origins=["https://talkleeai.com"]))
+async def test_a_cross_site_page_cannot_open_it(env):
     ws = _CookieWs(env.gateway, origin="https://evil.example")
     await asyncio.wait_for(ask_ai_ws.ask_ai_websocket(ws, "demo-1"), timeout=5)
     assert ws.closed == 1008 and ws.accepted is False
     assert env.created == []
 
 
-async def test_the_website_itself_can_open_it(env, monkeypatch):
-    monkeypatch.setattr("app.core.config.get_settings",
-                        lambda: SimpleNamespace(allowed_origins=["https://talkleeai.com"]))
-    ws = _CookieWs(env.gateway, origin="https://talkleeai.com")
+async def test_a_script_without_an_origin_cannot_open_it(env):
+    """Browsers always send Origin on a socket upgrade; with sign-in gone, a
+    request without one is refused before accept and before any provider."""
+    ws = _CookieWs(env.gateway, origin=None)
+    await asyncio.wait_for(ask_ai_ws.ask_ai_websocket(ws, "demo-1"), timeout=5)
+    assert ws.closed == 1008 and ws.accepted is False
+    assert env.created == []
+
+
+async def test_the_website_itself_can_open_it(env):
+    ws = _CookieWs(env.gateway, origin=WEBSITE)
     await asyncio.wait_for(ask_ai_ws.ask_ai_websocket(ws, "demo-1"), timeout=5)
     assert ws.accepted is True and len(env.created) == 1

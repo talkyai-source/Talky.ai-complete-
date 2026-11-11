@@ -16,6 +16,7 @@ import time
 import uuid
 import asyncio
 import logging
+from collections import deque
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -43,9 +44,46 @@ _ask_ai_semaphore: Optional[asyncio.Semaphore] = None
 # slot, and a forgotten tab must not hold one forever. Each slot runs paid STT,
 # TTS and LLM sessions. Override with the env vars below.
 _MAX_SESSIONS_PER_IP = int(os.getenv("ASK_AI_MAX_SESSIONS_PER_IP", "3"))
-_MAX_SESSION_SECONDS = float(os.getenv("ASK_AI_MAX_SESSION_SECONDS", "900"))
+# 5 minutes: enough for a demo conversation, and with sign-in gone (12 Nov
+# 2026) a third of the old 15-minute ceiling per slot.
+_MAX_SESSION_SECONDS = float(os.getenv("ASK_AI_MAX_SESSION_SECONDS", "300"))
 _IDLE_SECONDS = float(os.getenv("ASK_AI_IDLE_SECONDS", "180"))
 _sessions_by_ip: dict[str, int] = {}
+
+# Start budgets for the open demo, over rolling windows: a visitor may start a
+# few sessions an hour and a day, and the whole site a bounded number a day, so
+# a script cycling short sessions cannot run up the provider bill. Kept in this
+# process's memory, like the caps above; a restart forgets them.
+_STARTS_PER_IP_PER_HOUR = int(os.getenv("ASK_AI_STARTS_PER_IP_PER_HOUR", "6"))
+_STARTS_PER_IP_PER_DAY = int(os.getenv("ASK_AI_STARTS_PER_IP_PER_DAY", "20"))
+_STARTS_PER_DAY = int(os.getenv("ASK_AI_STARTS_PER_DAY", "400"))
+_starts_by_ip: dict[str, deque] = {}
+_starts_all: deque = deque()
+_MAX_TRACKED_IPS = 50_000
+
+
+def _admit_start(client_ip: str, now: float) -> Optional[str]:
+    """Count a session start against the budgets; the name of the budget that
+    refuses it, or None when it may start."""
+    day_ago, hour_ago = now - 86_400, now - 3_600
+    while _starts_all and _starts_all[0] <= day_ago:
+        _starts_all.popleft()
+    if len(_starts_by_ip) > _MAX_TRACKED_IPS:
+        for ip in [ip for ip, times in _starts_by_ip.items() if times[-1] <= day_ago]:
+            del _starts_by_ip[ip]
+    starts = _starts_by_ip.get(client_ip) or deque()
+    while starts and starts[0] <= day_ago:
+        starts.popleft()
+    if len(_starts_all) >= _STARTS_PER_DAY:
+        return "site_daily"
+    if len(starts) >= _STARTS_PER_IP_PER_DAY:
+        return "visitor_daily"
+    if sum(1 for started in starts if started > hour_ago) >= _STARTS_PER_IP_PER_HOUR:
+        return "visitor_hourly"
+    starts.append(now)
+    _starts_by_ip[client_ip] = starts
+    _starts_all.append(now)
+    return None
 
 
 def _client_ip(websocket: WebSocket) -> str:
@@ -175,11 +213,12 @@ async def get_greeting_audio():
 
 
 def _is_origin_allowed(websocket: WebSocket) -> bool:
-    """Reject cross-origin browser upgrades (same rule as the other sockets).
-    Non-browser clients (no Origin) carry no browser cookie."""
+    """Only the website's own pages may open the open demo. Browsers always
+    send Origin on a socket upgrade, so a request without one is a script and
+    is refused (12 Nov 2026, when sign-in stopped being the gate)."""
     origin = websocket.headers.get("origin")
     if not origin:
-        return True
+        return False
     from app.core.config import get_settings
 
     return origin in get_settings().allowed_origins
@@ -219,6 +258,13 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
     if _sessions_by_ip.get(client_ip, 0) >= _MAX_SESSIONS_PER_IP:
         logger.warning("Ask AI per-client cap reached ip=%s, rejecting %s", client_ip, session_id)
         await websocket.send_json({"type": "error", "message": "Too many open sessions, please close one and retry"})
+        await websocket.close(code=1013)
+        return
+
+    refused = _admit_start(client_ip, time.monotonic())
+    if refused:
+        logger.warning("Ask AI start budget reached budget=%s ip=%s, rejecting %s", refused, client_ip, session_id)
+        await websocket.send_json({"type": "error", "message": "The assistant is busy right now. Please try again later."})
         await websocket.close(code=1013)
         return
 
