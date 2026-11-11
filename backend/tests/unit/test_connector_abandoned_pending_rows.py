@@ -3,9 +3,10 @@
 Each Connect/Reconnect click inserts a pending connector row. A sign-in window
 closed without any callback left that row pending for good (a denied or
 cancelled one is now rejected by the callback). When an attempt for the same
-tenant/type/provider activates, every OTHER pending attempt of that provider
+tenant/type/provider activates, every OLDER pending attempt of that provider
 can never complete (activation already refuses an older attempt), so it is
-closed in the same transaction and named in the activation audit.
+closed in the same transaction and named in the activation audit. A newer
+pending attempt stays open: its callback still supersedes this one.
 
 The redirect_uri the frontend sends to authorize was required but never used:
 it is now optional and documented as ignored.
@@ -100,6 +101,21 @@ async def test_activation_closes_the_providers_other_abandoned_attempts(monkeypa
     activated = audit.records[-1]
     assert activated["action"] == "connector.oauth_activated"
     assert activated["metadata"]["abandoned_pending_ids"] == [str(older_abandoned["id"])]
+
+
+async def test_a_newer_pending_attempt_stays_open_when_an_older_one_activates(monkeypatch, lifecycle):
+    # The newer sign-in can still complete, and then it supersedes this one; closing it
+    # would make the older authorization win (concurrent callbacks keep the newest).
+    life, audit = lifecycle
+    older_abandoned = _parent("pending", 30)
+    target = _parent("pending", 5)
+    newer = _parent("pending", 1)
+    conn = await _activate(monkeypatch, life, [older_abandoned, target, newer], target)
+
+    closed = [args for sql, args in conn.executed
+              if sql.startswith("UPDATE connectors SET status='error'") and "status='pending'" in sql]
+    assert [str(i) for i in closed[0][1]] == [str(older_abandoned["id"])]
+    assert audit.records[-1]["metadata"]["abandoned_pending_ids"] == [str(older_abandoned["id"])]
 
 
 async def test_activation_with_no_other_pending_attempt_closes_nothing(monkeypatch, lifecycle):

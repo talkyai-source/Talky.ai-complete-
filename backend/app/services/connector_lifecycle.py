@@ -604,11 +604,12 @@ class ConnectorLifecycle:
             retire = [str(row["id"]) for row in usable]
             if retire:
                 await self._retire(conn, tenant_id, retire)
-            # Other pending attempts of this provider (a sign-in window closed
+            # Older pending attempts of this provider (a sign-in window closed
             # with no callback) can never complete once this one activates:
             # close them here instead of leaving them pending forever (D3-6).
+            # A newer one can still complete and supersede this one; it stays.
             abandoned = [str(row["id"]) for row in parents
-                         if row["status"] == "pending" and str(row["id"]) != str(connector_id)]
+                         if row["status"] == "pending" and order(row) < order(target)]
             if abandoned:
                 await conn.execute(
                     "UPDATE connectors SET status='error' WHERE tenant_id=$1 AND id=ANY($2::uuid[]) "
