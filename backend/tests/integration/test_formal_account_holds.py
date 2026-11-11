@@ -70,7 +70,10 @@ async def test_committed_hold_has_durable_audit_and_no_absent_queue_dependency(a
     assert await db.owner.fetchval("SELECT count(*) FROM audit_logs WHERE event_id=$1", result.audit_event_id) == 1
     assert result.propagated_to == []
     assert result.propagation_pending
-    assert await db.owner.fetchval("SELECT to_regclass('public.suspension_propagation_queue')") is None
+    # 0087 (QA F14-02) adopts the bootstrap queue table; a hold still never depends on it.
+    queue = await db.owner.fetchval("SELECT to_regclass('public.suspension_propagation_queue')")
+    assert queue is None or not await db.owner.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM public.suspension_propagation_queue)")
 
 
 async def test_partner_restore_preserves_an_independent_tenant_hold(account_db, monkeypatch):
