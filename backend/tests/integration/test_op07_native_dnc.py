@@ -16,7 +16,9 @@ from app.realtime.openai import RealtimeEvent
 from tests.unit.test_realtime_end_call_ownership import _events, _fixture
 
 pytestmark = pytest.mark.integration
-PHONE = "+15555550107"
+# DNC writes use the strict libphonenumber normaliser (QA F2-14): a fictional
+# 555 area code is refused, so the synthetic destinations must be valid numbers.
+PHONE = "+14155550107"
 
 
 @pytest_asyncio.fixture
@@ -208,7 +210,7 @@ async def test_bulk_compatibility_writes_normalized_phone_and_preserves_source(d
     db = dnc_db
     service = DNCService(db.pool)
     result = await service.bulk_import(tenant_id=str(db.tenants[0]),
-        numbers=["+1 (555) 555-0107", PHONE], source="existing_custom_list")
+        numbers=["+1 (415) 555-0107", PHONE], source="existing_custom_list")
     assert result["invalid_count"] == 0
     rows = await db.admin.fetch("SELECT phone_number,normalized_number,source FROM dnc_entries WHERE tenant_id=$1", db.tenants[0])
     assert len(rows) == 1
@@ -221,13 +223,13 @@ async def test_global_suppression_remains_idempotent_and_visible_across_tenants(
     source = "synthetic_global_" + uuid4().hex
     ids = []
     try:
-        first = await service.add(tenant_id=None, e164="+15555550997", source=source)
+        first = await service.add(tenant_id=None, e164="+14155550997", source=source)
         ids.append(first.id)
-        second = await service.add(tenant_id=None, e164="+15555550997", source=source)
+        second = await service.add(tenant_id=None, e164="+14155550997", source=source)
         ids.append(second.id)
         assert first.id == second.id
         for tenant in db.tenants:
-            assert await service.is_on_dnc(tenant_id=str(tenant), e164="+15555550997")
+            assert await service.is_on_dnc(tenant_id=str(tenant), e164="+14155550997")
     finally:
         # This test alone owns these exact synthetic global entries.
         if ids:

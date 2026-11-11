@@ -90,7 +90,7 @@ async def test_live_opt_out_survives_final_settlement_without_changing_call_hist
 async def test_only_active_original_destination_caller_opt_out_suppresses_retry(settlement, kind):
     f, db = settlement, settlement.db
     tenant = str(db.tenants[1] if kind == "foreign" else db.tenants[0])
-    number = "+15555550108" if kind == "new_lead_phone" else PHONE
+    number = "+14155550108" if kind == "new_lead_phone" else PHONE
     source = "manual_admin" if kind == "other_source" else "caller_opt_out"
     row = await DNCService(db.pool).add(tenant_id=tenant, e164=number, source=source)
     if kind == "expired":
@@ -107,7 +107,7 @@ async def test_only_active_original_destination_caller_opt_out_suppresses_retry(
 async def test_changed_lead_phone_does_not_erase_original_call_suppression(settlement):
     f, db = settlement, settlement.db
     await DNCService(db.pool).add_caller_opt_out(tenant_id=str(db.tenants[0]), e164=PHONE)
-    await db.admin.execute("UPDATE leads SET phone_number='+15555550108' WHERE id=$1", db.leads[0])
+    await db.admin.execute("UPDATE leads SET phone_number='+14155550108' WHERE id=$1", db.leads[0])
     assert (await settle(f)).retry_args is None
 
 
@@ -248,7 +248,7 @@ async def test_concurrent_bulk_duplicates_and_foreign_scope(dnc_db):
 
 async def test_bulk_row_database_failure_does_not_poison_next_row(dnc_db):
     db = dnc_db
-    bad = "+15555550109"
+    bad = "+14155550109"
 
     class FailingRow:
         def __init__(self, conn):
@@ -320,7 +320,8 @@ async def test_non_dialable_stored_records_settle_without_suppression_lookup(set
 async def test_malformed_outbound_owned_record_cannot_gain_retry_permission(settlement, is_test):
     f, db = settlement, settlement.db
     await db.admin.execute("UPDATE calls SET is_test=$2,phone_number='anonymous' WHERE id=$1", f.call_id, is_test)
-    with pytest.raises(ValueError, match="valid E.164"):
+    # The DNC normaliser's message (QA F2-14): "... valid phone number in E.164 format".
+    with pytest.raises(ValueError, match="valid phone number in E.164"):
         await settle(f)
     assert await db.admin.fetchval("SELECT status FROM calls WHERE id=$1", f.call_id) == "in_progress"
     assert await db.admin.fetchval("SELECT terminal_retry_payload FROM calls WHERE id=$1", f.call_id) is None
