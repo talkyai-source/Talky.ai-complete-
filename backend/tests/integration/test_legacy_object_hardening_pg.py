@@ -1,9 +1,10 @@
-"""0094 on disposable loopback PostgreSQL: legacy owner-rights views and definer function.
+"""0094 on disposable loopback PostgreSQL: owner-rights views and the legacy definer function.
 
 LINEAGE reproduces production's arrangement: tables with forced row-level
 security, plain views over them owned by a superuser, and the broken
 SECURITY DEFINER log_audit_event function.
 """
+import os
 from uuid import uuid4
 
 import asyncpg
@@ -17,7 +18,8 @@ LINEAGE = (
     "CREATE TABLE suspension_events (id uuid PRIMARY KEY, tenant_id uuid, is_active boolean)",
     "CREATE TABLE tenant_secrets (id uuid PRIMARY KEY, tenant_id uuid, encrypted_value text, is_active boolean)",
     "CREATE TABLE security_events (id uuid PRIMARY KEY, tenant_id uuid, status text)",
-    *(statement for table in ("suspension_events", "tenant_secrets", "security_events") for statement in (
+    "CREATE TABLE calls (id uuid PRIMARY KEY, tenant_id uuid, is_test boolean)",
+    *(statement for table in ("suspension_events", "tenant_secrets", "security_events", "calls") for statement in (
         f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
         f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",
         f"CREATE POLICY tenant_rows ON {table} USING ({SCOPED})",
@@ -25,12 +27,13 @@ LINEAGE = (
     "CREATE VIEW active_suspensions AS SELECT id, tenant_id FROM suspension_events WHERE is_active",
     "CREATE VIEW expiring_secrets AS SELECT id, tenant_id, encrypted_value FROM tenant_secrets WHERE is_active",
     "CREATE VIEW open_security_events AS SELECT id, tenant_id FROM security_events WHERE status = 'open'",
+    "CREATE VIEW billable_calls AS SELECT id, tenant_id FROM calls WHERE NOT is_test",
     """CREATE FUNCTION log_audit_event(p_user_id uuid, p_tenant_id uuid, p_action_type character varying,
            p_target_type character varying, p_target_id uuid, p_description text, p_metadata jsonb,
            p_ip_address inet, p_user_agent text) RETURNS uuid
        LANGUAGE plpgsql SECURITY DEFINER AS $$ BEGIN RETURN NULL; END; $$""",
 )
-VIEWS = ("active_suspensions", "expiring_secrets", "open_security_events")
+VIEWS = ("active_suspensions", "billable_calls", "expiring_secrets", "open_security_events")
 
 
 def migration():
@@ -48,8 +51,9 @@ async def seed(db):
             await conn.execute("INSERT INTO suspension_events VALUES ($1, $2, true)", uuid4(), tenant)
             await conn.execute("INSERT INTO tenant_secrets VALUES ($1, $2, 'ciphertext', true)", uuid4(), tenant)
             await conn.execute("INSERT INTO security_events VALUES ($1, $2, 'open')", uuid4(), tenant)
+            await conn.execute("INSERT INTO calls VALUES ($1, $2, false)", uuid4(), tenant)
         await conn.execute(f'CREATE ROLE "{reader}" NOLOGIN NOSUPERUSER NOBYPASSRLS')
-        await conn.execute(f'GRANT SELECT ON suspension_events, tenant_secrets, security_events, {", ".join(VIEWS)} TO "{reader}"')
+        await conn.execute(f'GRANT SELECT ON suspension_events, tenant_secrets, security_events, calls, {", ".join(VIEWS)} TO "{reader}"')
     return mine, reader
 
 
@@ -97,3 +101,18 @@ async def test_a_fresh_install_without_the_legacy_objects_is_unchanged(database)
     with pytest.raises(asyncpg.UndefinedTableError):
         async with database.pool.acquire() as conn:
             await conn.execute("SELECT 1 FROM active_suspensions")
+
+
+async def test_every_view_of_the_migrated_database_runs_with_the_readers_rights():
+    """Guard: a view added by a later migration must set security_invoker too."""
+    dsn = os.getenv("TEST_DATABASE_URL", "").strip()
+    if not dsn:
+        pytest.skip("explicit loopback TEST_DATABASE_URL required; real PostgreSQL not run")
+    conn = await asyncpg.connect(dsn, timeout=5)
+    try:
+        owner_rights = await conn.fetch("""SELECT relname FROM pg_class
+            WHERE relkind = 'v' AND relnamespace = 'public'::regnamespace
+              AND NOT coalesce(reloptions @> ARRAY['security_invoker=true'], false) ORDER BY relname""")
+    finally:
+        await conn.close()
+    assert [row["relname"] for row in owner_rights] == []
