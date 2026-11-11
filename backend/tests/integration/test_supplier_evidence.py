@@ -89,7 +89,8 @@ async def test_normal_mfa_import_replay_private_bytes_review_and_difference(supp
         assert exact.status_code == 200 and exact.json()["id"] == saved["id"]
         downloaded = await call(db, admin, "GET", f"/admin/usage/statements/{saved['id']}/source")
         assert downloaded.status_code == 200 and downloaded.content == body["source_content"].encode()
-        assert downloaded.headers["cache-control"] == "private, no-store"
+        # Every signed-in response is no-store (QA F2-13), which already forbids every cache.
+        assert downloaded.headers["cache-control"] == "no-store"
         review = {"request_id": str(uuid4()), "source_sha256": saved["source_sha256"], "stage": "reviewed",
                   "review_reference": "Owned finance source observation", "notes": "Synthetic original project source compared.",
                   "source_account_and_period_checked": True, "accept_unallocated_difference": False}
