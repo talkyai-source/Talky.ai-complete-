@@ -269,3 +269,27 @@ def test_the_site_budget_warns_at_eighty_percent(monkeypatch, caplog):
             ask_ai_ws._admit_start(f"198.51.100.{n}", float(n))
     warnings = [r.getMessage() for r in caplog.records if "80% used" in r.getMessage()]
     assert warnings == ["Ask AI site start budget 80% used: 4 of 5 in the last 24 h"]
+
+
+@pytest.mark.asyncio
+async def test_the_open_session_cap_counts_an_ipv6_visitor_per_64(env, monkeypatch):
+    """Rotating addresses inside one /64 must not open more sessions than the
+    per-visitor cap (security review, 12 Nov 2026)."""
+    monkeypatch.setattr(ask_ai_ws, "_MAX_SESSIONS_PER_IP", 1, raising=False)
+    monkeypatch.setattr(ask_ai_ws, "_MAX_SESSION_SECONDS", 3600, raising=False)
+    monkeypatch.setattr(ask_ai_ws, "_IDLE_SECONDS", 3600, raising=False)
+    first = _Ws(env.gateway, ip="2001:db8:1:2::1", stream_frames=False)
+    same_64 = _Ws(env.gateway, ip="2001:db8:1:2::ffff", stream_frames=False)
+    other_64 = _Ws(env.gateway, ip="2001:db8:1:3::1", stream_frames=False)
+
+    task1 = asyncio.create_task(ask_ai_ws.ask_ai_websocket(first, "s1"))
+    await asyncio.sleep(0.1)
+    await asyncio.wait_for(ask_ai_ws.ask_ai_websocket(same_64, "s2"), timeout=5)
+    assert same_64.closed == 1013, "another address in the same /64 is the same visitor"
+    task3 = asyncio.create_task(ask_ai_ws.ask_ai_websocket(other_64, "s3"))
+    await asyncio.sleep(0.1)
+    assert other_64.closed is None, "another /64 is another visitor"
+
+    env.gateway.active = False
+    await asyncio.wait_for(asyncio.gather(task1, task3), timeout=5)
+    assert not ask_ai_ws._sessions_by_ip

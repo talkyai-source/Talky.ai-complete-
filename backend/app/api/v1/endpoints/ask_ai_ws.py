@@ -274,7 +274,8 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
         await websocket.close(code=1013)
         return
 
-    client_ip = _client_ip(websocket)
+    # One visitor for every cap: an IPv4 address or an IPv6 /64, as the start budgets count it.
+    client_ip = _visitor_key(_client_ip(websocket))
     if _sessions_by_ip.get(client_ip, 0) >= _MAX_SESSIONS_PER_IP:
         logger.warning("Ask AI per-client cap reached ip=%s, rejecting %s", client_ip, session_id)
         await websocket.send_json({"type": "error", "message": "Too many open sessions, please close one and retry"})
