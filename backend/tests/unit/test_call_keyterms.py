@@ -57,15 +57,20 @@ def test_capped_length(monkeypatch):
 # --- brand-correction guardrail -------------------------------------------
 
 def test_brand_correction_includes_company_name():
-    line = brand_correction_line("Dojo")
-    assert "Dojo" in line
-    assert "BRAND ACCURACY" in line
+    # b4d25876: brand_correction_line is a deliberate empty stub (composer.py:142-144);
+    # the brand is stated once, in the conversation guide ("You are <agent>, an AI assistant for <company>").
+    assert brand_correction_line("Dojo") == ""
+    from app.services.scripts.prompts.composer import compose_prompt
+    from tests.unit.test_prompt_composer import LEAD_GEN_SLOTS
+    assert "Dojo" in compose_prompt("lead_gen", "Alex", "Dojo", LEAD_GEN_SLOTS)
 
 
 def test_brand_correction_is_per_campaign():
-    # Different campaigns -> different correction text, no hardcoding.
-    assert "Acme Roofing" in brand_correction_line("Acme Roofing")
-    assert "Dojo" not in brand_correction_line("Acme Roofing")
+    # Different campaigns -> different brand in the composed prompt, no hardcoding.
+    from app.services.scripts.prompts.composer import compose_prompt
+    from tests.unit.test_prompt_composer import LEAD_GEN_SLOTS
+    prompt = compose_prompt("lead_gen", "Alex", "Acme Roofing", LEAD_GEN_SLOTS)
+    assert "Acme Roofing" in prompt and "Dojo" not in prompt
 
 
 def test_brand_correction_empty_company_is_blank():
