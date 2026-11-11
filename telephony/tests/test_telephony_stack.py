@@ -1378,8 +1378,12 @@ class TelephonyStaticTests(unittest.TestCase):
             "exten => _X!,1,NoOp(Validate admitted inbound canary call to ${EXTEN})",
             ext_cfg,
         )
+        # QA F5-10: after the three routing arguments, the admitted call also
+        # hands Stasis the caller-ID attestation headers it was offered.
         self.assertIn(
-            "Stasis(talky_ai,inbound,${TALKY_ORIGINAL_DID},${CONTEXT},${TALKY_AGENT_ID})",
+            "Stasis(talky_ai,inbound,${TALKY_ORIGINAL_DID},${CONTEXT},${TALKY_AGENT_ID},"
+            "cid_pai_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Asserted-Identity)})},"
+            "cid_attestation_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Attestation-Indicator)})})",
             ext_cfg,
         )
         inbound_dialplan = ext_cfg.split("[from-opensips]", 1)[1].split(
