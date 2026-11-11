@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
-# Install system dependencies and refresh inherited OpenSSL/PCRE2 security packages.
+# Install system dependencies and refresh inherited OpenSSL/PCRE2/zlib security packages.
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -19,6 +19,7 @@ RUN apt-get update && apt-get install -y \
     libssl3t64 \
     openssl \
     openssl-provider-legacy \
+    zlib1g \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for better caching
