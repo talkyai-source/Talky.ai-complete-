@@ -67,8 +67,13 @@ loader._load = function (id, ...args) {
         useNotificationMutation: () => ({ mutateAsync: async () => { mutationCalls += 1; throw new Error("Read retry must never replay a mutation"); } }),
     };
     if (id.endsWith("lib/notifications-client")) return { useNotificationsActions: () => ({ create() {} }) };
+    // The table's start control and the page's shared Start dialog (useCampaignReadiness) need no readiness read here.
+    if (id.endsWith("components/campaigns/campaign-readiness")) return {
+        CampaignStartControl: Nothing, CampaignReadinessNotice: Nothing,
+        useCampaignReadiness: () => ({ ready: true, checking: false, reason: null, error: false, byId: {}, retry: async () => [] }),
+    };
     for (const [path, name] of [["event-stream", "EventStream"], ["alert-timeline", "AlertTimeline"],
-        ["command-bar", "CommandBar"], ["campaign-readiness", "CampaignStartControl"]]) {
+        ["command-bar", "CommandBar"]]) {
         if (id.endsWith(`components/campaigns/${path}`)) return { [name]: Nothing };
     }
     return originalLoad.call(this, id, ...args);
