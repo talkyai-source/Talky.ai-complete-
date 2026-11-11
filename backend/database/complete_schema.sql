@@ -3352,7 +3352,17 @@ BEGIN
               -- recordings_s3 has none, tenant_phone_numbers has its own
               -- trg_tenant_phone_numbers_updated_at (SECTION 6.6.13).
               'recordings_s3',
-              'tenant_phone_numbers'
+              'tenant_phone_numbers',
+              -- Production has none on these either (QA F14-02 P6); abuse_events
+              -- is listed so that applying this file twice adds none.
+              'abuse_events',
+              'admin_media_deletion_intents',
+              'dnc_entries',
+              'roles',
+              'tenant_ai_configs',
+              'tenant_users',
+              'user_mfa',
+              'white_label_partners'
           )
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS update_%I_updated_at ON %I', t, t);
@@ -3935,3 +3945,12 @@ BEGIN
     RAISE NOTICE 'No Supabase dependencies. Auth via local JWT + bcrypt.';
     RAISE NOTICE '==========================================================';
 END $$;
+
+-- =============================================================================
+-- Retry classifier columns, last: migration 0009 creates them on both paths;
+-- production also carries their comments (archived 20260522 SQL).
+-- =============================================================================
+ALTER TABLE dialer_jobs ADD COLUMN IF NOT EXISTS failure_category TEXT;
+ALTER TABLE dialer_jobs ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+COMMENT ON COLUMN dialer_jobs.failure_category IS 'Track 2 retry classifier output: one of transient_network, auth_gate, carrier_reject, invalid_input, internal. NULL for jobs that never failed or were written before the classifier shipped.';
+COMMENT ON COLUMN dialer_jobs.failure_reason IS 'Track 2 retry classifier output: fine-grained snake_case reason string. Typically the bridge error.code (e.g. caller_id_not_verified) or http_<status> for status-based fallbacks.';
