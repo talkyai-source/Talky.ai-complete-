@@ -16,6 +16,7 @@ import time
 import uuid
 import asyncio
 import logging
+import ipaddress
 from collections import deque
 from typing import Optional
 
@@ -62,9 +63,23 @@ _starts_all: deque = deque()
 _MAX_TRACKED_IPS = 50_000
 
 
+def _visitor_key(client_ip: str) -> str:
+    """Who a start is counted against: an IPv4 address, or an IPv6 /64. One
+    host is normally given a whole /64, so single IPv6 addresses cost nothing
+    to rotate through."""
+    try:
+        address = ipaddress.ip_address(client_ip)
+    except ValueError:
+        return client_ip
+    if address.version == 6 and address.ipv4_mapped is None:
+        return str(ipaddress.ip_network(f"{address}/64", strict=False))
+    return str(getattr(address, "ipv4_mapped", None) or address)
+
+
 def _admit_start(client_ip: str, now: float) -> Optional[str]:
     """Count a session start against the budgets; the name of the budget that
     refuses it, or None when it may start."""
+    client_ip = _visitor_key(client_ip)
     day_ago, hour_ago = now - 86_400, now - 3_600
     while _starts_all and _starts_all[0] <= day_ago:
         _starts_all.popleft()
@@ -83,6 +98,11 @@ def _admit_start(client_ip: str, now: float) -> Optional[str]:
     starts.append(now)
     _starts_by_ip[client_ip] = starts
     _starts_all.append(now)
+    if len(_starts_all) == int(_STARTS_PER_DAY * 0.8):
+        # When the site budget runs out the demo refuses everyone until the
+        # window rolls; this line is the early warning for whoever watches logs.
+        logger.warning("Ask AI site start budget 80%% used: %d of %d in the last 24 h",
+                       len(_starts_all), _STARTS_PER_DAY)
     return None
 
 

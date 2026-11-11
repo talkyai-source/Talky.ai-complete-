@@ -239,3 +239,33 @@ def test_the_default_session_is_five_minutes():
     if "ASK_AI_MAX_SESSION_SECONDS" in os.environ:
         pytest.skip("an operator override is set in this environment")
     assert ask_ai_ws._MAX_SESSION_SECONDS == 300
+
+
+def test_ipv6_visitors_are_counted_per_64_network(monkeypatch):
+    """One IPv6 host normally holds a whole /64, so rotating addresses inside
+    it must not reset the visitor's budget (security review, 12 Nov 2026)."""
+    allow_website(monkeypatch)
+    monkeypatch.setattr(ask_ai_ws, "_STARTS_PER_IP_PER_HOUR", 1)
+    monkeypatch.setattr(ask_ai_ws, "_STARTS_PER_IP_PER_DAY", 100)
+    monkeypatch.setattr(ask_ai_ws, "_STARTS_PER_DAY", 100)
+    assert ask_ai_ws._admit_start("2001:db8:1:2::1", 0.0) is None
+    assert ask_ai_ws._admit_start("2001:db8:1:2:ffff::9", 1.0) == "visitor_hourly"
+    assert ask_ai_ws._admit_start("2001:db8:1:3::1", 2.0) is None, "another /64 is another visitor"
+    # IPv4, and IPv4 written as IPv6, stay one address each.
+    assert ask_ai_ws._visitor_key("203.0.113.7") == "203.0.113.7"
+    assert ask_ai_ws._visitor_key("::ffff:203.0.113.7") == "203.0.113.7"
+    assert ask_ai_ws._visitor_key("unknown") == "unknown"
+
+
+def test_the_site_budget_warns_at_eighty_percent(monkeypatch, caplog):
+    import logging
+
+    allow_website(monkeypatch)
+    monkeypatch.setattr(ask_ai_ws, "_STARTS_PER_IP_PER_HOUR", 100)
+    monkeypatch.setattr(ask_ai_ws, "_STARTS_PER_IP_PER_DAY", 100)
+    monkeypatch.setattr(ask_ai_ws, "_STARTS_PER_DAY", 5)
+    with caplog.at_level(logging.WARNING, logger=ask_ai_ws.logger.name):
+        for n in range(4):
+            ask_ai_ws._admit_start(f"198.51.100.{n}", float(n))
+    warnings = [r.getMessage() for r in caplog.records if "80% used" in r.getMessage()]
+    assert warnings == ["Ask AI site start budget 80% used: 4 of 5 in the last 24 h"]
