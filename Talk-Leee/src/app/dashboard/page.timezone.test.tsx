@@ -8,7 +8,9 @@ import { dashboardApi, type Campaign } from "@/lib/dashboard-api";
 import { extendedApi } from "@/lib/extended-api";
 
 // Plan 3.7 Z3 on the Dashboard: every date-sensitive figure says which zone
-// it really uses, and the UTC figures print the UTC date. The real page with
+// it really uses, and the UTC figures print the UTC date. The live chart is cut
+// in the account's reporting zone, which the summary reports (QA F1-30/F1-32),
+// so that is the zone its label names, never the browser's. The real page with
 // the layout and the panels that fetch on their own stubbed; the chart stubs
 // print the labels the page hands them.
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
@@ -53,6 +55,8 @@ afterEach(() => {
 });
 
 const day = { date: "2026-03-01", total_calls: 4, answered: 3, failed: 1 };
+// The account's reporting zone: neither UTC nor either browser zone used below.
+const REPORTING_ZONE = "Asia/Karachi";
 
 async function mountPage() {
     globalThis.WebSocket = class { constructor() { throw new Error("no socket in tests"); } } as unknown as typeof WebSocket;
@@ -62,6 +66,7 @@ async function mountPage() {
     }] as unknown as Campaign[];
     mock.method(dashboardApi, "getDashboardSummary", async () => ({
         total_calls: 0, answered_calls: 0, failed_calls: 0, minutes_used: 0, minutes_remaining: 100, active_campaigns: 1,
+        timezone: REPORTING_ZONE,
     }));
     mock.method(dashboardApi, "listCampaigns", async () => ({ campaigns }));
     mock.method(extendedApi, "getCallAnalytics", async () => ({ series: [day] }));
@@ -74,19 +79,19 @@ function labelText(testId: string): string | null {
     return screen.queryByTestId(testId)?.textContent ?? null;
 }
 
-test("the month figures say UTC, the live chart says the browser's zone, and UTC figures print the UTC date (zone behind UTC)", async () => {
+test("the month figures say UTC, the live chart says the account's reporting zone, and UTC figures print the UTC date (browser behind UTC)", async () => {
     process.env.TZ = "America/Los_Angeles";
     await mountPage();
     assert.equal(labelText("dashboard-kpi-timezone"), "Timezone: UTC");
     assert.equal(labelText("dashboard-stacked-timezone"), "Timezone: UTC");
     assert.equal(labelText("dashboard-heatmap-timezone"), "Timezone: UTC");
     assert.equal(labelText("dashboard-timeline-timezone"), "Timezone: UTC");
-    assert.equal(labelText("dashboard-live-timezone"), "Timezone: America/Los_Angeles");
-    assert.equal(labelText("dashboard-stats-timezone"), "Timezone: America/Los_Angeles");
+    assert.equal(labelText("dashboard-live-timezone"), `Timezone: ${REPORTING_ZONE}`);
+    assert.equal(labelText("dashboard-stats-timezone"), `Timezone: ${REPORTING_ZONE}`);
     // The live chart's Custom range keeps the same zone label next to its inputs.
     fireEvent.click(screen.getByRole("button", { name: "Custom" }));
     assert.equal(screen.getByText("Start").closest("label")?.querySelector("input")?.type, "datetime-local");
-    assert.equal(labelText("dashboard-live-timezone"), "Timezone: America/Los_Angeles");
+    assert.equal(labelText("dashboard-live-timezone"), `Timezone: ${REPORTING_ZONE}`);
     // The campaign-lines chart (inside Real-Time Call Statistics) says UTC.
     assert.equal(labelText("dashboard-campaign-lines-timezone"), null);
     fireEvent.click(screen.getByRole("button", { name: "Campaigns" }));
@@ -99,7 +104,7 @@ test("the month figures say UTC, the live chart says the browser's zone, and UTC
 test("the UTC figures print the UTC date with the browser ahead of UTC", async () => {
     process.env.TZ = "Asia/Tokyo";
     await mountPage();
-    assert.equal(labelText("dashboard-live-timezone"), "Timezone: Asia/Tokyo");
+    assert.equal(labelText("dashboard-live-timezone"), `Timezone: ${REPORTING_ZONE}`);
     assert.deepEqual(Array.from(screen.getByTestId("stacked-labels").querySelectorAll("li")).map((li) => li.textContent), ["Mar 1"]);
     assert.deepEqual(Array.from(screen.getByTestId("timeline-labels").querySelectorAll("li")).map((li) => li.textContent), ["Mar 1"]);
 });

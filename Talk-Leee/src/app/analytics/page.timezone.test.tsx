@@ -33,7 +33,9 @@ afterEach(() => {
 
 test("the range menu and the daily chart show 'Timezone: UTC' and print the UTC date in a zone behind UTC", async () => {
     process.env.TZ = "America/Los_Angeles";
+    // The page takes the account's reporting zone from the response and loads nothing without it (QA F1-30/F1-32).
     mock.method(extendedApi, "getCallAnalytics", async () => ({
+        timezone: "UTC",
         series: [{ date: "2026-03-01", total_calls: 4, answered: 3, failed: 1 }],
     }));
     render(<Page />);
