@@ -3363,6 +3363,10 @@ BEGIN
     END LOOP;
 END $$;
 
+-- As in production (decision D2 default): the campaigns touch trigger exists
+-- but is disabled, so campaign writes set updated_at themselves.
+ALTER TABLE campaigns DISABLE TRIGGER update_campaigns_updated_at;
+
 -- =============================================================================
 -- SECTION 9: DEFAULT DATA
 -- =============================================================================
