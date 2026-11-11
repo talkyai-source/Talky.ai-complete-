@@ -6,8 +6,6 @@ import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import { MessageCircle } from "lucide-react";
 import { apiBaseUrl } from "@/lib/env";
-import { useAuth } from "@/lib/auth-context";
-import { ASKAI_SIGNIN_FLAG } from "@/components/auth/askai-signin-notice";
 import { ASKAI_CALL_ENDED_FLAG } from "@/components/ui/call-ended-notice";
 
 function parseConfiguredApiUrl(): URL | null {
@@ -110,18 +108,8 @@ const AudioVisualizer: React.FC<{ isActive: boolean; audioLevel: number; bars?: 
 export function VoiceAgentPopup() {
     const router = useRouter();
     const pathname = usePathname();
-    // Phase 5 universal-auth-state: subscribe to AuthContext for the
-    // sign-in gate. Replaces a getBrowserAuthToken() snapshot inside
-    // handleMainButtonClick — which would have been stale if the user
-    // logged in or out without re-mounting this component.
-    //
-    // Gate on `status === "authenticated"` rather than the raw access
-    // token: in cookie-only mode the JWT is HttpOnly and JS can't read
-    // it, so the bearer is null for fully-logged-in users. The WS still
-    // authenticates via the cookie because `wss://api.talkleeai.com`
-    // shares the parent `talkleeai.com` domain with the cookie.
-    const { status: authStatus } = useAuth();
-    const isAuthed = authStatus === "authenticated";
+    // The hero demo is open to every visitor (owner decision 12 Nov 2026):
+    // no sign-in gate here, and the server no longer asks for one.
     const [aiState, setAiState] = useState<AIState>("idle");
     const [audioLevel, setAudioLevel] = useState(0);
     const [error, setError] = useState<string | null>(null);
@@ -985,31 +973,32 @@ export function VoiceAgentPopup() {
             console.log(`[VoiceAgent] WebSocket closed: code=${event.code}, reason=${event.reason}`);
 
             // If the server never accepted us, the upgrade was rejected.
-            // Common reasons: stale auth, wrong path, rate limit, capacity.
+            // Common reasons: a page origin the server does not allow, wrong
+            // path, rate limit, capacity. The demo needs no sign-in, so none
+            // of these sends the visitor to the sign-in page.
             if (!serverAccepted) {
-                // Close codes that indicate auth/policy failure on the server.
-                // 1008 = policy violation, 4001/4003/4004 = app-level auth codes.
-                const isAuthFailure =
+                // 1008 = policy violation (the origin check), 4001/4003/4004 =
+                // app-level refusals.
+                const isPolicyRefusal =
                     event.code === 1008 ||
                     event.code === 4001 ||
                     event.code === 4003 ||
                     event.code === 4004;
 
-                if (isAuthFailure) {
+                if (isPolicyRefusal) {
                     failConnection(
-                        "Your session has expired. Redirecting to sign in…",
-                        true,
+                        "The assistant could not start here. Please reload the page and try again.",
+                        false,
                     );
                     return;
                 }
 
                 // 1006 (abnormal closure) on a never-accepted WS most often
                 // means the server returned 4xx on the upgrade or refused TCP.
-                // Treat it as a probable auth/permissions issue but stay on the
-                // page — let the user retry without forcing a redirect.
+                // Stay on the page and let the visitor retry.
                 if (event.code === 1006 || event.code === 0) {
                     failConnection(
-                        "Could not start the assistant. Please make sure you are signed in and try again.",
+                        "Could not start the assistant. Please try again.",
                         false,
                     );
                     return;
@@ -1040,30 +1029,19 @@ export function VoiceAgentPopup() {
     }, [handleMessage, endSession, cleanupAudioPlayer, startMicrophone, stopMicrophone, initializeAudioPlayer, playTessaIntro, prefetchTessaIntro, router, pathname]);
 
     const handleMainButtonClick = useCallback(() => {
-        if (!isAuthed) {
-            // Signed-out: redirect immediately, no message here. The sign-in
-            // notice renders on the auth pages, keyed off this session flag.
-            try {
-                sessionStorage.setItem(ASKAI_SIGNIN_FLAG, "1");
-            } catch { /* storage blocked (private mode) — redirect still works */ }
-            router.push(`/auth/login?next=${encodeURIComponent(pathname)}`);
-            return;
-        }
         if (!isActive) {
             void startSession();
         } else {
             endSession();
         }
-    }, [isAuthed, isActive, startSession, endSession, router, pathname]);
+    }, [isActive, startSession, endSession]);
 
     // Start fetching Tessa's intro on the user's first interaction with the
     // button (hover, focus or press) instead of on page load, so visitors who
-    // never touch it do not trigger a speech-synthesis call. Signed-out users
-    // are redirected to login on click, so they never need the intro.
+    // never touch it do not trigger a speech-synthesis call.
     const warmTessaIntro = useCallback(() => {
-        if (!isAuthed) return;
         void prefetchTessaIntro();
-    }, [isAuthed, prefetchTessaIntro]);
+    }, [prefetchTessaIntro]);
 
     // Pre-warm microphone stream on mount if permission is already granted.
     // getUserMedia() takes 100-500ms when called for the first time on button
