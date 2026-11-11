@@ -969,7 +969,8 @@ CREATE TABLE IF NOT EXISTS assistant_conversations (
     started_at TIMESTAMPTZ DEFAULT NOW(),
     last_message_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    -- NOT NULL as in production (archived 20260306_add_assistant_conversations_updated_at.sql).
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 4.4 ASSISTANT ACTIONS (Audit Log)
@@ -1629,29 +1630,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- The body is production's text (schema-qualified, indented as migration 0033
+-- wrote it), byte for byte, because the parity check compares function bodies
+-- literally (QA F14-02). The logic is the one this function always had.
 CREATE OR REPLACE FUNCTION prune_tenant_policy_audit_log(p_limit INTEGER DEFAULT 5000)
 RETURNS INTEGER AS $$
-DECLARE
-    deleted_count INTEGER;
-BEGIN
-    WITH to_delete AS (
-        SELECT id
-        FROM tenant_policy_audit_log
-        WHERE retention_until < NOW()
-        ORDER BY retention_until ASC
-        LIMIT GREATEST(COALESCE(p_limit, 0), 0)
-    ),
-    deleted AS (
-        DELETE FROM tenant_policy_audit_log a
-        USING to_delete d
-        WHERE a.id = d.id
-        RETURNING 1
-    )
-    SELECT COUNT(*) INTO deleted_count FROM deleted;
+            DECLARE
+                deleted_count INTEGER;
+            BEGIN
+                WITH to_delete AS (
+                    SELECT id
+                    FROM public.tenant_policy_audit_log
+                    WHERE retention_until < NOW()
+                    ORDER BY retention_until ASC
+                    LIMIT GREATEST(COALESCE(p_limit, 0), 0)
+                ),
+                deleted AS (
+                    DELETE FROM public.tenant_policy_audit_log AS audit_row
+                    USING to_delete
+                    WHERE audit_row.id = to_delete.id
+                    RETURNING 1
+                )
+                SELECT COUNT(*) INTO deleted_count FROM deleted;
 
-    RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
+                RETURN deleted_count;
+            END;
+            $$ LANGUAGE plpgsql;
 
 -- 6.6.12 TENANT POLICY RLS
 ALTER TABLE tenant_sip_trunks ENABLE ROW LEVEL SECURITY;
@@ -2304,8 +2308,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     event_category VARCHAR(30) NOT NULL,
     severity VARCHAR(10) NOT NULL DEFAULT 'INFO',
 
-    -- Actor
-    actor_id UUID REFERENCES user_profiles(id),
+    -- Actor (ON DELETE SET NULL as in production: deleting a user keeps the row)
+    actor_id UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
     actor_type VARCHAR(20) NOT NULL DEFAULT 'user',
     actor_role VARCHAR(50),
 
@@ -2328,14 +2332,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     after_state JSONB,
     metadata JSONB,
 
-    -- Integrity (tamper-evident)
+    -- Integrity (tamper-evident). entry_hash is NOT NULL and retention_until has
+    -- no default, as in production: both audit writers in
+    -- app/domain/services/audit_logger.py supply them on every insert.
     previous_hash VARCHAR(64),
-    entry_hash VARCHAR(64),
+    entry_hash VARCHAR(64) NOT NULL,
     signature VARCHAR(128),
 
     -- Compliance
     compliance_tags VARCHAR(50)[],
-    retention_until DATE NOT NULL DEFAULT (CURRENT_DATE + INTERVAL '365 days'),
+    retention_until DATE NOT NULL,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -2345,6 +2351,60 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type ON audit_logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+-- The other seven lookup indexes production has (QA F14-02).
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_time ON audit_logs(actor_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(event_category);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_compliance ON audit_logs USING gin (compliance_tags);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_retention ON audit_logs(retention_until);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_severity ON audit_logs(severity);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_time ON audit_logs(tenant_id, event_time DESC);
+
+-- Legacy audit functions production has (QA F14-02, decision D4: adopted as they
+-- are, neither fixed nor removed). The application never calls them, and
+-- log_audit_event names audit_logs columns that do not exist, so it cannot run.
+-- The bodies are production's text, byte for byte (the parity check compares
+-- function bodies literally), trailing space on the INSERT column list included.
+CREATE OR REPLACE FUNCTION apply_audit_retention() RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    -- Archive and delete expired audit logs
+    -- In production, this would move to cold storage before deletion
+    DELETE FROM audit_logs WHERE retention_until < CURRENT_DATE - INTERVAL '30 days';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION cleanup_expired_idempotency_keys() RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM idempotency_keys
+    WHERE expires_at < NOW();
+
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION log_audit_event(p_user_id uuid, p_tenant_id uuid, p_action_type character varying, p_target_type character varying, p_target_id uuid, p_description text, p_metadata jsonb, p_ip_address inet, p_user_agent text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    AS $$
+DECLARE
+    v_id UUID;
+BEGIN
+    INSERT INTO audit_logs (
+        user_id, tenant_id, action_type, target_type, target_id, 
+        description, metadata, ip_address, user_agent
+    ) VALUES (
+        p_user_id, p_tenant_id, p_action_type, p_target_type, p_target_id,
+        p_description, p_metadata, p_ip_address, p_user_agent
+    ) RETURNING id INTO v_id;
+    RETURN v_id;
+END;
+$$;
 
 -- Durable boundary for irreversible platform-admin recording/feedback deletes.
 -- The API commits one of these rows before touching audio storage.  Rows are
@@ -2694,9 +2754,11 @@ CREATE TABLE IF NOT EXISTS security_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Classification
+    -- The two CHECKs are spelled with explicit casts so the stored text is the
+    -- production dump's ("col IN (...)" would be stored as ARRAY[...]::text[]).
     event_type VARCHAR(50) NOT NULL,
-    severity VARCHAR(10) NOT NULL CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO')),
-    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'investigating', 'resolved', 'false_positive', 'escalated')),
+    severity VARCHAR(10) NOT NULL CHECK (severity::text = ANY (ARRAY['CRITICAL'::varchar::text, 'HIGH'::varchar::text, 'MEDIUM'::varchar::text, 'LOW'::varchar::text, 'INFO'::varchar::text])),
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status::text = ANY (ARRAY['open'::varchar::text, 'investigating'::varchar::text, 'resolved'::varchar::text, 'false_positive'::varchar::text, 'escalated'::varchar::text])),
 
     -- Scope
     tenant_id UUID REFERENCES tenants(id),
@@ -2705,7 +2767,7 @@ CREATE TABLE IF NOT EXISTS security_events (
 
     -- Detection
     detection_source VARCHAR(50) NOT NULL, 
-    rule_id UUID, -- References abuse_detection_rules(id) if exists
+    rule_id UUID REFERENCES abuse_detection_rules(id),
 
     -- Details
     title VARCHAR(200) NOT NULL,
@@ -2724,20 +2786,34 @@ CREATE TABLE IF NOT EXISTS security_events (
 
     -- SLA tracking
     sla_deadline TIMESTAMPTZ,
-    first_response_at TIMESTAMPTZ
+    first_response_at TIMESTAMPTZ,
+
+    -- Alert Timeline category (migration 0004). It is the last column here
+    -- because 0004 appended it in production; the migration chain is stamped
+    -- past 0004 on a fresh install, so the bootstrap has to carry it.
+    alert_type TEXT CHECK (alert_type IS NULL OR alert_type IN ('Network', 'API', 'Campaign', 'System'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_security_events_status ON security_events(status);
 CREATE INDEX IF NOT EXISTS idx_security_events_severity ON security_events(severity);
 CREATE INDEX IF NOT EXISTS idx_security_events_tenant ON security_events(tenant_id);
+-- The other seven lookup indexes production has (QA F14-02). The two created
+-- indexes both cover created_at DESC; production has both, so both are kept.
+CREATE INDEX IF NOT EXISTS idx_security_events_alert_type ON security_events(alert_type, created_at DESC) WHERE alert_type IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_security_events_assigned ON security_events(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_events_created_at ON security_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_events_event_type ON security_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_security_events_sla ON security_events(sla_deadline) WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id);
 
 -- 4. SUSPENSION_EVENTS (Formal suspension history)
 CREATE TABLE IF NOT EXISTS suspension_events (
     suspension_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- Target
-    target_type VARCHAR(20) NOT NULL CHECK (target_type IN ('user', 'tenant', 'partner')),
+    -- Target (CHECK spelled with explicit casts: the production dump's text)
+    target_type VARCHAR(20) NOT NULL CHECK (target_type::text = ANY (ARRAY['user'::varchar::text, 'tenant'::varchar::text, 'partner'::varchar::text])),
     target_id UUID NOT NULL,
 
     -- Suspension details
@@ -2774,6 +2850,12 @@ CREATE TABLE IF NOT EXISTS suspension_events (
 
 CREATE INDEX IF NOT EXISTS idx_suspension_events_target ON suspension_events(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_suspension_events_active ON suspension_events(target_id, is_active) WHERE is_active = TRUE;
+-- The other five lookup indexes production has (QA F14-02).
+CREATE INDEX IF NOT EXISTS idx_suspension_events_appeal ON suspension_events(appeal_submitted_at) WHERE appeal_decision = 'pending';
+CREATE INDEX IF NOT EXISTS idx_suspension_events_suspended_at ON suspension_events(suspended_at DESC);
+CREATE INDEX IF NOT EXISTS idx_suspension_events_tenant ON suspension_events(target_id) WHERE target_type = 'tenant';
+CREATE INDEX IF NOT EXISTS idx_suspension_events_type ON suspension_events(suspension_type);
+CREATE INDEX IF NOT EXISTS idx_suspension_events_user ON suspension_events(target_id) WHERE target_type = 'user';
 
 -- Serialize tenant/partner COMPLIANCE holds with irreversible media deletion.
 CREATE OR REPLACE FUNCTION serialize_compliance_media_hold()
@@ -3428,6 +3510,97 @@ JOIN tenant_users tu ON tu.user_id = up.id
 JOIN tenants t ON t.id = tu.tenant_id
 JOIN roles r ON r.id = tu.role_id
 WHERE tu.status IN ('active', 'pending');
+
+-- Three views production has and the bootstrap lacked (QA F14-02; archived
+-- day8_audit_suspension_secrets.sql). Nothing in the application reads them.
+-- The column lists are written out as production stores them: the archived
+-- script used SELECT *, which Postgres expanded once when it ran. So
+-- open_security_events has no alert_type (that column came later, migration
+-- 0004) and expiring_secrets has no lookup_hash (migration 0068). The WHERE
+-- text is spelled the way the production dump prints it.
+CREATE OR REPLACE VIEW active_suspensions AS
+SELECT
+    suspension_id,
+    created_at,
+    target_type,
+    target_id,
+    suspension_type,
+    reason_category,
+    reason_description,
+    evidence,
+    suspended_at,
+    suspended_until,
+    restored_at,
+    suspended_by,
+    restored_by,
+    restore_reason,
+    is_active,
+    propagated_services,
+    propagation_confirmed_at,
+    appeal_submitted_at,
+    appeal_reason,
+    appeal_reviewed_by,
+    appeal_decision,
+    appeal_response,
+    audit_log_id
+FROM suspension_events
+WHERE is_active = TRUE AND (suspended_until IS NULL OR suspended_until > NOW());
+
+CREATE OR REPLACE VIEW expiring_secrets AS
+SELECT
+    secret_id,
+    created_at,
+    updated_at,
+    tenant_id,
+    created_by,
+    secret_type,
+    secret_name,
+    description,
+    encrypted_value,
+    encrypted_dek,
+    iv,
+    algorithm,
+    permissions,
+    version,
+    rotated_from,
+    rotated_to,
+    rotated_at,
+    expires_at,
+    last_accessed_at,
+    last_accessed_by,
+    access_count,
+    is_active,
+    is_compromised,
+    revoked_at,
+    revoked_reason
+FROM tenant_secrets
+WHERE is_active = TRUE AND expires_at IS NOT NULL AND expires_at < NOW() + INTERVAL '7 days';
+
+CREATE OR REPLACE VIEW open_security_events AS
+SELECT
+    event_id,
+    created_at,
+    event_type,
+    severity,
+    status,
+    tenant_id,
+    user_id,
+    session_id,
+    detection_source,
+    rule_id,
+    title,
+    description,
+    evidence,
+    assigned_to,
+    resolved_at,
+    resolved_by,
+    resolution_notes,
+    auto_action_taken,
+    auto_action_success,
+    sla_deadline,
+    first_response_at
+FROM security_events
+WHERE status::text = ANY (ARRAY['open'::varchar::text, 'investigating'::varchar::text, 'escalated'::varchar::text]);
 
 -- =============================================================================
 -- SECTION 10: CALLGUARD TABLES
