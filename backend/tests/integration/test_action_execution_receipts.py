@@ -46,7 +46,8 @@ async def action_db():
                 admission_status VARCHAR(16) NOT NULL DEFAULT 'pending',
                 processing_status VARCHAR(16) NOT NULL DEFAULT 'pending',
                 billing_status VARCHAR(16) NOT NULL DEFAULT 'none',
-                reserved_seconds INTEGER NOT NULL DEFAULT 0);
+                reserved_seconds INTEGER NOT NULL DEFAULT 0,
+                caller_ani_private BOOLEAN NOT NULL DEFAULT FALSE);
             CREATE TABLE connectors (id UUID PRIMARY KEY,tenant_id UUID,type TEXT,status TEXT);
             CREATE TABLE connector_accounts (connector_id UUID,tenant_id UUID,status TEXT);
         """)
@@ -123,12 +124,17 @@ async def test_callback_db_outbox_replays_same_job_after_queue_success(action_db
     await admin.execute("INSERT INTO campaigns VALUES ($1::uuid,$2::uuid,'outbound','running',$3::jsonb)",
                         campaign, tenant, json.dumps({"campaign_brief": {"approved_next_actions": ["schedule_callback"]}}))
     await admin.execute("INSERT INTO leads VALUES ($1::uuid,$2::uuid,$3::uuid,'+14155552671',false,'pending')", lead, tenant, campaign)
+    # A voice callback is booked from a call (QA F5-10): the executor reads that call's
+    # identity and only an outbound call (we dialled the number) or a verified caller passes.
+    call = str(uuid4())
+    await admin.execute("INSERT INTO calls (id,tenant_id,campaign_id,lead_id,status,direction) "
+                        "VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'completed','outbound')", call, tenant, campaign, lead)
     when = datetime.now(timezone.utc) - timedelta(seconds=1)
     payload = {"parameters": {"phone": "+14155552671", "scheduled_at": when.isoformat()}, "confirmation": {"revision": 1}}
     async def schedule():
         return {"success": True, "status": "scheduled", "confirmation_allowed": True, "scheduled_at": when.isoformat()}
     await DurableActionExecutor(pool).execute(tenant_id=tenant,idempotency_key="voice-callback",action="schedule_callback",
-        payload=payload,executor=schedule,campaign_id=campaign,lead_id=lead)
+        payload=payload,executor=schedule,call_id=call,campaign_id=campaign,lead_id=lead)
     queued = []
     async def publish(job, **kwargs):
         queued.append(job.job_id)
