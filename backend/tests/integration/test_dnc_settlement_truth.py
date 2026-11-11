@@ -31,6 +31,9 @@ async def settlement(dnc_db):
     # Canonical calls UPDATE trigger invalidates linked prepared CRM work.
     await db.admin.execute(f'GRANT SELECT,INSERT,UPDATE ON crm_deliveries TO "{db.role}"')
     await db.admin.execute(f'GRANT SELECT ON connectors TO "{db.role}"')
+    # Settlement counts each completed outbound call for the campaign failure
+    # alert in the same transaction (QA F3-08, campaign_alerts.record_terminal_call).
+    await db.admin.execute(f'GRANT SELECT,INSERT,UPDATE ON campaign_alert_state TO "{db.role}"')
     original_pool = db.pool
 
     async def init(conn):
