@@ -115,7 +115,7 @@ export default function SettingsPage() {
                  */}
                 {/* QA F1-15: who is in this workspace, and their roles. */}
                 <Link
-                    href="/settings/team"
+                    href="/team"
                     className="block rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm transition-colors hover:bg-background/90 dark:border-white/10 dark:bg-white/5"
                 >
                     <span className="text-sm font-semibold text-foreground">Team</span>
