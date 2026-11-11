@@ -3,6 +3,7 @@ import asyncio
 from copy import deepcopy
 import hashlib
 import json
+import re
 import socket
 from unittest.mock import AsyncMock
 from types import SimpleNamespace
@@ -365,7 +366,10 @@ async def test_scope_exclusions_cannot_retain_large_length_values_or_bracket_pas
               if sql.startswith("UPDATE calls SET transcript=") or sql.startswith("UPDATE transcripts")]
     assert len(writes) == 2
     for args in writes:
-        assert secret not in str(args) and CONTACT in str(args)
+        # A turn's timestamp is server time, not caller words: a short value such as "042" can
+        # occur in its microseconds (CI flake, 11 Nov 2026), so it is left out of the check.
+        written = re.sub(r'"timestamp": "[^"]*"', "", " ".join(str(value) for value in args))
+        assert secret not in written and CONTACT in written
 
 
 @pytest.mark.parametrize("count", [1, 6, 12, 16, 32, 64])
