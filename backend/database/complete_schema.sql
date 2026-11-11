@@ -1594,13 +1594,6 @@ CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_request_id
 CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_retention_until
     ON tenant_policy_audit_log(retention_until);
 
-CREATE OR REPLACE FUNCTION prevent_tenant_policy_audit_log_mutation()
-RETURNS TRIGGER AS $$
-BEGIN
-    RAISE EXCEPTION 'tenant_policy_audit_log is immutable';
-END;
-$$ LANGUAGE plpgsql;
-
 CREATE OR REPLACE FUNCTION log_tenant_policy_mutation()
 RETURNS TRIGGER AS $$
 DECLARE
@@ -1914,19 +1907,10 @@ CREATE POLICY p_tenant_policy_audit_log_delete ON tenant_policy_audit_log
     FOR DELETE
     USING (FALSE);
 
-DROP TRIGGER IF EXISTS trg_prevent_tenant_policy_audit_log_update
-    ON tenant_policy_audit_log;
-CREATE TRIGGER trg_prevent_tenant_policy_audit_log_update
-    BEFORE UPDATE ON tenant_policy_audit_log
-    FOR EACH ROW
-    EXECUTE FUNCTION prevent_tenant_policy_audit_log_mutation();
-
-DROP TRIGGER IF EXISTS trg_prevent_tenant_policy_audit_log_delete
-    ON tenant_policy_audit_log;
-CREATE TRIGGER trg_prevent_tenant_policy_audit_log_delete
-    BEFORE DELETE ON tenant_policy_audit_log
-    FOR EACH ROW
-    EXECUTE FUNCTION prevent_tenant_policy_audit_log_mutation();
+-- As in production, no trigger guards this table: the RLS policies above deny
+-- UPDATE and DELETE to ordinary roles (QA F14-02, decision D1). An immutability
+-- trigger must still let tenant and user deletion cascade, and needs an owner
+-- decision before it is added to both paths.
 
 DROP TRIGGER IF EXISTS trg_audit_tenant_sip_trunks ON tenant_sip_trunks;
 CREATE TRIGGER trg_audit_tenant_sip_trunks
