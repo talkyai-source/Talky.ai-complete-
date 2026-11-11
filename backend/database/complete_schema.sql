@@ -1934,113 +1934,6 @@ CREATE INDEX IF NOT EXISTS idx_calls_dialer_job_id
 -- =============================================================================
 
 -- =============================================================================
--- TENANT CALL LIMITS
--- =============================================================================
--- Comprehensive per-tenant limits for voice operations including rate limits,
--- concurrency, spend caps, and geographic restrictions.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS tenant_call_limits (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-
-    -- Rate limits (rolling window)
-    calls_per_minute INTEGER NOT NULL DEFAULT 60,
-    calls_per_hour INTEGER NOT NULL DEFAULT 1000,
-    calls_per_day INTEGER NOT NULL DEFAULT 10000,
-
-    -- Concurrency
-    max_concurrent_calls INTEGER NOT NULL DEFAULT 10,
-    max_queue_size INTEGER NOT NULL DEFAULT 50,
-
-    -- Usage limits
-    monthly_minutes_allocated INTEGER NOT NULL DEFAULT 0,
-    monthly_minutes_used INTEGER NOT NULL DEFAULT 0,
-    monthly_spend_cap DECIMAL(12,2),
-    monthly_spend_used DECIMAL(12,2) DEFAULT 0.00,
-
-    -- Call restrictions
-    max_call_duration_seconds INTEGER DEFAULT 3600, -- 1 hour
-    min_call_interval_seconds INTEGER DEFAULT 300,  -- 5 min between calls to same number
-
-    -- Geographic controls (ISO 3166-1 alpha-2 country codes)
-    allowed_country_codes TEXT[] DEFAULT '{}',
-    blocked_country_codes TEXT[] DEFAULT '{}',
-    blocked_prefixes TEXT[] DEFAULT '{}',
-
-    -- Feature flags (override plan features)
-    features_enabled JSONB DEFAULT '{}',
-    features_disabled JSONB DEFAULT '{}',
-
-    -- Business hours (optional, format: '09:00' - '17:00')
-    business_hours_start TIME,
-    business_hours_end TIME,
-    business_hours_timezone TEXT DEFAULT 'UTC',
-    respect_business_hours BOOLEAN DEFAULT FALSE,
-
-    -- Status
-    is_active BOOLEAN DEFAULT TRUE,
-    effective_from TIMESTAMPTZ DEFAULT NOW(),
-    effective_until TIMESTAMPTZ,
-
-    -- Metadata
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    created_by UUID,
-    updated_by UUID,
-
-    UNIQUE(tenant_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_tenant ON tenant_call_limits(tenant_id) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_effective ON tenant_call_limits(tenant_id, effective_from, effective_until);
-
--- =============================================================================
--- PARTNER AGGREGATE LIMITS (Multi-tenant Reseller Controls)
--- =============================================================================
--- For partners/resellers managing multiple sub-tenants.
--- Enforces aggregate limits across all child tenants.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS partner_limits (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    partner_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Partner is also a tenant
-
-    -- Tenant management
-    max_tenants INTEGER NOT NULL DEFAULT 10,
-    current_tenant_count INTEGER DEFAULT 0,
-
-    -- Aggregate rate limits across all child tenants
-    aggregate_calls_per_minute INTEGER NOT NULL DEFAULT 600,
-    aggregate_calls_per_hour INTEGER NOT NULL DEFAULT 10000,
-    aggregate_calls_per_day INTEGER NOT NULL DEFAULT 100000,
-    aggregate_concurrent_calls INTEGER NOT NULL DEFAULT 100,
-
-    -- Financial controls
-    revenue_share_percent DECIMAL(5,2) DEFAULT 20.00,
-    min_billing_amount DECIMAL(10,2) DEFAULT 100.00,
-    max_billing_amount DECIMAL(12,2),
-
-    -- Feature governance
-    feature_whitelist JSONB DEFAULT '[]', -- If set, only these features allowed
-    feature_blacklist JSONB DEFAULT '[]', -- These features never allowed
-
-    -- Abuse detection sensitivity (0-100, higher = more sensitive)
-    fraud_detection_sensitivity INTEGER DEFAULT 50 CHECK (fraud_detection_sensitivity BETWEEN 0 AND 100),
-
-    -- Status
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    created_by UUID,
-    updated_by UUID,
-
-    UNIQUE(partner_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_partner_limits_partner ON partner_limits(partner_id) WHERE is_active = TRUE;
-
--- =============================================================================
 -- TENANT-PARTNER RELATIONSHIP (ALTER)
 -- =============================================================================
 -- Links child tenants to their partner for aggregate limit enforcement
@@ -2110,114 +2003,6 @@ CREATE TABLE IF NOT EXISTS abuse_detection_rules (
 
 CREATE INDEX IF NOT EXISTS idx_abuse_rules_tenant ON abuse_detection_rules(tenant_id) WHERE is_active = TRUE;
 CREATE INDEX IF NOT EXISTS idx_abuse_rules_type ON abuse_detection_rules(rule_type, is_active);
-
--- =============================================================================
--- ABUSE EVENTS (AUDIT TRAIL)
--- =============================================================================
--- Records of detected abuse patterns and actions taken.
--- Used for fraud investigation and compliance reporting.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS abuse_events (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    partner_id UUID REFERENCES tenants(id), -- If applicable
-
-    event_type TEXT NOT NULL, -- References abuse_detection_rules.rule_type
-    severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
-
-    -- Detection details
-    rule_id UUID REFERENCES abuse_detection_rules(id),
-    trigger_value NUMERIC, -- The value that triggered (e.g., 150 calls when limit is 100)
-    threshold_value NUMERIC, -- The threshold that was exceeded
-
-    -- Context
-    source_ip INET,
-    phone_number_called VARCHAR(50),
-    campaign_id UUID,
-    call_id UUID,
-    user_id UUID,
-
-    -- Geographic info
-    destination_country TEXT,
-    destination_prefix TEXT,
-
-    -- Financial impact (if applicable)
-    estimated_cost_impact DECIMAL(12,2),
-
-    -- Action taken
-    action_taken TEXT NOT NULL CHECK (action_taken IN (
-        'flagged',     -- Logged for review
-        'warned',      -- Alert sent
-        'throttled',   -- Rate limited
-        'blocked',     -- Call blocked
-        'suspended'    -- Tenant suspended
-    )),
-    action_details JSONB DEFAULT '{}',
-
-    -- Auto-escalation
-    auto_escalate_at TIMESTAMPTZ,
-    escalation_level INTEGER DEFAULT 0,
-
-    -- Resolution
-    resolved_at TIMESTAMPTZ,
-    resolved_by UUID,
-    resolution_notes TEXT,
-    false_positive BOOLEAN, -- Was this a false positive?
-
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_abuse_events_tenant ON abuse_events(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_abuse_events_type ON abuse_events(event_type, severity, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_abuse_events_unresolved ON abuse_events(tenant_id) WHERE resolved_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_abuse_events_phone ON abuse_events(phone_number_called) WHERE phone_number_called IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_abuse_events_partner ON abuse_events(partner_id, created_at DESC) WHERE partner_id IS NOT NULL;
-
--- =============================================================================
--- CALL GUARD DECISIONS (AUDIT LOG)
--- =============================================================================
--- Records every call guard decision for compliance and debugging.
--- Critical for troubleshooting blocked calls and proving compliance.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS call_guard_decisions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    partner_id UUID REFERENCES tenants(id),
-
-    -- Request details
-    call_id UUID,
-    phone_number VARCHAR(50) NOT NULL,
-    campaign_id UUID,
-    user_id UUID,
-    call_type TEXT DEFAULT 'outbound' CHECK (call_type IN ('outbound', 'inbound', 'transfer')),
-
-    -- Decision
-    decision TEXT NOT NULL CHECK (decision IN ('allow', 'block', 'queue', 'throttle')),
-
-    -- Check results (JSON array of all checks performed)
-    checks_performed JSONB NOT NULL DEFAULT '[]',
-
-    -- Failed checks (if blocked)
-    failed_checks JSONB DEFAULT '[]',
-
-    -- Queue info (if queued)
-    queue_position INTEGER,
-    queue_wait_seconds INTEGER,
-
-    -- Throttle info (if throttled)
-    retry_after_seconds INTEGER,
-
-    -- Timing
-    total_latency_ms INTEGER,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_tenant ON call_guard_decisions(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_blocked ON call_guard_decisions(tenant_id, decision) WHERE decision != 'allow';
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_call ON call_guard_decisions(call_id) WHERE call_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_phone ON call_guard_decisions(phone_number);
 
 -- =============================================================================
 -- DO-NOT-CALL (DNC) LIST
@@ -3594,6 +3379,8 @@ CREATE TABLE IF NOT EXISTS tenant_call_limits (
 
 CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_tenant_active
     ON tenant_call_limits(tenant_id, is_active, effective_from DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_tenant ON tenant_call_limits(tenant_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_effective ON tenant_call_limits(tenant_id, effective_from, effective_until);
 
 -- 10.2 PARTNER LIMITS
 CREATE TABLE IF NOT EXISTS partner_limits (
@@ -3620,6 +3407,14 @@ CREATE TABLE IF NOT EXISTS partner_limits (
 
 CREATE INDEX IF NOT EXISTS idx_partner_limits_partner_active
     ON partner_limits(partner_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_partner_limits_partner ON partner_limits(partner_id) WHERE is_active = TRUE;
+
+-- As in production: the updated_at touch triggers that the SECTION 8 loop
+-- cannot attach, because it runs before this section creates the tables.
+DROP TRIGGER IF EXISTS update_tenant_call_limits_updated_at ON tenant_call_limits;
+CREATE TRIGGER update_tenant_call_limits_updated_at BEFORE UPDATE ON tenant_call_limits FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_partner_limits_updated_at ON partner_limits;
+CREATE TRIGGER update_partner_limits_updated_at BEFORE UPDATE ON partner_limits FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- 10.3 DNC ENTRIES: canonical definition and 0061 contract appear in the DNC section above.
 
@@ -3630,7 +3425,7 @@ CREATE TABLE IF NOT EXISTS call_guard_decisions (
     partner_id           UUID REFERENCES tenants(id) ON DELETE SET NULL,
     call_id              VARCHAR(100),
     phone_number         VARCHAR(20),
-    decision             VARCHAR(20) NOT NULL CHECK (decision IN ('allow', 'block', 'queue', 'throttle')),
+    decision             VARCHAR(20) NOT NULL CHECK ((decision)::text = ANY (ARRAY[('allow'::character varying)::text, ('block'::character varying)::text, ('queue'::character varying)::text, ('throttle'::character varying)::text])),
     checks_performed     JSONB NOT NULL DEFAULT '[]'::jsonb,
     failed_checks        JSONB NOT NULL DEFAULT '[]'::jsonb,
     queue_position       INTEGER,
@@ -3641,13 +3436,16 @@ CREATE TABLE IF NOT EXISTS call_guard_decisions (
 
 CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_tenant_created ON call_guard_decisions(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_phone ON call_guard_decisions(phone_number, created_at DESC) WHERE phone_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_tenant ON call_guard_decisions(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_blocked ON call_guard_decisions(tenant_id, decision) WHERE decision != 'allow';
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_call ON call_guard_decisions(call_id) WHERE call_id IS NOT NULL;
 
 -- 10.5 ABUSE EVENTS
 CREATE TABLE IF NOT EXISTS abuse_events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     event_type      VARCHAR(50) NOT NULL DEFAULT 'velocity_anomaly',
-    severity        VARCHAR(20) NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+    severity        VARCHAR(20) NOT NULL DEFAULT 'medium' CHECK ((severity)::text = ANY (ARRAY[('low'::character varying)::text, ('medium'::character varying)::text, ('high'::character varying)::text, ('critical'::character varying)::text])),
     source          VARCHAR(50) NOT NULL DEFAULT 'system',
     description     TEXT,
     details         JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -3660,6 +3458,8 @@ CREATE TABLE IF NOT EXISTS abuse_events (
 
 CREATE INDEX IF NOT EXISTS idx_abuse_events_tenant_severity ON abuse_events(tenant_id, severity, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_abuse_events_unresolved ON abuse_events(tenant_id, created_at DESC) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_abuse_events_tenant ON abuse_events(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_abuse_events_type ON abuse_events(event_type, severity, created_at DESC);
 
 -- Seed default call limits for every tenant
 INSERT INTO tenant_call_limits (tenant_id)
