@@ -100,7 +100,11 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     -- constraint from pg_constraint, so either historical name upgrades.
     role VARCHAR(50) NOT NULL DEFAULT 'user' CONSTRAINT chk_user_profiles_role_valid CHECK (role IN ('platform_admin', 'partner_admin', 'tenant_admin', 'campaign_manager', 'user', 'agent', 'billing_user', 'readonly')),
     password_hash TEXT,                          -- bcrypt hash (nullable for OAuth future)
-    
+    -- created_at/updated_at sit here, ahead of the security columns, because
+    -- that is the column order of the production dump (QA F14-02).
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
     -- Security hardening columns
     account_locked_until TIMESTAMPTZ,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -112,15 +116,14 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     verification_token TEXT,
     verification_token_expires_at TIMESTAMPTZ,
     email_verified_at TIMESTAMPTZ,
+    -- Spelled as the production dump prints it. is_verified is NOT NULL, so
+    -- "NOT is_verified" and "is_verified = FALSE" are the same rule.
     CONSTRAINT chk_email_verification_consistency CHECK (
-        NOT is_verified OR (verification_token IS NULL AND email_verified_at IS NOT NULL)
+        is_verified = FALSE OR (is_verified = TRUE AND verification_token IS NULL AND email_verified_at IS NOT NULL)
     ),
 
     -- Day 3: Passkey denormalized count
-    passkey_count INTEGER NOT NULL DEFAULT 0 CHECK (passkey_count >= 0),
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    passkey_count INTEGER NOT NULL DEFAULT 0 CHECK (passkey_count >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_profiles_tenant_id ON user_profiles(tenant_id);
@@ -128,6 +131,8 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_has_passkey ON user_profiles(passkey_count) WHERE passkey_count > 0;
 CREATE INDEX IF NOT EXISTS idx_user_profiles_is_active ON user_profiles (is_active) WHERE is_active = FALSE;
 CREATE INDEX IF NOT EXISTS idx_user_profiles_mfa_enabled ON user_profiles (mfa_enabled) WHERE mfa_enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_user_profiles_is_verified ON user_profiles (is_verified) WHERE is_verified = FALSE;
+CREATE INDEX IF NOT EXISTS idx_user_profiles_verification_token ON user_profiles (verification_token) WHERE verification_token IS NOT NULL;
 
 -- Complete the tenants -> user_profiles side of the bootstrap cycle now that
 -- both tables exist. The catalog guard keeps the consolidated schema safe to
@@ -310,19 +315,30 @@ CREATE INDEX IF NOT EXISTS idx_cloned_voices_tenant
 
 -- 1.4 SECURITY_SESSIONS
 -- Stores server-side session records for instant revocation.
+-- Column order, constraint names and indexes are the production dump's
+-- (QA F14-02): the Day 5 columns were appended to production one migration at
+-- a time, so they do not form one block here.
 CREATE TABLE IF NOT EXISTS security_sessions (
-    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id             UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    session_token_hash  TEXT        NOT NULL UNIQUE,
+    id                  UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL,
+    session_token_hash  TEXT        NOT NULL,
     ip_address          TEXT,
     user_agent          TEXT,
-    
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_active_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    revoked             BOOLEAN     NOT NULL DEFAULT FALSE,
+    revoked_at          TIMESTAMPTZ,
+    revoke_reason       TEXT,
+    mfa_verified        BOOLEAN     NOT NULL DEFAULT FALSE,
+
     -- Day 5: Session security enhancements
     device_fingerprint  TEXT,
     device_name         TEXT,
-    device_type         TEXT        CHECK (device_type IN ('mobile', 'tablet', 'desktop', 'unknown')),
+    device_type         TEXT,
     browser             TEXT,
     os                  TEXT,
+    country_code        TEXT,
     bound_ip            TEXT,
     ip_binding_enforced BOOLEAN     NOT NULL DEFAULT FALSE,
     fingerprint_binding_enforced BOOLEAN NOT NULL DEFAULT FALSE,
@@ -332,14 +348,12 @@ CREATE TABLE IF NOT EXISTS security_sessions (
     requires_verification BOOLEAN   NOT NULL DEFAULT FALSE,
     verified_at         TIMESTAMPTZ,
     session_number      INTEGER,
-    mfa_verified        BOOLEAN     NOT NULL DEFAULT FALSE,
-    
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_active_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at          TIMESTAMPTZ NOT NULL,
-    revoked             BOOLEAN     NOT NULL DEFAULT FALSE,
-    revoked_at          TIMESTAMPTZ,
-    revoke_reason       TEXT,
+    rotated_from_session_id UUID,
+    is_rotated          BOOLEAN     NOT NULL DEFAULT FALSE,
+    CONSTRAINT pk_security_sessions PRIMARY KEY (id),
+    CONSTRAINT uq_security_sessions_token_hash UNIQUE (session_token_hash),
+    CONSTRAINT fk_security_sessions_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_device_type CHECK (device_type IN ('mobile', 'tablet', 'desktop', 'unknown')),
     CONSTRAINT chk_revoked_at_consistency CHECK ((revoked = FALSE AND revoked_at IS NULL) OR (revoked = TRUE AND revoked_at IS NOT NULL)),
     CONSTRAINT chk_expires_after_created CHECK (expires_at > created_at)
 );
@@ -347,66 +361,100 @@ CREATE TABLE IF NOT EXISTS security_sessions (
 CREATE INDEX IF NOT EXISTS idx_ss_token_lookup ON security_sessions (session_token_hash) WHERE revoked = FALSE;
 CREATE INDEX IF NOT EXISTS idx_ss_user_active ON security_sessions (user_id, last_active_at DESC) WHERE revoked = FALSE;
 CREATE INDEX IF NOT EXISTS idx_ss_mfa_verified ON security_sessions (user_id, mfa_verified) WHERE mfa_verified = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ss_active_binding ON security_sessions (session_token_hash, bound_ip, device_fingerprint) WHERE revoked = FALSE;
+CREATE INDEX IF NOT EXISTS idx_ss_cleanup ON security_sessions (expires_at) WHERE revoked = FALSE;
+CREATE INDEX IF NOT EXISTS idx_ss_fingerprint ON security_sessions (device_fingerprint) WHERE device_fingerprint IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ss_suspicious ON security_sessions (user_id, is_suspicious, suspicious_detected_at DESC) WHERE is_suspicious = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ss_suspicious_cleanup ON security_sessions (suspicious_detected_at) WHERE is_suspicious = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ss_user_all ON security_sessions (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ss_user_session_number ON security_sessions (user_id, session_number DESC) WHERE revoked = FALSE;
 
 -- 1.5 LOGIN_ATTEMPTS
 -- Per-account lockout tracking.
 CREATE TABLE IF NOT EXISTS login_attempts (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
     email           TEXT        NOT NULL,
-    user_id         UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    user_id         UUID,
     ip_address      TEXT        NOT NULL,
     user_agent      TEXT,
     success         BOOLEAN     NOT NULL,
     failure_reason  TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_login_attempts PRIMARY KEY (id),
+    CONSTRAINT fk_login_attempts_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_la_email_failures ON login_attempts (email, created_at DESC) WHERE success = FALSE;
 CREATE INDEX IF NOT EXISTS idx_la_user_time ON login_attempts (user_id, created_at DESC) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_la_email_time ON login_attempts (email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_la_ip_time ON login_attempts (ip_address, created_at DESC);
 
 -- 1.6 USER_MFA
 -- Encrypted TOTP secrets.
 CREATE TABLE IF NOT EXISTS user_mfa (
-    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id             UUID        NOT NULL UNIQUE REFERENCES user_profiles(id) ON DELETE CASCADE,
+    id                  UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL,
     totp_secret_enc     TEXT        NOT NULL,
     enabled             BOOLEAN     NOT NULL DEFAULT FALSE,
     verified_at         TIMESTAMPTZ,
-    last_used_at        TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at        TIMESTAMPTZ,
+    CONSTRAINT pk_user_mfa PRIMARY KEY (id),
+    CONSTRAINT uq_user_mfa_user UNIQUE (user_id),
+    CONSTRAINT fk_user_mfa_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT chk_user_mfa_verified_before_enabled CHECK ((enabled = FALSE) OR (enabled = TRUE AND verified_at IS NOT NULL))
 );
+
+CREATE INDEX IF NOT EXISTS idx_user_mfa_enabled ON user_mfa (user_id) WHERE enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_user_mfa_user_id ON user_mfa (user_id);
 
 -- 1.7 RECOVERY_CODES
 -- Single-use backup codes.
 CREATE TABLE IF NOT EXISTS recovery_codes (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    code_hash       TEXT        NOT NULL UNIQUE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL,
+    code_hash       TEXT        NOT NULL,
     batch_id        UUID        NOT NULL,
     used            BOOLEAN     NOT NULL DEFAULT FALSE,
     used_at         TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_recovery_codes PRIMARY KEY (id),
+    CONSTRAINT uq_recovery_codes_hash UNIQUE (code_hash),
+    CONSTRAINT fk_recovery_codes_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT chk_recovery_codes_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL))
 );
+
+CREATE INDEX IF NOT EXISTS idx_rc_code_hash ON recovery_codes (code_hash) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_rc_user_batch ON recovery_codes (user_id, batch_id);
+CREATE INDEX IF NOT EXISTS idx_rc_user_created ON recovery_codes (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rc_user_unused ON recovery_codes (user_id, used) WHERE used = FALSE;
 
 -- 1.8 MFA_CHALLENGES
 -- Ephemeral two-step login tokens.
 CREATE TABLE IF NOT EXISTS mfa_challenges (
-    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id             UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    challenge_hash      TEXT        NOT NULL UNIQUE,
+    id                  UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL,
+    challenge_hash      TEXT        NOT NULL,
     ip_address          TEXT,
     user_agent          TEXT,
     expires_at          TIMESTAMPTZ NOT NULL,
     used                BOOLEAN     NOT NULL DEFAULT FALSE,
-    attempts            INTEGER     NOT NULL DEFAULT 0 CONSTRAINT mfa_challenges_attempts_bounds CHECK (attempts >= 0 AND attempts <= 100),
     used_at             TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- attempts is last because migration 0007 appended it in production.
+    attempts            INTEGER     NOT NULL DEFAULT 0,
+    CONSTRAINT pk_mfa_challenges PRIMARY KEY (id),
+    CONSTRAINT uq_mfa_challenges_hash UNIQUE (challenge_hash),
+    CONSTRAINT fk_mfa_challenges_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT mfa_challenges_attempts_bounds CHECK (attempts >= 0 AND attempts <= 100),
     CONSTRAINT chk_mfa_challenge_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL)),
     CONSTRAINT chk_mfa_challenge_expires_after_created CHECK (expires_at > created_at)
 );
+
+CREATE INDEX IF NOT EXISTS idx_mc_cleanup ON mfa_challenges (expires_at) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_mc_hash_active ON mfa_challenges (challenge_hash) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_mc_user_time ON mfa_challenges (user_id, created_at DESC);
 
 -- 1.9 USER_PASSKEYS
 -- Registered FIDO2 / WebAuthn credentials (passkeys) per user.
@@ -426,7 +474,10 @@ CREATE TABLE IF NOT EXISTS user_passkeys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_up_credential_id ON user_passkeys (credential_id);
-CREATE INDEX IF NOT EXISTS idx_up_user_id ON user_passkeys (user_id, created_at DESC);
+-- No idx_up_user_id here: in production that name belongs to user_permissions
+-- (created below), so user_passkeys(user_id) has no covering index until the
+-- 0088 foreign-key index sweep adds one. Two archived scripts both used the
+-- name; production kept the user_permissions one.
 
 -- 1.10 WEBAUTHN_CHALLENGES
 -- Ephemeral challenges for WebAuthn registration and authentication ceremonies.
@@ -452,14 +503,17 @@ CREATE INDEX IF NOT EXISTS idx_wc_user_time ON webauthn_challenges (user_id, cre
 -- 1.11 ROLES
 -- RBAC role definitions.
 CREATE TABLE IF NOT EXISTS roles (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            VARCHAR(50) NOT NULL UNIQUE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    name            VARCHAR(50) NOT NULL,
     description     TEXT,
-    level           INTEGER     NOT NULL CHECK (level > 0),
+    level           INTEGER     NOT NULL,
     is_system_role  BOOLEAN     NOT NULL DEFAULT FALSE,
     tenant_scoped   BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_roles PRIMARY KEY (id),
+    CONSTRAINT uq_roles_name UNIQUE (name),
+    CONSTRAINT chk_roles_level_positive CHECK (level > 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_roles_level ON roles (level DESC);
@@ -467,60 +521,93 @@ CREATE INDEX IF NOT EXISTS idx_roles_level ON roles (level DESC);
 -- 1.12 PERMISSIONS
 -- Granular permissions.
 CREATE TABLE IF NOT EXISTS permissions (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            VARCHAR(100) NOT NULL UNIQUE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    name            VARCHAR(100) NOT NULL,
     description     TEXT,
     resource        VARCHAR(50) NOT NULL,
     action          VARCHAR(50) NOT NULL,
     is_system       BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (resource, action)
+    CONSTRAINT pk_permissions PRIMARY KEY (id),
+    CONSTRAINT uq_permissions_name UNIQUE (name),
+    CONSTRAINT uq_permissions_resource_action UNIQUE (resource, action)
 );
+
+CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions (resource);
+CREATE INDEX IF NOT EXISTS idx_permissions_resource_action ON permissions (resource, action);
 
 -- 1.13 ROLE_PERMISSIONS
 -- Junction table for role-permission assignment.
 CREATE TABLE IF NOT EXISTS role_permissions (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    role_id         UUID        NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    permission_id   UUID        NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    role_id         UUID        NOT NULL,
+    permission_id   UUID        NOT NULL,
     granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (role_id, permission_id)
+    CONSTRAINT pk_role_permissions PRIMARY KEY (id),
+    CONSTRAINT uq_role_permissions_role_perm UNIQUE (role_id, permission_id),
+    CONSTRAINT fk_rp_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_rp_permission FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_rp_role_id ON role_permissions (role_id);
+CREATE INDEX IF NOT EXISTS idx_rp_permission_id ON role_permissions (permission_id);
 
 -- 1.14 TENANT_USERS
 -- Junction table for tenant membership with role assignment.
 CREATE TABLE IF NOT EXISTS tenant_users (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    role_id         UUID        NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL,
+    tenant_id       UUID        NOT NULL,
+    role_id         UUID        NOT NULL,
     is_primary      BOOLEAN     NOT NULL DEFAULT FALSE,
-    status          VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'suspended', 'removed')),
-    invited_by      UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'active',
+    invited_by      UUID,
     invited_at      TIMESTAMPTZ,
     joined_at       TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, tenant_id)
+    CONSTRAINT pk_tenant_users PRIMARY KEY (id),
+    CONSTRAINT uq_tenant_users_user_tenant UNIQUE (user_id, tenant_id),
+    CONSTRAINT fk_tu_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_tu_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    CONSTRAINT fk_tu_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_tu_inviter FOREIGN KEY (invited_by) REFERENCES user_profiles(id) ON DELETE SET NULL,
+    -- Explicit casts, so the stored text is the one the production dump has
+    -- ("status IN (...)" would be stored as ARRAY[...]::text[]).
+    CONSTRAINT tenant_users_status_check CHECK (status::text = ANY (ARRAY['pending'::varchar::text, 'active'::varchar::text, 'suspended'::varchar::text, 'removed'::varchar::text]))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tu_user_id ON tenant_users (user_id);
 CREATE INDEX IF NOT EXISTS idx_tu_tenant_id ON tenant_users (tenant_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tu_user_primary ON tenant_users (user_id) WHERE is_primary = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tu_role_id ON tenant_users (role_id);
+CREATE INDEX IF NOT EXISTS idx_tu_status ON tenant_users (status) WHERE status::text = ANY (ARRAY['pending'::varchar::text, 'active'::varchar::text]);
+CREATE INDEX IF NOT EXISTS idx_tu_user_active ON tenant_users (user_id) WHERE status = 'active';
 
 -- 1.15 USER_PERMISSIONS
 -- Direct permission grants to users.
 CREATE TABLE IF NOT EXISTS user_permissions (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    permission_id   UUID        NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
-    tenant_id       UUID        REFERENCES tenants(id) ON DELETE CASCADE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL,
+    permission_id   UUID        NOT NULL,
+    tenant_id       UUID,
     expires_at      TIMESTAMPTZ,
     reason          TEXT,
-    granted_by      UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    granted_by      UUID,
     granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, permission_id, tenant_id)
+    CONSTRAINT pk_user_permissions PRIMARY KEY (id),
+    CONSTRAINT uq_user_permissions_user_perm_tenant UNIQUE (user_id, permission_id, tenant_id),
+    CONSTRAINT fk_up_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_up_permission FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_up_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    CONSTRAINT fk_up_granter FOREIGN KEY (granted_by) REFERENCES user_profiles(id) ON DELETE SET NULL
 );
+
+-- idx_up_user_id is this table's index in production (see the note at
+-- user_passkeys above).
+CREATE INDEX IF NOT EXISTS idx_up_user_id ON user_permissions (user_id);
+CREATE INDEX IF NOT EXISTS idx_up_permission_id ON user_permissions (permission_id);
+CREATE INDEX IF NOT EXISTS idx_up_expires ON user_permissions (expires_at) WHERE expires_at IS NOT NULL;
 
 -- =============================================================================
 -- SECTION 2: DIALER PIPELINE
