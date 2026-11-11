@@ -30,7 +30,9 @@ import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
-import { calendarBucketBounds, calendarHourBounds, formatCalendarDate, reportingDateRange } from "@/lib/reporting-time";
+import { calendarBucketBounds, calendarHourBounds, reportingDateRange } from "@/lib/reporting-time";
+import { campaignStatusLabel } from "@/lib/campaign-status";
+import { browserTimeZoneName, formatUtcDateLabel, timezoneLabel, UTC_TIMEZONE_LABEL } from "@/lib/utc-date-label";
 
 function Counter({ value }: { value: number }) {
     const nodeRef = useRef<HTMLSpanElement>(null);
@@ -591,7 +593,7 @@ function CampaignLinesChart({
                     tooltip.show(e.clientX, e.clientY, (
                         <div className="space-y-2">
                             <div className="text-sm font-black text-gray-900">
-                                {new Date(b.startMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                {formatUtcDateLabel(b.startMs)}
                             </div>
                             <div className="space-y-1">{rows}</div>
                         </div>
@@ -697,6 +699,10 @@ export default function DashboardPage() {
     const [callStatsView, setCallStatsView] = useState<"status" | "campaigns" | "outcomes">("status");
 
     const sim = daily;
+    // 3.7 Z3 with QA F1-30/F1-32: label the charts with the zone their
+    // buckets are really cut in, the account's reporting zone (the browser's
+    // until the summary has said which).
+    const chartZone = useMemo(() => summary?.timezone || browserTimeZoneName(), [summary?.timezone]);
 
     const activeRange = useMemo(() => {
         const end = callRangeMode === "custom" ? (customEndMs ?? sim.lastUpdatedMs) : sim.lastUpdatedMs;
@@ -1363,7 +1369,8 @@ export default function DashboardPage() {
 
     const safeSeries = series ?? [];
     const stackedPoints: DualSeriesPoint[] = safeSeries.map((s) => ({
-        label: formatCalendarDate(s.date),
+        // 3.7 Z3: a UTC day bucket, printed as its UTC date.
+        label: formatUtcDateLabel(s.date),
         a: s.answered,
         b: s.failed,
     }));
@@ -1426,7 +1433,7 @@ export default function DashboardPage() {
             return {
                 id: c.id,
                 title: c.name,
-                detail: `${c.calls_completed} completed • ${c.calls_failed} failed • ${c.status}`,
+                detail: `${c.calls_completed} completed • ${c.calls_failed} failed • ${campaignStatusLabel(c.status)}`,
                 timeLabel: time,
                 tone,
             };
@@ -1451,7 +1458,7 @@ export default function DashboardPage() {
         .map((s) => {
             const rate = s.total_calls > 0 ? s.failed / s.total_calls : 0;
             const severity: TimelineItem["severity"] = rate > 0.18 ? "error" : rate > 0.12 ? "warn" : "info";
-            const dateLabel = formatCalendarDate(s.date);
+            const dateLabel = formatUtcDateLabel(s.date);
             return {
                 id: `fail-${s.date}`,
                 title: severity === "error" ? "High failure rate" : severity === "warn" ? "Elevated failures" : "Stable delivery",
@@ -1491,7 +1498,8 @@ export default function DashboardPage() {
             ) : (
                 <div className="space-y-8">
                     {/* Stats Grid */}
-                    <div data-testid="dashboard-kpi-row" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
+                    <div data-testid="dashboard-kpi-timezone" className="text-xs font-bold text-muted-foreground">{UTC_TIMEZONE_LABEL}</div>
+                    <div data-testid="dashboard-kpi-row" className="!mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
                         {kpis.map((k) => (
                             <KpiCard
                                 key={k.title}
@@ -1556,7 +1564,7 @@ export default function DashboardPage() {
                                         Custom
                                     </button>
                                 </div>
-
+                                <div data-testid="dashboard-live-timezone" className="text-xs font-bold text-muted-foreground">{timezoneLabel(chartZone)}</div>
                             </div>
 
                             {callRangeMode === "custom" ? (
@@ -1771,6 +1779,7 @@ export default function DashboardPage() {
                                 <div className="min-w-0">
                                     <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Stacked Area Chart</h3>
                                     <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Answered vs failed trend</p>
+                                    <p data-testid="dashboard-stacked-timezone" className="text-xs font-bold text-muted-foreground">{UTC_TIMEZONE_LABEL}</p>
                                 </div>
                                 <div className="text-xs font-bold text-gray-700 dark:text-muted-foreground bg-gray-100 dark:bg-muted/30 border border-gray-200 dark:border-border px-3 py-1.5 rounded-full">
                                     Last {stackedPoints.length} points
@@ -1796,6 +1805,7 @@ export default function DashboardPage() {
                                     <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">
                                         {new Date(activeRange.startMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}–{new Date(activeRange.endMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                                     </p>
+                                    <p data-testid="dashboard-stats-timezone" className="text-xs font-bold text-muted-foreground">{timezoneLabel(chartZone)}</p>
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2">
@@ -1862,6 +1872,7 @@ export default function DashboardPage() {
                             ) : callStatsView === "campaigns" ? (
                                 <div className="space-y-4">
                                     <div className="flex flex-wrap items-center gap-2">
+                                        <span data-testid="dashboard-campaign-lines-timezone" className="text-xs font-bold text-muted-foreground">{UTC_TIMEZONE_LABEL}</span>
                                         {campaignLineSeries.campaigns.map((c) => (
                                             <button
                                                 key={c.id}
@@ -1913,6 +1924,7 @@ export default function DashboardPage() {
                                 <div className="min-w-0">
                                     <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Heatmap</h3>
                                     <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Activity intensity by day and time</p>
+                                    <p data-testid="dashboard-heatmap-timezone" className="text-xs font-bold text-muted-foreground">{UTC_TIMEZONE_LABEL}</p>
                                 </div>
                                 <div className="text-xs font-bold text-gray-700 dark:text-muted-foreground bg-gray-100 dark:bg-muted/30 border border-gray-200 dark:border-border px-3 py-1.5 rounded-full">
                                     7×8
@@ -1952,6 +1964,7 @@ export default function DashboardPage() {
                                 <div className="min-w-0">
                                     <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Error & Alert Timeline</h3>
                                     <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Recent delivery health signals</p>
+                                    <p data-testid="dashboard-timeline-timezone" className="text-xs font-bold text-muted-foreground">{UTC_TIMEZONE_LABEL}</p>
                                 </div>
                                 <div className="flex items-center gap-2 text-xs font-bold text-gray-700 dark:text-muted-foreground bg-gray-100 dark:bg-muted/30 border border-gray-200 dark:border-border px-3 py-1.5 rounded-full">
                                     <AlertTriangle className="w-4 h-4" />
@@ -2024,7 +2037,7 @@ export default function DashboardPage() {
                                                                 : "bg-gray-100 text-gray-800 dark:bg-gray-500/20 dark:text-gray-200"
                                                         }`}
                                                 >
-                                                    {campaign.status}
+                                                    {campaignStatusLabel(campaign.status)}
                                                 </span>
                                                 <ArrowUpRight className="w-4 h-4 text-gray-700 dark:text-muted-foreground" />
                                             </div>

@@ -4,8 +4,9 @@ import { afterEach, test } from "node:test";
 import React from "react";
 import { act, cleanup, render } from "@testing-library/react";
 
-// Real SignupPopup; only next/navigation is stubbed so the test can drive the
-// route the component sees. `pathname` is mutable and read on every render.
+// Real SignupPopup; only next/navigation and the auth context are stubbed so
+// the test can drive the route and the sign-in state the component sees.
+// `pathname` and `authStatus` are mutable and read on every render.
 let pathname = "/";
 // QA F1-03: the popup reads the sign-in state. Anonymous by default, so every
 // timing test below describes a visitor; set it to test a signed-in user.
@@ -14,7 +15,7 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 loader._load = function (id, ...args) {
     if (id === "next/navigation") return { usePathname: () => pathname };
-    if (id === "@/lib/auth-context") return { useAuth: () => ({ status: authStatus }) };
+    if (id.includes("lib/auth-context")) return { useAuth: () => ({ status: authStatus }) };
     return originalLoad.call(this, id, ...args);
 };
 let SignupPopup: React.ComponentType;
@@ -73,12 +74,17 @@ function mount() {
         // The arrival timer (0 ms for a page never cancelled) is async by design.
         advance(0);
     };
+    // A sign-in state change re-renders the subscriber, as the real context does.
+    const setAuth = (status: string) => {
+        authStatus = status;
+        utils.rerender(<SignupPopup />);
+    };
     const restore = () => {
         globalThis.setTimeout = originalSetTimeout;
         globalThis.clearTimeout = originalClearTimeout;
         performance.now = originalPerfNow;
     };
-    return { advance, navigate, restore };
+    return { advance, navigate, setAuth, restore };
 }
 
 test("absent before 10 s, present after, on the first page", () => {
@@ -90,11 +96,11 @@ test("absent before 10 s, present after, on the first page", () => {
         assert.ok(popup(), "shown at 10 s");
         assert.equal(
             popup()?.querySelector("p")?.textContent,
-            "Ready to make your first call? Create an account to configure your AI voice agent.",
+            "Want to see it handle a real call? Book a short demo and we'll walk you through it.",
         );
         const buttons = [...popup()!.querySelectorAll<HTMLElement>("a, button")].map((el) => el.textContent);
-        assert.deepEqual(buttons, ["Signup", "Cancel"]);
-        assert.equal(popup()!.querySelector("a")?.getAttribute("href"), "/auth/register");
+        assert.deepEqual(buttons, ["Book a Demo", "Cancel"]);
+        assert.equal(popup()!.querySelector("a")?.getAttribute("href"), "/book-a-demo");
     } finally {
         restore();
     }
@@ -225,12 +231,18 @@ test("renders only on the allow-listed public routes, matched exactly", () => {
     }
 });
 
-test("shows on /book-a-demo like every other public page", () => {
+test("never shown on /book-a-demo, the page it links to, shown again on leaving", () => {
     const { advance, navigate, restore } = mount();
     try {
         advance(DELAY);
         navigate("/book-a-demo/");
-        assert.ok(popup(), "/book-a-demo (trailing-slash form the production router reports) is permitted");
+        assert.ok(!popup(), "hidden on /book-a-demo/ (trailing-slash form the production router reports)");
+        advance(60_000);
+        assert.ok(!popup(), "never appears on /book-a-demo/, however long");
+        navigate("/book-a-demo");
+        assert.ok(!popup(), "hidden on /book-a-demo without the slash");
+        navigate("/pricing");
+        assert.ok(popup(), "back on /pricing immediately");
     } finally {
         restore();
     }
@@ -262,8 +274,7 @@ test("writes nothing to storage", () => {
     }
 });
 
-// QA F1-03 (QA-UI-031, QA-UI-047): Escape closes it like Cancel, and a signed-in
-// user never sees an invitation to create an account.
+// QA F1-03 (QA-UI-031, QA-UI-047): Escape closes it like Cancel.
 test("Escape closes it on that page, like Cancel", () => {
     const { advance, restore } = mount();
     try {
@@ -278,12 +289,18 @@ test("Escape closes it on that page, like Cancel", () => {
     }
 });
 
-test("a signed-in user is never invited to create an account", () => {
+test("signed in: never renders on any public page, past 10 s", () => {
     authStatus = "authenticated";
-    const { advance, restore } = mount();
+    const { advance, navigate, restore } = mount();
     try {
-        advance(DELAY * 3);
-        assert.ok(!popup(), "hidden for a signed-in user");
+        advance(DELAY + 60_000);
+        assert.ok(!popup(), "hidden on / past 10 s");
+        for (const page of ["/pricing", "/contact", "/docs/getting-started", "/industries/healthcare", "/"]) {
+            navigate(page);
+            assert.ok(!popup(), `hidden on ${page}`);
+            advance(60_000);
+            assert.ok(!popup(), `still hidden on ${page} after a minute`);
+        }
     } finally {
         restore();
     }
@@ -295,6 +312,82 @@ test("Cancel is not styled as a destructive action", () => {
         advance(DELAY);
         const cancel = [...popup()!.querySelectorAll("button")].find((b) => b.textContent === "Cancel");
         assert.ok(cancel && !/destructive/.test(cancel.className), cancel?.className);
+    } finally {
+        restore();
+    }
+});
+
+test("unresolved at 10 s: renders nothing, then appears the moment the state becomes anonymous, with no new wait", () => {
+    for (const unresolved of ["uninitialized", "loading"]) {
+        authStatus = unresolved;
+        const { advance, setAuth, restore } = mount();
+        try {
+            advance(DELAY);
+            assert.ok(!popup(), `${unresolved}: nothing at 10 s`);
+            advance(5_000);
+            assert.ok(!popup(), `${unresolved}: nothing at 15 s`);
+            setAuth("anonymous");
+            assert.ok(popup(), `${unresolved} -> anonymous: shown at once, no timer advanced`);
+        } finally {
+            restore();
+            cleanup();
+        }
+    }
+});
+
+test("becoming signed in while shown: it hides", () => {
+    const { advance, setAuth, restore } = mount();
+    try {
+        advance(DELAY);
+        assert.ok(popup(), "shown to the anonymous visitor");
+        setAuth("authenticated");
+        assert.ok(!popup(), "hidden the moment the visitor is signed in");
+        advance(60_000);
+        assert.ok(!popup(), "stays hidden");
+    } finally {
+        restore();
+    }
+});
+
+test("becoming anonymous on an armed, uncancelled page: appears at once; on a cancelled page: stays hidden", () => {
+    authStatus = "authenticated";
+    const { advance, navigate, setAuth, restore } = mount();
+    try {
+        advance(DELAY + 5_000);
+        assert.ok(!popup(), "signed in: hidden on the armed page");
+        setAuth("anonymous");
+        assert.ok(popup(), "armed, uncancelled page: shown at once");
+        act(() => {
+            popup()!.querySelector("button")!.click();
+        });
+        assert.ok(!popup(), "cancelled");
+        setAuth("authenticated");
+        setAuth("anonymous");
+        assert.ok(!popup(), "cancelled page: stays hidden when the state becomes anonymous again");
+        advance(60_000);
+        assert.ok(!popup(), "cancelled page: stays hidden for the rest of the stay");
+        navigate("/pricing");
+        assert.ok(popup(), "another page, never cancelled: shown at once");
+    } finally {
+        restore();
+    }
+});
+
+test("writes nothing to storage across sign-in state changes, with the auth stub in place", () => {
+    authStatus = "loading";
+    const { advance, setAuth, restore } = mount();
+    try {
+        advance(DELAY);
+        setAuth("anonymous");
+        assert.ok(popup());
+        setAuth("authenticated");
+        setAuth("anonymous");
+        act(() => {
+            popup()!.querySelector("button")!.click();
+        });
+        assert.equal(window.localStorage.length, 0);
+        assert.equal(window.sessionStorage.length, 0);
+        assert.equal(document.cookie, "");
     } finally {
         restore();
     }

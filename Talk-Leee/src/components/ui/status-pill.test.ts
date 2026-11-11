@@ -11,10 +11,10 @@ ensureDom();
 afterEach(() => cleanup());
 
 const CASES: Array<{ state: StatusPillState; label: string; tooltip: RegExp }> = [
-    { state: "connected", label: "Connected", tooltip: /active and syncing/i },
+    { state: "connected", label: "Connected", tooltip: /^Connected\.$/ },
     { state: "disconnected", label: "Disconnected", tooltip: /not connected yet/i },
-    { state: "expired", label: "Expired", tooltip: /credentials have expired/i },
-    { state: "error", label: "Error", tooltip: /encountered an error/i },
+    { state: "expired", label: "Expired", tooltip: /^Credentials have expired\. Reconnect to refresh access\.$/ },
+    { state: "error", label: "Needs attention", tooltip: /encountered an error/i },
 ];
 
 for (const c of CASES) {

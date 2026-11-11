@@ -14,23 +14,26 @@ import {
     CampaignFilters,
     CampaignSortKey,
     CampaignSortSpec,
-    CampaignStatus,
     SortDir,
     campaignProgressPct,
     campaignSuccessRatePct,
     formatPct,
-    normalizeCampaignStatus,
     paginate,
     progressColorClass,
     RowsPerPage,
     statusBadgeClass,
 } from "@/lib/campaign-performance";
 import { cn } from "@/lib/utils";
-import { ChevronDown, ChevronRight, Download, Pause, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronRight, Download, Loader2, Pause, Play, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { CampaignStartControl } from "@/components/campaigns/campaign-readiness";
 import type { CampaignActions } from "@/lib/permissions";
+import { CampaignDuplicateStatus, useCampaignDuplicate } from "@/components/campaigns/campaign-duplicate";
+import type { CampaignDuplicateResult } from "@/lib/campaign-duplicate";
+import { CampaignControlNoticeBox } from "@/components/campaigns/campaign-control-notice";
+import { campaignStartLabel, canStartCampaign, useCampaignsInFlight, type CampaignControlNotice } from "@/lib/campaign-control";
+import { campaignDisplayStatus, campaignStatusFilterOptions, campaignStatusLabel, migrateStatusFilterLabels } from "@/lib/campaign-status";
 
 type ColumnDef = { key: CampaignSortKey; label: string; numeric?: boolean };
 
@@ -65,8 +68,6 @@ const TABLE_GRID_COLS =
 // grid span the full scroll width.
 const TABLE_MIN_WIDTH = "min-w-[59.125rem]";
 
-const ALL_STATUSES: CampaignStatus[] = ["Active", "Paused", "Completed", "Draft", "Failed"];
-
 type ExportPreset = "All Time" | "Last 7 Days" | "Last 30 Days" | "This Month" | "Custom";
 type ExportColumnKey =
     | "id"
@@ -80,6 +81,9 @@ type ExportColumnKey =
     | "created_at";
 
 const EXPORT_PRESETS: ExportPreset[] = ["All Time", "Last 7 Days", "Last 30 Days", "This Month", "Custom"];
+
+/** 3.4 E4: shown when a download or the print view could not be started. */
+export const EXPORT_FAILED_TEXT = "The export failed. Try again.";
 
 function isExportPreset(value: unknown): value is ExportPreset {
     return typeof value === "string" && (EXPORT_PRESETS as string[]).includes(value);
@@ -150,25 +154,34 @@ function applyDateRangeByCreatedAt(items: Campaign[], range: { from: number | nu
     });
 }
 
-function campaignsToCsvWithColumns(campaigns: Campaign[], columns: ExportColumnKey[]) {
+export function campaignsToCsvWithColumns(campaigns: Campaign[], columns: ExportColumnKey[]) {
     const headers = columns.join(",");
     const lines = [headers];
     for (const c of campaigns) {
         const row = columns.map((col) => {
-            if (col === "id") return csvEscape(c.id);
-            if (col === "name") return csvEscape(c.name);
-            if (col === "status") return csvEscape(normalizeCampaignStatus(c.status));
+            if (col === "id") return c.id;
+            if (col === "name") return c.name;
+            if (col === "status") return campaignStatusLabel(c.status);
             if (col === "total_leads") return String(c.total_leads ?? 0);
             if (col === "calls_completed") return String(c.calls_completed ?? 0);
             if (col === "calls_failed") return String(c.calls_failed ?? 0);
             if (col === "progress_pct") return campaignProgressPct(c).toFixed(1);
             if (col === "success_rate_pct") return campaignSuccessRatePct(c).toFixed(1);
-            if (col === "created_at") return csvEscape(c.created_at);
+            if (col === "created_at") return c.created_at;
             return "";
         });
-        lines.push(row.join(","));
+        lines.push(row.map((value) => csvEscape(csvFormulaGuard(value))).join(","));
     }
     return lines.join("\n");
+}
+
+/**
+ * 3.4 E3: a value beginning with =, +, - or @ gets a leading ' so a
+ * spreadsheet shows it as text instead of running it as a formula.
+ */
+export function csvFormulaGuard(value: string) {
+    const v = String(value ?? "");
+    return /^[=+\-@]/.test(v) ? `'${v}` : v;
 }
 
 function campaignsToJsonWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], meta: { rangeLabel: string }) {
@@ -177,7 +190,7 @@ function campaignsToJsonWithColumns(campaigns: Campaign[], columns: ExportColumn
         for (const col of columns) {
             if (col === "id") out[col] = c.id;
             else if (col === "name") out[col] = c.name;
-            else if (col === "status") out[col] = normalizeCampaignStatus(c.status);
+            else if (col === "status") out[col] = campaignStatusLabel(c.status);
             else if (col === "total_leads") out[col] = Number(c.total_leads ?? 0);
             else if (col === "calls_completed") out[col] = Number(c.calls_completed ?? 0);
             else if (col === "calls_failed") out[col] = Number(c.calls_failed ?? 0);
@@ -210,22 +223,39 @@ function sortIndicator(spec: CampaignSortSpec[] | undefined, key: CampaignSortKe
     return s.dir === "asc" ? "↑" : "↓";
 }
 
-function downloadBlob(blob: Blob, filename: string) {
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    URL.revokeObjectURL(url);
+/** 3.4 E4: true when the browser accepted the download, false when any step threw. */
+function downloadBlob(blob: Blob, filename: string): boolean {
+    try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        return true;
+    } catch {
+        return false;
+    }
 }
 
-export function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], rangeLabel: string) {
-    // QA F1-18: with "noopener" browsers return null here, so the export never
-    // printed. Open normally and cut the opener link before writing anything.
-    const w = window.open("", "_blank");
-    if (!w) return;
+/**
+ * 3.4 E1: opens the print view in a new window and asks for the browser's
+ * print dialog. Returns false when the window could not be opened (pop-ups
+ * blocked) or writing to it threw, so the caller can show the failure state.
+ * The window is opened without "noopener": with it Chromium returns null and
+ * the rows can never be written.
+ */
+export function printCampaignsWithColumns(campaigns: Campaign[], columns: ExportColumnKey[], rangeLabel: string): boolean {
+    let w: Window | null = null;
+    try {
+        w = window.open("", "_blank");
+    } catch {
+        w = null;
+    }
+    if (!w) return false;
+    // QA F1-18: cut the opener link before writing anything.
     w.opener = null;
     const headCells = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
     const rows = campaigns
@@ -234,7 +264,7 @@ export function printCampaignsWithColumns(campaigns: Campaign[], columns: Export
                 .map((col) => {
                     if (col === "id") return `<td>${escapeHtml(c.id)}</td>`;
                     if (col === "name") return `<td>${escapeHtml(c.name)}</td>`;
-                    if (col === "status") return `<td>${escapeHtml(normalizeCampaignStatus(c.status))}</td>`;
+                    if (col === "status") return `<td>${escapeHtml(campaignStatusLabel(c.status))}</td>`;
                     if (col === "total_leads") return `<td style="text-align:right">${Number(c.total_leads || 0).toLocaleString()}</td>`;
                     if (col === "calls_completed") return `<td style="text-align:right">${Number(c.calls_completed || 0).toLocaleString()}</td>`;
                     if (col === "calls_failed") return `<td style="text-align:right">${Number(c.calls_failed || 0).toLocaleString()}</td>`;
@@ -247,7 +277,8 @@ export function printCampaignsWithColumns(campaigns: Campaign[], columns: Export
             return `<tr>${cells}</tr>`;
         })
         .join("");
-    w.document.write(`<!doctype html>
+    try {
+        w.document.write(`<!doctype html>
 <html>
 <head>
   <meta charset="utf-8" />
@@ -270,9 +301,13 @@ export function printCampaignsWithColumns(campaigns: Campaign[], columns: Export
   </table>
 </body>
 </html>`);
-    w.document.close();
-    w.focus();
-    w.print();
+        w.document.close();
+        w.focus();
+        w.print();
+        return true;
+    } catch {
+        return false;
+    }
 }
 
 function escapeHtml(value: string) {
@@ -314,20 +349,40 @@ export function CampaignPerformanceTable({
     errorRequestId,
     onRetry,
     onPause,
+    onStop,
+    onPauseSelected,
     onResume,
     onDelete,
     onDuplicate,
     allowed = { create: true, update: true, delete: true },
+    notice,
+    onNoticeDismiss,
+    exportOpen: exportOpenProp,
+    onExportOpenChange,
 }: {
     campaigns: Campaign[];
     loading: boolean;
     error: string;
     errorRequestId?: string;
     onRetry?: () => void;
+    /** Pauses one campaign (details modal). */
     onPause: (id: string) => Promise<void>;
-    onResume: (id: string) => Promise<void>;
+    /** Stops one campaign (details modal). */
+    onStop: (id: string) => Promise<void>;
+    /** "Pause Selected": only the running campaigns among these are paused. */
+    onPauseSelected: (campaigns: Campaign[]) => Promise<void>;
+    /** Opens the shared Start / Resume dialog. `detailsId` = asked from that campaign's details modal. */
+    onResume: (ids: string[], detailsId?: string) => void;
+    /** Result of the last Start / Pause / Stop asked from a campaign's details modal. */
+    notice?: { campaignId: string; notice: CampaignControlNotice } | null;
+    /** The details modal closed: its result message goes with it. */
+    onNoticeDismiss?: () => void;
     onDelete: (id: string) => Promise<void>;
-    onDuplicate: (id: string) => Promise<void>;
+    /** Runs after Duplicate created a real backend copy (the list refetches here). */
+    onDuplicate: (result: CampaignDuplicateResult) => Promise<void>;
+    /** 3.4 E4: the Export window's open state, when the page owns it (the command bar opens it too). */
+    exportOpen?: boolean;
+    onExportOpenChange?: (next: boolean) => void;
     /** What the signed-in role may do (QA F1-21); everything by default. */
     allowed?: CampaignActions;
 }) {
@@ -343,8 +398,16 @@ export function CampaignPerformanceTable({
     const [selected, setSelected] = useState<Set<string>>(new Set());
     const [expanded, setExpanded] = useState<Set<string>>(new Set());
     const [detailsId, setDetailsId] = useState<string | null>(null);
+    const duplicate = useCampaignDuplicate(detailsId, onDuplicate);
+    // Start / stop / pause requests running from any entry point (shared store).
+    const inFlight = useCampaignsInFlight();
+    const [bulkPausing, setBulkPausing] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-    const [exportOpen, setExportOpen] = useState(false);
+    const [exportOpenLocal, setExportOpenLocal] = useState(false);
+    const exportOpen = exportOpenProp ?? exportOpenLocal;
+    const setExportOpen = onExportOpenChange ?? setExportOpenLocal;
+    // 3.4 E4: what the last export did, shown next to the export buttons.
+    const [exportStatus, setExportStatus] = useState<string>("");
     const [exportPreset, setExportPreset] = useState<ExportPreset>("All Time");
     const [exportFrom, setExportFrom] = useState<string>("");
     const [exportTo, setExportTo] = useState<string>("");
@@ -427,7 +490,7 @@ export function CampaignPerformanceTable({
 
         const raf = window.requestAnimationFrame(() => {
             setSort(Array.isArray(savedSort) ? savedSort : []);
-            setFilters(savedFilters);
+            setFilters({ ...savedFilters, statuses: migrateStatusFilterLabels(savedFilters?.statuses) });
             setRowsPerPage(savedRows);
             setPage(savedPage);
             if (savedExport) {
@@ -550,12 +613,15 @@ export function CampaignPerformanceTable({
     };
 
     const detailsCampaign = useMemo(() => campaigns.find((c) => c.id === detailsId) || null, [campaigns, detailsId]);
-    const detailsStatus = useMemo(
-        () => (detailsCampaign ? normalizeCampaignStatus(detailsCampaign.status) : null),
-        [detailsCampaign]
-    );
-    const detailsCanPause = detailsStatus === "Active";
-    const detailsCanResume = detailsStatus === "Paused" || detailsStatus === "Draft" || detailsStatus === "Failed";
+    // Same rules as the campaign detail page: Pause / Stop while running;
+    // Start / Resume for exactly draft, paused and stopped.
+    const detailsCanPause = (detailsCampaign?.status || "").toLowerCase() === "running";
+    const detailsCanResume = canStartCampaign(detailsCampaign?.status);
+    const detailsStarting = detailsId !== null && inFlight.starting.has(detailsId);
+    const detailsStopping = detailsId !== null && inFlight.stopping.has(detailsId);
+    const detailsPausing = detailsId !== null && inFlight.pausing.has(detailsId);
+    const detailsBusy = detailsStarting || detailsStopping || detailsPausing;
+    const statusOptions = useMemo(() => campaignStatusFilterOptions(campaigns.map((c) => c.status)), [campaigns]);
     // The in-row partial edit modal (name / description / voice_id /
     // max_concurrent_calls only) was removed: it could not satisfy the
     // backend's CampaignUpdateRequest, which requires persona_type,
@@ -611,29 +677,36 @@ export function CampaignPerformanceTable({
         const items = exportItems;
         if (format === "csv") {
             const csv = campaignsToCsvWithColumns(items, exportColumnList);
-            downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "campaigns-export.csv");
+            const ok = downloadBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), "campaigns-export.csv");
+            setExportStatus(ok ? "Downloaded campaigns-export.csv." : EXPORT_FAILED_TEXT);
             return;
         }
         if (format === "json") {
             const json = campaignsToJsonWithColumns(items, exportColumnList, { rangeLabel: exportRange.label });
-            downloadBlob(new Blob([json], { type: "application/json" }), "campaigns-export.json");
+            const ok = downloadBlob(new Blob([json], { type: "application/json" }), "campaigns-export.json");
+            setExportStatus(ok ? "Downloaded campaigns-export.json." : EXPORT_FAILED_TEXT);
             return;
         }
-        printCampaignsWithColumns(items, exportColumnList, exportRange.label);
+        const ok = printCampaignsWithColumns(items, exportColumnList, exportRange.label);
+        setExportStatus(ok ? "Print view opened." : EXPORT_FAILED_TEXT);
     };
 
     const bulkPause = async () => {
-        const ids = Array.from(selected);
-        for (const id of ids) await onPause(id);
+        if (bulkPausing) return;
+        setBulkPausing(true);
+        try {
+            await onPauseSelected(campaigns.filter((campaign) => selected.has(campaign.id)));
+        } finally {
+            setBulkPausing(false);
+        }
         setSelected(new Set());
     };
 
-    const resumableSelectedIds = campaigns.filter((campaign) => selected.has(campaign.id) && ["Paused", "Draft", "Failed"].includes(normalizeCampaignStatus(campaign.status))).map((campaign) => campaign.id);
-    const bulkResume = async () => {
-        const ids = resumableSelectedIds;
-        for (const id of ids) await onResume(id);
-        setSelected(new Set());
-    };
+    const resumableSelectedIds = campaigns.filter((campaign) => selected.has(campaign.id) && canStartCampaign(campaign.status)).map((campaign) => campaign.id);
+    // One dialog and one first-speaker choice for every selected campaign; the
+    // dialog checks each one and lists those it will not start, so every
+    // selected campaign is handed over, whatever its status.
+    const bulkResume = () => onResume(campaigns.filter((campaign) => selected.has(campaign.id)).map((campaign) => campaign.id));
 
     const bulkDelete = async () => {
         const ids = Array.from(selected);
@@ -815,7 +888,7 @@ export function CampaignPerformanceTable({
                                                   style={statusPanelStyle ?? undefined}
                                               >
                                                   <div className="max-h-[108px] overflow-y-auto overscroll-contain pr-1 scrollbar-gutter-stable">
-                                                      {ALL_STATUSES.map((s) => {
+                                                      {statusOptions.map((s) => {
                                                           const checked = filters.statuses.includes(s);
                                                           return (
                                                               <label
@@ -913,7 +986,7 @@ export function CampaignPerformanceTable({
                             Export
                         </Button>
                         {allowed.create ? (
-                            <Button
+                                <Button
                                 asChild
                                 variant="outline"
                                 className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
@@ -960,16 +1033,16 @@ export function CampaignPerformanceTable({
                         notice's own mt-1 is zeroed at every width so the phone column keeps
                         this container's 8px gap above it instead of 12px. */}
                     <div className="flex flex-col items-start gap-2 [&>div:first-of-type]:contents [&>div:first-of-type>div]:mt-0 [&>div:first-of-type>div]:[overflow-wrap:anywhere] sm:grid sm:min-w-0 sm:flex-1 sm:grid-cols-[max-content_minmax(0,1fr)_max-content] sm:items-center sm:gap-x-4 sm:[&>div:first-of-type>button]:col-start-1 sm:[&>div:first-of-type>button]:row-start-2 sm:[&>div:first-of-type>button]:w-40 sm:[&>div:first-of-type>button]:justify-start sm:[&>div:first-of-type>div]:col-start-2 sm:[&>div:first-of-type>div]:row-start-1 sm:[&>div:first-of-type>div]:row-span-2 sm:[&>div:first-of-type>div]:self-center sm:[&>div:first-of-type>div]:justify-self-center sm:[&>div:first-of-type>div]:text-center sm:[&>div:first-of-type>p]:col-start-2 sm:[&>div:first-of-type>p]:row-start-3 sm:[&>div:first-of-type>p]:justify-self-center">
-                        <Button type="button" variant="outline" size="sm" className="sm:col-start-1 sm:row-start-1 sm:w-40 sm:justify-start" onClick={bulkPause} disabled={!allowed.update}>
-                            <Pause className="h-4 w-4" />
-                            Pause Selected
+                        <Button type="button" variant="outline" size="sm" className="sm:col-start-1 sm:row-start-1 sm:w-40 sm:justify-start" onClick={bulkPause} disabled={bulkPausing || !allowed.update}>
+                            {bulkPausing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Pause className="h-4 w-4" />}
+                            {bulkPausing ? "Pausing…" : "Pause Selected"}
                         </Button>
-                        {/* Same first-div shape as the start control, for the grid above. */}
-                        {allowed.update ? (
-                            <CampaignStartControl campaignIds={resumableSelectedIds} onStart={bulkResume} label="Resume Selected" />
-                        ) : (
-                            <div><Button type="button" variant="outline" size="sm" disabled>Resume Selected</Button></div>
-                        )}
+                        <div>
+                            <Button type="button" variant="outline" size="sm" onClick={bulkResume} disabled={resumableSelectedIds.length === 0 || !allowed.update}>
+                                <Play className="h-4 w-4" aria-hidden />
+                                Resume Selected
+                            </Button>
+                        </div>
                         <div className="flex flex-wrap items-center gap-2 sm:contents">
                             <Button type="button" variant="secondary" size="sm" className="sm:col-start-3 sm:row-start-1 sm:w-40 sm:justify-start" onClick={() => setExportOpen(true)}>
                                 <Download className="h-4 w-4" />
@@ -1050,7 +1123,10 @@ export function CampaignPerformanceTable({
                         {useVirtual && virtual ? <div style={{ height: virtual.topPad }} /> : null}
 
                                 {visibleRows.map((campaign) => {
-                                    const st = normalizeCampaignStatus(campaign.status);
+                                    const st = campaignDisplayStatus(campaign.status, {
+                                        starting: inFlight.starting.has(campaign.id),
+                                        stopping: inFlight.stopping.has(campaign.id),
+                                    });
                                     const progress = campaignProgressPct(campaign);
                                     const success = campaignSuccessRatePct(campaign);
                                     const isSelected = selected.has(campaign.id);
@@ -1196,6 +1272,11 @@ export function CampaignPerformanceTable({
                             <Button type="button" variant="secondary" onClick={() => onExport("json")}>
                                 JSON
                             </Button>
+                            {exportStatus ? (
+                                <div role="status" aria-live="polite" data-testid="campaign-export-status" className="flex min-w-0 items-center break-words text-xs font-semibold text-foreground">
+                                    {exportStatus}
+                                </div>
+                            ) : null}
                         </div>
                         <div className="mt-3 text-xs font-semibold text-muted-foreground">
                             PDF opens a print view; save as PDF from your browser.
@@ -1284,9 +1365,12 @@ export function CampaignPerformanceTable({
 
             <Modal
                 open={detailsId !== null}
-                onOpenChange={(next) => setDetailsId(next ? detailsId : null)}
+                onOpenChange={(next) => {
+                    if (!next) onNoticeDismiss?.();
+                    setDetailsId(next ? detailsId : null);
+                }}
                 title={detailsCampaign ? detailsCampaign.name : "Campaign Details"}
-                description={detailsCampaign ? normalizeCampaignStatus(detailsCampaign.status) : undefined}
+                description={detailsCampaign ? campaignDisplayStatus(detailsCampaign.status, { starting: detailsStarting, stopping: detailsStopping }) : undefined}
                 size="lg"
             >
                 {detailsCampaign ? (
@@ -1315,25 +1399,32 @@ export function CampaignPerformanceTable({
                                     Open Page
                                 </Link>
                             </Button>
-                            {!allowed.update ? null : detailsCanResume ? <CampaignStartControl campaignIds={[detailsCampaign.id]} onStart={() => onResume(detailsCampaign.id)} label="Resume" /> : detailsCanPause ? (
-                                <Button
-                                    type="button"
-                                    variant="outline"
-                                    onClick={async () => {
-                                        if (!detailsCampaign) return;
-                                        if (detailsCanPause) await onPause(detailsCampaign.id);
-                                        else if (detailsCanResume) await onResume(detailsCampaign.id);
-                                    }}
-                                >
-                                    {detailsCanPause ? "Pause" : "Resume"}
-                                </Button>
+                            {!allowed.update ? null : detailsCanResume ? (
+                                <CampaignStartControl
+                                    campaignIds={[detailsCampaign.id]}
+                                    onStart={async () => onResume([detailsCampaign.id], detailsCampaign.id)}
+                                    label={campaignStartLabel(detailsCampaign.status)}
+                                    disabled={detailsBusy}
+                                />
+                            ) : detailsCanPause ? (
+                                <>
+                                    <Button type="button" variant="outline" disabled={detailsBusy} onClick={() => { void onPause(detailsCampaign.id); }}>
+                                        {detailsPausing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                                        {detailsPausing ? "Pausing…" : "Pause"}
+                                    </Button>
+                                    <Button type="button" variant="outline" disabled={detailsBusy} onClick={() => { void onStop(detailsCampaign.id); }}>
+                                        {detailsStopping ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : null}
+                                        {detailsStopping ? "Stopping…" : "Stop"}
+                                    </Button>
+                                </>
                             ) : null}
                             {allowed.create ? (
                                 <Button
                                     type="button"
                                     variant="outline"
-                                    onClick={async () => {
-                                        await onDuplicate(detailsCampaign.id);
+                                    disabled={duplicate.disabled}
+                                    onClick={() => {
+                                        void duplicate.run();
                                     }}
                                 >
                                     Duplicate
@@ -1371,6 +1462,8 @@ export function CampaignPerformanceTable({
                                 </Button>
                             ) : null}
                         </div>
+                        <CampaignDuplicateStatus duplicate={duplicate} />
+                        {notice && notice.campaignId === detailsCampaign.id ? <CampaignControlNoticeBox notice={notice.notice} /> : null}
                     </div>
                 ) : null}
             </Modal>

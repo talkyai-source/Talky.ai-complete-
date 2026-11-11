@@ -67,7 +67,7 @@ export default function RootLayout({
           </SuspensionStateProvider>
           {/* Mounted once here, outside any page, so its 10 s timer and per-page
               cancel state survive client-side navigation and reset on reload.
-              Inside the providers: it reads the sign-in state (QA F1-03). */}
+              Inside AppProviders because it reads the sign-in state (QA F1-03). */}
           <SignupPopup />
         </AppProviders>
         {/* Renders null unless the Ask AI popup flagged a call as dropped by

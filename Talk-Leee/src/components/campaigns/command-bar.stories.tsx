@@ -40,6 +40,7 @@ const meta: Meta<typeof CommandBar> = {
         campaigns,
         onPause: async () => { },
         onResume: async () => { },
+        onExport: () => { },
     },
 };
 

@@ -276,5 +276,11 @@ test("AC-TZ wiring: the edit page feeds calling_config to both editors and the d
     assert.match(edit, /calling_schedule: \(campaign as \{ calling_config\?: CampaignCallingSchedule \| null \}\)\.calling_config \?\? null,/);
     assert.match(edit, /callingSchedule,\n/);
     assert.match(edit, /<CampaignForm mode="edit" campaignId=\{campaignId\} initialData=\{initial\} direction=\{direction\} \/>/);
-    assert.match(detail, /<CallingScheduleStartNotice callingConfig=\{campaign\?\.calling_config\} \/>/);
+    // The Start dialog is now the shared one (plan 3.2): the detail page opens
+    // it with its campaign, and the dialog mounts the notice from that
+    // campaign's calling_config.
+    const startDialog = readFileSync(path.join(process.cwd(), "src/components/campaigns/campaign-start-dialog.tsx"), "utf8");
+    assert.match(detail, /startDialog\.open\(\[campaign\]\);/);
+    assert.match(detail, /<CampaignStartDialog dialog=\{startDialog\} \/>/);
+    assert.match(startDialog, /<CallingScheduleStartNotice callingConfig=\{dialog\.targets\[0\]\?\.calling_config\} \/>/);
 });

@@ -137,8 +137,8 @@ test("a stale block on a campaign that is not running shows no banner", async ()
         activity: { state: "paused", work_remaining: false, waiting_on_schedule: false, schedule_override_active: false, reason_code: "out_of_minutes", next_eligible_at: null },
     }, "paused");
     render(<Page />);
-    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Start/ })), { timeout: SLOW });
-    assert.equal(screen.queryByText(/Not dialing/), null);
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Resume/ })), { timeout: SLOW });
+    assert.equal(screen.queryByText(/Not dialing/) === null, true);
 });
 
 test("a just-resumed campaign does not show the stale 'not running' block", async () => {

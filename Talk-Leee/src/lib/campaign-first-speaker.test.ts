@@ -10,8 +10,10 @@ afterEach(() => {
     setRequestIdentity(null);
 });
 
-for (const firstSpeaker of [undefined, "user", "agent"] as const) {
-    test(`campaign resume sends only an explicit speaker override: ${firstSpeaker}`, async () => {
+// Plan 3.3 (merged 11 Nov 2026): the speaker is not saved on the campaign, so
+// the shared Start dialog's choice goes with every start and resume.
+for (const firstSpeaker of ["user", "agent"] as const) {
+    test(`campaign start sends the chosen first speaker: ${firstSpeaker}`, async () => {
         let body: Record<string, unknown> | undefined;
         setTokenProvider(() => "synthetic-token");
         setRequestIdentity({ userId: "user-a", tenantId: "tenant-a" });
@@ -19,7 +21,7 @@ for (const firstSpeaker of [undefined, "user", "agent"] as const) {
             body = JSON.parse(String(init?.body));
             return Response.json({ message: "Started", jobs_enqueued: 1 });
         }) as typeof fetch;
-        await dashboardApi.startCampaign("synthetic-campaign", firstSpeaker ? { first_speaker: firstSpeaker } : undefined);
-        assert.deepEqual(body, firstSpeaker ? { first_speaker: firstSpeaker } : {});
+        await dashboardApi.startCampaign("synthetic-campaign", { first_speaker: firstSpeaker });
+        assert.deepEqual(body, { first_speaker: firstSpeaker });
     });
 }

@@ -809,3 +809,32 @@ export const VoiceCallStartResponseSchema = z.union([
 ]);
 
 export type VoiceCallStartResponse = z.infer<typeof VoiceCallStartResponseSchema>;
+
+// GET /rbac/tenant-users item (backend TenantMemberResponse).
+export const TenantMemberSchema = z.object({
+    id: z.string(),
+    email: z.string(),
+    name: z.string().nullable().optional(),
+    role: z.string(),
+    is_primary: z.boolean(),
+    status: z.string(),
+    joined_at: z.string().nullable().optional(),
+});
+
+export type TenantMember = z.infer<typeof TenantMemberSchema>;
+
+export const TenantMemberListSchema = z.array(TenantMemberSchema);
+
+// GET /rbac/roles item (backend RoleResponse).
+export const RbacRoleSchema = z.object({
+    id: z.string(),
+    name: z.string(),
+    description: z.string().nullable().optional(),
+    level: z.number(),
+    is_system_role: z.boolean(),
+    tenant_scoped: z.boolean(),
+});
+
+export type RbacRole = z.infer<typeof RbacRoleSchema>;
+
+export const RbacRoleListSchema = z.array(RbacRoleSchema);

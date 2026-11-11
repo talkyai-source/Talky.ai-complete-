@@ -23,6 +23,7 @@ import { isWithinFreshLoginGrace } from "@/lib/http-client";
 // produced "Cannot read properties of undefined (reading 'call')".
 import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 import { QualifiedLeadAlerts } from "@/components/notifications/qualified-lead-alerts";
+import { FailedCallAlerts } from "@/components/notifications/failed-call-alerts";
 import { SupportLauncher } from "@/components/support/support-launcher";
 
 interface DashboardLayoutProps {
@@ -211,8 +212,12 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
             {/* Floating text assistant — bottom-right across the app. */}
             <FloatingAssistant />
 
-            {/* Real-time qualified-lead toasts (reuses the Event Stream poll). */}
+            {/* Durable server notices: qualified leads, campaign failures and low
+                minutes (QA F3-08). LowMinutesAlerts (plan 3.8 N1) is not mounted:
+                the durable low_minutes notice already covers it, and both would
+                notify twice. Per-call failure alerts (plan 3.8 N2) are separate. */}
             <QualifiedLeadAlerts />
+            <FailedCallAlerts />
 
             {/* Support: Help button above the assistant launcher, the drawer and
                 unread notifications. Renders nothing until GET /support/config

@@ -31,23 +31,33 @@ export function actionOutcome(run: AssistantRun): string {
     return STATUS_LABELS[run.status];
 }
 
-function download(items: AssistantRun[], format: "json" | "csv") {
-    const safe = items.map((item) => ({ id: item.id, action: item.actionType, status: item.status,
-        source: item.source, created_at: item.createdAt, receipt: item.receipt ?? null }));
-    // Text cells cannot become spreadsheet formulas when the audit is opened.
-    const cell = (value: unknown) => {
-        const raw = typeof value === "string" ? value : JSON.stringify(value ?? "");
-        const literal = /^[=+@\-\t\r]/.test(raw) ? `'${raw}` : raw;
-        return `"${literal.replaceAll('"', '""')}"`;
-    };
-    const content = format === "json" ? JSON.stringify(safe, null, 2)
-        : ["id,action,status,source,created_at,receipt", ...safe.map((row) => Object.values(row).map(cell).join(","))].join("\n");
-    const url = URL.createObjectURL(new Blob([content], { type: format === "json" ? "application/json" : "text/csv" }));
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = `action-history-page.${format}`;
-    anchor.click();
-    URL.revokeObjectURL(url);
+/** 3.4 E4: what the last export did, shown next to the export buttons. */
+const EXPORT_FAILED_TEXT = "The export failed. Try again.";
+
+/** Returns the status text for the export: the file name on success, the failure text otherwise. */
+function download(items: AssistantRun[], format: "json" | "csv"): string {
+    const filename = `action-history-page.${format}`;
+    try {
+        const safe = items.map((item) => ({ id: item.id, action: item.actionType, status: item.status,
+            source: item.source, created_at: item.createdAt, receipt: item.receipt ?? null }));
+        // Text cells cannot become spreadsheet formulas when the audit is opened.
+        const cell = (value: unknown) => {
+            const raw = typeof value === "string" ? value : JSON.stringify(value ?? "");
+            const literal = /^[=+@\-\t\r]/.test(raw) ? `'${raw}` : raw;
+            return `"${literal.replaceAll('"', '""')}"`;
+        };
+        const content = format === "json" ? JSON.stringify(safe, null, 2)
+            : ["id,action,status,source,created_at,receipt", ...safe.map((row) => Object.values(row).map(cell).join(","))].join("\n");
+        const url = URL.createObjectURL(new Blob([content], { type: format === "json" ? "application/json" : "text/csv" }));
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = filename;
+        anchor.click();
+        URL.revokeObjectURL(url);
+        return `Downloaded ${filename}.`;
+    } catch {
+        return EXPORT_FAILED_TEXT;
+    }
 }
 
 export function ActionHistory() {
@@ -60,6 +70,7 @@ export function ActionHistory() {
     const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
     const [view, setView] = useState<"table" | "timeline">("table");
     const [selectedId, setSelectedId] = useState<string>();
+    const [exportStatus, setExportStatus] = useState("");
     const query: AssistantRunsQuery = { page, pageSize: 50, statuses: status ? [status] : [],
         actionType: actionType.trim() || undefined, leadId, sortKey: "createdAt", sortDir,
         from: from ? `${from}T00:00:00Z` : undefined, to: to ? `${to}T23:59:59.999Z` : undefined };
@@ -98,8 +109,9 @@ export function ActionHistory() {
             <Button variant="outline" aria-pressed={view === "table"} onClick={() => setView("table")}>Table</Button>
             <Button variant="outline" aria-pressed={view === "timeline"} onClick={() => setView("timeline")}>Timeline</Button>
             <label className="text-sm"><span className="sr-only">Date order</span><select aria-label="Date order" className="rounded-md border border-input bg-background p-2" value={sortDir} onChange={(event) => change(() => setSortDir(event.target.value as "asc" | "desc"))}><option value="desc">Newest first</option><option value="asc">Oldest first</option></select></label>
-            <Button variant="outline" disabled={dateError || !items.length || result.isPlaceholderData} onClick={() => download(items, "csv")}>Export page CSV</Button>
-            <Button variant="outline" disabled={dateError || !items.length || result.isPlaceholderData} onClick={() => download(items, "json")}>Export page JSON</Button>
+            <Button variant="outline" disabled={dateError || !items.length || result.isPlaceholderData} onClick={() => setExportStatus(download(items, "csv"))}>Export page CSV</Button>
+            <Button variant="outline" disabled={dateError || !items.length || result.isPlaceholderData} onClick={() => setExportStatus(download(items, "json"))}>Export page JSON</Button>
+            {exportStatus && <span role="status" aria-live="polite" data-testid="action-history-export-status" className="min-w-0 break-words text-sm">{exportStatus}</span>}
         </div>
         {result.isError && <div role="alert" className="rounded-lg border border-destructive/30 p-3 text-sm">{result.error instanceof Error ? result.error.message : "Action history could not be loaded."} Refresh to check saved records; a failed history request does not tell us whether an action ran.</div>}
         {!dateError && result.isPending && <p role="status">Loading action history…</p>}

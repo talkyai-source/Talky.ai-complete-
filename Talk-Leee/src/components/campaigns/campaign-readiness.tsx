@@ -30,7 +30,19 @@ export function useCampaignReadiness(campaignIds: string[], enabled = true) {
     const blocked = queries.find((query) => query.data?.ready !== true);
     const ready = enabled && ids.length > 0 && !checking && !failed && !blocked;
     const reason = !ids.length ? "No campaigns selected." : failed ? "Calling readiness could not be checked. Try again." : checking ? "Checking calling readiness…" : blocked?.data?.reason || (!ready ? "The calling route is not ready." : null);
-    return { ready, checking, reason, error: Boolean(failed), retry: () => Promise.all(queries.map((query) => query.refetch())) };
+    // Each campaign's own answer, for a start that covers several campaigns:
+    // `reason` is why that one cannot start (null while ready or not yet answered).
+    const byId: Record<string, { ready: boolean; pending: boolean; reason: string | null }> = {};
+    ids.forEach((id, index) => {
+        const query = queries[index];
+        const idReady = enabled && !query.isError && query.data?.ready === true;
+        byId[id] = {
+            ready: idReady,
+            pending: enabled && query.isPending,
+            reason: query.isError ? "Calling readiness could not be checked. Try again." : query.data && !idReady ? query.data.reason || "The calling route is not ready." : null,
+        };
+    });
+    return { ready, checking, reason, error: Boolean(failed), byId, retry: () => Promise.all(queries.map((query) => query.refetch())) };
 }
 
 export function CampaignReadinessNotice({ readiness }: { readiness: ReturnType<typeof useCampaignReadiness> }) {
@@ -47,18 +59,20 @@ export function CampaignReadinessNotice({ readiness }: { readiness: ReturnType<t
 }
 
 /** A launch surface only: backend remains authoritative and rechecks at POST. */
-export function CampaignStartControl({ campaignIds, onStart, label, menu = false }: {
+export function CampaignStartControl({ campaignIds, onStart, label, menu = false, disabled = false }: {
     campaignIds: string[];
     onStart: () => Promise<void>;
     label: string;
     menu?: boolean;
+    /** An extra reason to hold the button, e.g. a start already in flight. */
+    disabled?: boolean;
 }) {
     const readiness = useCampaignReadiness(campaignIds);
     const [pending, setPending] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const running = useRef(false);
     async function start() {
-        if (!readiness.ready || running.current) return;
+        if (!readiness.ready || running.current || disabled) return;
         running.current = true;
         setPending(true);
         setError(null);
@@ -67,7 +81,7 @@ export function CampaignStartControl({ campaignIds, onStart, label, menu = false
         finally { running.current = false; setPending(false); }
     }
     return <div className={menu ? "px-3 py-2" : ""}>
-        <Button type="button" role={menu ? "menuitem" : undefined} size="sm" variant={menu ? "ghost" : "outline"} onClick={() => void start()} disabled={!readiness.ready || pending}>
+        <Button type="button" role={menu ? "menuitem" : undefined} size="sm" variant={menu ? "ghost" : "outline"} onClick={() => void start()} disabled={!readiness.ready || pending || disabled}>
             {pending ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Play className="h-4 w-4" aria-hidden />}{label}
         </Button>
         <CampaignReadinessNotice readiness={readiness} />

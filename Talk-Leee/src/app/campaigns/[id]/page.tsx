@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { dashboardApi, campaignStartErrorMessage, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
+import { dashboardApi, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
 import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
 import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPages, type OptionalContactFieldKey } from "@/lib/contact-fields";
 import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
@@ -22,14 +22,29 @@ import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { KnowledgePanel } from "@/components/campaigns/knowledge-panel";
 import { TestAgentButton } from "@/components/campaigns/test-agent-button";
 import { CampaignReadinessNotice, useCampaignReadiness } from "@/components/campaigns/campaign-readiness";
-import { Modal } from "@/components/ui/modal";
-import { CallingScheduleLine, CallingScheduleStartNotice } from "@/components/campaigns/calling-schedule-notice";
+import { CallingScheduleLine } from "@/components/campaigns/calling-schedule-notice";
+import { CampaignStartDialog, useCampaignStartDialog } from "@/components/campaigns/campaign-start-dialog";
+import { CampaignControlNoticeBox } from "@/components/campaigns/campaign-control-notice";
+import {
+    campaignStartLabel,
+    canStartCampaign,
+    contactsQueuedText,
+    outOfMinutesText,
+    runCampaignPause,
+    runCampaignStop,
+    useCampaignsInFlight,
+    type CampaignControlNotice,
+} from "@/lib/campaign-control";
+import { campaignDisplayStatus } from "@/lib/campaign-status";
+import { CampaignDuplicateStatus, duplicateResultNotice, useCampaignDuplicate } from "@/components/campaigns/campaign-duplicate";
+import { stashDuplicateNotice } from "@/lib/campaign-duplicate";
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 import { campaignActions } from "@/lib/permissions";
 import {
     ArrowLeft,
+    Copy,
     Play,
     Pause,
     Square,
@@ -146,7 +161,10 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const permissions = useEffectivePermissions();
     // QA F1-21: start, pause, stop, edit and every contact change need
     // campaigns:update; unknown permissions keep them offered.
-    const canChange = campaignActions(permissions.isSuccess ? permissions.data.permissions : undefined).update;
+    const allowedActions = campaignActions(permissions.isSuccess ? permissions.data.permissions : undefined);
+    const canChange = allowedActions.update;
+    // A duplicate is a new campaign (QA F1-21 with plan 3.1).
+    const canDuplicate = allowedActions.create;
     const canManageKnowledge = permissions.isSuccess && (
         permissions.data.role?.toLowerCase() === "platform_admin"
         || permissions.data.permissions.includes("campaigns:update")
@@ -164,7 +182,17 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         activity?: CampaignActivity | null;
     } | null>(null);
     const [loading, setLoading] = useState(true);
-    const [actionLoading, setActionLoading] = useState(false);
+    // A Pause or Stop of this page is running (request + the reload after it).
+    const [controlBusy, setControlBusy] = useState(false);
+    // The shared in-flight sets: a start / stop / pause of this campaign that is
+    // running from any entry point (this page or the campaign list).
+    const inFlight = useCampaignsInFlight();
+    const starting = inFlight.starting.has(campaignId);
+    const stopping = inFlight.stopping.has(campaignId);
+    const pausing = inFlight.pausing.has(campaignId);
+    const actionLoading = controlBusy || starting || stopping || pausing;
+    // Result of the last Start / Pause / Stop, shown inline (never an alert()).
+    const [controlNotice, setControlNotice] = useState<CampaignControlNotice | null>(null);
     const [error, setError] = useState("");
     const [minutes, setMinutes] = useState<MinutesStatus | null>(null);
     const loadGeneration = useRef(0);
@@ -172,8 +200,14 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     // Why the last Start attempt was refused, in the server's own words.
     // Empty until something is actually refused; never pre-populated.
     const [startError, setStartError] = useState("");
-    const canStart = Boolean(campaign && ["draft", "paused", "stopped"].includes(campaign.status));
+    const canStart = Boolean(campaign && canStartCampaign(campaign.status));
     const readiness = useCampaignReadiness([campaignId], canStart);
+    // Duplicate (3.1): the same shared copy routine and rules as the campaign
+    // list. Once the copy exists its page opens, carrying the result message.
+    const duplicate = useCampaignDuplicate(campaign ? campaignId : null, (result) => {
+        stashDuplicateNotice(result.campaign.id, duplicateResultNotice(result));
+        router.push(`/campaigns/${result.campaign.id}`);
+    });
 
     // Out of plan minutes ⇒ the backend will 402 a Start, so we disable the
     // button up front and explain why. `unlimited` plans are never blocked.
@@ -192,17 +226,6 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const [listsRefreshToken, setListsRefreshToken] = useState(0);
     const [lists, setLists] = useState<ContactList[]>([]);
     const listsSectionRef = useRef<HTMLDivElement | null>(null);
-
-    // First-speaker selector shown after the Start button is pressed
-    const [startModalOpen, setStartModalOpen] = useState(false);
-    const [firstSpeaker, setFirstSpeaker] = useState<"agent" | "user">("agent");
-    // Batch size = max calls in flight at once (dialing/ringing/answered). The
-    // campaign dials in batches of this size; a new call starts only as an
-    // earlier one finishes. Seeded from the campaign's saved setting when known.
-    const [batchSize, setBatchSize] = useState<number>(10);
-    // Wait time (seconds) between consecutive calls — paces dialing on top of
-    // the batch size. 0 = no gap (dial as slots free).
-    const [callGap, setCallGap] = useState<number>(0);
 
     // Add contact form
     const [showAddContact, setShowAddContact] = useState(false);
@@ -332,85 +355,59 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         };
     }, [campaign?.status, campaignId, router]);
 
+    // The ONE Start / Resume confirmation, shared with the campaign list
+    // (components/campaigns/campaign-start-dialog). It closes once the start
+    // request has answered; the campaign reads "Preparing" until the reload
+    // below has brought the backend's own status.
+    const startDialog = useCampaignStartDialog({
+        minutes,
+        onFinished: async (outcome) => {
+            if (outcome.queued !== null) {
+                setStartError("");
+                setControlNotice({ kind: "success", lines: [contactsQueuedText(outcome.queued)] });
+            } else if (outcome.notStarted.length > 0) {
+                // Shown in the page rather than an alert(): the quota figures next
+                // to it refresh underneath, so the reason stays readable beside the
+                // numbers that explain it instead of vanishing on acknowledge.
+                setStartError(outcome.notStarted[0]!.reason);
+            }
+            // Refresh status and quota so the button/banner reflect reality.
+            await loadData();
+        },
+    });
+
     function handleStartClick() {
-        if (!readiness.ready) return;
+        if (!campaign || !readiness.ready) return;
         // Out of plan minutes — don't even open the modal; the backend
         // would 402 anyway. The banner above the button explains why.
         if (outOfMinutes) {
-            setStartError(
-                `You're out of plan minutes (${minutes?.used_minutes}/${minutes?.allocated} used this month). ` +
-                "Add minutes or upgrade your plan to start campaigns.",
-            );
+            setStartError(outOfMinutesText(minutes));
             return;
         }
         setStartError("");
-        // Default back to "agent" every time so a previous choice doesn't
-        // silently carry over into the next Start.
-        setFirstSpeaker("agent");
-        // Seed the pacing controls from the campaign's saved settings if present.
-        const cfg = campaign?.calling_config as { batch_size?: number; call_gap_seconds?: number } | undefined;
-        if (typeof cfg?.batch_size === "number" && cfg.batch_size >= 0) {
-            setBatchSize(cfg.batch_size);
-        }
-        if (typeof cfg?.call_gap_seconds === "number" && cfg.call_gap_seconds >= 0) {
-            setCallGap(cfg.call_gap_seconds);
-        }
-        setStartModalOpen(true);
-    }
-
-    async function handleConfirmStart() {
-        if (!readiness.ready || actionLoading) return;
-        try {
-            setActionLoading(true);
-            setStartModalOpen(false);
-            await dashboardApi.startCampaign(campaignId, {
-                first_speaker: firstSpeaker,
-                batch_size: batchSize,
-                call_gap_seconds: callGap,
-            });
-            setStartError("");
-            await loadData();
-        } catch (err) {
-            // The backend's out-of-minutes 402 ships a structured detail
-            // ({ message, ... }) the http client exposes as `.details`.
-            // Shown in the page rather than an alert(): the quota figures next
-            // to it refresh underneath, so the reason stays readable beside the
-            // numbers that explain it instead of vanishing on acknowledge.
-            setStartError(campaignStartErrorMessage(err));
-            // Refresh quota so the button/banner reflect reality after a 402.
-            void loadData();
-        } finally {
-            setActionLoading(false);
-        }
+        setControlNotice(null);
+        startDialog.open([campaign]);
     }
 
     async function handlePause() {
+        setControlBusy(true);
+        setControlNotice(null);
         try {
-            setActionLoading(true);
-            const result = await dashboardApi.pauseCampaign(campaignId);
-            await loadData();
-            if (result.termination_summary.status !== "confirmed") {
-                alert(result.message);
-            }
-        } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to pause campaign");
+            const notice = await runCampaignPause(campaignId, loadData);
+            if (notice) setControlNotice(notice);
         } finally {
-            setActionLoading(false);
+            setControlBusy(false);
         }
     }
 
     async function handleStop() {
+        setControlBusy(true);
+        setControlNotice(null);
         try {
-            setActionLoading(true);
-            const result = await dashboardApi.stopCampaign(campaignId);
-            await loadData();
-            if (result.termination_summary.status !== "confirmed") {
-                alert(result.message);
-            }
-        } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to stop campaign");
+            const notice = await runCampaignStop(campaignId, loadData);
+            if (notice) setControlNotice(notice);
         } finally {
-            setActionLoading(false);
+            setControlBusy(false);
         }
     }
 
@@ -520,8 +517,11 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                         <div className="min-w-0">
                             <div className="flex flex-wrap items-center gap-3">
                                 <h2 className="break-words text-2xl font-semibold text-foreground">{campaign.name}</h2>
-                                <span className={`px-3 py-1 text-sm font-medium rounded-full ${getStatusStyle(campaign.status)}`}>
-                                    {campaign.status}
+                                <span
+                                    data-testid="campaign-status"
+                                    className={`px-3 py-1 text-sm font-medium rounded-full ${getStatusStyle(starting || stopping ? "" : campaign.status)}`}
+                                >
+                                    {campaignDisplayStatus(campaign.status, { starting, stopping })}
                                 </span>
                             </div>
                             {campaign.description && (
@@ -563,29 +563,37 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     Edit
                                 </Button>
                             ) : null}
-                            {!canChange ? null : campaign.status === "draft" || campaign.status === "paused" || campaign.status === "stopped" ? (
+                            {canDuplicate ? (
+                                <Button variant="outline" onClick={() => { void duplicate.run(); }} disabled={actionLoading || duplicate.disabled}>
+                                    <Copy className="w-4 h-4" />
+                                    Duplicate
+                                </Button>
+                            ) : null}
+                            {canChange && canStart ? (
                                 <Button
                                     onClick={handleStartClick}
                                     disabled={actionLoading || outOfMinutes || !readiness.ready}
                                     title={outOfMinutes ? "Out of plan minutes — add minutes to start" : undefined}
                                 >
                                     <Play className="w-4 h-4" />
-                                    Start
+                                    {campaignStartLabel(campaign.status)}
                                 </Button>
                             ) : campaign.status === "running" ? (
                                 <>
                                     <Button variant="outline" onClick={handlePause} disabled={actionLoading}>
-                                        <Pause className="w-4 h-4" />
-                                        Pause
+                                        {pausing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pause className="w-4 h-4" />}
+                                        {pausing ? "Pausing…" : "Pause"}
                                     </Button>
                                     <Button variant="outline" onClick={handleStop} disabled={actionLoading}>
-                                        <Square className="w-4 h-4" />
-                                        Stop
+                                        {stopping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Square className="w-4 h-4" />}
+                                        {stopping ? "Stopping…" : "Stop"}
                                     </Button>
                                 </>
                             ) : null}
                         </div>
                     </motion.div>
+                    <CampaignDuplicateStatus duplicate={duplicate} />
+                    <CampaignControlNoticeBox notice={controlNotice} />
                     {canChange && canStart && <CampaignReadinessNotice readiness={readiness} />}
 
                     {/* Running but not placing calls: say why, in the dialer's own
@@ -1095,199 +1103,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                 </div>
             ) : null}
 
-            <Modal
-                open={startModalOpen}
-                onOpenChange={setStartModalOpen}
-                title="Who speaks first?"
-                description="Pick who opens the conversation when the callee answers. The call pipeline pre-warms either way — this only controls whether the agent speaks an opening line or waits for the caller."
-                size="sm"
-                footer={
-                    <div className="flex justify-end gap-2">
-                        <Button
-                            variant="outline"
-                            onClick={() => setStartModalOpen(false)}
-                            disabled={actionLoading}
-                        >
-                            Cancel
-                        </Button>
-                        <Button onClick={handleConfirmStart} disabled={actionLoading || !readiness.ready}>
-                            {actionLoading ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Play className="w-4 h-4" />
-                            )}
-                            Start campaign
-                        </Button>
-                    </div>
-                }
-            >
-                <div className="space-y-2">
-                    <CampaignReadinessNotice readiness={readiness} />
-                    <CallingScheduleStartNotice callingConfig={campaign?.calling_config} />
-                    <label
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-                            firstSpeaker === "agent"
-                                ? "border-primary bg-primary/5"
-                                : "border-border hover:bg-muted/40"
-                        }`}
-                    >
-                        <input
-                            type="radio"
-                            name="first-speaker"
-                            value="agent"
-                            checked={firstSpeaker === "agent"}
-                            onChange={() => setFirstSpeaker("agent")}
-                            className="mt-1"
-                        />
-                        <div>
-                            <div className="text-sm font-medium text-foreground">AI agent speaks first</div>
-                            <div className="text-xs text-muted-foreground">
-                                Agent plays a pre-synthesized greeting the instant the callee picks up. Best for cold outreach.
-                            </div>
-                        </div>
-                    </label>
-
-                    <label
-                        className={`flex cursor-pointer items-start gap-3 rounded-lg border p-3 transition-colors ${
-                            firstSpeaker === "user"
-                                ? "border-primary bg-primary/5"
-                                : "border-border hover:bg-muted/40"
-                        }`}
-                    >
-                        <input
-                            type="radio"
-                            name="first-speaker"
-                            value="user"
-                            checked={firstSpeaker === "user"}
-                            onChange={() => setFirstSpeaker("user")}
-                            className="mt-1"
-                        />
-                        <div>
-                            <div className="text-sm font-medium text-foreground">Caller speaks first</div>
-                            <div className="text-xs text-muted-foreground">
-                                Agent waits for the callee to say &ldquo;hello&rdquo; before responding. Feels more natural on warm lists.
-                            </div>
-                        </div>
-                    </label>
-
-                    <div className="mt-3 rounded-lg border border-border p-3">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <div className="text-sm font-medium text-foreground">
-                                    Calls at a time (batch size)
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                    How many calls dial simultaneously. A new call starts only as an
-                                    earlier one finishes (answered, no-answer, voicemail, etc.).
-                                    Lower = gentler on your trunk; higher = faster throughput.
-                                </div>
-                            </div>
-                            <input
-                                type="number"
-                                min={1}
-                                max={100}
-                                value={batchSize}
-                                onChange={(e) => {
-                                    const n = parseInt(e.target.value, 10);
-                                    setBatchSize(Number.isNaN(n) ? 1 : Math.min(100, Math.max(1, n)));
-                                }}
-                                className="w-20 shrink-0 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
-                            />
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                            {[5, 10, 20, 50].map((n) => (
-                                <button
-                                    key={n}
-                                    type="button"
-                                    onClick={() => setBatchSize(n)}
-                                    className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
-                                        batchSize === n
-                                            ? "border-primary bg-primary/5 text-foreground"
-                                            : "border-border text-muted-foreground hover:bg-muted/40"
-                                    }`}
-                                >
-                                    {n}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
-                    <div className="mt-3 rounded-lg border border-border p-3">
-                        <div className="flex items-center justify-between gap-3">
-                            <div>
-                                <div className="text-sm font-medium text-foreground">
-                                    Wait between calls
-                                </div>
-                                <div className="text-xs text-muted-foreground">
-                                    Minimum gap before the next call is dialed, so calls go out on a
-                                    steady cadence instead of all at once. Applies on top of the batch
-                                    size. Set to 0 for no wait.
-                                </div>
-                            </div>
-                            <div className="flex shrink-0 items-center gap-1">
-                                <input
-                                    type="number"
-                                    min={0}
-                                    max={60}
-                                    aria-label="Minutes"
-                                    value={Math.floor(callGap / 60)}
-                                    onChange={(e) => {
-                                        const m = parseInt(e.target.value, 10);
-                                        const mins = Number.isNaN(m) ? 0 : Math.min(60, Math.max(0, m));
-                                        setCallGap(Math.min(3600, mins * 60 + (callGap % 60)));
-                                    }}
-                                    className="w-14 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
-                                />
-                                <span className="text-xs text-muted-foreground">min</span>
-                                <input
-                                    type="number"
-                                    min={0}
-                                    max={59}
-                                    aria-label="Seconds"
-                                    value={callGap % 60}
-                                    onChange={(e) => {
-                                        const s = parseInt(e.target.value, 10);
-                                        const secs = Number.isNaN(s) ? 0 : Math.min(59, Math.max(0, s));
-                                        setCallGap(Math.min(3600, Math.floor(callGap / 60) * 60 + secs));
-                                    }}
-                                    className="w-14 rounded-md border border-border bg-background px-2 py-1 text-center text-sm text-foreground"
-                                />
-                                <span className="text-xs text-muted-foreground">sec</span>
-                            </div>
-                        </div>
-                        <div className="mt-2 flex items-center gap-2">
-                            <div className="flex flex-wrap gap-1.5">
-                                {[
-                                    { label: "None", v: 0 },
-                                    { label: "30s", v: 30 },
-                                    { label: "1m", v: 60 },
-                                    { label: "2m", v: 120 },
-                                    { label: "5m", v: 300 },
-                                ].map((p) => (
-                                    <button
-                                        key={p.v}
-                                        type="button"
-                                        onClick={() => setCallGap(p.v)}
-                                        className={`rounded-md border px-2 py-0.5 text-xs transition-colors ${
-                                            callGap === p.v
-                                                ? "border-primary bg-primary/5 text-foreground"
-                                                : "border-border text-muted-foreground hover:bg-muted/40"
-                                        }`}
-                                    >
-                                        {p.label}
-                                    </button>
-                                ))}
-                            </div>
-                            {callGap > 0 && (
-                                <span className="ml-auto text-xs text-muted-foreground">
-                                    = {Math.floor(callGap / 60) > 0 ? `${Math.floor(callGap / 60)}m ` : ""}
-                                    {callGap % 60 > 0 ? `${callGap % 60}s` : (Math.floor(callGap / 60) > 0 ? "" : "0s")}
-                                </span>
-                            )}
-                        </div>
-                    </div>
-                </div>
-            </Modal>
+            <CampaignStartDialog dialog={startDialog} />
         </DashboardLayout>
     );
 }

@@ -37,11 +37,16 @@ export function CommandBar({
     campaigns,
     onPause,
     onResume,
+    onExport,
     allowed = { create: true, update: true, delete: true },
 }: {
     campaigns: Campaign[];
-    onPause: (id: string) => Promise<void>;
-    onResume: (id: string) => Promise<void>;
+    /** Pauses the given campaigns (only the running ones are acted on). */
+    onPause: (campaigns: Campaign[]) => Promise<void>;
+    /** Opens the shared Start / Resume dialog for these campaign ids. */
+    onResume: (ids: string[]) => void;
+    /** 3.4 E4: "Export campaigns" opens the campaigns Export window. */
+    onExport: () => void;
     /** What the signed-in role may do (QA F1-21); everything by default. */
     allowed?: CampaignActions;
 }) {
@@ -128,7 +133,7 @@ export function CommandBar({
                     category: "Reports",
                     title: "Export campaigns",
                     subtitle: "Opens export modal",
-                    action: () => router.push("/campaigns#export"),
+                    action: () => onExport(),
                 },
                 {
                     id: "action-new-campaign",
@@ -145,9 +150,7 @@ export function CommandBar({
                     subtitle: "Prototype action",
                     hidden: !allowed.update,
                     action: async () => {
-                        for (const c of campaigns) {
-                            if ((c.status || "").toLowerCase() === "running") await onPause(c.id);
-                        }
+                        await onPause(campaigns.filter((c) => (c.status || "").toLowerCase() === "running"));
                     },
                 },
                 {
@@ -157,11 +160,11 @@ export function CommandBar({
                     subtitle: resumeReadiness.reason || "Calling routes are ready",
                     disabled: !resumeReadiness.ready,
                     hidden: !allowed.update,
-                    action: async () => {
+                    // Never starts anything itself: the shared dialog asks who
+                    // speaks first and sends the request.
+                    action: () => {
                         if (!resumeReadiness.ready) return;
-                        for (const c of campaigns) {
-                            if ((c.status || "").toLowerCase() === "paused") await onResume(c.id);
-                        }
+                        onResume(campaigns.filter((c) => (c.status || "").toLowerCase() === "paused").map((c) => c.id));
                     },
                 },
             ];
@@ -221,7 +224,7 @@ export function CommandBar({
             .map((x) => x.r);
 
         return scored;
-    }, [allowed.create, allowed.update, campaigns, onPause, onResume, parsed.prefix, parsed.query, router, resumeReadiness.ready, resumeReadiness.reason]);
+    }, [allowed.create, allowed.update, campaigns, onExport, onPause, onResume, parsed.prefix, parsed.query, router, resumeReadiness.ready, resumeReadiness.reason]);
 
     const runResult = async (r: Result) => {
         if (r.disabled || runningAction.current) return;

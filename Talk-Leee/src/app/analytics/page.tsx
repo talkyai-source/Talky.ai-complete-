@@ -8,12 +8,14 @@ import { motion } from "framer-motion";
 import { Select } from "@/components/ui/select";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
-import { formatCalendarDate, reportingDateRange } from "@/lib/reporting-time";
+import { reportingDateRange } from "@/lib/reporting-time";
 import { isApiClientError } from "@/lib/http-client";
 import { ReadError } from "@/components/ui/read-error";
+import { formatUtcDateLabel, UTC_TIMEZONE_LABEL } from "@/lib/utc-date-label";
 
+// 3.7 Z3: the backend groups days by UTC date, so the label is the UTC date.
 function formatDate(dateStr: string) {
-    return formatCalendarDate(dateStr);
+    return formatUtcDateLabel(dateStr);
 }
 
 function GlassStatCard({
@@ -159,6 +161,7 @@ export default function AnalyticsPage() {
                         <option value="30">Last 30 days</option>
                         <option value="90">Last 90 days</option>
                     </Select>
+                    <span data-testid="analytics-range-timezone" className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{UTC_TIMEZONE_LABEL}</span>
                 </motion.div>
 
                 <motion.div
@@ -252,7 +255,10 @@ export default function AnalyticsPage() {
                         transition={{ delay: 0.4 }}
                         className="rounded-2xl border border-border bg-muted/60 backdrop-blur-sm p-4 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out hover:bg-background hover:shadow-md"
                     >
-                        <h3 className="text-lg font-semibold text-foreground mb-6">Call Volume</h3>
+                        <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
+                            <h3 className="text-lg font-semibold text-foreground">Call Volume</h3>
+                            <span data-testid="analytics-chart-timezone" className="text-xs font-semibold text-muted-foreground">{UTC_TIMEZONE_LABEL}</span>
+                        </div>
                         {data.length === 0 ? (
                             <div className="text-center py-12 text-muted-foreground">
                                 <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" aria-hidden />

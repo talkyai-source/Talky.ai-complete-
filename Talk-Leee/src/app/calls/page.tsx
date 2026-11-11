@@ -13,6 +13,7 @@ import type { Call } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
 import { CallsLoadError, SummaryPreview, distinctDidOptions, inboundCampaignFilterOptions } from "@/components/calls/call-panels";
 import { statusPillClass } from "@/lib/status-colors";
+import { humanizeOutcome } from "@/lib/call-outcome-label";
 import { extendedApi } from "@/lib/extended-api";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
 import {
@@ -88,32 +89,6 @@ function formatDuration(seconds?: number) {
     const mins = Math.floor(seconds / 60);
     const secs = seconds % 60;
     return `${mins}:${secs.toString().padStart(2, "0")}`;
-}
-
-// Friendly, first-class labels for each call disposition so the history
-// reads like a human's notes ("No Answer", "Voicemail") rather than raw
-// enum values. Unknown values fall back to Title-Cased words.
-const OUTCOME_LABELS: Record<string, string> = {
-    goal_achieved: "Qualified",
-    goal_not_achieved: "Disqualified",
-    answered: "Answered",
-    no_answer: "No Answer",
-    busy: "Busy",
-    voicemail: "Voicemail",
-    rejected: "Rejected",
-    failed: "Failed",
-    timeout: "Timed Out",
-    unavailable: "Unavailable",
-    disconnected: "Disconnected",
-};
-
-function humanizeOutcome(outcome?: string) {
-    if (!outcome) return "--";
-    const key = outcome.trim().toLowerCase();
-    if (OUTCOME_LABELS[key]) return OUTCOME_LABELS[key];
-    return key
-        .replace(/_/g, " ")
-        .replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function DirectionBadge({ direction }: { direction?: "inbound" | "outbound" }) {

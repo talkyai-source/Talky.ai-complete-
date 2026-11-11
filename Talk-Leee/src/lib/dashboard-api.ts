@@ -296,6 +296,13 @@ export interface Call {
     transfer_legs?: TransferLeg[];
 }
 
+/** Body of POST /campaigns/{id}/start. `first_speaker` is a per-start choice. */
+export interface CampaignStartOptions {
+    first_speaker: "agent" | "user";
+    batch_size?: number;
+    call_gap_seconds?: number;
+}
+
 export interface CampaignTerminationSummary {
     status: "confirmed" | "partial" | "lookup_failed";
     total_selected: number;
@@ -596,12 +603,15 @@ class DashboardApi {
         });
     }
 
+    // `first_speaker` has no default here: it is not saved on the campaign, so
+    // every start must carry the choice made in the shared Start dialog.
     async startCampaign(
         id: string,
-        opts?: { first_speaker?: "agent" | "user"; batch_size?: number; call_gap_seconds?: number },
+        opts: CampaignStartOptions,
     ): Promise<{ message: string; jobs_enqueued: number }> {
-        const body: Record<string, unknown> = {};
-        if (opts?.first_speaker !== undefined) body.first_speaker = opts.first_speaker;
+        const body: Record<string, unknown> = {
+            first_speaker: opts.first_speaker,
+        };
         // Only send pacing settings when the caller set them, so omitting one
         // leaves the campaign's existing setting untouched.
         if (opts?.batch_size !== undefined && opts?.batch_size !== null) {
@@ -747,10 +757,11 @@ class DashboardApi {
     }
 
     // Calls
-    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}): Promise<{ calls: Call[]; total: number }> {
+    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}, signal?: AbortSignal): Promise<{ calls: Call[]; total: number }> {
         const response = await this.client.request<{ items: (CallListItem & { summary?: string })[]; total: number }>({
             path: "/calls",
             method: "GET",
+            signal,
             params: {
                 page: String(page),
                 page_size: String(pageSize),

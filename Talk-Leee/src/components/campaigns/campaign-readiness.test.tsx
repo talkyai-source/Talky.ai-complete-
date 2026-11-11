@@ -5,7 +5,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { api } from "@/lib/api";
-import type { Campaign } from "@/lib/dashboard-api";
+import { dashboardApi, type Campaign } from "@/lib/dashboard-api";
+import { CampaignStartDialog, useCampaignStartDialog } from "./campaign-start-dialog";
 import { CampaignReadinessNotice, CampaignStartControl, useCampaignReadiness } from "./campaign-readiness";
 import { CommandBar } from "./command-bar";
 import { CampaignPerformanceTable } from "./campaign-performance-table";
@@ -15,7 +16,9 @@ const requestAnimationFrame = window.requestAnimationFrame;
 const cancelAnimationFrame = window.cancelAnimationFrame;
 const clients: QueryClient[] = [];
 const router = { push() {}, replace() {}, refresh() {}, back() {}, forward() {}, async prefetch() {} } as unknown as React.ContextType<typeof AppRouterContext>;
-afterEach(() => { cleanup(); clients.splice(0).forEach((client) => client.clear()); api.request = request; window.requestAnimationFrame = requestAnimationFrame; window.cancelAnimationFrame = cancelAnimationFrame; localStorage.clear(); });
+const startCampaign = dashboardApi.startCampaign;
+const getMinutesStatus = dashboardApi.getMinutesStatus;
+afterEach(() => { dashboardApi.startCampaign = startCampaign; dashboardApi.getMinutesStatus = getMinutesStatus; cleanup(); clients.splice(0).forEach((client) => client.clear()); api.request = request; window.requestAnimationFrame = requestAnimationFrame; window.cancelAnimationFrame = cancelAnimationFrame; localStorage.clear(); });
 
 function mount(children: React.ReactNode) {
     window.requestAnimationFrame = (callback) => window.setTimeout(() => callback(performance.now()), 0);
@@ -80,19 +83,38 @@ test("a closed or nonlaunch surface performs no readiness request", () => {
 
 const campaign = { id: "campaign-a", name: "Example campaign", status: "paused", direction: "outbound", created_at: "2026-10-02T00:00:00Z", total_leads: 1, calls_completed: 0, calls_failed: 0 } as Campaign;
 
+// The table asks its host for the shared Start dialog; this is that host.
+function TableWithStartDialog({ onOpen }: { onOpen: () => void }) {
+    const startDialog = useCampaignStartDialog();
+    return <>
+        <CampaignPerformanceTable campaigns={[campaign]} loading={false} error="" onPause={async () => {}} onStop={async () => {}} onPauseSelected={async () => {}} onResume={(ids) => { onOpen(); startDialog.open([campaign].filter((c) => ids.includes(c.id)), { listSkipped: true }); }} onDelete={async () => {}} onDuplicate={async () => {}} />
+        <CampaignStartDialog dialog={startDialog} />
+    </>;
+}
+
 test("table selection and details block resume while the route is unavailable", async () => {
     api.request = async <T,>() => ({ ready: false, reason: "Selected trunk unavailable" }) as T;
     let resumed = 0;
-    mount(<CampaignPerformanceTable campaigns={[campaign]} loading={false} error="" onPause={async () => {}} onResume={async () => { resumed++; }} onDelete={async () => {}} onDuplicate={async () => {}} />);
+    let opened = 0;
+    dashboardApi.startCampaign = async () => { resumed++; return { message: "ok", jobs_enqueued: 0 }; };
+    dashboardApi.getMinutesStatus = async () => ({ allocated: 100, used_minutes: 0, remaining_minutes: 100, unlimited: false, exhausted: false });
+    mount(<TableWithStartDialog onOpen={() => { opened++; }} />);
     // Finish the table's initial preference hydration and selection-reset frames.
     await act(async () => { await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())); });
     await act(async () => { await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())); });
     fireEvent.click(screen.getByRole("checkbox", { name: `Select ${campaign.name}` }));
-    await screen.findByText(/Selected trunk unavailable/);
-    const button = screen.getByRole("button", { name: "Resume Selected" });
-    assert.equal((button as HTMLButtonElement).disabled, true);
-    fireEvent.click(button);
+    // Resume Selected now opens the shared Start dialog. The campaign there
+    // cannot start while its route is unavailable, so nothing is sent.
+    fireEvent.click(screen.getByRole("button", { name: "Resume Selected" }));
+    const startDialog = within(screen.getByRole("dialog"));
+    await startDialog.findByText("Example campaign: not started — Selected trunk unavailable");
+    const confirm = startDialog.getByRole("button", { name: "Start campaign" });
+    assert.equal((confirm as HTMLButtonElement).disabled, true);
+    fireEvent.click(confirm);
     assert.equal(resumed, 0);
+    fireEvent.click(startDialog.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true));
+    assert.equal(opened, 1);
     fireEvent.click(screen.getByRole("button", { name: new RegExp(campaign.name) }));
     const dialog = within(screen.getByRole("dialog"));
     await dialog.findByText(/Selected trunk unavailable/);
@@ -100,12 +122,13 @@ test("table selection and details block resume while the route is unavailable", 
     assert.equal((detailResume as HTMLButtonElement).disabled, true);
     fireEvent.click(detailResume);
     assert.equal(resumed, 0);
+    assert.equal(opened, 1, "the blocked Resume never opens the dialog");
 });
 
 test("command-bar keyboard execution cannot bypass unavailable resume routes", async () => {
     api.request = async <T,>() => ({ ready: false, reason: "Selected trunk unavailable" }) as T;
     let resumed = 0;
-    mount(<CommandBar campaigns={[campaign]} onPause={async () => {}} onResume={async () => { resumed++; }} />);
+    mount(<CommandBar campaigns={[campaign]} onPause={async () => {}} onResume={async () => { resumed++; }} onExport={() => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Ctrl + K" }));
     const input = screen.getByRole("textbox");
     fireEvent.change(input, { target: { value: "/resume" } });

@@ -44,12 +44,16 @@ test("TZ5: a partly saved schedule keeps the saved parts, marks the rest Not set
 });
 
 test("TZ2/TZ5: the campaign detail page mounts the notice from calling_config inside the Start dialog, above the Start action", () => {
+    // The Start dialog is now the shared one (plan 3.2): the page opens it with
+    // its campaign, and the notice sits inside that dialog's Modal.
     const page = readFileSync(path.join(process.cwd(), "src/app/campaigns/[id]/page.tsx"), "utf8");
-    const mount = page.indexOf("<CallingScheduleStartNotice callingConfig={campaign?.calling_config} />");
-    const dialog = page.indexOf("open={startModalOpen}");
-    const dialogEnd = page.indexOf("</Modal>", dialog);
+    const shared = readFileSync(path.join(process.cwd(), "src/components/campaigns/campaign-start-dialog.tsx"), "utf8");
+    const mount = shared.indexOf("<CallingScheduleStartNotice callingConfig={dialog.targets[0]?.calling_config} />");
+    const dialog = shared.indexOf("open={dialog.isOpen}");
+    const dialogEnd = shared.indexOf("</Modal>", dialog);
     assert.notEqual(mount, -1);
     assert.ok(dialog !== -1 && mount > dialog && mount < dialogEnd, "notice must sit inside the Start dialog");
+    assert.ok(page.includes("startDialog.open([campaign]);") && page.includes("<CampaignStartDialog dialog={startDialog} />"), "the detail page opens that dialog with its campaign");
     assert.ok(!page.includes("checkCallingWindow("), "the page no longer formats the window itself");
 });
 
@@ -68,9 +72,11 @@ test("TZ2: the campaign header shows the saved schedule line without opening Sta
     const page = readFileSync(path.join(process.cwd(), "src/app/campaigns/[id]/page.tsx"), "utf8");
     const header = page.search(/<CallingScheduleLine\s+callingConfig=\{campaign\.calling_config\}\s+testId="campaign-calling-schedule"/);
     const description = page.indexOf("{campaign.description}");
-    const dialog = page.indexOf("open={startModalOpen}");
+    // The Start dialog is now the shared component the page mounts (plan 3.2).
+    const dialog = page.indexOf("<CampaignStartDialog dialog={startDialog} />");
+    const shared = readFileSync(path.join(process.cwd(), "src/components/campaigns/campaign-start-dialog.tsx"), "utf8");
     assert.notEqual(header, -1, "header line must be mounted from calling_config");
     assert.ok(description !== -1 && header > description, "the line sits in the campaign information area, after the description");
     assert.ok(dialog !== -1 && header < dialog, "the line is outside the Start dialog");
-    assert.ok(page.includes("<CallingScheduleStartNotice callingConfig={campaign?.calling_config} />"), "the Start dialog block is unchanged");
+    assert.ok(shared.includes("<CallingScheduleStartNotice callingConfig={dialog.targets[0]?.calling_config} />"), "the Start dialog still carries the notice");
 });

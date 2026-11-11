@@ -47,7 +47,7 @@ function mount(children: React.ReactNode) {
 function mountTable(allowed: ReturnType<typeof campaignActions>) {
     mount(<CampaignPerformanceTable campaigns={[CAMPAIGN]} loading={false} error=""
         onPause={async () => {}} onResume={async () => {}} onDelete={async () => {}} onDuplicate={async () => {}}
-        allowed={allowed} />);
+        onStop={async () => {}} onPauseSelected={async () => {}} allowed={allowed} />);
 }
 function openQuickView() {
     fireEvent.click(screen.getByRole("button", { name: /Spring push/ }));
@@ -88,7 +88,7 @@ test("a role that manages campaigns keeps every action", () => {
 });
 
 function commandActions(allowed: ReturnType<typeof campaignActions>) {
-    mount(<CommandBar campaigns={[CAMPAIGN]} onPause={async () => {}} onResume={async () => {}} allowed={allowed} />);
+    mount(<CommandBar campaigns={[CAMPAIGN]} onPause={async () => {}} onResume={() => {}} onExport={() => {}} allowed={allowed} />);
     fireEvent.click(screen.getByRole("button", { name: "Ctrl + K" }));
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "/" } });
     return document.body.textContent ?? "";

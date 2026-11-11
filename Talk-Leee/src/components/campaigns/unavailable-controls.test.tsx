@@ -44,7 +44,7 @@ test("the working export dialog does not offer a browser-only recurring report",
     window.localStorage.setItem("campaigns.performance.reportSchedule", JSON.stringify({ enabled: true }));
     mount(<CampaignPerformanceTable campaigns={[]} loading={false} error=""
         onPause={async () => {}} onResume={async () => {}} onDelete={async () => {}}
-        onDuplicate={async () => {}} />);
+        onDuplicate={async () => {}} onStop={async () => {}} onPauseSelected={async () => {}} />);
     fireEvent.click(screen.getByRole("button", { name: "Export" }));
     const dialog = within(await screen.findByRole("dialog"));
     assert.ok(dialog.getByRole("button", { name: "CSV" }));

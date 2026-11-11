@@ -25,6 +25,7 @@ import {
     Plug,
     MessageSquare,
     LifeBuoy,
+    UsersRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ViewportDrawer } from "@/components/ui/viewport-drawer";
@@ -87,6 +88,9 @@ const navigation: NavItem[] = [
     // inside Settings. Everything on it — is 2FA on, what is still signed in,
     // who changed that — is looked for in a hurry.
     { name: "Security", href: "/security", icon: ShieldCheck },
+    // Plan 3.5: the members of this customer account. Every signed-in member
+    // sees the page; the backend decides who may change, deactivate or remove.
+    { name: "Team", href: "/team", icon: UsersRound },
     {
         name: "Billing & Logs", href: "/billing", icon: CreditCard,
         children: [

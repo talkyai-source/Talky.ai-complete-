@@ -78,4 +78,9 @@ export const backendEndpoints = {
     supportTicketReopen: { method: "POST", path: "/support/tickets/{id}/reopen", tags: ["Support"], summary: "Reopen a support ticket" },
     supportTicketRate: { method: "POST", path: "/support/tickets/{id}/csat", tags: ["Support"], summary: "Rate a resolved support ticket" },
     supportUnread: { method: "GET", path: "/support/unread", tags: ["Support"], summary: "Tickets with unread staff replies" },
+
+    rbacRoles: { method: "GET", path: "/rbac/roles", tags: ["Team"], summary: "List roles" },
+    rbacTenantUsers: { method: "GET", path: "/rbac/tenant-users", tags: ["Team"], summary: "List tenant members" },
+    rbacTenantUserUpdate: { method: "PATCH", path: "/rbac/tenant-users/{id}", tags: ["Team"], summary: "Update a tenant member's role or status" },
+    rbacTenantUserRemove: { method: "DELETE", path: "/rbac/tenant-users/{id}", tags: ["Team"], summary: "Remove a tenant member" },
 } as const;
