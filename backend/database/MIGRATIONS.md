@@ -57,12 +57,17 @@ the current post-0065/0067 table contracts. It adopts compatible existing
 objects without replacing them, and refuses incompatible columns, defaults,
 constraints, indexes or tenant security.
 
-The current sole head is `0092_drop_broken_touch_triggers` (after
-0088-0091). On the production lineage it drops the touch triggers that set
-`updated_at` on `assistant_actions` and `reminders`, which have no such column,
-so every UPDATE of either table failed. Fresh installs have no such trigger, so
-it changes nothing there. A fresh install and the production lineage still
-differ elsewhere (QA F14-02, see the CI schema-parity step).
+`0092_drop_broken_touch_triggers` comes after 0088-0091. On the production
+lineage it drops the touch triggers that set `updated_at` on
+`assistant_actions` and `reminders`, which have no such column, so every
+UPDATE of either table failed. Fresh installs have no such trigger, so it
+changes nothing there.
+
+The current sole head is `0093_abuse_event_columns`. On the production lineage
+it adds the ten `abuse_events` columns the abuse code inserts and resolves
+with, so abuse events can be recorded at all; fresh installs already have them.
+A fresh install and the production lineage still differ elsewhere (QA F14-02,
+see the CI schema-parity step).
 
 For the `psql` commands above, privately configure libpq's `PGHOST`, `PGPORT`,
 `PGUSER`, `PGDATABASE` and authentication environment/password file. Configure
