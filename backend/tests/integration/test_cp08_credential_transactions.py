@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import fakeredis
 import pytest
 import pytest_asyncio
 from fastapi import HTTPException, Response
@@ -24,7 +25,7 @@ from app.api.v1.endpoints.mfa.challenge import create_mfa_challenge
 from app.api.v1.endpoints.mfa.schemas import MFAChallengeVerifyRequest
 from app.api.v1.endpoints.mfa.schemas import MFAConfirmRequest
 from app.core.db_utils import acquire_with_tenant
-from app.core.security import passkeys
+from app.core.security import auth_abuse, passkeys
 from app.core.security.recovery import store_recovery_codes
 from tests.integration.test_ag05_lead_evidence import lead_db  # noqa: F401
 
@@ -135,12 +136,19 @@ class ResetRedis:
         self.raw=json.dumps(payload)
         self.fail_cleanup=fail_cleanup
         self.attempts={}
+        # The shared abuse budgets (QA CP-08 / A3) are fail-closed Redis Lua over their own
+        # keys, so they run as the real scripts on a Lua-capable fake, never on this record.
+        self.budgets=fakeredis.FakeAsyncRedis(decode_responses=True)
     async def get(self,_): return self.raw
     async def delete(self,_):
         if self.fail_cleanup: raise RuntimeError('synthetic cleanup outage')
         self.raw=None
     async def eval(self,script,_count,*params):
-        # Fake of the Redis EVAL command (redis-py Redis.eval); nothing is executed.
+        # Fake of the Redis EVAL command (redis-py Redis.eval): the two budget scripts reset_password
+        # runs before it reads the code (reset-ip window, failed-guess windows) go to the real Lua;
+        # the code-attempt claim and the cleanup below are emulated on the single reset record.
+        if script in (auth_abuse._CLAIM_WINDOW,auth_abuse._RESET_FAILURE_WINDOW):
+            return await self.budgets.eval(script,_count,*params)
         if 'INCR' in script:
             # reset._CLAIM_RESET_ATTEMPT gets (request, attempts) then (original, max, ttl).
             # Same rules as the Lua: the code must still be current, each claim
