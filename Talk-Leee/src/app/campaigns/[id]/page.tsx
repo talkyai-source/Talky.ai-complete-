@@ -578,7 +578,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Play className="w-4 h-4" />
                                     {campaignStartLabel(campaign.status)}
                                 </Button>
-                            ) : campaign.status === "running" ? (
+                            ) : canChange && campaign.status === "running" ? (
                                 <>
                                     <Button variant="outline" onClick={handlePause} disabled={actionLoading}>
                                         {pausing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pause className="w-4 h-4" />}

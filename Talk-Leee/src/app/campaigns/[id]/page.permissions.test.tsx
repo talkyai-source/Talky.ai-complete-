@@ -70,7 +70,8 @@ for (const status of ["paused", "running"]) {
         load(status);
         render(<Page />);
         await screen.findByText("+442071234567", undefined, { timeout: SLOW });
-        for (const name of [/^Edit$/, /^Start$/, /^Pause$/, /^Stop$/, /Import CSV/, /Add Contact/, /^Edit \+44/, /^Delete \+44/]) {
+        // A paused campaign's start control reads Resume (plan 3.2); Duplicate needs campaigns:create (plan 3.1).
+        for (const name of [/^Edit$/, /^Start$/, /^Resume$/, /^Pause$/, /^Stop$/, /^Duplicate$/, /Import CSV/, /Add Contact/, /^Edit \+44/, /^Delete \+44/]) {
             assert.equal(absent(name), true, `${name} offered`);
         }
         assert.equal(contactListsReadOnly, true);
@@ -82,8 +83,20 @@ test("a role that may change campaigns keeps every control", async () => {
     load("paused");
     render(<Page />);
     await screen.findByText("+442071234567", undefined, { timeout: SLOW });
-    for (const name of [/^Edit$/, /^Start$/, /Import CSV/, /Add Contact/, /^Edit \+44/, /^Delete \+44/]) {
+    // A paused campaign's start control reads Resume (plan 3.2), not Start.
+    for (const name of [/^Edit$/, /^Resume$/, /Import CSV/, /Add Contact/, /^Edit \+44/, /^Delete \+44/]) {
         assert.ok(screen.getByRole("button", { name }), `${name} missing`);
     }
     await waitFor(() => assert.equal(contactListsReadOnly, false));
 });
+
+// A duplicate is a new campaign: it needs campaigns:create, whatever the role may change (plan 3.1).
+for (const [permission, offered] of [["campaigns:update", false], ["campaigns:create", true]] as const) {
+    test(`Duplicate is ${offered ? "offered" : "not offered"} to a role with campaigns:read and ${permission}`, async () => {
+        permissionsQuery = { isSuccess: true, data: { permissions: ["campaigns:read", permission], role: "user" } };
+        load("paused");
+        render(<Page />);
+        await screen.findByText("+442071234567", undefined, { timeout: SLOW });
+        assert.equal(absent(/^Duplicate$/), !offered);
+    });
+}
