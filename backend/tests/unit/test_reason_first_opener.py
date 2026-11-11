@@ -110,12 +110,15 @@ def test_the_reason_still_reaches_the_system_prompt():
 
 
 def test_relocated_turn_gives_identity_reason_and_permission():
-    """The shortened introduction still explains the call and yields the floor."""
+    """The opening context still gives the reason for the call, names who is speaking and
+    yields the floor. It scripts no spoken line or permission question any more: the lead_gen
+    outbound OPENING CONTEXT (personas/lead_gen.py:10) leaves the wording to the model."""
     flat = _flat(compose_prompt(
         "lead_gen", "Sarah", "All-state", LEAD_GEN_SLOTS, direction="outbound",
     )).lower()
-    introduction = f"sarah from all-state, calling about {REASON}. got a minute?"
+    introduction = f"this is an outbound call about {REASON}. introduce sarah and all-state naturally if needed, then listen."
     assert introduction in flat
+    # policies/how_to_speak.md:9: ask one question, "then stop and let them answer".
     assert "stop and let them answer" in flat
 
 
@@ -134,14 +137,19 @@ def test_relocated_turn_still_bans_the_bad_time_question():
 
 def test_stage_one_now_says_the_pickup_greeting_already_played():
     """Regression pin on the SEQUENCING fix: the persona prompt must no
-    longer claim the model speaks first — a bare pickup greeting already
-    played before this prompt runs, and STAGE 1 is what happens on the
-    model's first REAL turn, after the callee replies."""
+    longer claim the model speaks first. Whether a greeting was already
+    delivered is runtime state (LIVE STATE introduction=...), not prompt text."""
     flat = _flat(compose_prompt(
         "lead_gen", "Sarah", "All-state", LEAD_GEN_SLOTS, direction="outbound",
     ))
     assert "you speak first, the moment they pick up" not in flat.lower()
-    assert "already played" in flat.lower() or "already spoke" in flat.lower()
+    # The delivery fact is runtime state (LIVE STATE introduction=..., live_state.py:13-15);
+    # the composed prompt carries no staged script ("STAGE 1") and no "already played" claim.
+    assert "stage 1" not in flat.lower()
+    from app.services.scripts.prompts.live_state import build_live_state_block
+    assert "introduction=not_delivered" in build_live_state_block(
+        agent_name="Sarah", company_name="All-state", has_introduced=False,
+    )
 
 
 def test_inbound_never_states_the_reason():
