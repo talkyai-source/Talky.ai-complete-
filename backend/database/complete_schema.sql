@@ -2547,10 +2547,11 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_severity ON audit_logs(severity);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_time ON audit_logs(tenant_id, event_time DESC);
 
 -- Legacy audit functions production has (QA F14-02, decision D4: adopted as they
--- are, neither fixed nor removed). The application never calls them, and
--- log_audit_event names audit_logs columns that do not exist, so it cannot run.
--- The bodies are production's text, byte for byte (the parity check compares
--- function bodies literally), trailing space on the INSERT column list included.
+-- are, neither fixed nor removed). The application never calls them. The bodies
+-- are production's text, byte for byte (the parity check compares function
+-- bodies literally). Production's third one, log_audit_event, is not created
+-- here: it was a SECURITY DEFINER without a pinned search_path that could not
+-- run, and migration 0094 drops it (tests/unit/test_bootstrap_definer_functions.py).
 CREATE OR REPLACE FUNCTION apply_audit_retention() RETURNS void
     LANGUAGE plpgsql
     AS $$
@@ -2572,23 +2573,6 @@ BEGIN
 
     GET DIAGNOSTICS deleted_count = ROW_COUNT;
     RETURN deleted_count;
-END;
-$$;
-
-CREATE OR REPLACE FUNCTION log_audit_event(p_user_id uuid, p_tenant_id uuid, p_action_type character varying, p_target_type character varying, p_target_id uuid, p_description text, p_metadata jsonb, p_ip_address inet, p_user_agent text) RETURNS uuid
-    LANGUAGE plpgsql SECURITY DEFINER
-    AS $$
-DECLARE
-    v_id UUID;
-BEGIN
-    INSERT INTO audit_logs (
-        user_id, tenant_id, action_type, target_type, target_id, 
-        description, metadata, ip_address, user_agent
-    ) VALUES (
-        p_user_id, p_tenant_id, p_action_type, p_target_type, p_target_id,
-        p_description, p_metadata, p_ip_address, p_user_agent
-    ) RETURNING id INTO v_id;
-    RETURN v_id;
 END;
 $$;
 
