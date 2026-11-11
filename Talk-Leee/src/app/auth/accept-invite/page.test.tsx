@@ -9,7 +9,7 @@ import AcceptInvitePage from "./page";
 // QA F1-15 / D4-2: where an invited person joins. The token arrives in the
 // link's fragment, is read once and removed from the address bar, and only
 // travels in request bodies.
-const TOKEN = "tok-abcdefghijklmnopqrstuvwxyz0123456789";
+const TOKEN = "t".repeat(40);
 const SLOW = 15_000;
 const INVITE: InvitePreview = { email: "sam@example.com", workspace_name: "Acme Ltd", role: "agent", expires_at: "2026-11-18T09:00:00Z" };
 

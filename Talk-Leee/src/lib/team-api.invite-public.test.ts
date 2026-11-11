@@ -26,7 +26,7 @@ test("a signed-out visitor can preview and accept an invite", async () => {
             : { email: "sam@example.com", message: "joined" };
         return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
-    const token = "tok-abcdefghijklmnopqrstuvwxyz";
+    const token = "t".repeat(30);
     assert.equal((await inviteApi.preview(token)).workspace_name, "Acme Ltd");
     const joined = await inviteApi.accept({ token, name: "Sam", password: "x".repeat(16), confirmPassword: "x".repeat(16) });
     assert.equal(joined.email, "sam@example.com");

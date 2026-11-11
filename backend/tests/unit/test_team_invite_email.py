@@ -21,14 +21,14 @@ async def test_the_invite_email_links_to_the_accept_page_and_escapes_names(monke
         workspace_name="Acme <b>Ltd</b>\r\nBcc: someone@example.org",
         inviter="Ada\nAdmin",
         role_name="agent",
-        token="tok_123-abc",
+        token="tokentoken",
         expires_at="2026-11-18T09:00:00+00:00",
     )
     assert delivered is True
     assert sent["recipient_email"] == "sam@example.com"
     assert "\n" not in sent["subject"] and "\r" not in sent["subject"]
     assert sent["subject"].startswith("Ada Admin invited you to Acme <b>Ltd</b> Bcc:")
-    link = "https://app.example.com/auth/accept-invite#token=tok_123-abc"
+    link = "https://app.example.com/auth/accept-invite#token=tokentoken"
     assert link in sent["text_body"]
     assert f'href="{link}"' in sent["html_body"]
     assert "<b>Ltd</b>" not in sent["html_body"] and "&lt;b&gt;Ltd&lt;/b&gt;" in sent["html_body"]
