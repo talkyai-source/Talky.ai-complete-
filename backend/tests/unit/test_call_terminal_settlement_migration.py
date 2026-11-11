@@ -84,12 +84,14 @@ def test_0028_repairs_the_missing_call_to_dialer_job_link() -> None:
     migration = _normalized(_MIGRATION.read_text(encoding="utf-8"))
     complete = _normalized(_SCHEMA.read_text(encoding="utf-8"))
 
-    for source in (migration, complete):
-        assert "ADD COLUMN IF NOT EXISTS dialer_job_id UUID" in source
-        assert "REFERENCES dialer_jobs(id) ON DELETE SET NULL" in source
-        assert "CREATE INDEX IF NOT EXISTS idx_calls_dialer_job_id" in source
+    assert "ADD COLUMN IF NOT EXISTS dialer_job_id UUID" in migration
+    assert "REFERENCES dialer_jobs(id) ON DELETE SET NULL" in migration
+    assert "CREATE INDEX IF NOT EXISTS idx_calls_dialer_job_id" in migration
     assert "SELECT DISTINCT ON (call_id) call_id, id FROM dialer_jobs" in migration
     assert "c.dialer_job_id IS NULL" in migration
+    # 0028 is the single creator on fresh installs too (QA F14-02): the bootstrap
+    # creating the column first would put it before 0022's columns, unlike production.
+    assert "ADD COLUMN IF NOT EXISTS dialer_job_id" not in complete
 
 
 def test_compatibility_function_is_monotonic_but_never_claims_settlement() -> None:

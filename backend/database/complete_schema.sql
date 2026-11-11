@@ -66,9 +66,19 @@ CREATE TABLE IF NOT EXISTS tenants (
     stripe_customer_id VARCHAR(100),
     stripe_subscription_id VARCHAR(100),
     subscription_status VARCHAR(50) DEFAULT 'inactive',
-    
-    -- Day 8: Suspension and White Label support
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_deletion')),
+
+    -- created_at .. is_partner sit here, ahead of the Day 8 columns, because that
+    -- is the column order of the production dump (QA F14-02). partner_id is the
+    -- partner link the later ALTER TABLE ... ADD COLUMN IF NOT EXISTS also names;
+    -- with the column already here, that statement does nothing.
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    partner_id UUID REFERENCES tenants(id),
+    is_partner BOOLEAN DEFAULT FALSE,
+
+    -- Day 8: Suspension and White Label support. The status CHECK is spelled
+    -- with explicit casts: that is the text production stores.
+    status VARCHAR(20) DEFAULT 'active' CHECK (status::text = ANY (ARRAY['active'::varchar::text, 'suspended'::varchar::text, 'pending_deletion'::varchar::text])),
     suspended_at TIMESTAMPTZ,
     -- FK is added after user_profiles is created below. Keeping it inline
     -- creates an impossible circular bootstrap: user_profiles references
@@ -76,9 +86,12 @@ CREATE TABLE IF NOT EXISTS tenants (
     suspended_by UUID,
     suspension_reason TEXT,
     white_label_partner_id UUID, -- Will add foreign key after table creation
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+
+    -- Migration 0005 adds this column, but a fresh install is stamped past it, so
+    -- the bootstrap carries it, at production's position: ahead of allowance_anchor_at
+    -- (0072) and assistant_model (0087), which migrations append after it. Migration
+    -- 0087 finds the column and its CHECK here and adopts them unchanged.
+    active_telephony_provider TEXT DEFAULT 'none' CHECK (active_telephony_provider IN ('twilio', 'vonage', 'sip', 'none'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenants_plan_id ON tenants(plan_id);
@@ -693,11 +706,6 @@ CREATE TABLE IF NOT EXISTS calls (
     started_at TIMESTAMPTZ,
     answered_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
-    -- Separate from status: an operator may write the first terminal status,
-    -- while the provider callback still owns once-only outbound side effects.
-    terminal_settled_at TIMESTAMPTZ,
-    terminal_retry_payload JSONB,
-    terminal_retry_enqueued_at TIMESTAMPTZ,
     duration_seconds INTEGER,
     recording_url TEXT,
     transcript TEXT,
@@ -716,8 +724,15 @@ CREATE TABLE IF NOT EXISTS calls (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON COLUMN calls.terminal_settled_at IS
-    'Proof that outbound call, lead, job, campaign and retry-outbox intent committed; full durability also requires any retry payload to be acknowledged';
+-- dialer_job_id, terminal_settled_at, terminal_retry_payload and
+-- terminal_retry_enqueued_at (with idx_calls_dialer_job_id and the comment on
+-- terminal_settled_at) are deliberately NOT created here: migration 0028 creates
+-- them, in that order. Production has them right after the inbound columns that
+-- migration 0022 adds, and 0022 uses plain ADD COLUMN, so this bootstrap cannot
+-- hold those columns either. A column created here would land ahead of the
+-- 0015/0017/0022 columns instead of behind them, and QA F14-02 compares column
+-- order (billable_calls expands SELECT * in that order). A fresh install runs
+-- 0028 like every other database, so it ends with the same columns.
 
 CREATE INDEX IF NOT EXISTS idx_calls_tenant_id ON calls(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_calls_campaign_id ON calls(campaign_id);
@@ -792,11 +807,13 @@ CREATE INDEX IF NOT EXISTS idx_recordings_s3_tenant_id ON recordings_s3(tenant_i
 CREATE INDEX IF NOT EXISTS idx_recordings_s3_status ON recordings_s3(status);
 
 -- 2.6 TRANSCRIPTS
+-- No talklee_call_id column or index here: production has none and the only
+-- transcript writer (transcript_service.py) never sets one; the id lives on
+-- calls (QA F14-02).
 CREATE TABLE IF NOT EXISTS transcripts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
     call_id UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
-    talklee_call_id VARCHAR(20),
     turns JSONB NOT NULL DEFAULT '[]',
     full_text TEXT,
     word_count INTEGER DEFAULT 0,
@@ -812,7 +829,6 @@ CREATE TABLE IF NOT EXISTS transcripts (
 
 CREATE INDEX IF NOT EXISTS idx_transcripts_tenant_id ON transcripts(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_transcripts_call_id ON transcripts(call_id);
-CREATE INDEX IF NOT EXISTS idx_transcripts_talklee_id ON transcripts(talklee_call_id) WHERE talklee_call_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_transcripts_full_text_search
 ON transcripts USING gin(to_tsvector('english', COALESCE(full_text, '')));
 
@@ -836,6 +852,11 @@ CREATE TABLE IF NOT EXISTS call_legs (
     answered_at      TIMESTAMPTZ,
     ended_at         TIMESTAMPTZ,
     duration_seconds INTEGER,
+    -- metadata, created_at and updated_at sit ahead of the billing columns
+    -- because that is the column order of the production dump (QA F14-02).
+    metadata         JSONB DEFAULT '{}',
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW(),
     billing_status   VARCHAR(16) NOT NULL DEFAULT 'none'
         CONSTRAINT call_legs_billing_status_valid
         CHECK (billing_status IN ('none', 'reserved', 'held', 'finalized', 'released', 'reversed')),
@@ -847,10 +868,7 @@ CREATE TABLE IF NOT EXISTS call_legs (
     cost              NUMERIC(12, 6)
         CONSTRAINT call_legs_cost_nonnegative
         CHECK (cost IS NULL OR cost >= 0),
-    currency          VARCHAR(3),
-    metadata         JSONB DEFAULT '{}',
-    created_at       TIMESTAMPTZ DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ DEFAULT NOW()
+    currency          VARCHAR(3)
 );
 
 CREATE INDEX IF NOT EXISTS idx_call_legs_call_id ON call_legs(call_id);
@@ -1054,18 +1072,9 @@ CREATE TABLE IF NOT EXISTS action_plans (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Forward reference fix: calls.action_plan_id → action_plans
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints
-        WHERE constraint_name = 'fk_calls_action_plan'
-        AND table_name = 'calls'
-    ) THEN
-        ALTER TABLE calls ADD CONSTRAINT fk_calls_action_plan
-            FOREIGN KEY (action_plan_id) REFERENCES action_plans(id);
-    END IF;
-END $$;
+-- calls.action_plan_id has no foreign key to action_plans: production has none,
+-- and the fresh install matches it (QA F14-02, decision D3). Adding the key to
+-- both paths is a separate change (count orphans, then NOT VALID + VALIDATE).
 
 -- =============================================================================
 -- SECTION 5: SCHEDULING & REMINDERS
@@ -1228,15 +1237,17 @@ CREATE TABLE IF NOT EXISTS tenant_ai_configs (
     tts_model TEXT NOT NULL DEFAULT 'Chirp3-HD',
     tts_voice_id TEXT NOT NULL DEFAULT 'en-US-Chirp3-HD-Leda',
     tts_sample_rate INTEGER NOT NULL DEFAULT 24000,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     -- Per-tenant voice-pipeline tuning (T4-C3). Partial dict matching
     -- the VoiceTuning dataclass (app/domain/services/voice_tuning.py).
     -- Empty JSONB means "use env / code defaults". Validation happens
     -- in code via VoiceTuningResolver.coerce_user_partial — the column
     -- itself stays permissive so future fields land without a schema
-    -- migration.
-    voice_tuning JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    -- migration. Last, after updated_at: migration 0008 added it to
+    -- production's table, and the later AI-config migrations append after it
+    -- (QA F14-02 column order).
+    voice_tuning JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenant_ai_configs_tenant_id ON tenant_ai_configs(tenant_id);
@@ -2200,15 +2211,9 @@ END $active_owner$;
 -- END 0060 ACTIVE JOB OWNER
 
 
--- Canonical once-only call settlement resolves the originating job from the
--- call row. Kept nullable for inbound/manual calls and added here (after
--- dialer_jobs exists) because calls is declared earlier in this bootstrap.
-ALTER TABLE calls
-    ADD COLUMN IF NOT EXISTS dialer_job_id UUID
-        REFERENCES dialer_jobs(id) ON DELETE SET NULL;
-CREATE INDEX IF NOT EXISTS idx_calls_dialer_job_id
-    ON calls(dialer_job_id)
-    WHERE dialer_job_id IS NOT NULL;
+-- calls.dialer_job_id (the link canonical once-only settlement follows from the
+-- call row to its job) and its index are created by migration 0028, not here;
+-- see the note under the calls table.
 
 -- =============================================================================
 -- SECTION 6.5: VOICE SECURITY & CALL GUARD (Day 7)
@@ -2294,17 +2299,20 @@ CREATE INDEX IF NOT EXISTS idx_abuse_rules_type ON abuse_detection_rules(rule_ty
 -- Per-tenant and global DNC lists for compliance.
 -- =============================================================================
 
+-- The table is created in the shape of the production baseline
+-- (baseline_2026-06-02.sql): normalized_number varchar(20), source varchar(50),
+-- no phone_number and no created_by. The 0061 contract below then does to it what
+-- migration 0061 does to production: source becomes text and phone_number is
+-- appended last, so a fresh install ends with production's column list (QA F14-02).
 CREATE TABLE IF NOT EXISTS dnc_entries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE, -- NULL = global DNC
-    phone_number VARCHAR(50) NOT NULL,
-    normalized_number VARCHAR(50) NOT NULL,
-    source TEXT NOT NULL DEFAULT 'manual', -- Existing API accepts free-text sources.
+    normalized_number VARCHAR(20) NOT NULL,
+    source VARCHAR(50) NOT NULL DEFAULT 'manual', -- 0061 widens this to free text.
     reason TEXT,
-    expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    created_by UUID, -- Retained legacy attribution; not inferred as added_by.
     added_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -2449,7 +2457,7 @@ CREATE TABLE IF NOT EXISTS white_label_partners (
     tenant_id UUID NOT NULL UNIQUE REFERENCES tenants(id) ON DELETE CASCADE, -- partner's own tenant
     company_name VARCHAR(255) NOT NULL,
     contact_email VARCHAR(255),
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_deletion')),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status::text = ANY (ARRAY['active'::varchar::text, 'suspended'::varchar::text, 'pending_deletion'::varchar::text])),
     suspended_at TIMESTAMPTZ,
     suspended_by UUID REFERENCES user_profiles(id),
     suspension_reason TEXT,
@@ -2464,7 +2472,8 @@ CREATE INDEX IF NOT EXISTS idx_white_label_partners_status ON white_label_partne
 
 -- Add the deferred tenants -> white_label_partners FK once, including when
 -- this consolidated schema is applied over the canonical baseline (whose
--- constraint name differs from older local schemas).
+-- constraint name differs from older local schemas). It has no ON DELETE action,
+-- as in production: a partner that still has tenants cannot be deleted (QA F14-02).
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -2489,7 +2498,7 @@ BEGIN
         ALTER TABLE tenants
             ADD CONSTRAINT tenants_white_label_partner_id_fkey
             FOREIGN KEY (white_label_partner_id)
-            REFERENCES white_label_partners(id) ON DELETE SET NULL;
+            REFERENCES white_label_partners(id);
     END IF;
 END $$;
 
@@ -2622,13 +2631,15 @@ CREATE TABLE IF NOT EXISTS admin_media_deletion_intents (
     status VARCHAR(24) NOT NULL DEFAULT 'intent_committed'
         CHECK (status IN ('intent_committed', 'object_deleted', 'completed', 'failed')),
     attempt_count INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count > 0),
-    attempt_actor_ids UUID[] NOT NULL,
     last_error TEXT,
     object_deleted_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     response_body JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Last, as in production, where migration 0026 appended it (QA F14-02 column
+    -- order). The ADD COLUMN IF NOT EXISTS below stays for databases that predate it.
+    attempt_actor_ids UUID[] NOT NULL,
     CONSTRAINT admin_media_deletion_actor_idempotency_unique
         UNIQUE (actor_id, idempotency_key),
     CONSTRAINT admin_media_deletion_resource_unique
@@ -3692,6 +3703,7 @@ JOIN user_permissions up_perm ON up_perm.user_id = up.id
 JOIN permissions p ON p.id = up_perm.permission_id
 WHERE up_perm.expires_at IS NULL OR up_perm.expires_at > NOW();
 
+-- The WHERE text is spelled the way the production dump prints it (QA F14-02).
 CREATE OR REPLACE VIEW user_tenant_roles AS
 SELECT
     up.id AS user_id,
@@ -3707,7 +3719,7 @@ FROM user_profiles up
 JOIN tenant_users tu ON tu.user_id = up.id
 JOIN tenants t ON t.id = tu.tenant_id
 JOIN roles r ON r.id = tu.role_id
-WHERE tu.status IN ('active', 'pending');
+WHERE tu.status::text = ANY (ARRAY['active'::varchar::text, 'pending'::varchar::text]);
 
 -- Three views production has and the bootstrap lacked (QA F14-02; archived
 -- day8_audit_suspension_secrets.sql). Nothing in the application reads them.
