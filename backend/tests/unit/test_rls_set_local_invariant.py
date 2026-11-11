@@ -599,7 +599,7 @@ def test_platform_emergency_exception_cannot_hide_a_new_tenant_query(tmp_path: P
 
 
 def test_platform_emergency_exception_schema_still_has_no_tenant_or_rls_policy() -> None:
-    migration = ast.parse((_BACKEND_ROOT / "alembic/versions/0087_bootstrap_manual_parity.py").read_text(encoding="utf-8"))
+    migration = ast.parse((_BACKEND_ROOT / "Alembic/versions/0087_bootstrap_manual_parity.py").read_text(encoding="utf-8"))
     table, = [node for node in ast.walk(migration) if isinstance(node, ast.Call)
               and isinstance(node.func, ast.Name) and node.func.id == "_table" and node.args
               and isinstance(node.args[0], ast.Constant) and node.args[0].value == "emergency_access_requests"]
