@@ -36,7 +36,10 @@ async def test_selector_and_action_admission_preserve_question_scope(prior, call
     history = _history(prior, caller)
     provider = SimpleNamespace(supports_tools=True, stream_chat_with_tools=AsyncMock())
     names = [tool["function"]["name"] for tool in action_tools_for_turn(history, provider)]
-    assert ("end_call" in names) is ends
+    # action_tools_for_turn offers every connected action and no longer hides end_call by
+    # guessing at the caller's words (action_tools.py:383-392; pinned by
+    # test_available_tools_are_not_hidden_by_keyword_guessing). run_voice_action below is the scope gate.
+    assert "end_call" in names
     # A newly generated assistant farewell is not what this caller answered.
     session = SimpleNamespace(conversation_history=history + [Message(role=MessageRole.ASSISTANT, content="Goodbye.")])
     result = await run_voice_action(session, "end_call", {}, user_text=caller)
