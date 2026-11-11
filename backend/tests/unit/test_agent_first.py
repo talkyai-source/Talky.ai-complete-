@@ -103,9 +103,10 @@ async def test_live_state_does_not_reinvite_intro_after_agent_first_greeting():
         company_name="Acme",
         has_introduced=getattr(session, "_has_introduced", False),
     )
-    assert "ALREADY introduced" in block
-    assert "Do NOT introduce yourself again" in block
-    assert "have not introduced yourself" not in block
+    # LIVE STATE is now neutral runtime facts (prompts/live_state.py:13-15), not an
+    # instruction line: it reports introduction=delivered / not_delivered.
+    assert "introduction=delivered" in block
+    assert "introduction=not_delivered" not in block
 
 
 @pytest.mark.asyncio
@@ -164,8 +165,9 @@ async def test_bare_pickup_greeting_live_state_still_invites_introduction():
         company_name="Acme",
         has_introduced=getattr(session, "_has_introduced", False),
     )
-    assert "have not introduced yourself" in block
-    assert "ALREADY introduced" not in block
+    # prompts/live_state.py:13-15 reports introduction=not_delivered for a bare greeting.
+    assert "introduction=not_delivered" in block
+    assert "introduction=delivered" not in block
 
 
 @pytest.mark.parametrize(
