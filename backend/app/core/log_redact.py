@@ -76,6 +76,7 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -382,6 +383,20 @@ def scrub_text(value: str) -> str:
         end = stop
     pieces.append(_PII_RE.sub(_mask_match, value[end:]))
     return "".join(pieces)
+
+
+_REFERENCE_LETTERS = "abcdefghjkmnpqrstuvwxyz"  # no i, l, o: easy to read back
+
+
+def error_reference() -> str:
+    """A short reference a user can quote for an error logged in full.
+
+    Letters only. A hex id with 11+ digits in a row (about 1 in 140 of them)
+    is a `longrun` above and gets masked, so the logged reference no longer
+    matched the one the user was shown (CI flake, 12 Nov 2026). 12 letters
+    from 23 is about 54 bits.
+    """
+    return "".join(secrets.choice(_REFERENCE_LETTERS) for _ in range(12))
 
 
 def summarize_sensitive(value: str) -> str:

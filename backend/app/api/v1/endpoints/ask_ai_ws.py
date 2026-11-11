@@ -13,7 +13,6 @@ Day 41: Refactored to use VoiceOrchestrator for lifecycle management.
 import os
 import json
 import time
-import uuid
 import asyncio
 import logging
 import ipaddress
@@ -29,6 +28,7 @@ from app.domain.services.ask_ai_session_config import (
     ASK_AI_CONFIG,
 )
 from app.domain.models.conversation import Message, MessageRole
+from app.core.log_redact import error_reference
 
 logger = logging.getLogger(__name__)
 
@@ -434,7 +434,7 @@ async def ask_ai_websocket(websocket: WebSocket, session_id: str):
         except Exception as e:
             # QA F2-07: the exception text stays in the log, under a reference
             # the visitor can quote; the page gets a fixed message.
-            reference = uuid.uuid4().hex[:12]
+            reference = error_reference()
             logger.error("Ask AI error ref=%s session=%s: %s", reference, session_id, e, exc_info=True)
             try:
                 await websocket.send_json({

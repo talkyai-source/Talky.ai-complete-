@@ -37,6 +37,7 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
+from app.core.log_redact import error_reference
 from app.core.security.rbac import (
     Permission,
     check_permission,
@@ -1062,7 +1063,7 @@ async def campaign_test_websocket(
         except Exception as e:  # noqa: BLE001
             # QA F2-07: the exception text stays in the log, under a reference
             # the user can quote; the page gets a fixed message.
-            reference = uuid.uuid4().hex[:12]
+            reference = error_reference()
             logger.error("campaign_test_ws error ref=%s: %s", reference, e, exc_info=True)
             try:
                 await websocket.send_json({
