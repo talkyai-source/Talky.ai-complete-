@@ -291,7 +291,9 @@ async def test_admin_mfa_cookie_hold_evidence_restore_and_old_credentials(journe
         # The real Admin client sends its issued bearer with matching cookies.
         # Keep the cookie-only identity check above, then exercise that transport.
         admin.headers["Authorization"] = "Bearer " + verified.json()["access_token"]
-        listed = await request(admin, "GET", "/admin/tenants", params={"limit": 1000})
+        # A page holds at most 200 tenants (QA F2-13); the search keeps this run's three on it.
+        listed = await request(admin, "GET", "/admin/tenants",
+                               params={"limit": 200, "search": "Synthetic Admin HTTP"})
         assert set(map(str, db.tenants)) <= {row["id"] for row in listed.json()}
 
         for client, user in ((member, db.users[1]), (other, db.users[2])):
