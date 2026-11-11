@@ -19,6 +19,10 @@ def test_the_demo_hears_with_assemblyai_in_english():
     assert AssemblyAISettings.model_validate(config.assemblyai_settings)
     # The browser sends 16 kHz PCM, which AssemblyAI receives as is.
     assert (config.stt_sample_rate, config.stt_encoding) == (16000, "linear16")
+    # The brand and agent names are boosted (the first live test heard "Talkly").
+    assert config.stt_keyterms == ["Talk-Lee", "Tessa"]
+    from app.domain.models.assemblyai_config import AssemblyAIKeyterm  # noqa: F401  (1-50 characters each)
+    assert all(1 <= len(term) <= 50 for term in config.stt_keyterms)
 
 
 def test_the_demo_answers_with_deepseek_flash():

@@ -129,6 +129,9 @@ def build_ask_ai_session_config() -> VoiceSessionConfig:
         tts_provider_type=ASK_AI_CONFIG["tts_provider"],
         stt_model=ASSEMBLYAI_MODEL,
         stt_language="en",
+        # The brand and the agent's name, as campaigns pass theirs per call: the
+        # first live demo heard "Talk-Lee" as "Talkly" (12 Nov 2026).
+        stt_keyterms=["Talk-Lee", "Tessa"],
         assemblyai_settings=AssemblyAISettings().model_dump(mode="json"),
         stt_sample_rate=16000,
         stt_encoding="linear16",
