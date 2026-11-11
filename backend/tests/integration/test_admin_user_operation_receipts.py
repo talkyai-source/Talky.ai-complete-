@@ -307,25 +307,41 @@ async def test_membership_insert_after_review_cannot_be_adopted_by_old_mutation(
             body["role"] = "readonly"
         body = await prepare_write(db, admin, method, f"/admin/users/{db.users[1]}", body)
         task = asyncio.create_task(call(db, admin, method, f"/admin/users/{db.users[1]}", json=body))
+        insert = None
         try:
             await asyncio.wait_for(entered.wait(), 5)
-            inserted = await asyncio.wait_for(call(db, admin, "POST", "/rbac/tenant-users", json={
+            # Membership writes are audited (QA F12-10) and take the audit chain lock first,
+            # as the reviewed mutation did, so the insert waits for it instead of landing
+            # between its review and its write: the old mutation can never adopt it.
+            insert = asyncio.create_task(call(db, admin, "POST", "/rbac/tenant-users", json={
                 "user_id": str(db.users[1]), "tenant_id": str(db.tenants[1]),
                 "role_name": "tenant_admin", "is_primary": True,
-            }), 5)
-            assert inserted.status_code == 201
+            }))
+            finished, _ = await asyncio.wait({insert}, timeout=1)
+            assert not finished, "the membership insert must wait for the reviewed mutation"
             release.set()
             result = await asyncio.wait_for(task, 10)
+            inserted = await asyncio.wait_for(insert, 10)
             membership = await db.owner.fetchval("""SELECT r.name FROM tenant_users tu
                 JOIN roles r ON r.id=tu.role_id WHERE tu.user_id=$1""", db.users[1])
             RUN_EVIDENCE.append({"case": "post_review_membership_insert", "method": method,
-                                 "status": result.status_code, "new_membership_preserved": membership == "tenant_admin"})
-            assert result.status_code == 409 and membership == "tenant_admin"
+                                 "status": result.status_code, "insert_status": inserted.status_code,
+                                 "new_membership_preserved": membership == "tenant_admin"})
+            if method == "PATCH":
+                # The reviewed state had no membership, so the role change is refused; the
+                # insert that waited for it then lands untouched.
+                assert result.status_code == 409 and result.json()["error"]["code"] == "user_membership_required"
+                assert inserted.status_code == 201 and membership == "tenant_admin"
+            else:
+                # The delete commits first; the insert that waited for it finds no user.
+                assert result.status_code == 200 and result.json()["outcome"] == "deleted"
+                assert inserted.status_code == 404 and membership is None
         finally:
             release.set()
-            if not task.done():
-                task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
+            for pending in (task, insert):
+                if pending is not None and not pending.done():
+                    pending.cancel()
+            await asyncio.gather(*(t for t in (task, insert) if t is not None), return_exceptions=True)
 
 
 async def test_explicit_self_rejection_is_no_write_code_not_unknown(crud_db):  # noqa: F811
