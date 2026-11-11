@@ -14,7 +14,7 @@ import pytest
 
 from app.api.v1.endpoints import ask_ai_ws, campaign_test_ws
 from app.domain.models.ai_config import AIProviderConfig
-from tests.unit.test_ask_ai_signed_in_only import _CookieWs, env  # noqa: F401  (fixture)
+from tests.unit.test_ask_ai_public_demo import _CookieWs, env  # noqa: F401  (fixture)
 from tests.unit.test_campaign_test_ws import _CAMPAIGN, FakeWebSocket, _Harness
 
 SECRET = "asyncpg: password authentication failed for user talkyai at 10.0.0.5"
@@ -30,10 +30,6 @@ def _assert_safe(frames, caplog):
 
 
 async def test_ask_ai_failure_sends_a_reference_not_the_exception_text(env, monkeypatch, caplog):  # noqa: F811
-    async def signed_in(_websocket):
-        return {"user_id": "u1", "tenant_id": "t1"}
-
-    monkeypatch.setattr(ask_ai_ws, "_signed_in_principal", signed_in)
     env.orch.create_voice_session = AsyncMock(side_effect=RuntimeError(SECRET))
     ws = _CookieWs(env.gateway, cookie="jwt")
     with caplog.at_level(logging.ERROR, logger=ask_ai_ws.logger.name):

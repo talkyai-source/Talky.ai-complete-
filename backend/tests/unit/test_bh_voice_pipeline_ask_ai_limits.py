@@ -97,13 +97,6 @@ def env(monkeypatch):
     )
     monkeypatch.setattr(ask_ai_ws, "_ask_ai_semaphore", None)
     monkeypatch.setattr(ask_ai_ws, "_sessions_by_ip", {}, raising=False)
-
-    # QA F11-06: the socket serves signed-in sessions only; these tests are
-    # about the caps for such a session.
-    async def signed_in(_websocket):
-        return {"user_id": "u1", "tenant_id": "t1"}
-
-    monkeypatch.setattr(ask_ai_ws, "_signed_in_principal", signed_in)
     return SimpleNamespace(gateway=gateway, orch=orch)
 
 
