@@ -221,7 +221,9 @@ test("demo path: dashboard, meetings, reminders, email, connectors", async ({ pa
     await expect(page).toHaveURL(/\/meetings/);
     await expect(page.getByRole("heading", { name: /^Meetings$/ })).toBeVisible({ timeout: 20_000 });
 
-    await page.goto("/reminders", { waitUntil: "networkidle", timeout: 60_000 });
+    // Not "networkidle": background polling can keep the network busy after the page has rendered
+    // (CI 12 Nov 2026 timed out with the Reminders heading on screen). The heading check below is the wait.
+    await page.goto("/reminders", { waitUntil: "domcontentloaded", timeout: 60_000 });
     await expect(page).toHaveURL(/\/reminders/);
     await expect(page.getByRole("heading", { name: /^Reminders$/ })).toBeVisible({ timeout: 20_000 });
 
