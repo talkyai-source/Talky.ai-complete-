@@ -21,8 +21,8 @@ jobs:
       CI: "true"
       PW_PROD_AUDIT: "0"
       NEXT_PUBLIC_APP_ENV: development
-      # All API requests stay on loopback. This job uses existing local fixture
-      # expectations and contains no staging/production tokens or credentials.
+      # All API requests stay on loopback; the specs answer them in the browser
+      # (tests/support/session.ts). No staging/production tokens or credentials.
       NEXT_PUBLIC_API_BASE_URL: http://127.0.0.1:3100/api/v1
       NEXT_PUBLIC_SENTRY_ENABLED: ""
     steps:
@@ -36,6 +36,19 @@ jobs:
           cache-dependency-path: Talk-Leee/package-lock.json
       - run: npm ci
       - run: npx playwright install --with-deps chromium
+      # Check the build that ships: next dev mounts every component twice
+      # (React Strict Mode) and compiles pages on demand, which neither users
+      # nor these checks should see. Playwright reuses this server.
+      - name: Build the web app as it ships
+        run: npm run build
+      - name: Start the production server on the port the specs use
+        run: |
+          nohup npm run start -- -p 3100 > next-start.log 2>&1 &
+          for attempt in $(seq 1 60); do
+            curl -fsS -o /dev/null http://127.0.0.1:3100/ && break
+            sleep 2
+          done
+          curl -fsS -o /dev/null http://127.0.0.1:3100/
       - name: Existing smoke and visual expectations (no snapshot rewrite)
         run: npx playwright test tests/demo.smoke.spec.ts tests/dashboard-first-row.visual.spec.ts --project=chromium --workers=1 --reporter=list,html
       - uses: actions/upload-artifact@v4
@@ -45,4 +58,5 @@ jobs:
           path: |
             Talk-Leee/test-results
             Talk-Leee/playwright-report
+            Talk-Leee/next-start.log
           retention-days: 14

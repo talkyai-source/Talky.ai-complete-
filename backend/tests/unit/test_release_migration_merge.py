@@ -28,7 +28,8 @@ KEY_VALIDATION = "0089_provider_key_validation"
 ALERTS = "0090_campaign_alerts"
 CURSOR = "0091_call_history_cursor"
 TRIGGERS = "0092_drop_broken_touch_triggers"
-HEAD = "0093_abuse_event_columns"
+ABUSE = "0093_abuse_event_columns"
+HEAD = "0094_harden_legacy_db_objects"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -41,7 +42,8 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # 0084 (hand-run call-failure/lead-signal columns, QA F14-02) sits on 0083
     # (pay as you go), on 0082 (support system), which sits on the payment
     # merge that joins both histories.
-    assert SCRIPTS.get_revision(HEAD).down_revision == TRIGGERS
+    assert SCRIPTS.get_revision(HEAD).down_revision == ABUSE
+    assert SCRIPTS.get_revision(ABUSE).down_revision == TRIGGERS
     assert SCRIPTS.get_revision(TRIGGERS).down_revision == CURSOR
     assert SCRIPTS.get_revision(CURSOR).down_revision == ALERTS
     assert SCRIPTS.get_revision(ALERTS).down_revision == KEY_VALIDATION
@@ -189,4 +191,4 @@ def test_payment_merge_has_no_business_sql_and_refuses_history_split():
 def test_upgrade_after_the_payment_merge_runs_only_support_pay_as_you_go_then_the_fold():
     revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", PAYMENT_MERGE)]
     assert revisions == [SUPPORT, PAYG, CALL_SIGNALS, LEGAL, WORKFLOWS,
-                         PARITY, CONSTRAINTS, KEY_VALIDATION, ALERTS, CURSOR, TRIGGERS, HEAD]
+                         PARITY, CONSTRAINTS, KEY_VALIDATION, ALERTS, CURSOR, TRIGGERS, ABUSE, HEAD]

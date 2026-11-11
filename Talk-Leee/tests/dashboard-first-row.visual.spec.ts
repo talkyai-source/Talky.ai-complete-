@@ -62,6 +62,9 @@ async function openDashboardKpiRow(page: Page, vp: (typeof viewports)[number]) {
     // instead of the 5 s default of expect().
     const row = page.getByTestId("dashboard-kpi-row");
     await expect(row).toBeVisible({ timeout: 30_000 });
+    // The counters count up once they scroll into view; on a phone the row sits
+    // below the first-campaign checklist, out of view.
+    await row.scrollIntoViewIfNeeded();
     await page.waitForFunction(
         () => {
             const nodes = document.querySelectorAll('[data-testid="kpi-counter"]');
