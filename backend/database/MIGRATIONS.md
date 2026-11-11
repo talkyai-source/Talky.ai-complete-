@@ -51,11 +51,18 @@ though it had previously been stamped at 0021. Migration 0033 repairs databases
 already stamped past that gap. New databases must run the full 0009-to-head
 chain and must never restore the old 0021 stamp shortcut.
 
-The current sole head is `0087_bootstrap_manual_parity`, after
-`0086_call_workflows` and `0085_legal_acceptance`. It fills the documented
-bootstrap/manual gaps, using the current post-0065/0067 table contracts. It
-adopts compatible existing objects without replacing them, and refuses
-incompatible columns, defaults, constraints, indexes or tenant security.
+`0087_bootstrap_manual_parity` comes after `0086_call_workflows` and
+`0085_legal_acceptance`. It fills the documented bootstrap/manual gaps, using
+the current post-0065/0067 table contracts. It adopts compatible existing
+objects without replacing them, and refuses incompatible columns, defaults,
+constraints, indexes or tenant security.
+
+The current sole head is `0092_drop_broken_touch_triggers` (after
+0088-0091). On the production lineage it drops the touch triggers that set
+`updated_at` on `assistant_actions` and `reminders`, which have no such column,
+so every UPDATE of either table failed. Fresh installs have no such trigger, so
+it changes nothing there. A fresh install and the production lineage still
+differ elsewhere (QA F14-02, see the CI schema-parity step).
 
 For the `psql` commands above, privately configure libpq's `PGHOST`, `PGPORT`,
 `PGUSER`, `PGDATABASE` and authentication environment/password file. Configure
