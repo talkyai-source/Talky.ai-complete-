@@ -63,9 +63,16 @@ lineage it drops the touch triggers that set `updated_at` on
 UPDATE of either table failed. Fresh installs have no such trigger, so it
 changes nothing there.
 
-The current sole head is `0093_abuse_event_columns`. On the production lineage
-it adds the ten `abuse_events` columns the abuse code inserts and resolves
-with, so abuse events can be recorded at all; fresh installs already have them.
+`0093_abuse_event_columns` adds, on the production lineage, the ten
+`abuse_events` columns the abuse code inserts and resolves with, so abuse
+events can be recorded at all; fresh installs already have them.
+
+The current sole head is `0094_harden_legacy_db_objects`. It drops the broken
+SECURITY DEFINER `log_audit_event(...)` (unpinned search_path, nothing calls
+it) and makes the owner-rights views `active_suspensions`, `expiring_secrets`
+and `open_security_events` run with the reader's rights (`security_invoker`),
+so the row-level security of the tables beneath them applies.
+
 A fresh install and the production lineage still differ elsewhere (QA F14-02,
 see the CI schema-parity step).
 
