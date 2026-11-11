@@ -232,7 +232,7 @@ export const termsBlocks: LegalBlock[] = [
   { type: "h2", text: "9. Data, Privacy, and Processing" },
   {
     type: "p",
-    text: `Your use of Talk-Lee is subject to our Privacy Policy at talkleeai.com/privacy. A Data Processing Agreement (DPA) is available at talkleeai.com/dpa and is incorporated into these Terms for GDPR and UK GDPR compliance.`,
+    text: `Your use of Talk-Lee is subject to our Privacy Policy at talkleeai.com/privacy. A Data Processing Agreement (DPA) is available on request from privacy@talkleeai.com and is incorporated into these Terms for GDPR and UK GDPR compliance.`,
   },
   { type: "h3", text: "9.1 Your Data" },
   {
