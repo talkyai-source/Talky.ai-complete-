@@ -19,7 +19,7 @@ const CAMPAIGN_ID = "11111111-2222-3333-4444-555555555555";
 // Stable identity like the real router: loadData depends on it.
 const router = { push() {}, replace() {} };
 loader._load = function (id, ...args) {
-    if (id === "next/navigation") return { useParams: () => ({ id: CAMPAIGN_ID }), useRouter: () => router };
+    if (id === "next/navigation") return { useParams: () => ({ id: CAMPAIGN_ID }), useRouter: () => router, useSearchParams: () => new URLSearchParams() };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("components/campaigns/smart-csv-import")) return { SmartCsvImport: nothing };
     if (id.includes("components/campaigns/contact-lists")) return { ContactLists: nothing, ActiveContactsSummary: nothing };
