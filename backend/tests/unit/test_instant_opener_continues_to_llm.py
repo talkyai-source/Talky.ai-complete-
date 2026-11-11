@@ -1,5 +1,12 @@
 """The instant opener must not leave a bare "Hello?" with nothing but itself.
 
+CURRENT CONTRACT (owner decision 2026-11-05, QA F12-03, 644750c2): the instant greeting was
+disconnected (01195ba4). On a caller-first outbound call the callee's pickup words ("Hello?") get the
+identity opener ("Hi, this is <agent>, an AI assistant from <company> ..."), spoken through
+voice_session.pipeline; it ends on a question, so the model does NOT also reply to the same words
+(turn_ender.py:465-486, caller_first_disclosure.py). The defect/fix narrative below is the history of
+why a bare "Hello?" must never be left unanswered; the first test now pins the current mechanism.
+
 THE DEFECT (production, 2026-09-23, call 6e0e221b)
 ------------------------------------------------------
 The callee answered with "Hello?" (18:09:26.57). instant_opener.py played the
@@ -116,25 +123,19 @@ async def test_bare_hello_gets_the_instant_greeting_and_a_real_llm_turn(monkeypa
     session._voice_session_ref = voice_session
     pipeline = _pipeline_stub()
 
-    monkeypatch.setattr(
-        "app.domain.services.telephony.modes.agent_first._send_outbound_greeting",
-        _fake_send_outbound_greeting,
-    )
-
+    # 01195ba4 disconnected the instant greeting; 644750c2 (QA F12-03) answers pickup words with
+    # the identity opener, spoken through voice_session.pipeline (caller_first_disclosure.py:101-107),
+    # and the model does not also reply (turn_ender.py:465-486).
+    voice_session.pipeline = pipeline
     await TurnEnder(pipeline).handle(session, None, user_text="Hello?")
 
-    assert pipeline._run_turn.await_args is not None, (
-        "the LLM turn never ran after the instant greeting played"
-    )
-    called_transcript = pipeline._run_turn.await_args.args[1]
-    assert called_transcript == "Hello?"
-
-    roles = [m.role for m in session.conversation_history]
-    assert roles[:2] == [MessageRole.ASSISTANT, MessageRole.USER], (
-        f"expected greeting-then-user (no duplicate, no reordering), got {roles!r}"
-    )
-    assert session.conversation_history[0].content == "Hi, hello."
-    assert session.conversation_history[1].content == "Hello?"
+    assert pipeline._run_turn.await_args is None
+    spoken = pipeline.synthesize_and_send_audio.await_args.args[1]
+    assert "an AI assistant from" in spoken
+    # The caller's words come first, then the opener (caller_first_disclosure.py:89, 106).
+    assert [(m.role, m.content) for m in session.conversation_history] == [
+        (MessageRole.USER, "Hello?"), (MessageRole.ASSISTANT, spoken),
+    ]
 
 
 @pytest.mark.asyncio
