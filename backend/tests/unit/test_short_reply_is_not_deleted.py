@@ -51,7 +51,9 @@ def test_sure_thing_prefix_does_not_orphan_the_full_stop(clean):
     """The exact turn-14 string from production."""
     out = clean("Sure thing. The weather today is actually quite nice.")
     assert not out.startswith("."), f"orphaned punctuation survived: {out!r}"
-    assert out == "The weather today is actually quite nice."
+    # clean_response no longer strips conversational openers (llm_guardrails.py:11-86, b4d25876),
+    # so the model's own wording reaches TTS whole and there is no stripped filler to orphan a stop.
+    assert out == "Sure thing. The weather today is actually quite nice."
 
 
 @pytest.mark.parametrize("text", [
@@ -60,16 +62,17 @@ def test_sure_thing_prefix_does_not_orphan_the_full_stop(clean):
     "Sure thing I can help with that.",
 ])
 def test_the_filler_is_still_stripped_when_it_should_be(clean, text):
-    """Non-vacuity — the fix must not simply disable the strip."""
+    """Conversation openers are model wording and are no longer stripped (b4d25876)."""
     out = clean(text)
-    assert out.lower().startswith("i can help")
+    assert out == text
 
 
 def test_sentence_case_is_restored_after_a_strip(clean):
     """"Sure, take your time." used to become "take your time." — which is what
-    every persisted transcript and QA review then showed."""
-    assert clean("Sure, take your time.") == "Take your time."
-    assert clean("Of course, go ahead.") == "Go ahead."
+    every persisted transcript and QA review then showed. Openers are no longer
+    stripped (llm_guardrails.py:11-86), so the reply keeps its own capitalisation."""
+    assert clean("Sure, take your time.") == "Sure, take your time."
+    assert clean("Of course, go ahead.") == "Of course, go ahead."
 
 
 def test_a_filler_only_reply_keeps_its_words(clean):
@@ -87,7 +90,9 @@ def test_replies_without_a_filler_are_untouched(clean):
 
 
 def test_the_legacy_dash_strip_still_applies(clean):
-    assert clean("— I'm calling about your enquiry.") == "I'm calling about your enquiry."
+    # The leading-dash strip went with the other opener rewrites (llm_guardrails.py:11-86, b4d25876):
+    # the cleaner removes reasoning, markdown, audio tags and leaked disclosures, not punctuation.
+    assert clean("— I'm calling about your enquiry.") == "— I'm calling about your enquiry."
 
 
 # ── the downstream guard ─────────────────────────────────────────────────────
