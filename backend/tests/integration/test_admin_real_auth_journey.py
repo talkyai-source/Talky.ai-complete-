@@ -22,6 +22,8 @@ import pyotp
 import pytest
 import pytest_asyncio
 
+from tests.integration.test_support_migration import _repository_head
+
 
 pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[3]
@@ -148,7 +150,7 @@ async def journey_db(monkeypatch):
     assert not app.dependency_overrides, "Authentication must use normal dependencies"
     owner = await asyncpg.connect(configured, command_timeout=30)
     before = await protected_snapshot(owner)
-    assert before["head"] == "0084_call_failure_lead_signals"
+    assert before["head"] == _repository_head()
     role = "admin_http_" + uuid4().hex
     tenants = [uuid4() for _ in range(3)]
     users = [uuid4() for _ in range(3)]
