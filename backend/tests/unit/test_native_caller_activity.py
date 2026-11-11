@@ -149,7 +149,10 @@ async def test_late_historical_final_is_not_current_activity(native):
     await native.step({"kind": "start", "item": "newer"})
     old = native.session.last_activity_at
     await final(native, "I am not your customer.", "older")
-    assert native.bridge._live_state.customer_relationship.value == "denied"
+    # 0c3b4ded: the native bridge no longer interprets caller prose. Its live state only reduces
+    # identity, confirmed-contact and tool-result evidence (live_structured_state.py:59, 99-123;
+    # only the cascaded reducer, :152-156, sets customer_relationship), so none is inferred here.
+    assert native.bridge._live_state.customer_relationship is None
     assert native.session.last_activity_at == old
 
 
