@@ -357,7 +357,10 @@ async def test_immediate_hold_and_auth_issuance_serialize_in_both_orders(account
         results=await asyncio.gather(tasks["hold"],tasks["issuance"],return_exceptions=True)
         assert not isinstance(results[0],BaseException),results[0]
         if first=="hold":
-            assert isinstance(results[1],HTTPException) and results[1].status_code==401
+            # Sign-in names the hold with a coded 403 (D4-5); a refresh keeps the plain 401.
+            assert isinstance(results[1],HTTPException) and results[1].status_code==(403 if kind=="login" else 401)
+            if kind=="login":
+                assert results[1].detail["code"]=="tenant_suspended"
         else:
             assert not isinstance(results[1],BaseException),results[1]
         assert await db.owner.fetchval(

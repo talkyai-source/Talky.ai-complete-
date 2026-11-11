@@ -327,7 +327,10 @@ async def test_admin_mfa_cookie_hold_evidence_restore_and_old_credentials(journe
         member.cookies = httpx.Cookies(old_cookies)
         await request(member, "POST", "/auth/refresh", 401)
         await request(other, "GET", "/auth/me")
-        await request(member, "POST", "/auth/login", 401, json={"email": f"{db.users[1]}@example.com", "password": db.password})
+        # A correct password on a held account is told about the hold with a coded 403 (D4-5).
+        held_login = await request(member, "POST", "/auth/login", 403,
+                                   json={"email": f"{db.users[1]}@example.com", "password": db.password})
+        assert held_login.json()["error"]["code"] == "tenant_suspended"
         await request(admin, "POST", tenant_path + "/restore", 422, json={"reason": "Missing reviewed identity"})
         await request(admin, "POST", tenant_path + "/restore", 409, json={"reason": "Wrong reviewed identity", "expected_suspension_id": str(uuid4())})
         restored = (await request(admin, "POST", tenant_path + "/restore", json={
