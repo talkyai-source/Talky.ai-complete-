@@ -80,8 +80,10 @@ def test_prompt_gets_call_target_block_when_named():
     )
     # The persona/guardrails now PRECEDE the block, and that ordering is the
     # whole point: everything before the lead name is a shared, cacheable prefix.
-    assert "HARD RULES" in cfg.system_prompt
-    assert cfg.system_prompt.index("HARD RULES") < cfg.system_prompt.index(
+    # The static guardrail block is headed "## NON-NEGOTIABLES" in the composed system prompt
+    # (prompts/policies/non_negotiables.md:6; prompts/build.py:204 _FLOOR_MARKER); "HARD RULES" is not in it.
+    assert "NON-NEGOTIABLES" in cfg.system_prompt
+    assert cfg.system_prompt.index("NON-NEGOTIABLES") < cfg.system_prompt.index(
         "PERSON YOU'RE CALLING"
     ), "static instructions must come before the per-call block"
     # Callee identity is also carried on the config for the realtime path.
