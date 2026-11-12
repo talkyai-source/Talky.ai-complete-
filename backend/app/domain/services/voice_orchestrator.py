@@ -522,17 +522,24 @@ class VoiceOrchestrator:
             # bypassing row security (task #80). None routes through the
             # documented bypass path for sessions with no tenant.
             tenant = tenant_id or getattr(config, "tenant_id", None)
-            async with acquire_with_tenant(pool, str(tenant) if tenant else None) as conn:
+            tenant_scope = str(tenant) if tenant else None
+            # The statement names the tenant itself whenever the session has
+            # one (both ids are stamped together from the same call). Only a
+            # session with no tenant at all, which already runs on the bypass
+            # connection above, is matched by the durable call id alone.
+            async with acquire_with_tenant(pool, tenant_scope) as conn:
                 updated = await conn.execute(
                     """UPDATE calls
                           SET prompt_template = $2,
                               prompt_version  = $3,
                               prompt_hash     = $4
-                        WHERE id = $1::uuid""",
+                        WHERE id = $1::uuid
+                          AND ($5::uuid IS NULL OR tenant_id = $5::uuid)""",
                     str(call_row_id),
                     config.prompt_template,
                     config.prompt_version,
                     config.prompt_hash,
+                    tenant_scope,
                 )
             # "UPDATE 0" means the join key was wrong — which is invisible
             # otherwise, and would leave every review unattributable. Now that

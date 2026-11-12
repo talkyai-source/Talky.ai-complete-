@@ -228,6 +228,7 @@ async def claim_inbound_transfer_takeovers(
                 UPDATE calls
                    SET status='termination_pending', updated_at=NOW()
                  WHERE id=$1::uuid
+                   AND tenant_id=$4::uuid
                    AND direction='inbound'
                    AND status=$2
                    AND status <> 'termination_pending'
@@ -237,6 +238,7 @@ async def claim_inbound_transfer_takeovers(
                 str(parent["id"]),
                 str(parent.get("status") or ""),
                 list(TERMINAL_CALL_STATUSES),
+                str(parent["tenant_id"]),
             )
             if not updated:
                 continue
