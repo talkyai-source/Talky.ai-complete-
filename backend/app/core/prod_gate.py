@@ -127,6 +127,7 @@ def enforce_production_gate() -> None:
     violations.extend(_check_account_sender())
     violations.extend(_check_caller_id_enforcement())
     violations.extend(_check_inbound_strict_routing())
+    violations.extend(_check_telephony_state_backend())
 
     for warning in secret_strength_warnings():
         logger.warning("prod_gate_warning %s", warning)
@@ -175,6 +176,32 @@ def _check_guard_bypass_flags() -> list[GateViolation]:
                 )
             )
     return violations
+
+
+def _check_telephony_state_backend() -> list[GateViolation]:
+    """A call process keeps the phone owner lock and live-call state in Redis.
+
+    On the in-memory backend every process believes it owns the phones, so two
+    call processes (a restart race, a stray second worker, or the second APP
+    server in the HA plan) would both drive Asterisk. The dashboard process
+    (TELEPHONY_ENABLED=false) never touches the phones and is not checked.
+    """
+    from app.core.process_role import telephony_enabled
+
+    if not telephony_enabled():
+        return []
+    backend = (os.getenv("TELEPHONY_STATE_BACKEND") or "memory").strip().lower()
+    if backend == "redis":
+        return []
+    return [
+        GateViolation(
+            rule="telephony_state_not_shared",
+            detail=(
+                f"TELEPHONY_STATE_BACKEND={backend!r} keeps the phone owner lock in "
+                "this process's memory. A call process in production must use 'redis'."
+            ),
+        )
+    ]
 
 
 def _check_caller_id_enforcement() -> list[GateViolation]:

@@ -50,6 +50,8 @@ def _prod_env_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("TELEPHONY_ADAPTER", "asterisk")
     monkeypatch.setenv("ASTERISK_ARI_PASSWORD", _STRONG_PBX_PW)
     monkeypatch.setenv("FREESWITCH_ESL_PASSWORD", _STRONG_PBX_PW)
+    # A call process keeps the phone owner lock and call state in Redis.
+    monkeypatch.setenv("TELEPHONY_STATE_BACKEND", "redis")
     # Required secrets
     monkeypatch.setenv("JWT_SECRET", _STRONG_JWT)
     # Required in production since the KMS fail-open fix: without it the gate

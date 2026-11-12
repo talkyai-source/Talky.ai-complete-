@@ -60,6 +60,7 @@ def _clean_env(monkeypatch):
     monkeypatch.delenv("TELEPHONY_DEV_BYPASS_GUARD_ERRORS", raising=False)
     monkeypatch.delenv("TELEPHONY_LOCAL_DEV", raising=False)
     monkeypatch.delenv("CALLER_ID_ENFORCEMENT_MODE", raising=False)
+    monkeypatch.setenv("TELEPHONY_STATE_BACKEND", "redis")
     # kms caches its backend in a module global; keep tests independent.
     monkeypatch.setattr(kms, "_backend", None)
 
