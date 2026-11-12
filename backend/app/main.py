@@ -87,6 +87,81 @@ async def _event_loop_lag_heartbeat(stop_event: asyncio.Event) -> None:
             deadline = loop.time() + period
 
 
+# A call process that lost the owner-lock race re-tries it on this period for
+# as long as it runs: on one server that covers a restart (the dead
+# predecessor's lock lapses within ~60s); on a server pair it is the warm
+# standby that takes the phones over when the owner dies.
+_OWNERSHIP_RETRY_PERIOD_S = 50.0
+# The "still standby" warning repeats every this many attempts (~10 minutes),
+# so a long-lived standby does not flood the journal.
+_OWNERSHIP_STANDBY_LOG_EVERY = 12
+
+
+async def _acquire_as_standby(state_backend, *, production: bool) -> bool:
+    """One standby try for the telephony owner lock.
+
+    The plain acquire fails OPEN on a Redis error (right for a lone dev
+    process). A standby that did that in production would become a second
+    owner beside a live one, so there a Redis error raises and the process
+    stays standby until the next try.
+    """
+    if production:
+        acquire_strict = getattr(state_backend, "acquire_telephony_ownership_strict", None)
+        if callable(acquire_strict):
+            return await acquire_strict()
+    return await state_backend.acquire_telephony_ownership()
+
+
+async def _retry_telephony_ownership(
+    acquire,
+    take_over,
+    *,
+    period=_OWNERSHIP_RETRY_PERIOD_S,
+    sleep=None,
+    log_every=_OWNERSHIP_STANDBY_LOG_EVERY,
+) -> int:
+    """Retry the telephony owner lock until it is won, for as long as we run.
+
+    It used to give up after six tries (~5 minutes), so a standby could never
+    take the phones over from an owner that died later. ``acquire`` returns
+    True once this process holds the lock; ``take_over`` then starts the
+    heartbeat, connects ARI and recovers orphaned calls. A failure in either is
+    logged and retried on the next period (re-acquiring a lock we hold is
+    idempotent). Returns the winning attempt; otherwise only cancellation
+    (shutdown) ends it.
+    """
+    # Resolved per call, not at import, so a test can stub main.asyncio.
+    sleep = sleep if sleep is not None else asyncio.sleep
+    attempt = 0
+    while True:
+        attempt += 1
+        await sleep(period)
+        try:
+            if await acquire():
+                logger.info(
+                    "Telephony ownership acquired on retry %d — connecting ARI",
+                    attempt,
+                )
+                await take_over()
+                return attempt
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - keep retrying until shutdown
+            logger.warning(
+                "telephony_ownership_retry_failed attempt=%d err=%s",
+                attempt,
+                exc,
+            )
+            continue
+        if attempt % log_every == 0:
+            logger.warning(
+                "telephony_standby attempt=%d: another process still holds the "
+                "ARI owner lock; retrying every %.0fs",
+                attempt,
+                period,
+            )
+
+
 # Backoff between background ARI connect retries after a failed boot attempt;
 # the last value repeats until the connect succeeds or the app shuts down.
 _BOOT_ARI_RETRY_DELAYS_S = (2.0, 5.0, 10.0, 30.0, 60.0)
@@ -784,71 +859,55 @@ async def lifespan(app: FastAPI):
             "by %s. This process will NOT connect ARI and will 503 telephony "
             "routes. Expected with --workers >1 / a second pod; if you see this "
             "on a single-worker deploy, a previous owner's lock has not yet "
-            "expired (clears within ~60s). Will retry ownership for ~5 minutes.",
+            "expired (clears within ~60s). Will keep retrying ownership every "
+            "%.0fs while it runs (standby).",
             owner or "another process",
+            _OWNERSHIP_RETRY_PERIOD_S,
         )
 
         # On a single-worker deploy the usual cause is a RESTART: the old
         # process died holding the lock (expires ~60s), the new one tried
         # ONCE at boot and gave up — leaving telephony 503'ing until a
         # manual /connect or another restart (observed 2026-07-08: 6+ min
-        # of failed originations after a deploy). Retry for a few minutes;
-        # a genuine second worker keeps failing acquire and nothing changes.
-        async def _retry_telephony_ownership() -> None:
-            for attempt in range(1, 7):  # ~5 minutes of coverage
-                await asyncio.sleep(50)
-                try:
-                    if strict_validation and _production_inbound_enabled:
-                        acquired = await _state_backend.acquire_telephony_ownership_strict()
-                    else:
-                        acquired = await _state_backend.acquire_telephony_ownership()
-                    if acquired:
-                        if strict_validation and _production_inbound_enabled:
-                            await _state_backend.start_heartbeat_strict()
-                        else:
-                            await _state_backend.start_heartbeat()
-                        logger.info(
-                            "Telephony ownership acquired on retry %d — connecting ARI",
-                            attempt,
-                        )
-                        await _auto_connect_telephony()
-                        # Delayed ownership is a real takeover boundary too.
-                        # Run recovery immediately; waiting for the next
-                        # watchdog tick leaves stale linked PSTN legs live for
-                        # up to another interval after ARI becomes available.
-                        try:
-                            from app.domain.services.telephony.lifecycle import (
-                                recover_orphaned_calls,
-                                wait_for_telephony_application,
-                            )
+        # of failed originations after a deploy). On a server pair this
+        # process is the standby and must take over whenever the owner dies,
+        # so it retries for as long as it runs.
+        async def _acquire_standby_ownership() -> bool:
+            return await _acquire_as_standby(_state_backend, production=strict_validation)
 
-                            await wait_for_telephony_application()
-                            recovered = await recover_orphaned_calls()
-                            if recovered:
-                                logger.info(
-                                    "telephony delayed-owner recovery: reclaimed %d orphaned call(s)",
-                                    recovered,
-                                )
-                        except Exception as recovery_exc:
-                            logger.warning(
-                                "Telephony delayed-owner recovery failed "
-                                "(watchdog will retry): %s",
-                                recovery_exc,
-                            )
-                        return
-                except Exception as exc:  # noqa: BLE001 — keep retrying
-                    logger.warning(
-                        "telephony_ownership_retry_failed attempt=%d err=%s",
-                        attempt,
-                        exc,
+        async def _take_over_telephony() -> None:
+            if strict_validation and _production_inbound_enabled:
+                await _state_backend.start_heartbeat_strict()
+            else:
+                await _state_backend.start_heartbeat()
+            await _auto_connect_telephony()
+            # Delayed ownership is a real takeover boundary too.
+            # Run recovery immediately; waiting for the next
+            # watchdog tick leaves stale linked PSTN legs live for
+            # up to another interval after ARI becomes available.
+            try:
+                from app.domain.services.telephony.lifecycle import (
+                    recover_orphaned_calls,
+                    wait_for_telephony_application,
+                )
+
+                await wait_for_telephony_application()
+                recovered = await recover_orphaned_calls()
+                if recovered:
+                    logger.info(
+                        "telephony delayed-owner recovery: reclaimed %d orphaned call(s)",
+                        recovered,
                     )
-            logger.critical(
-                "Telephony ownership NOT acquired after retries — this process "
-                "will keep 503ing telephony routes (another owner is alive, or "
-                "the lock backend is unhealthy)."
-            )
+            except Exception as recovery_exc:
+                logger.warning(
+                    "Telephony delayed-owner recovery failed "
+                    "(watchdog will retry): %s",
+                    recovery_exc,
+                )
 
-        asyncio.get_running_loop().create_task(_retry_telephony_ownership())
+        app.state.telephony_ownership_retry_task = asyncio.create_task(
+            _retry_telephony_ownership(_acquire_standby_ownership, _take_over_telephony)
+        )
     else:
         # Auto-connect telephony bridge so campaigns can originate calls
         # immediately. Must happen after container startup (needs the loop).
@@ -921,6 +980,11 @@ async def lifespan(app: FastAPI):
     if _boot_retry is not None and not _boot_retry.done():
         _boot_retry.cancel()
         await asyncio.gather(_boot_retry, return_exceptions=True)
+    # Nor may a standby take the phones over during teardown.
+    _owner_retry = getattr(app.state, "telephony_ownership_retry_task", None)
+    if _owner_retry is not None and not _owner_retry.done():
+        _owner_retry.cancel()
+        await asyncio.gather(_owner_retry, return_exceptions=True)
 
     # Phase 1.4 — flip readiness to NOT_READY immediately so the load
     # balancer stops sending new calls. Existing calls finish; the loop
