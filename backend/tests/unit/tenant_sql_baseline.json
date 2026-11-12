@@ -20,22 +20,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "01222d75ec593031865e98dc96ab195ba95591b47283846aa2d3515f64a9b0e4",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle.update_config",
-      "line": 551,
-      "method": "execute",
-      "tables": [
-        "connectors"
-      ],
-      "sql": "UPDATE connectors SET config=$2::jsonb WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "013cfba48f72a8b5696b2ad6421d7a822d49e6347a6517ff16cb74662c7bd3e9",
       "file": "app/services/scripts/prompts/bodies.py",
       "function": "list_versions",
@@ -62,22 +46,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "2d8a79cd53306bec9bf82a8add623b4f2b9e29c52721c863550cc79554da4298",
-      "file": "app/api/v1/endpoints/security_events.py",
-      "function": "get_open_alerts",
-      "line": 438,
-      "method": "fetch",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "SELECT * FROM security_events WHERE status IN ('open', 'investigating', 'escalated') AND severity IN ('CRITICAL', 'HIGH') {branch} ORDER BY severity = 'CRITICAL' DESC, created_at DESC LIMIT 50",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -112,20 +80,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "046cf3c23f14e4de0ec8293c98534a850da073f37260e004f7537f484d7c7fb8",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "capture_cohort",
-      "line": 122,
-      "method": "fetch",
-      "tables": [],
-      "sql": "SELECT id FROM {loop-value} WHERE user_id=ANY($1::uuid[]) AND {Subscript(value=Subscript(value=Name(id='_CREDENTIALS', ctx=Load()), slice=Name(id='table', ctx=Load()), ctx=Load()), slice=Constant(value=0), ctx=Load())} ORDER BY id LIMIT $2",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "046f3be59f5c1c2e64256300aa6a892801b2b0b9c7f1caf856b10ae2f56b945f",
       "file": "app/domain/services/telephony/transfer_provider_identity.py",
       "function": "persist_asterisk_transfer_provider_identity",
@@ -155,20 +109,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "0570e7fb48fdd4029051448ed47d089811a2d3a0113c436c8520f720f5f49b5d",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_campaign_status",
-      "line": 135,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='CAMPAIGN_BY_NAME_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -270,23 +210,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "073485b21efce145f1511c4540f3341f8302a3f5b235d833ad11dcbd85934ebe",
-      "file": "app/services/crm_delivery_store.py",
-      "function": "CRMDeliveryStore.begin_contact_create",
-      "line": 164,
-      "method": "execute",
-      "tables": [
-        "calls",
-        "crm_deliveries"
-      ],
-      "sql": "UPDATE crm_deliveries SET phase='creating_contact', updated_at=NOW() WHERE tenant_id=$1::uuid AND call_id=$2::uuid AND provider=$3 AND lease_token=$4::uuid AND status='processing' AND phase='resolving_contact' AND contact_effect=$5::jsonb AND remote_contact_id IS NULL AND remote_call_id IS NULL AND destination_connector_id::text=$5::jsonb->>'connector_id' AND destination_account_id=$5::jsonb->>'account_id' AND EXISTS (SELECT 1 FROM calls c WHERE c.id=crm_deliveries.call_id AND c.tenant_id=crm_deliveries.tenant_id AND c.xmin::text=$6::text)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "074c0f4551956e1d51ae722eaa31a66a3e9f04fa8857a2f74f4e475da36d7e7a",
       "file": "app/domain/services/secrets_manager.py",
       "function": "SecretsManager.get_metadata",
@@ -343,22 +266,6 @@
         "calls"
       ],
       "sql": "SELECT c.id, c.tenant_id, c.campaign_id, c.lead_id, c.phone_number, c.direction, c.talklee_call_id, c.status, COALESCE(c.provider_call_id, c.external_call_uuid) AS provider_call_id, leg.id AS leg_id FROM calls AS c LEFT JOIN LATERAL ( SELECT id FROM call_legs WHERE call_id = c.id AND leg_type = 'pstn_outbound' ORDER BY created_at, id LIMIT 1 ) AS leg ON TRUE WHERE c.tenant_id = $1::uuid AND c.dialer_job_id = $2::uuid AND c.dialer_attempt_number = $3 LIMIT 1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "0a8dcd628eed86f5b9ba18b5e95146053b3137516f3847baaca87da370b2346a",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "fetch_ticket_tenant",
-      "line": 48,
-      "method": "fetchval",
-      "tables": [
-        "support_tickets"
-      ],
-      "sql": "SELECT tenant_id FROM support_tickets WHERE id = $1",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -518,22 +425,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "14f14ef8031b6e379d6502b11874390c4444eef0c5efd06956bb5c133a408c8b",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_runtimes",
-      "line": 353,
-      "method": "fetch",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_owner_stopped' AND event_type='session_terminated' AND resource_type='assistant_runtime' AND resource_id=ANY($1::uuid[]) ORDER BY event_id LIMIT $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "15aaf97ecf88d73ace8d146d6c07c1fd4303def061e80fde8bafa49aec3dd898",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select_with_relations",
@@ -577,22 +468,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "17222cb827d7192ef91652bb719f07bf0eec8240dc0622d55535c202b78b48f1",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.list_for_call",
-      "line": 222,
-      "method": "fetch",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "SELECT id, tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash, llm_model, created_at, updated_at FROM conversation_reviews WHERE call_id = $1 ORDER BY created_at",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -805,22 +680,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "21ff2d747b61b97dd54c457b1e23432f4a28e38a080baed1cc34474bfbf79e29",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle.reject_pending",
-      "line": 531,
-      "method": "fetchval",
-      "tables": [
-        "connectors"
-      ],
-      "sql": "UPDATE connectors SET status='error' WHERE id=$1 AND status='pending' RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "222517c2c2dc523e05f7836988b99255abba2c34d588594b57c2295b1601466c",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.did_availability",
@@ -853,20 +712,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "23ee1635f859037b33cf1b5ccf9d8d139f15514c70c684e59dc147766c08ad08",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._find_open_tickets",
-      "line": 203,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='TICKETS_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "2599d0671bf281569b889dcddde55d76c2b6ac56275b3640ff88c69497a7f621",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reverse_finalized_usage",
@@ -892,22 +737,6 @@
         "calls"
       ],
       "sql": "SELECT count(*) FROM calls WHERE status='termination_pending' AND (NULLIF(BTRIM(provider),'') IS NULL OR COALESCE(NULLIF(BTRIM(provider_call_id),''), NULLIF(BTRIM(external_call_uuid),'')) IS NULL)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "26c1e35b3925a15fec7e8678188b2dad18687ddea15e60f94396934b9dc9d13b",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_original_proof",
-      "line": 230,
-      "method": "fetchrow",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT * FROM audit_logs WHERE event_id=$1",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1077,23 +906,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2c80b1f9bba24b519b4cedbedcf39f574645d5e3b26f882852070744518efe3c",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "fetch_ticket",
-      "line": 39,
-      "method": "fetchrow",
-      "tables": [
-        "support_tickets",
-        "user_profiles"
-      ],
-      "sql": "SELECT t.id, t.tenant_id, t.number, t.requester_user_id, t.conversation_id, t.subject, t.category, t.priority, t.status, t.assignee_user_id, t.related_campaign_id, t.related_call_id, t.diagnostics, t.first_response_due_at, t.resolution_due_at, t.first_responded_at, t.first_response_breached_at, t.resolution_breached_at, t.resolved_at, t.closed_at, t.csat_score, t.csat_comment, t.version, t.created_at, t.updated_at, rq.name AS requester_name, rq.email AS requester_email FROM support_tickets t LEFT JOIN user_profiles rq ON rq.id = t.requester_user_id WHERE t.id = $1 AND t.tenant_id = $2{IfExp(test=Name(id='for_update', ctx=Load()), body=Constant(value=' FOR UPDATE OF t'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "2e5bfdba273df44decbf357a7bde58ab886e7e817f0aeee190d59c8352c5205f",
       "file": "app/api/v1/endpoints/billing.py",
       "function": "_invoice_rows",
@@ -1173,24 +985,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2fa9f798fff490c0bf04c2c8b7d8c4da4a5b60a29cb79424da625887b01abf56",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "list_customer_tickets",
-      "line": 186,
-      "method": "fetch",
-      "tables": [
-        "support_ticket_messages",
-        "support_ticket_reads",
-        "support_tickets"
-      ],
-      "sql": "SELECT t.id, t.number, t.subject, t.status, t.priority, t.category, t.updated_at, EXISTS ( SELECT 1 FROM support_ticket_messages sm WHERE sm.ticket_id = t.id AND sm.tenant_id = t.tenant_id AND sm.author_type = 'staff' AND NOT sm.is_internal AND sm.created_at > COALESCE((SELECT r.last_seen_at FROM support_ticket_reads r WHERE r.user_id = $2 AND r.ticket_id = t.id AND r.tenant_id = t.tenant_id), '-infinity'::timestamptz)) AS unread FROM support_tickets t WHERE t.tenant_id = $1 AND ($3 OR t.requester_user_id = $2) AND ($4::text IS NULL OR t.status = $4) AND ($5::timestamptz IS NULL OR (t.updated_at, t.id) < ($5, $6::uuid)) ORDER BY t.updated_at DESC, t.id DESC LIMIT $7",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "30f43b2bcb1d0980e26d85305e0e3a46397ebe3a0be9d478d4f1aaa854e5003b",
       "file": "app/workers/dialer_worker.py",
       "function": "DialerWorker._get_campaign_calling_config",
@@ -1252,22 +1046,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3529364dce10fa87d53f6cc451f47cd266ff6ce639f4ec55ae3cdff892acc04a",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.submit",
-      "line": 251,
-      "method": "fetchrow",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "INSERT INTO conversation_reviews ( tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (call_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, review_tags = EXCLUDED.review_tags, comment = EXCLUDED.comment, updated_at = NOW() RETURNING id, tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash, llm_model, created_at, updated_at",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -1385,52 +1163,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "38b569b140b901842003a2dca702d89dd415e0a648709a0b46eb6989e7cfe9ce",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._hold_account_row",
-      "line": 452,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "UPDATE {table} SET status='suspended',suspended_at=$2,suspended_by=$3, suspension_reason=$4,updated_at=clock_timestamp() WHERE id=$1 RETURNING status,suspended_at,suspended_by,suspension_reason",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "ccce735c942ef4c3fba99ff2322a8aa5edeb50960283879d5a5dbdfe0941077b",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "get_abuse_statistics",
-      "line": 436,
-      "method": "fetchval",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT COUNT(*) FROM abuse_events WHERE severity IN ('high', 'critical') AND resolved_at IS NULL {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3626903d9964b894b0b92874d25c1270f87be7a67c1130bb30b01f82626b5712",
-      "file": "app/api/v1/endpoints/security_events.py",
-      "function": "resolve_security_event",
-      "line": 396,
-      "method": "fetchrow",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "UPDATE security_events SET status = 'resolved', resolved_at = $1, resolved_by = $2, resolution_notes = $3 {branch} RETURNING *",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "3b6bc04c963d0e93bbb9e8175299c19eeb12d4264a404cbd23638b715490546c",
       "file": "app/api/v1/endpoints/admin/user_operations.py",
       "function": "_list",
@@ -1443,70 +1175,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "37c461d6ec8cc184f49078d6e14ae085013bba85bac3b6cccd4a0dc1820eff9d",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "get_abuse_statistics",
-      "line": 414,
-      "method": "fetch",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT severity, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY severity",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3bf9b0025137d27d7e40d9fd0b3f7574ff6a4a49ec72608ebe03a6374ea26594",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.reward_balance",
-      "line": 479,
-      "method": "fetchrow",
-      "tables": [
-        "review_reward_ledger"
-      ],
-      "sql": "SELECT COALESCE(SUM(points), 0)::int AS total, count(*)::int AS entries, count(*) FILTER ( WHERE awarded_at >= date_trunc('day', NOW() AT TIME ZONE 'utc') )::int AS today FROM review_reward_ledger WHERE user_id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "7ce71ba6c314bbc085fb68a652843d9acb4c33c24a82f22a603c2d718d92feb5",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "get_abuse_statistics",
-      "line": 404,
-      "method": "fetchval",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT COUNT(*) FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3d47082b67d116d74a3f0be97b317e10d8a8d11d63e4295f532047ad4abbd5ea",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService._maybe_award",
-      "line": 313,
-      "method": "fetchval",
-      "tables": [
-        "review_reward_ledger"
-      ],
-      "sql": "SELECT count(*) FROM review_reward_ledger WHERE user_id = $1 AND awarded_at >= date_trunc('day', NOW() AT TIME ZONE 'utc')",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -1651,22 +1319,6 @@
         "dialer_jobs"
       ],
       "sql": "SELECT DISTINCT ON (dj.phone_number) dj.id, dj.phone_number, dj.campaign_id, dj.lead_id, dj.status, dj.last_outcome, dj.last_error, dj.failure_category, dj.failure_reason, dj.attempt_number, dj.updated_at, camp.name AS campaign_name, camp.status AS campaign_status, camp.calling_config AS calling_config FROM dialer_jobs dj LEFT JOIN campaigns camp ON camp.id = dj.campaign_id WHERE dj.tenant_id = $1 AND dj.updated_at >= NOW() - make_interval(mins => $2) AND dj.status NOT IN ('completed', 'goal_achieved') AND (dj.failure_reason IS NOT NULL OR dj.last_error IS NOT NULL) AND COALESCE(dj.failure_reason, dj.last_error, '') NOT IN ('call_gap', 'batch_capacity', 'tenant_gap', 'call_guard_throttled', 'call_guard_queued', 'destination_busy') AND NOT EXISTS ( SELECT 1 FROM calls c2 WHERE c2.lead_id = dj.lead_id AND c2.created_at > dj.updated_at ) {branch} ORDER BY dj.phone_number, dj.updated_at DESC",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "403db2acc7ec13f079c159fdeee1ca0a1a2b00256f5d576751c6d29e3867c2c5",
-      "file": "app/domain/services/abuse_detection.py",
-      "function": "AbuseDetectionService._check_rapid_calls",
-      "line": 507,
-      "method": "fetchval",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT COUNT(*) FROM calls WHERE tenant_id = $1 AND phone_number = $2 AND created_at > NOW() - INTERVAL '{window_minutes} minutes' AND NOT is_test",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -1853,22 +1505,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "45d66ad18e3632041da428c0a141d7b13638a767525ee46f1cb515788d123234",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._effective_account",
-      "line": 498,
-      "method": "fetchval",
-      "tables": [
-        "white_label_partners"
-      ],
-      "sql": "SELECT status FROM white_label_partners WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "46003396d3bbd89630edc539c991450677dd1adfabfe080bfc195f7d3b896f22",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "authorize_inbound_transfer",
@@ -1946,22 +1582,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "271770d97992e6e9cdbc9be1f3c94594b04be83476318cedaadc28d146b1ed71",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "get_abuse_statistics",
-      "line": 448,
-      "method": "fetchval",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT COUNT(*) FROM abuse_events WHERE created_at BETWEEN NOW() - INTERVAL '{BinOp(left=Name(id='hours', ctx=Load()), op=Mult(), right=Constant(value=2))} hours' AND NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2057,22 +1677,6 @@
         "calls"
       ],
       "sql": "SELECT count(*) FROM calls WHERE campaign_id = $1 AND ( status IN ('answered', 'in_call') OR ( status IN ('dialing', 'ringing', 'initiated') AND created_at > now() - make_interval(secs => $2::int) ) ) AND NOT is_test",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "4b14069656779e6ed185a2c9b87d2d08cfc6b7d99273e59b526671d837c47cd6",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_calls",
-      "line": 430,
-      "method": "fetch",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT id,call_id,provider,provider_leg_id,status,created_at FROM call_legs WHERE call_id=ANY($1::uuid[]) ORDER BY call_id,id LIMIT $2",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -2321,38 +1925,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "538daeeb2763782f162c8784abe1ae39f0a54968873a9f360b010085a6c7eec5",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle.activate",
-      "line": 520,
-      "method": "execute",
-      "tables": [
-        "connectors"
-      ],
-      "sql": "UPDATE connectors SET status='active',config=$2::jsonb, provider_revocation_status='not_requested' WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "53967c9a4f138d0f31c44c045a9846060bce363bc10ef71297a5b54c910ac142",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_calls",
-      "line": 436,
-      "method": "fetch",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "SELECT call_id,event_data FROM call_events WHERE call_id=ANY($1::uuid[]) AND event_type='admin_termination_confirmed' ORDER BY created_at DESC LIMIT $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "54ef68f0cd7d824a8c417e93c147a39fb4548875b777837652432e4b7c776560",
       "file": "app/core/db.py",
       "function": "Database.fetch_one",
@@ -2383,22 +1955,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "55a4d1f2fc3e8cbedab37fcbd197bb1db3ca440b77328a8bdbd0d6f9f4e9295d",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "capture_cohort",
-      "line": 158,
-      "method": "fetch",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_owner_stopped' AND resource_type='assistant_runtime' AND resource_id=ANY($1::uuid[]) ORDER BY event_id LIMIT $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "56149dcef269051e6daba8c79895538c4a44ac668efb87143d2fa33cc00cd8b4",
       "file": "app/domain/services/billing_topup_events.py",
       "function": "apply_topup_event",
@@ -2410,20 +1966,6 @@
       "sql": "SELECT id FROM topup_orders WHERE provider_payment_id=$1",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "568dd5de51dd992ae225c52e76a7fae13e3f11751803d41b307e7088ac410be1",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._effective_account",
-      "line": 490,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT * FROM {IfExp(test=Compare(left=Name(id='target_type', ctx=Load()), ops=[Eq()], comparators=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load())]), body=Constant(value='tenants'), orelse=Constant(value='white_label_partners'))} WHERE id=$1",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -2472,22 +2014,6 @@
       "sql": "SELECT field_key, label, field_type, is_required, agent_visible, user_visible, options, sort_order FROM campaign_lead_fields WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid{IfExp(test=Name(id='agent_only', ctx=Load()), body=Constant(value=' AND agent_visible'), orelse=Constant(value=''))} ORDER BY sort_order, label",
       "scoped": false,
       "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "5ae93d090067db544ef128734d15417684cd578c40e1ab7ab37fef849655f72c",
-      "file": "app/domain/services/support/staff_service.py",
-      "function": "_detail",
-      "line": 128,
-      "method": "fetchrow",
-      "tables": [
-        "user_profiles"
-      ],
-      "sql": "SELECT id, name, email FROM user_profiles WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -2638,20 +2164,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5fad5dd2878390b492b06370ec0c7f9143765ee7f8f13af61d4d0fbaac7ae0f6",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_phone_numbers_status",
-      "line": 185,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='PHONES_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "608673ae8f203b334a90ac4039618e5b14388e1d72a0b66e3fa203057353259c",
       "file": "app/core/security/sessions/queries.py",
       "function": "get_session_by_id",
@@ -2694,22 +2206,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "630a9c7f7732f9eb6475d0446bddab3b72e8f7641361bd493601dca862bfb9b7",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService._maybe_award",
-      "line": 304,
-      "method": "fetchval",
-      "tables": [
-        "review_reward_ledger"
-      ],
-      "sql": "SELECT 1 FROM review_reward_ledger WHERE review_id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2763,20 +2259,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "646b680047e93d1615d6d8d5cb21c0bab3198d09c61cf7123b608367b0ac4038",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_campaign_status",
-      "line": 139,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='CAMPAIGN_FAILURES_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "6480797f340270949e0ca0135e305fb9e0aa563984838b0d3c30762653dbc8bc",
       "file": "app/api/v1/endpoints/admin/supplier_evidence.py",
       "function": "_view",
@@ -2789,38 +2271,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "64894750d70dc4ff65ba2a8adc73d81eb35c195bda7630d8b0832f444dc3771d",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "update_ticket",
-      "line": 76,
-      "method": "fetchval",
-      "tables": [
-        "support_tickets"
-      ],
-      "sql": "UPDATE support_tickets SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='assignments', ctx=Load())], keywords=[])} WHERE id = $1 AND tenant_id = $2 RETURNING version",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "26cd2dcf8ef4e45110c1fcad2ad67f4d1f25fbe6b9810a3c341d0ad34d5c7ae9",
-      "file": "app/api/v1/endpoints/security_events.py",
-      "function": "update_security_event",
-      "line": 349,
-      "method": "fetchrow",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "UPDATE security_events SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='assignments', ctx=Load())], keywords=[])} {branch} RETURNING *",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2902,22 +2352,6 @@
       "sql": "SELECT w.key, COALESCE((SELECT SUM(c.duration_seconds) FROM calls c WHERE c.tenant_id=$1::uuid AND c.created_at >= w.start AND c.created_at < w.finish AND NOT c.is_test AND (c.direction IS DISTINCT FROM 'inbound' OR c.billing_status='finalized')), 0) + COALESCE((SELECT SUM(COALESCE(leg.duration_seconds, 0)) FROM call_legs leg JOIN calls parent ON parent.id=leg.call_id WHERE parent.tenant_id=$1::uuid AND parent.created_at >= w.start AND parent.created_at < w.finish AND NOT parent.is_test AND leg.leg_type='transfer' AND leg.billing_status='finalized'), 0) AS seconds FROM unnest($2::text[], $3::timestamptz[], $4::timestamptz[]) AS w(key, start, finish)",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "1704e09e738a86aa004420ac5e6f21a821b631413dc174a2a29ccb34775f7c16",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "get_abuse_statistics",
-      "line": 425,
-      "method": "fetch",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT event_type, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY event_type",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -3243,84 +2677,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2d61381e6a1487795c7b9a43d6554c7c270b792c2152def1fe971d7d21a33095",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "list_abuse_events",
-      "line": 205,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{branch} ORDER BY e.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "6f5dad83c54e159e006b42d5361e5d764f6e0fcaa9ca6bea8528a6d968cd546e",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._hold_account_members",
-      "line": 474,
-      "method": "fetchval",
-      "tables": [
-        "tenant_users"
-      ],
-      "sql": "UPDATE tenant_users SET status='suspended',updated_at=clock_timestamp() WHERE id=$1 RETURNING updated_at",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "6f9e629c2e4da49372ffc17e606f67d811c3e8929c7dd42666adbb81ce146113",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_runtimes",
-      "line": 337,
-      "method": "fetch",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_registered' AND event_type='session_created' AND resource_type='assistant_runtime' AND (resource_id=ANY($1::uuid[]) OR metadata->>'user_id'=ANY($2::text[])) ORDER BY event_id LIMIT $3",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "702b5748748dcd3efda3789a23f18958601cd0886759459d2aa76507707d7bd2",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "attach_files",
-      "line": 114,
-      "method": "fetch",
-      "tables": [
-        "support_ticket_attachments"
-      ],
-      "sql": "UPDATE support_ticket_attachments SET tenant_id = $1, ticket_id = $2, message_id = $3, attached_at = $6 WHERE id = ANY($4::uuid[]) AND message_id IS NULL AND uploaded_by = $5 AND (tenant_id = $1 OR ($7 AND tenant_id IS NULL)) RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "705fc6ef293ca22fc483fa86315a0276b29831ad2ad27635bf1d0cc824f7ab85",
-      "file": "app/domain/services/abuse_detection.py",
-      "function": "AbuseDetectionService._get_historical_avg_calls",
-      "line": 755,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT AVG(call_count) as avg_calls FROM ( SELECT DATE_TRUNC('hour', created_at) as hour, COUNT(*) as call_count FROM calls WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '7 days' AND NOT is_test GROUP BY DATE_TRUNC('hour', created_at) ) hourly_counts",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "72a111ac02fc6fb4c49d5ec14582b0645191b94c265cb430010a795d97eeb08e",
       "file": "app/core/security/refresh_tokens.py",
       "function": "rotate_refresh_token",
@@ -3403,20 +2759,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "aa5f23866bc66521df59b81001b4e7d2ecac4a79e867692e66b4ffe3409c3976",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "get_abuse_alerts",
-      "line": 789,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{branch} ORDER BY e.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "763e98b964ecb1b8370605e159dd56fd770a870ba8e771f9cecd5b382edefc7f",
       "file": "app/domain/services/recording_service.py",
       "function": "RecordingService._discard_unregistered_object",
@@ -3478,22 +2820,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "76f54a421574e6248bb94a9ef13fa86f59bbae9833437979daac15be09487277",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.list_reviews",
-      "line": 398,
-      "method": "fetch",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "SELECT id, tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash, llm_model, created_at, updated_at FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])} ORDER BY created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=2)}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -3805,22 +3131,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "80f1e9d34ca0ab8e8d9a2a4bf24608fe30e66a937e880a2c034dddbf87aed849",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.summarise",
-      "line": 461,
-      "method": "fetchrow",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "SELECT count(*)::int AS reviews, round(avg(rating)::numeric, 2)::float AS avg_rating, count(*) FILTER (WHERE rating <= 2)::int AS low_rated, count(DISTINCT call_id)::int AS calls_reviewed FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "810eeaf2b28d0ed74559eee75c3d834eba6006766dd14e2e5feeea8b74256d43",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.add",
@@ -3863,20 +3173,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "824c7602c93f4d7f77983cdd3f9fb5495bf41b1b1518d737fc68e2ead60d4bd2",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_call_details",
-      "line": 168,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='JOB_REASON_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -3989,20 +3285,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "87ac2b298ed87aa77df2d2194a20557041bcb5b6e1021bf29a7ac612e5acf4dd",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_account_overview",
-      "line": 106,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='PLAN_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4234,22 +3516,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "90b4a29b8fab0f6336122d1e6da80fb2a4d52fcc07fd16b9eb274b994a116d75",
-      "file": "app/domain/services/support/staff_service.py",
-      "function": "_valid_assignee",
-      "line": 170,
-      "method": "fetchval",
-      "tables": [
-        "user_profiles"
-      ],
-      "sql": "SELECT EXISTS (SELECT 1 FROM user_profiles WHERE id = $1 AND role = 'platform_admin' AND is_active AND is_verified)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "9118f3d7d8b4284675c649008e492500007c9be8d41893f797abec99e65f269c",
       "file": "app/core/security/refresh_tokens.py",
       "function": "rotate_refresh_token",
@@ -4278,22 +3544,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "91330761f9e315a208ba39254471b0da5257bbb79aec1ad5a46b2300315d77e4",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.summarise",
-      "line": 453,
-      "method": "fetch",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "SELECT tag, count(*)::int AS reviews, round(avg(rating)::numeric, 2)::float AS avg_rating FROM conversation_reviews, unnest(review_tags) AS tag WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])} GROUP BY tag ORDER BY reviews DESC",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4473,38 +3723,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "96124bb18add293c2f2863fea543715628b46bbd20f0c8f844ce8ee6b9486fb3",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.summarise",
-      "line": 441,
-      "method": "fetch",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "SELECT COALESCE(prompt_version, 'unrecorded') AS prompt_version, count(*)::int AS reviews, round(avg(rating)::numeric, 2)::float AS avg_rating, count(*) FILTER (WHERE rating <= 2)::int AS low_rated FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])} GROUP BY 1 ORDER BY reviews DESC",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "981cc60c43c2d2c7f3bd34e3395dd0c20b43de48dc8e93ddb4b697f1b6a90181",
-      "file": "app/domain/services/abuse_detection.py",
-      "function": "AbuseDetectionService.get_statistics",
-      "line": 952,
-      "method": "fetch",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT severity, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY severity",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "98a3391cfbd31eaeb3052a9aed626e06bf48ab151f9ce9cc6acbb7fdd2ef7eb9",
       "file": "app/domain/services/minutes_quota.py",
       "function": "_compute_minutes_status",
@@ -4617,20 +3835,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f55c21f5257265db0f417321e1a9512794542107900d0cabb6e13db899726aff",
-      "file": "app/api/v1/endpoints/abuse_monitoring.py",
-      "function": "list_abuse_rules",
-      "line": 510,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{branch} ORDER BY priority ASC, created_at DESC",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "9cae1e34b03bf1b6529b6368077d03a0e066da05fd947f2ac51cc7c3cd263168",
       "file": "app/domain/services/dnc_service.py",
       "function": "DNCService.add",
@@ -4660,22 +3864,6 @@
         "leads"
       ],
       "sql": "SELECT c.xmin::text AS call_revision, c.lead_id::text AS lead_id, l.xmin::text AS lead_revision, x.id::text AS connector_id, x.provider, x.status AS connector_status, x.config AS connector_config, a.id::text AS account_row_id, a.external_account_id, a.status AS account_status, a.scopes AS account_scopes, COALESCE((SELECT jsonb_agg(p.stamp ORDER BY p.kind,p.field_key) FROM ( SELECT 'current' AS kind,d.field_key, jsonb_build_array('current',d.field_key,d.id::text,d.xmin::text) AS stamp FROM call_lead_details d WHERE d.tenant_id=c.tenant_id AND d.call_id=c.id AND d.field_key IN ('email','phone') UNION ALL SELECT 'manual',m.field_key,m.stamp FROM ( SELECT DISTINCT ON (d.field_key) d.field_key, jsonb_build_array('manual',d.field_key,d.id::text,d.xmin::text) AS stamp FROM call_lead_details d JOIN calls source ON source.id=d.call_id AND source.tenant_id=d.tenant_id WHERE d.tenant_id=c.tenant_id AND source.lead_id=c.lead_id AND d.field_key IN ('email','phone') AND d.source='manual_edit' ORDER BY d.field_key,d.updated_at DESC,source.created_at DESC ) m ) p),'[]'::jsonb) AS primary_rows FROM calls c LEFT JOIN leads l ON l.id=c.lead_id AND l.tenant_id=c.tenant_id JOIN connectors x ON x.id=$3::uuid AND x.tenant_id=c.tenant_id AND x.type='crm' AND x.provider=$4 AND x.status='active' JOIN LATERAL ( SELECT id,external_account_id,status,scopes FROM connector_accounts WHERE connector_id=x.id AND tenant_id=c.tenant_id AND status='active' ORDER BY last_refreshed_at DESC LIMIT 1 ) a ON TRUE WHERE c.tenant_id=$1::uuid AND c.id=$2::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "9e4c3c7ed50e0b393e83ed0ee83bfe6e6f324bea064d04cd939261bbdce9da8e",
-      "file": "app/domain/services/support/articles.py",
-      "function": "search_articles",
-      "line": 81,
-      "method": "fetch",
-      "tables": [
-        "support_kb_articles"
-      ],
-      "sql": "WITH tq AS ( SELECT websearch_to_tsquery('english', $1) AS q_and, NULLIF(replace(websearch_to_tsquery('english', $1)::text, ' & ', ' | '), '')::tsquery AS q_or ), hits AS ( SELECT a.slug, a.title, a.section, a.body_md, a.url, a.updated_at, ts_rank(a.search_tsv, tq.q_and) * 2 + CASE WHEN tq.q_or IS NULL THEN 0 ELSE ts_rank(a.search_tsv, tq.q_or) END + word_similarity($1, a.search_text) AS rank, COALESCE(tq.q_or, tq.q_and) AS hq FROM public.support_kb_articles a, tq WHERE a.published AND (a.search_tsv @@ tq.q_and OR (tq.q_or IS NOT NULL AND a.search_tsv @@ tq.q_or) OR word_similarity($1, a.search_text) >= $3) ORDER BY rank DESC, a.updated_at DESC LIMIT $2 ) SELECT slug, title, section, url, body_md, ts_headline('english', body_md, hq, 'MaxWords=35, MinWords=12, StartSel=\"\", StopSel=\"\"') AS headline FROM hits ORDER BY rank DESC, updated_at DESC",
       "scoped": false,
       "unresolved": false,
       "bypass": false,
@@ -4983,36 +4171,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a65b7a9a90cc6438382c7d66719193cb5cbbb6485eee3defc0d19061ea293193",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._restore_owned_account_row",
-      "line": 766,
-      "method": "execute",
-      "tables": [],
-      "sql": "UPDATE {table} SET status=$2,suspended_at=$3,suspended_by=$4, suspension_reason=$5,updated_at=clock_timestamp() WHERE id=$1",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a6683bdbc8b823810ca30cb1852a664434877af54254c1512a1b3fa9181b97f5",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "capture_cohort",
-      "line": 148,
-      "method": "fetch",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_registered' AND resource_type='assistant_runtime' AND metadata->>'user_id'=ANY($1::text[]) ORDER BY event_id LIMIT $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "a68312705dca5ed8cbcc4e9608159420c6e689484446a22d97d1a1cf34e6bb31",
       "file": "app/domain/services/topup_service.py",
       "function": "TopupService.credit_paid_order",
@@ -5077,34 +4235,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a7992640df1383255e3420c24a2a11526c16d19ef40f347c5a7887e67ad9b0b3",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "tenant_owns",
-      "line": 226,
-      "method": "fetchval",
-      "tables": [],
-      "sql": "SELECT EXISTS (SELECT 1 FROM {table} WHERE id = $1 AND tenant_id = $2)",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a7b3c3f1407ea5fa8961b6991d6c83ae07078870984f2af74e5bef1d8acb708f",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_recent_call_issues",
-      "line": 156,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='RECENT_FAILURES_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "a81342649f3c108e15a8f24dc8007bea5049509f9ed4c6c7f6005ea9d36df1dd",
       "file": "app/domain/services/tenant_phone_number_service.py",
       "function": "TenantPhoneNumberService.revoke",
@@ -5114,23 +4244,6 @@
         "inbound_did_assignments"
       ],
       "sql": "SELECT EXISTS( SELECT 1 FROM inbound_did_assignments WHERE tenant_id=$1 AND phone_number_id=$2 AND status <> 'archived' )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a88ffd888b8e3c318297f23bbabbd0f0cfd19841f693ef6d5d209a73092145be",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "capture_cohort",
-      "line": 134,
-      "method": "fetch",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "SELECT c.id,c.tenant_id,c.provider,c.provider_call_id,c.external_call_uuid,c.route_snapshot FROM calls c WHERE c.tenant_id=ANY($1::uuid[]) AND (c.status <> ALL($2::text[]) OR (c.provider_terminated_at IS NULL AND ( (c.direction='inbound' AND c.billing_status='reserved') OR (c.direction='outbound' AND c.terminal_settled_at IS NULL))) OR EXISTS (SELECT 1 FROM call_legs l WHERE l.call_id=c.id AND l.status IN ('initiated','ringing','answered','in_progress','in_call','active'))) ORDER BY c.id LIMIT $3",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -5250,23 +4363,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ad17975085dc08539adf576f060200d4a060477201caac229886367a5fd34d32",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "fetch_messages",
-      "line": 128,
-      "method": "fetch",
-      "tables": [
-        "support_ticket_messages",
-        "user_profiles"
-      ],
-      "sql": "SELECT m.id, m.author_user_id, m.author_type, m.body, m.is_internal, m.created_at, up.name AS author_name FROM support_ticket_messages m LEFT JOIN user_profiles up ON up.id = m.author_user_id WHERE m.ticket_id = $1 AND m.tenant_id = $2 AND ($3 OR NOT m.is_internal) ORDER BY m.created_at, m.id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "ad70e4b55963aac4f8dc4dca88dd1794b44e19924749db07c5fa888640311b42",
       "file": "app/api/v1/endpoints/mfa/challenge.py",
       "function": "resolve_mfa_challenge",
@@ -5297,20 +4393,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "aee942df4c9306bde7c45f105eeca69a8c9641a8f5e32603ca7d9db9702e24f1",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_campaign_status",
-      "line": 133,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='CAMPAIGN_BY_ID_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "afa4e9399571973315567549088cff5f2078247a63f8c3466005c5f482dda304",
       "file": "app/core/security/principal.py",
       "function": "load_current_principal",
@@ -5323,20 +4405,6 @@
       "sql": "SELECT up.id,up.email,up.name,up.role AS profile_role,up.tenant_id, up.is_active,up.is_verified,t.business_name,t.minutes_allocated,t.minutes_used, tu.status AS membership_status,r.name AS membership_role FROM user_profiles up LEFT JOIN tenants t ON t.id=up.tenant_id LEFT JOIN tenant_users tu ON tu.user_id=up.id AND tu.tenant_id=up.tenant_id LEFT JOIN roles r ON r.id=tu.role_id WHERE up.id=$1::uuid",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "afc18d6284b41e856f23cbe8d8d6ea68ba993c8d9dd8b58c4467f1e51ec7b2dc",
-      "file": "app/domain/services/abuse_detection.py",
-      "function": "AbuseDetectionService.get_recent_events",
-      "line": 912,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{branch} ORDER BY e.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -5401,22 +4469,6 @@
       "sql": "SELECT intent_id, request_reason FROM admin_media_deletion_request_keys WHERE actor_id = $1 AND idempotency_key = $2",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "198db28e366211c37062418c5dcb28379a8885d8661e688b82b6b408e7f2338b",
-      "file": "app/api/v1/endpoints/security_events.py",
-      "function": "list_security_events",
-      "line": 215,
-      "method": "fetch",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "SELECT s.* FROM security_events s {IfExp(test=Name(id='conditions', ctx=Load()), body=JoinedStr(values=[Constant(value='WHERE '), FormattedValue(value=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[]), conversion=-1)]), orelse=Constant(value=''))} ORDER BY created_at DESC,event_id DESC LIMIT ${branch} OFFSET ${branch}{Constant(value=1)}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -5771,39 +4823,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "bed5122ca30ed89708af4a42be12fdb79c567a544ab2f2e0c095e85090c04e8f",
-      "file": "app/domain/services/abuse_detection.py",
-      "function": "AbuseDetectionService.get_statistics",
-      "line": 980,
-      "method": "fetchval",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT COUNT(*) FROM abuse_events WHERE severity IN ('high', 'critical') AND resolved_at IS NULL {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "bed98b28acdbacd8d345fda5bb725ce0e613bf0912a149ace7d7f927e87acf9d",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._account_profiles",
-      "line": 436,
-      "method": "fetch",
-      "tables": [
-        "tenant_users",
-        "user_profiles"
-      ],
-      "sql": "SELECT up.id FROM user_profiles up WHERE EXISTS(SELECT 1 FROM tenant_users tu WHERE tu.user_id=up.id AND tu.tenant_id=ANY($1::uuid[])) ORDER BY up.id FOR UPDATE OF up",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "c0fc79b819c0d0a8262dfb733af91e99568c3475419fadad4a3d23a7bbb95536",
       "file": "app/services/scripts/knowledge/ingest_service.py",
       "function": "recover_stale_processing_sources",
@@ -5959,22 +4978,6 @@
         "inbound_reassignment_requests"
       ],
       "sql": "SELECT * FROM inbound_reassignment_requests WHERE ($1::text='all' OR status=$1) AND ($2::timestamptz IS NULL OR (requested_at,id)<($2::timestamptz,$3::uuid)) ORDER BY requested_at DESC,id DESC LIMIT $4",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c4221398483d576a4da662054671fd3ad5eebe8a7a7780c44ac183d611ab1d6d",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_original_proof",
-      "line": 237,
-      "method": "fetchrow",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT * FROM audit_logs WHERE action=$1 AND resource_type=$2 AND resource_id=$3 AND metadata->>'suspension_id'=$4 AND event_type=$5 ORDER BY event_time,event_id LIMIT 1",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -6291,38 +5294,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ca3e98d671323c4d59a65a0f583cd15406c9ad56c03fa8ee1483b72670414aa7",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.get_my_review",
-      "line": 211,
-      "method": "fetchrow",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "SELECT id, tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash, llm_model, created_at, updated_at FROM conversation_reviews WHERE call_id = $1 AND user_id = $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "ca45c9aa9cc63b36901681c0838342ad4125bca840f46cc63a26309275b3bd3a",
-      "file": "app/domain/services/conversation_review_service.py",
-      "function": "ConversationReviewService.list_reviews",
-      "line": 395,
-      "method": "fetchval",
-      "tables": [
-        "conversation_reviews"
-      ],
-      "sql": "SELECT count(*) FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "ca960464353e3d751f345546f28ee26711d1b69f501df04ad75fc2bb17757ddf",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.finalize",
@@ -6427,22 +5398,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ccbd3c75bbf93c42309dc651936106150b4df85838b100d4146b59fd5dc8369b",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._account_events",
-      "line": 425,
-      "method": "fetch",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT e.*,a.metadata->'formal_account_hold_version'='1'::jsonb AS policy_audited FROM suspension_events e LEFT JOIN audit_logs a ON a.event_id=e.audit_log_id WHERE e.target_type IN ('tenant','partner') AND e.is_active=TRUE ORDER BY e.suspended_at,e.suspension_id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "cd450245381760b8ab62dc2fda8bd6164cc72b0151201f603b6df43c9ae26cd8",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reverse_finalized_usage",
@@ -6484,40 +5439,6 @@
         "audit_logs"
       ],
       "sql": "SELECT event_id,resource_id,action,metadata FROM audit_logs WHERE actor_id=$1::uuid AND resource_type='user' AND action IN ('user_created','user_create_cancelled') AND metadata ? 'user_create_request_id' AND metadata->>'user_create_request_id'=$2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "ce770dc77a9cd45d4dfe2a4c9aeccbfc007652e72a2ef5daff8bdf009fb0b380",
-      "file": "app/services/crm_delivery_store.py",
-      "function": "CRMDeliveryStore.bind_contact_effect",
-      "line": 141,
-      "method": "execute",
-      "tables": [
-        "calls",
-        "crm_deliveries"
-      ],
-      "sql": "UPDATE crm_deliveries SET contact_effect=COALESCE(contact_effect,$5::jsonb), updated_at=NOW() WHERE tenant_id=$1::uuid AND call_id=$2::uuid AND provider=$3 AND lease_token=$4::uuid AND status='processing' AND phase NOT IN ('creating_contact','creating_call','legacy_unverified') AND remote_contact_id IS NULL AND remote_call_id IS NULL AND destination_connector_id::text=$5::jsonb->>'connector_id' AND destination_account_id=$5::jsonb->>'account_id' AND EXISTS (SELECT 1 FROM calls c WHERE c.id=crm_deliveries.call_id AND c.tenant_id=crm_deliveries.tenant_id AND c.xmin::text=$5::jsonb->>'source_call_revision') AND (contact_effect IS NULL OR contact_effect=$5::jsonb)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "cf3dc8bbd39d35d8aea327cbce9599f63f6e9d337e77d4c08617e7465780cab1",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "fetch_events",
-      "line": 153,
-      "method": "fetch",
-      "tables": [
-        "support_ticket_events",
-        "user_profiles"
-      ],
-      "sql": "SELECT e.id, e.type, e.from_value, e.to_value, e.created_at, e.actor_user_id, up.name AS actor_name FROM support_ticket_events e LEFT JOIN user_profiles up ON up.id = e.actor_user_id WHERE e.ticket_id = $1 AND e.tenant_id = $2 ORDER BY e.created_at, e.id",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -6686,20 +5607,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged."
     },
     {
-      "id": "d715ba8304f393ca434b900f9b6fe3234a0ffce9c11bbd43912502a639cc310c",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_call_details",
-      "line": 163,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='CALL_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "d7cb468de14e00d004540b859a76a882b46e49c0215ad5028d858060517eaad5",
       "file": "app/core/db.py",
       "function": "_apply_transaction_timeouts",
@@ -6849,20 +5756,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "dd497a9ab0b123bbaf0e0d660913b2c23d77ed23053dc3fa7d959e74c0b6389d",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_account_overview",
-      "line": 103,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='TENANT_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "ddaee134f887a3be0cf89ded1a8febe5ee9b8f835a399265f4aafbdf28b6d2f0",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.admit",
@@ -6959,55 +5852,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "dfd2e01a71f96b9e3a18283cd3d2f526a020512fcb857fa2412cd2355e49ef26",
-      "file": "app/domain/services/abuse_detection.py",
-      "function": "AbuseDetectionService._store_call_metrics",
-      "line": 789,
-      "method": "execute",
-      "tables": [
-        "call_velocity_snapshots"
-      ],
-      "sql": "INSERT INTO call_velocity_snapshots ( tenant_id, window_start, window_end, total_calls, unique_numbers, international_calls, premium_calls, short_duration_calls, top_destinations ) SELECT $1, DATE_TRUNC('hour', NOW()), DATE_TRUNC('hour', NOW()) + INTERVAL '1 hour', 1, 1, CASE WHEN $2 IS NOT NULL AND $2 != 'US' THEN 1 ELSE 0 END, 0, CASE WHEN $3 < 10 THEN 1 ELSE 0 END, '[]'::jsonb ON CONFLICT (tenant_id, window_start) DO UPDATE SET total_calls = call_velocity_snapshots.total_calls + 1, unique_numbers = call_velocity_snapshots.unique_numbers + 1, international_calls = call_velocity_snapshots.international_calls + CASE WHEN EXCLUDED.international_calls > 0 THEN 1 ELSE 0 END, short_duration_calls = call_velocity_snapshots.short_duration_calls + CASE WHEN EXCLUDED.short_duration_calls > 0 THEN 1 ELSE 0 END",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "e010fa08b021d0eb880e15678db6cbfd64f0ce0b3dde90ac525c96d4eafedd44",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_calls",
-      "line": 412,
-      "method": "fetch",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "SELECT c.* FROM calls c WHERE c.id=ANY($4::uuid[]) OR (c.tenant_id=ANY($1::uuid[]) AND ((c.status <> ALL($2::text[]) OR (c.provider_terminated_at IS NULL AND ( (c.direction='inbound' AND c.billing_status='reserved') OR (c.direction='outbound' AND c.terminal_settled_at IS NULL))) OR EXISTS (SELECT 1 FROM call_legs l WHERE l.call_id=c.id AND l.status IN ('initiated','ringing','answered','in_progress','in_call','active'))) OR c.created_at >= $3 OR c.answered_at >= $3 OR c.route_snapshot->'provider_acknowledgement' IS NOT NULL)) ORDER BY c.id LIMIT $5",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "e02f660a1ad4afab04eefc10636476a738cca4c9a7b561e823efd7ff3de4fa9b",
-      "file": "app/api/v1/endpoints/security_events.py",
-      "function": "get_security_event",
-      "line": 239,
-      "method": "fetchrow",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "SELECT * FROM security_events WHERE event_id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "e1634b05b57d47130be8f17f5ac1211ce77cef64027b1d10ce49db8b4f29798b",
       "file": "app/api/v1/endpoints/mfa/status.py",
       "function": "disable_mfa",
@@ -7020,38 +5864,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "e1b33f74afbe6ba3eb202dba6c0cfc6ffec8969d5332c3a56ee3363fc0f38790",
-      "file": "app/domain/services/abuse_detection.py",
-      "function": "AbuseDetectionService.get_statistics",
-      "line": 966,
-      "method": "fetch",
-      "tables": [
-        "abuse_events"
-      ],
-      "sql": "SELECT event_type, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY event_type",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "e1c01f42984ae803e15f159c8fcfa040a0d6a5c1f4ff5bdf1866ec1ac1c8b406",
-      "file": "app/services/connector_lifecycle.py",
-      "function": "ConnectorLifecycle.disable",
-      "line": 423,
-      "method": "execute",
-      "tables": [
-        "connectors"
-      ],
-      "sql": "UPDATE connectors SET provider_revocation_status='pending' WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -7100,34 +5912,6 @@
       "sql": "INSERT INTO tenant_phone_numbers (tenant_id, e164, provider, label, metadata, status) VALUES ($1, $2, $3, $4, $5::jsonb, 'pending_verification') ON CONFLICT (tenant_id, e164) DO UPDATE SET label = COALESCE(EXCLUDED.label, tenant_phone_numbers.label), metadata = tenant_phone_numbers.metadata || EXCLUDED.metadata WHERE tenant_phone_numbers.status NOT IN ('revoked', 'suspended') RETURNING *",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "e6690fc8966a3ff08da254d11b7323b0a3bc87e524fcb5c783fac90a93919e4a",
-      "file": "app/domain/services/support/bot/diagnostics.py",
-      "function": "ToolExecutor._get_connectors_status",
-      "line": 196,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{Attribute(value=Name(id='q', ctx=Load()), attr='CONNECTORS_SQL', ctx=Load())}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "e93a72b96d224160f26a469e9714aaeb4ed0434323f981579e2ba577a608da84",
-      "file": "app/domain/services/formal_enforcement.py",
-      "function": "_credentials",
-      "line": 298,
-      "method": "fetch",
-      "tables": [],
-      "sql": "SELECT id,{Subscript(value=Subscript(value=Name(id='_CREDENTIALS', ctx=Load()), slice=Name(id='table', ctx=Load()), ctx=Load()), slice=Constant(value=1), ctx=Load())} AS invalidated FROM {loop-value} WHERE id=ANY($1::uuid[]) OR ($3 AND user_id=ANY($2::uuid[]) AND {Subscript(value=Subscript(value=Name(id='_CREDENTIALS', ctx=Load()), slice=Name(id='table', ctx=Load()), ctx=Load()), slice=Constant(value=0), ctx=Load())}) ORDER BY id LIMIT $4",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -7279,24 +6063,6 @@
         "user_profiles"
       ],
       "sql": "SELECT DISTINCT p.name FROM tenant_users tu JOIN user_profiles profile ON profile.id=tu.user_id AND profile.is_active AND profile.is_verified JOIN roles r ON r.id = tu.role_id JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE tu.user_id = $1 AND tu.tenant_id = $2 AND tu.status = 'active'",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "efd8a60775d08ae08cf96943b4c03789b287660643fdbd6b9679d2ef3c4e10fa",
-      "file": "app/domain/services/support/ticket_store.py",
-      "function": "unread_ticket_ids",
-      "line": 202,
-      "method": "fetch",
-      "tables": [
-        "support_ticket_messages",
-        "support_ticket_reads",
-        "support_tickets"
-      ],
-      "sql": "SELECT t.id FROM support_tickets t WHERE t.tenant_id = $1 AND t.requester_user_id = $2 AND EXISTS ( SELECT 1 FROM support_ticket_messages sm WHERE sm.ticket_id = t.id AND sm.tenant_id = t.tenant_id AND sm.author_type = 'staff' AND NOT sm.is_internal AND sm.created_at > COALESCE((SELECT r.last_seen_at FROM support_ticket_reads r WHERE r.user_id = $2 AND r.ticket_id = t.id AND r.tenant_id = t.tenant_id), '-infinity'::timestamptz)) ORDER BY t.updated_at DESC, t.id DESC LIMIT 200",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -7465,22 +6231,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c7ae0a5bb753de95d34db6471d206d0d411bcb0739c9014d340ab93cdea4d89f",
-      "file": "app/api/v1/endpoints/security_events.py",
-      "function": "get_overdue_alerts",
-      "line": 473,
-      "method": "fetch",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "SELECT * FROM security_events WHERE status IN ('open', 'investigating', 'escalated') AND sla_deadline IS NOT NULL AND sla_deadline < $1 {branch} ORDER BY sla_deadline ASC",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "12d778f199a39f3af3497d30c278cc0f21bcdbeeed7f4ae0c8cb86a87c2d7a5a",
       "file": "app/api/v1/endpoints/alerts.py",
       "function": "list_alerts",
@@ -7491,22 +6241,6 @@
       "scoped": false,
       "unresolved": true,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "f5231eb31300a8f4f841da0c7e6da14b55dbf4b96d8adbe699e4583d9f9d2b7f",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._hold_account_members",
-      "line": 467,
-      "method": "fetch",
-      "tables": [
-        "tenant_users"
-      ],
-      "sql": "SELECT id,tenant_id,status,updated_at FROM tenant_users WHERE tenant_id=ANY($1::uuid[]) ORDER BY id FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -7809,6 +6543,194 @@
       "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "30d0cf46f96b0b8bc94a888f688c0973db580a657a497dc46c1e442828b3c4ce",
+      "file": "app/domain/services/conversation_review_service.py",
+      "function": "ConversationReviewService.submit",
+      "line": 251,
+      "method": "fetchrow",
+      "tables": [
+        "conversation_reviews"
+      ],
+      "sql": "INSERT INTO conversation_reviews ( tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT (call_id, user_id) DO UPDATE SET rating = EXCLUDED.rating, review_tags = EXCLUDED.review_tags, comment = EXCLUDED.comment, updated_at = NOW() WHERE conversation_reviews.tenant_id = $1 RETURNING id, tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash, llm_model, created_at, updated_at",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "aaf7d0f9083cec421b221d71b1838e12bef9bd2da40022170810e79e08331bfb",
+      "file": "app/domain/services/conversation_review_service.py",
+      "function": "ConversationReviewService.list_reviews",
+      "line": 404,
+      "method": "fetch",
+      "tables": [
+        "conversation_reviews"
+      ],
+      "sql": "SELECT id, tenant_id, call_id, campaign_id, user_id, rating, review_tags, comment, prompt_template, prompt_version, prompt_hash, llm_model, created_at, updated_at FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])} ORDER BY created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=1)} OFFSET ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])}{Constant(value=2)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "315a49c5613c024d4989bf2f52967918e15b8834c2756f814ae65e1a045abcfb",
+      "file": "app/domain/services/conversation_review_service.py",
+      "function": "ConversationReviewService.summarise",
+      "line": 467,
+      "method": "fetchrow",
+      "tables": [
+        "conversation_reviews"
+      ],
+      "sql": "SELECT count(*)::int AS reviews, round(avg(rating)::numeric, 2)::float AS avg_rating, count(*) FILTER (WHERE rating <= 2)::int AS low_rated, count(DISTINCT call_id)::int AS calls_reviewed FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "4817addfae64ef097b1e5047196e61722106b1fb9c0856455e53f584f29afce0",
+      "file": "app/domain/services/conversation_review_service.py",
+      "function": "ConversationReviewService.summarise",
+      "line": 459,
+      "method": "fetch",
+      "tables": [
+        "conversation_reviews"
+      ],
+      "sql": "SELECT tag, count(*)::int AS reviews, round(avg(rating)::numeric, 2)::float AS avg_rating FROM conversation_reviews, unnest(review_tags) AS tag WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])} GROUP BY tag ORDER BY reviews DESC",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "13cde3c3b0795cff019c8a239826f85256d84ff2e3f929776bd1c0b90d12401d",
+      "file": "app/domain/services/conversation_review_service.py",
+      "function": "ConversationReviewService.summarise",
+      "line": 447,
+      "method": "fetch",
+      "tables": [
+        "conversation_reviews"
+      ],
+      "sql": "SELECT COALESCE(prompt_version, 'unrecorded') AS prompt_version, count(*)::int AS reviews, round(avg(rating)::numeric, 2)::float AS avg_rating, count(*) FILTER (WHERE rating <= 2)::int AS low_rated FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])} GROUP BY 1 ORDER BY reviews DESC",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "60628387b0da4aa46d0dfdd2fa43a97240d5d9f4addcc0c653cd48f83dbb1c06",
+      "file": "app/domain/services/conversation_review_service.py",
+      "function": "ConversationReviewService.list_reviews",
+      "line": 401,
+      "method": "fetchval",
+      "tables": [
+        "conversation_reviews"
+      ],
+      "sql": "SELECT count(*) FROM conversation_reviews WHERE {Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='where', ctx=Load())], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "f6fbc2b1d0298b3d1fbe4f86dcfe05857294c249ce89d12c72ce47e92c4399a5",
+      "file": "app/domain/services/support/ticket_store.py",
+      "function": "update_ticket",
+      "line": 76,
+      "method": "fetchval",
+      "tables": [
+        "support_tickets"
+      ],
+      "sql": "UPDATE support_tickets SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='assignments', ctx=Load())], keywords=[])} WHERE id = $1 AND tenant_id = $2 RETURNING version",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "3764cd07ea2abbd0e931c7322f90f5b6104eb170fea182ccf2d37321a1edaeca",
+      "file": "app/domain/services/support/ticket_store.py",
+      "function": "tenant_owns",
+      "line": 226,
+      "method": "fetchval",
+      "tables": [],
+      "sql": "SELECT EXISTS (SELECT 1 FROM {table} WHERE id = $1 AND tenant_id = $2)",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required."
+    },
+    {
+      "id": "5e587006275c6faf79cd044cfb2233a55c28bbc26ac18789b2fca71afcc7691a",
+      "file": "app/domain/services/abuse_detection.py",
+      "function": "AbuseDetectionService.get_statistics",
+      "line": 953,
+      "method": "fetch",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT severity, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY severity",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required. New fingerprint (F2-03 compliance slice): only AbuseDetectionService._check_rapid_calls changed this module's AST; this statement's SQL, parameters and classification are unchanged."
+    },
+    {
+      "id": "7d1457bb6d8f207f8e2cb4dd16d2e5fdbe547871d6c60512ae694e8ac29cb26b",
+      "file": "app/domain/services/abuse_detection.py",
+      "function": "AbuseDetectionService.get_recent_events",
+      "line": 913,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{branch} ORDER BY e.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}{Constant(value=1)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required. New fingerprint (F2-03 compliance slice): only AbuseDetectionService._check_rapid_calls changed this module's AST; this statement's SQL, parameters and classification are unchanged."
+    },
+    {
+      "id": "9c893db5ac0bea793fff99dd8e43232810a530e15268a339a76f0c0ff090e51c",
+      "file": "app/domain/services/abuse_detection.py",
+      "function": "AbuseDetectionService.get_statistics",
+      "line": 981,
+      "method": "fetchval",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT COUNT(*) FROM abuse_events WHERE severity IN ('high', 'critical') AND resolved_at IS NULL {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required. New fingerprint (F2-03 compliance slice): only AbuseDetectionService._check_rapid_calls changed this module's AST; this statement's SQL, parameters and classification are unchanged."
+    },
+    {
+      "id": "b93e809da8be767d898ab3468e8acb3bce4bd269819123b26be688a111442ac7",
+      "file": "app/domain/services/abuse_detection.py",
+      "function": "AbuseDetectionService.get_statistics",
+      "line": 967,
+      "method": "fetch",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT event_type, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY event_type",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Existing unresolved debt; tenant-scoping review required. New fingerprint (F2-03 compliance slice): only AbuseDetectionService._check_rapid_calls changed this module's AST; this statement's SQL, parameters and classification are unchanged."
     }
   ],
   "exceptions": [
@@ -8926,21 +7848,6 @@
       "category": "platform_admin"
     },
     {
-      "id": "39472bcff477e491d52b955b3b15c04a309091cb973bd7af55bc45774069c277",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService.submit_appeal",
-      "line": 1043,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT id,{IfExp(test=Compare(left=Subscript(value=Name(id='event', ctx=Load()), slice=Constant(value='target_type'), ctx=Load()), ops=[Eq()], comparators=[Constant(value='tenant')]), body=Constant(value='id'), orelse=Constant(value='tenant_id'))} AS audit_tenant_id FROM {Call(func=Attribute(value=Name(id='tables', ctx=Load()), attr='get', ctx=Load()), args=[Subscript(value=Name(id='event', ctx=Load()), slice=Constant(value='target_type'), ctx=Load())], keywords=[])} WHERE id=$1 FOR KEY SHARE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Formal platform account enforcement locks the selected global user/tenant/partner identity and rechecks current platform-admin authority in the transaction. Automatic restoration instead supplies the exact expired hold ID and is checked under that same lock. A user or partner can affect multiple tenant memberships; caller-tenant filtering would not model this platform action. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:1043.",
-      "category": "platform_account_enforcement"
-    },
-    {
       "id": "2128115a41434c569043d3c5186066fbe7b771e839df055caadd04832c3ca9e2",
       "file": "app/infrastructure/telephony/asterisk_adapter.py",
       "function": "AsteriskAdapter._on_outbound_stasis_start",
@@ -9421,23 +8328,6 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "92acdde41e673a8ed8127a15c1c1490979a219cb5e5d83686057abfe6a85d9bf",
-      "file": "app/api/v1/endpoints/security_events.py",
-      "function": "escalate_event",
-      "line": 510,
-      "method": "fetchrow",
-      "tables": [
-        "security_events"
-      ],
-      "sql": "UPDATE security_events SET status = 'escalated', resolution_notes = CASE WHEN resolution_notes IS NULL OR resolution_notes = '' THEN $1 ELSE resolution_notes || E'\n\nEscalation: ' || $1 END {branch} RETURNING *",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": false,
-      "count": 1,
-      "reason": "resolve_tenant_scope refuses tenantless/non-owner ordinary callers and appends tenant_id=$3 to the UPDATE. Only PLATFORM_ADMIN may resolve a NULL scope and deliberately administer events across tenants. New fingerprint preserves the literal newline bytes in the escalation note; no scope was removed. Exact reviewed operation: fetchrow; app/api/v1/endpoints/security_events.py:510.",
-      "category": "reviewed_tenant_scoped"
-    },
-    {
       "id": "517b3db690071694a996b488f51dcd38d1e74cc7fa091ab001c1bb88a40493d8",
       "file": "app/api/v1/endpoints/admin/supplier_evidence.py",
       "function": "import_statement",
@@ -9753,21 +8643,6 @@
       "count": 1,
       "reason": "The authenticated Alertmanager ingestion route records platform incidents, not tenant data. ingest_alertmanager validates the dedicated write-only credential and configured source before calling this helper; source/fingerprint/start identify the global incident episode. Exact reviewed operation: fetchval; app/api/v1/endpoints/alertmanager.py:214.",
       "category": "platform_monitoring"
-    },
-    {
-      "id": "5ec7ecbc29b6273b9c8838d0c96e7a8809f88458f7022390569a2f5e965f9afa",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._restore_account",
-      "line": 787,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT * FROM {IfExp(test=Compare(left=Name(id='target_type', ctx=Load()), ops=[Eq()], comparators=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load())]), body=Constant(value='tenants'), orelse=Constant(value='white_label_partners'))} WHERE id=$1 FOR NO KEY UPDATE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Formal platform account enforcement locks the selected global user/tenant/partner identity and rechecks current platform-admin authority in the transaction. Automatic restoration instead supplies the exact expired hold ID and is checked under that same lock. A user or partner can affect multiple tenant memberships; caller-tenant filtering would not model this platform action. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:787.",
-      "category": "platform_account_enforcement"
     },
     {
       "id": "60286b5cbe327c226f6e8b681b047515d220525536b487fb59da22e9251bde3d",
@@ -10582,21 +9457,6 @@
       "bypass": null,
       "count": 1,
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Current endpoint:277\u2013285 requires emergency admin, resolved as platform-admin admission; stores post-incident review for one platform request. Reviewer may differ from requestor by design."
-    },
-    {
-      "id": "8b306ca2296c4b569131c5edd05350f56861b9a089bded22612486c62f03df3a",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService._suspend_account",
-      "line": 541,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT * FROM {IfExp(test=Compare(left=Name(id='target_type', ctx=Load()), ops=[Eq()], comparators=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load())]), body=Constant(value='tenants'), orelse=Constant(value='white_label_partners'))} WHERE id=$1 FOR NO KEY UPDATE",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "Formal platform account enforcement locks the selected global user/tenant/partner identity and rechecks current platform-admin authority in the transaction. Automatic restoration instead supplies the exact expired hold ID and is checked under that same lock. A user or partner can affect multiple tenant memberships; caller-tenant filtering would not model this platform action. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:541.",
-      "category": "platform_account_enforcement"
     },
     {
       "id": "8c1674b88b7dcf28d918a072fbfa1d0e06f0994fee5deb2733d8662e7de2d864",
@@ -12197,21 +11057,6 @@
       "category": "platform_admin"
     },
     {
-      "id": "f0663e2f1dc12645885bb3e02324807c29b0de94bc6f014efd0dd909a5dabfee",
-      "file": "app/domain/services/suspension_service.py",
-      "function": "SuspensionService.get_status",
-      "line": 931,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT * FROM {Subscript(value=Dict(keys=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='USER', ctx=Load()), Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load()), Attribute(value=Name(id='TargetType', ctx=Load()), attr='PARTNER', ctx=Load())], values=[Constant(value='user_profiles'), Constant(value='tenants'), Constant(value='white_label_partners')]), slice=Name(id='target_type', ctx=Load()), ctx=Load())} WHERE id=$1",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": true,
-      "count": 1,
-      "reason": "The user/tenant/partner status/history routes all require platform_admin (suspensions.py:158,181,239,263). This helper uses a fixed target-type/table mapping and bound target UUID to inspect that platform-controlled identity. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:931.",
-      "category": "platform_admin"
-    },
-    {
       "id": "f0840dcc4a8718c5b62705ed0655eaff32d7ba383cb0ddfeed999d3e9a1b3c54",
       "file": "app/api/v1/endpoints/telephony_sip/trunks.py",
       "function": "_delete_blocker",
@@ -12533,6 +11378,804 @@
       "count": 1,
       "reason": "Owner decision D4-2 (11 Nov 2026): an email that already has an account in any workspace is refused, so this checks the globally unique normalized account email, as signup does. A tenant predicate would miss accounts in other workspaces. Only existence is read. The caller was authorized for its own tenant in the same transaction (_current_target_admin). Exact reviewed operation: fetchval; app/api/v1/endpoints/rbac/tenant_invites.py:115.",
       "category": "individually_reviewed"
+    },
+    {
+      "id": "0a8dcd628eed86f5b9ba18b5e95146053b3137516f3847baaca87da370b2346a",
+      "file": "app/domain/services/support/ticket_store.py",
+      "function": "fetch_ticket_tenant",
+      "line": 48,
+      "method": "fetchval",
+      "tables": [
+        "support_tickets"
+      ],
+      "sql": "SELECT tenant_id FROM support_tickets WHERE id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Platform staff must find which tenant owns a ticket id before they can work on it; the only callers are staff_service._ticket_anywhere and _begin_staff_write, which run on a tenantless connection after require_current_platform_admin or require_platform_admin_mutation, and every later read and write is bound to the tenant this returns.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "796b4d810968ee41d5a379770b781c8d8c5e6cfb117ff86018f810659d0c63b7",
+      "file": "app/domain/services/support/ticket_store.py",
+      "function": "fetch_ticket",
+      "line": 39,
+      "method": "fetchrow",
+      "tables": [
+        "support_tickets",
+        "user_profiles"
+      ],
+      "sql": "SELECT t.id, t.tenant_id, t.number, t.requester_user_id, t.conversation_id, t.subject, t.category, t.priority, t.status, t.assignee_user_id, t.related_campaign_id, t.related_call_id, t.diagnostics, t.first_response_due_at, t.resolution_due_at, t.first_responded_at, t.first_response_breached_at, t.resolution_breached_at, t.resolved_at, t.closed_at, t.csat_score, t.csat_comment, t.version, t.created_at, t.updated_at, rq.name AS requester_name, rq.email AS requester_email FROM support_tickets t LEFT JOIN user_profiles rq ON rq.id = t.requester_user_id WHERE t.id = $1 AND t.tenant_id = $2{IfExp(test=Name(id='for_update', ctx=Load()), body=Constant(value=' FOR UPDATE OF t'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The ticket row is always bound by t.id = $1 AND t.tenant_id = $2 (the only optional fragment is FOR UPDATE OF t), and user_profiles is joined by primary key only to read the requester's name and email, because that global account may belong to several tenants, as in notifications._contact.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "ad17975085dc08539adf576f060200d4a060477201caac229886367a5fd34d32",
+      "file": "app/domain/services/support/ticket_store.py",
+      "function": "fetch_messages",
+      "line": 128,
+      "method": "fetch",
+      "tables": [
+        "support_ticket_messages",
+        "user_profiles"
+      ],
+      "sql": "SELECT m.id, m.author_user_id, m.author_type, m.body, m.is_internal, m.created_at, up.name AS author_name FROM support_ticket_messages m LEFT JOIN user_profiles up ON up.id = m.author_user_id WHERE m.ticket_id = $1 AND m.tenant_id = $2 AND ($3 OR NOT m.is_internal) ORDER BY m.created_at, m.id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Messages are bound by m.ticket_id = $1 AND m.tenant_id = $2, and user_profiles is joined by primary key only for the author's display name because staff authors are platform accounts that need not belong to the ticket's tenant.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "cf3dc8bbd39d35d8aea327cbce9599f63f6e9d337e77d4c08617e7465780cab1",
+      "file": "app/domain/services/support/ticket_store.py",
+      "function": "fetch_events",
+      "line": 153,
+      "method": "fetch",
+      "tables": [
+        "support_ticket_events",
+        "user_profiles"
+      ],
+      "sql": "SELECT e.id, e.type, e.from_value, e.to_value, e.created_at, e.actor_user_id, up.name AS actor_name FROM support_ticket_events e LEFT JOIN user_profiles up ON up.id = e.actor_user_id WHERE e.ticket_id = $1 AND e.tenant_id = $2 ORDER BY e.created_at, e.id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Events are bound by e.ticket_id = $1 AND e.tenant_id = $2, and user_profiles is joined by primary key only for the actor's display name because staff actors are platform accounts that need not belong to the ticket's tenant.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "702b5748748dcd3efda3789a23f18958601cd0886759459d2aa76507707d7bd2",
+      "file": "app/domain/services/support/ticket_store.py",
+      "function": "attach_files",
+      "line": 114,
+      "method": "fetch",
+      "tables": [
+        "support_ticket_attachments"
+      ],
+      "sql": "UPDATE support_ticket_attachments SET tenant_id = $1, ticket_id = $2, message_id = $3, attached_at = $6 WHERE id = ANY($4::uuid[]) AND message_id IS NULL AND uploaded_by = $5 AND (tenant_id = $1 OR ($7 AND tenant_id IS NULL)) RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Customers match only tenant_id = $1 because the staff flag $7 is False, while the staff-only branch adopts the uploading staff member's own unattached upload (stored with a NULL tenant by attachments.upload) into the ticket's tenant, limited to uploaded_by = $5 and message_id IS NULL; staff=True is passed only by staff_service.add_staff_message after require_platform_admin_mutation.",
+      "category": "reviewed_tenant_plus_global"
+    },
+    {
+      "id": "5ae93d090067db544ef128734d15417684cd578c40e1ab7ab37fef849655f72c",
+      "file": "app/domain/services/support/staff_service.py",
+      "function": "_detail",
+      "line": 128,
+      "method": "fetchrow",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "SELECT id, name, email FROM user_profiles WHERE id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the profile (id, name, email) of the platform admin a ticket is assigned to, whose account need not belong to the customer's tenant; _detail runs only inside staff get_ticket and patch_ticket after current platform-admin authority is checked, and the ticket was already fetched by its tenant.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "90b4a29b8fab0f6336122d1e6da80fb2a4d52fcc07fd16b9eb274b994a116d75",
+      "file": "app/domain/services/support/staff_service.py",
+      "function": "_valid_assignee",
+      "line": 170,
+      "method": "fetchval",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "SELECT EXISTS (SELECT 1 FROM user_profiles WHERE id = $1 AND role = 'platform_admin' AND is_active AND is_verified)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Checks that a proposed assignee id is an active, verified platform_admin account, a platform-wide property with no tenant to filter on; it runs only inside staff patch_ticket after require_platform_admin_mutation and returns a boolean.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "9e4c3c7ed50e0b393e83ed0ee83bfe6e6f324bea064d04cd939261bbdce9da8e",
+      "file": "app/domain/services/support/articles.py",
+      "function": "search_articles",
+      "line": 81,
+      "method": "fetch",
+      "tables": [
+        "support_kb_articles"
+      ],
+      "sql": "WITH tq AS ( SELECT websearch_to_tsquery('english', $1) AS q_and, NULLIF(replace(websearch_to_tsquery('english', $1)::text, ' & ', ' | '), '')::tsquery AS q_or ), hits AS ( SELECT a.slug, a.title, a.section, a.body_md, a.url, a.updated_at, ts_rank(a.search_tsv, tq.q_and) * 2 + CASE WHEN tq.q_or IS NULL THEN 0 ELSE ts_rank(a.search_tsv, tq.q_or) END + word_similarity($1, a.search_text) AS rank, COALESCE(tq.q_or, tq.q_and) AS hq FROM public.support_kb_articles a, tq WHERE a.published AND (a.search_tsv @@ tq.q_and OR (tq.q_or IS NOT NULL AND a.search_tsv @@ tq.q_or) OR word_similarity($1, a.search_text) >= $3) ORDER BY rank DESC, a.updated_at DESC LIMIT $2 ) SELECT slug, title, section, url, body_md, ts_headline('english', body_md, hq, 'MaxWords=35, MinWords=12, StartSel=\"\", StopSel=\"\"') AS headline FROM hits ORDER BY rank DESC, updated_at DESC",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "Published knowledge-base articles are global shared support content (support_kb_articles has no tenant_id and its read policy is published-or-bypass), so the search filters on a.published and returns only slug, title, section, snippet and url while the connection still carries the caller's tenant.",
+      "category": "platform_catalog"
+    },
+    {
+      "id": "e7058c2c43fad0539319268ab57f8902db17c2132e7d3ebcf63bced4555d3cc7",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService.submit_appeal",
+      "line": 1043,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT id,{IfExp(test=Compare(left=Subscript(value=Name(id='event', ctx=Load()), slice=Constant(value='target_type'), ctx=Load()), ops=[Eq()], comparators=[Constant(value='tenant')]), body=Constant(value='id'), orelse=Constant(value='tenant_id'))} AS audit_tenant_id FROM {Call(func=Attribute(value=Name(id='tables', ctx=Load()), attr='get', ctx=Load()), args=[Subscript(value=Name(id='event', ctx=Load()), slice=Constant(value='target_type'), ctx=Load())], keywords=[])} WHERE id=$1 FOR KEY SHARE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Formal platform account enforcement locks the selected global user/tenant/partner identity and rechecks current platform-admin authority in the transaction. Automatic restoration instead supplies the exact expired hold ID and is checked under that same lock. A user or partner can affect multiple tenant memberships; caller-tenant filtering would not model this platform action. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:1043. New fingerprint (F2-03 compliance slice): only SuspensionService._hold_account_members changed this module's AST; this statement's SQL, parameters and classification are unchanged.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "a96dbf7a005cbf1e43ad6f6fc3dc60990abecabdb71c1ac4a698bcac0cc6a983",
+      "file": "app/api/v1/endpoints/security_events.py",
+      "function": "escalate_event",
+      "line": 518,
+      "method": "fetchrow",
+      "tables": [
+        "security_events"
+      ],
+      "sql": "UPDATE security_events SET status = 'escalated', resolution_notes = CASE WHEN resolution_notes IS NULL OR resolution_notes = '' THEN $1 ELSE resolution_notes || E'\n\nEscalation: ' || $1 END {branch} RETURNING *",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "resolve_tenant_scope refuses tenantless/non-owner ordinary callers and appends tenant_id=$3 to the UPDATE. Only PLATFORM_ADMIN may resolve a NULL scope and deliberately administer events across tenants. New fingerprint preserves the literal newline bytes in the escalation note; no scope was removed. Exact reviewed operation: fetchrow; app/api/v1/endpoints/security_events.py:518. New fingerprint (F2-03 compliance slice): only get_security_event changed this module's AST; this statement's SQL, parameters and classification are unchanged.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "7fcaf3e2f428736f35078d3990fb73015dbf420630128feba2fa7b1be91d7bc9",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._restore_account",
+      "line": 787,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT * FROM {IfExp(test=Compare(left=Name(id='target_type', ctx=Load()), ops=[Eq()], comparators=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load())]), body=Constant(value='tenants'), orelse=Constant(value='white_label_partners'))} WHERE id=$1 FOR NO KEY UPDATE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Formal platform account enforcement locks the selected global user/tenant/partner identity and rechecks current platform-admin authority in the transaction. Automatic restoration instead supplies the exact expired hold ID and is checked under that same lock. A user or partner can affect multiple tenant memberships; caller-tenant filtering would not model this platform action. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:787. New fingerprint (F2-03 compliance slice): only SuspensionService._hold_account_members changed this module's AST; this statement's SQL, parameters and classification are unchanged.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "bf9a3c2ed2c4be79f6e28479fa45689b17a117ab33f0f95a0a59221f41a5ba6f",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._suspend_account",
+      "line": 541,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT * FROM {IfExp(test=Compare(left=Name(id='target_type', ctx=Load()), ops=[Eq()], comparators=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load())]), body=Constant(value='tenants'), orelse=Constant(value='white_label_partners'))} WHERE id=$1 FOR NO KEY UPDATE",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "Formal platform account enforcement locks the selected global user/tenant/partner identity and rechecks current platform-admin authority in the transaction. Automatic restoration instead supplies the exact expired hold ID and is checked under that same lock. A user or partner can affect multiple tenant memberships; caller-tenant filtering would not model this platform action. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:541. New fingerprint (F2-03 compliance slice): only SuspensionService._hold_account_members changed this module's AST; this statement's SQL, parameters and classification are unchanged.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "4d8a20cde818e0656c6d05dd285d652b3932c5208da3559678117bbdf909278a",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService.get_status",
+      "line": 931,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT * FROM {Subscript(value=Dict(keys=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='USER', ctx=Load()), Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load()), Attribute(value=Name(id='TargetType', ctx=Load()), attr='PARTNER', ctx=Load())], values=[Constant(value='user_profiles'), Constant(value='tenants'), Constant(value='white_label_partners')]), slice=Name(id='target_type', ctx=Load()), ctx=Load())} WHERE id=$1",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": true,
+      "count": 1,
+      "reason": "The user/tenant/partner status/history routes all require platform_admin (suspensions.py:158,181,239,263). This helper uses a fixed target-type/table mapping and bound target UUID to inspect that platform-controlled identity. Exact reviewed operation: fetchrow; app/domain/services/suspension_service.py:931. New fingerprint (F2-03 compliance slice): only SuspensionService._hold_account_members changed this module's AST; this statement's SQL, parameters and classification are unchanged.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "2d61381e6a1487795c7b9a43d6554c7c270b792c2152def1fe971d7d21a33095",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "list_abuse_events",
+      "line": 205,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{branch} ORDER BY e.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "GET /admin/abuse/events sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and tenant_id is only an optional operator filter that appends e.tenant_id = $n, so leaving it out is the intentional estate-wide fraud-event review.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "271770d97992e6e9cdbc9be1f3c94594b04be83476318cedaadc28d146b1ed71",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "get_abuse_statistics",
+      "line": 448,
+      "method": "fetchval",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT COUNT(*) FROM abuse_events WHERE created_at BETWEEN NOW() - INTERVAL '{BinOp(left=Name(id='hours', ctx=Load()), op=Mult(), right=Constant(value=2))} hours' AND NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The previous-period count behind the trend flag of GET /admin/abuse/statistics sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and a supplied tenant_id appends tenant_id = $1, so leaving it out is the intentional estate-wide comparison.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "37c461d6ec8cc184f49078d6e14ae085013bba85bac3b6cccd4a0dc1820eff9d",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "get_abuse_statistics",
+      "line": 414,
+      "method": "fetch",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT severity, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY severity",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The per-severity breakdown of GET /admin/abuse/statistics sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and a supplied tenant_id appends tenant_id = $1, so leaving it out is the intentional estate-wide breakdown.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "1704e09e738a86aa004420ac5e6f21a821b631413dc174a2a29ccb34775f7c16",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "get_abuse_statistics",
+      "line": 425,
+      "method": "fetch",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT event_type, COUNT(*) as count FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))} GROUP BY event_type",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The per-type breakdown of GET /admin/abuse/statistics sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and a supplied tenant_id appends tenant_id = $1, so leaving it out is the intentional estate-wide breakdown.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "ccce735c942ef4c3fba99ff2322a8aa5edeb50960283879d5a5dbdfe0941077b",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "get_abuse_statistics",
+      "line": 436,
+      "method": "fetchval",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT COUNT(*) FROM abuse_events WHERE severity IN ('high', 'critical') AND resolved_at IS NULL {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The unresolved high-severity count of GET /admin/abuse/statistics sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and a supplied tenant_id appends tenant_id = $1, so leaving it out is the intentional estate-wide count.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "7ce71ba6c314bbc085fb68a652843d9acb4c33c24a82f22a603c2d718d92feb5",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "get_abuse_statistics",
+      "line": 404,
+      "method": "fetchval",
+      "tables": [
+        "abuse_events"
+      ],
+      "sql": "SELECT COUNT(*) FROM abuse_events WHERE created_at > NOW() - INTERVAL '{hours} hours' {IfExp(test=Name(id='tenant_id', ctx=Load()), body=Constant(value='AND tenant_id = $1'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The total-events count of GET /admin/abuse/statistics sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and a supplied tenant_id appends tenant_id = $1, so leaving it out is the intentional estate-wide total.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "f55c21f5257265db0f417321e1a9512794542107900d0cabb6e13db899726aff",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "list_abuse_rules",
+      "line": 510,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{branch} ORDER BY priority ASC, created_at DESC",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "GET /admin/abuse/rules sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and it selects either one named tenant's rules (tenant_id = $n) or only the global rules (tenant_id IS NULL), which are platform configuration rather than a tenant's rows.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "aa5f23866bc66521df59b81001b4e7d2ecac4a79e867692e66b4ffe3409c3976",
+      "file": "app/api/v1/endpoints/abuse_monitoring.py",
+      "function": "get_abuse_alerts",
+      "line": 789,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{branch} ORDER BY e.created_at DESC LIMIT ${Call(func=Name(id='len', ctx=Load()), args=[Name(id='params', ctx=Load())], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "GET /admin/abuse/alerts is the platform-admin fraud queue and sits behind the router-level require_platform_admin dependency (tests/security/test_admin_tenant_isolation.py pins it), and a supplied tenant_id appends e.tenant_id = $n, so leaving it out is the intentional estate-wide alert review.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "046cf3c23f14e4de0ec8293c98534a850da073f37260e004f7537f484d7c7fb8",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "capture_cohort",
+      "line": 122,
+      "method": "fetch",
+      "tables": [],
+      "sql": "SELECT id FROM {loop-value} WHERE user_id=ANY($1::uuid[]) AND {Subscript(value=Subscript(value=Name(id='_CREDENTIALS', ctx=Load()), slice=Name(id='table', ctx=Load()), ctx=Load()), slice=Constant(value=0), ctx=Load())} ORDER BY id LIMIT $2",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Run inside the platform-admin suspension transaction (require_current_platform_admin and the user-administration lock), and these credential tables are keyed by the suspended subject's user id (security_sessions, mfa_challenges and webauthn_challenges have no tenant_id column), so the capture is by subject rather than by tenant.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "a88ffd888b8e3c318297f23bbabbd0f0cfd19841f693ef6d5d209a73092145be",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "capture_cohort",
+      "line": 134,
+      "method": "fetch",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "SELECT c.id,c.tenant_id,c.provider,c.provider_call_id,c.external_call_uuid,c.route_snapshot FROM calls c WHERE c.tenant_id=ANY($1::uuid[]) AND (c.status <> ALL($2::text[]) OR (c.provider_terminated_at IS NULL AND ( (c.direction='inbound' AND c.billing_status='reserved') OR (c.direction='outbound' AND c.terminal_settled_at IS NULL))) OR EXISTS (SELECT 1 FROM call_legs l WHERE l.call_id=c.id AND l.status IN ('initiated','ringing','answered','in_progress','in_call','active'))) ORDER BY c.id LIMIT $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Run inside the platform-admin suspension transaction (require_current_platform_admin and the user-administration lock) and already bounded by c.tenant_id = ANY($1::uuid[]) over the hold's affected tenants, which for a partner hold intentionally spans several tenants; the scanner only recognises a single-tenant equality.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "a6683bdbc8b823810ca30cb1852a664434877af54254c1512a1b3fa9181b97f5",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "capture_cohort",
+      "line": 148,
+      "method": "fetch",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_registered' AND resource_type='assistant_runtime' AND metadata->>'user_id'=ANY($1::text[]) ORDER BY event_id LIMIT $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the assistant-runtime registration receipts of the suspended subjects by their user ids inside the platform-admin suspension transaction (require_current_platform_admin and the user-administration lock), and a tenant filter could hide receipts registered under a tenant the user has since left, which would silently shrink the safety capture.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "55a4d1f2fc3e8cbedab37fcbd197bb1db3ca440b77328a8bdbd0d6f9f4e9295d",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "capture_cohort",
+      "line": 158,
+      "method": "fetch",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_owner_stopped' AND resource_type='assistant_runtime' AND resource_id=ANY($1::uuid[]) ORDER BY event_id LIMIT $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the owner-stop receipts for exactly the runtime resource ids captured by the previous statement, inside the platform-admin suspension transaction (require_current_platform_admin and the user-administration lock).",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "26c1e35b3925a15fec7e8678188b2dad18687ddea15e60f94396934b9dc9d13b",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_original_proof",
+      "line": 230,
+      "method": "fetchrow",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT * FROM audit_logs WHERE event_id=$1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Fetches the original suspension audit row by its saved event id for the platform_admin-only GET /admin/suspensions/propagation-status projection; that row's tenant is derived from the hold's target type, so the lookup is by exact event identity.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "c4221398483d576a4da662054671fd3ad5eebe8a7a7780c44ac183d611ab1d6d",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_original_proof",
+      "line": 237,
+      "method": "fetchrow",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT * FROM audit_logs WHERE action=$1 AND resource_type=$2 AND resource_id=$3 AND metadata->>'suspension_id'=$4 AND event_type=$5 ORDER BY event_time,event_id LIMIT 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Looks the original suspension audit row up by exact action, resource and suspension id for the platform_admin-only GET /admin/suspensions/propagation-status projection; that row's tenant is derived from the hold's target type, so the lookup is by exact event identity.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "e93a72b96d224160f26a469e9714aaeb4ed0434323f981579e2ba577a608da84",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_credentials",
+      "line": 298,
+      "method": "fetch",
+      "tables": [],
+      "sql": "SELECT id,{Subscript(value=Subscript(value=Name(id='_CREDENTIALS', ctx=Load()), slice=Name(id='table', ctx=Load()), ctx=Load()), slice=Constant(value=1), ctx=Load())} AS invalidated FROM {loop-value} WHERE id=ANY($1::uuid[]) OR ($3 AND user_id=ANY($2::uuid[]) AND {Subscript(value=Subscript(value=Name(id='_CREDENTIALS', ctx=Load()), slice=Name(id='table', ctx=Load()), ctx=Load()), slice=Constant(value=0), ctx=Load())}) ORDER BY id LIMIT $4",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Re-reads exactly the credential ids captured at suspension time (plus the suspended subjects' live ones) for the platform_admin-only GET /admin/suspensions/propagation-status projection, and these credential tables are keyed by user id (security_sessions, mfa_challenges and webauthn_challenges have no tenant_id column).",
+      "category": "platform_admin"
+    },
+    {
+      "id": "6f9e629c2e4da49372ffc17e606f67d811c3e8929c7dd42666adbb81ce146113",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_runtimes",
+      "line": 337,
+      "method": "fetch",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_registered' AND event_type='session_created' AND resource_type='assistant_runtime' AND (resource_id=ANY($1::uuid[]) OR metadata->>'user_id'=ANY($2::text[])) ORDER BY event_id LIMIT $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Lists the assistant-runtime registration receipts of the captured runtime ids and suspended subjects for the platform_admin-only GET /admin/suspensions/propagation-status projection, and a tenant filter could hide receipts registered under a tenant the user has since left.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "14f14ef8031b6e379d6502b11874390c4444eef0c5efd06956bb5c133a408c8b",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_runtimes",
+      "line": 353,
+      "method": "fetch",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT * FROM audit_logs WHERE action='assistant_runtime_owner_stopped' AND event_type='session_terminated' AND resource_type='assistant_runtime' AND resource_id=ANY($1::uuid[]) ORDER BY event_id LIMIT $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Lists the owner-stop receipts for exactly the runtime ids returned by the previous statement, for the platform_admin-only GET /admin/suspensions/propagation-status projection.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "e010fa08b021d0eb880e15678db6cbfd64f0ce0b3dde90ac525c96d4eafedd44",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_calls",
+      "line": 412,
+      "method": "fetch",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "SELECT c.* FROM calls c WHERE c.id=ANY($4::uuid[]) OR (c.tenant_id=ANY($1::uuid[]) AND ((c.status <> ALL($2::text[]) OR (c.provider_terminated_at IS NULL AND ( (c.direction='inbound' AND c.billing_status='reserved') OR (c.direction='outbound' AND c.terminal_settled_at IS NULL))) OR EXISTS (SELECT 1 FROM call_legs l WHERE l.call_id=c.id AND l.status IN ('initiated','ringing','answered','in_progress','in_call','active'))) OR c.created_at >= $3 OR c.answered_at >= $3 OR c.route_snapshot->'provider_acknowledgement' IS NOT NULL)) ORDER BY c.id LIMIT $5",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the exact call ids captured when the hold was taken plus calls of the hold's affected tenants (c.tenant_id = ANY($1::uuid[])) for the platform_admin-only GET /admin/suspensions/propagation-status projection, and a partner hold intentionally spans several tenants.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "4b14069656779e6ed185a2c9b87d2d08cfc6b7d99273e59b526671d837c47cd6",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_calls",
+      "line": 430,
+      "method": "fetch",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT id,call_id,provider,provider_leg_id,status,created_at FROM call_legs WHERE call_id=ANY($1::uuid[]) ORDER BY call_id,id LIMIT $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the legs of exactly the call ids returned by the preceding call read, for the platform_admin-only GET /admin/suspensions/propagation-status projection; call_legs carries no tenant_id column.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "53967c9a4f138d0f31c44c045a9846060bce363bc10ef71297a5b54c910ac142",
+      "file": "app/domain/services/formal_enforcement.py",
+      "function": "_calls",
+      "line": 436,
+      "method": "fetch",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "SELECT call_id,event_data FROM call_events WHERE call_id=ANY($1::uuid[]) AND event_type='admin_termination_confirmed' ORDER BY created_at DESC LIMIT $2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the termination receipts of exactly the call ids returned by the preceding call read, for the platform_admin-only GET /admin/suspensions/propagation-status projection; call_events carries no tenant_id column.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "ccbd3c75bbf93c42309dc651936106150b4df85838b100d4146b59fd5dc8369b",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._account_events",
+      "line": 425,
+      "method": "fetch",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT e.*,a.metadata->'formal_account_hold_version'='1'::jsonb AS policy_audited FROM suspension_events e LEFT JOIN audit_logs a ON a.event_id=e.audit_log_id WHERE e.target_type IN ('tenant','partner') AND e.is_active=TRUE ORDER BY e.suspended_at,e.suspension_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Lists every active tenant and partner hold because a partner hold governs all of that partner's tenants, and it runs only inside the platform-admin suspend/restore transactions (require_current_platform_admin) (or the expiry job's exact-hold restore) and the platform_admin-only status routes.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "bed98b28acdbacd8d345fda5bb725ce0e613bf0912a149ace7d7f927e87acf9d",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._account_profiles",
+      "line": 436,
+      "method": "fetch",
+      "tables": [
+        "tenant_users",
+        "user_profiles"
+      ],
+      "sql": "SELECT up.id FROM user_profiles up WHERE EXISTS(SELECT 1 FROM tenant_users tu WHERE tu.user_id=up.id AND tu.tenant_id=ANY($1::uuid[])) ORDER BY up.id FOR UPDATE OF up",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Locks the profiles of users with a membership in the hold's affected tenants (tu.tenant_id = ANY($1::uuid[])) inside the platform-admin suspend/restore transactions (require_current_platform_admin), and a partner hold intentionally spans several tenants.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "041ed7a6ac98ecf6e1ed57bcb75b8393e8e6fab0c03b1c2d7200319da569d2a9",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._hold_account_row",
+      "line": 452,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "UPDATE {table} SET status='suspended',suspended_at=$2,suspended_by=$3, suspension_reason=$4,updated_at=clock_timestamp() WHERE id=$1 RETURNING status,suspended_at,suspended_by,suspension_reason",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Updates the tenant or partner account row being suspended by its own primary key (the table is an internal constant) inside the platform-admin suspend/restore transactions (require_current_platform_admin); the row is the account itself, not a tenant's data.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "f5231eb31300a8f4f841da0c7e6da14b55dbf4b96d8adbe699e4583d9f9d2b7f",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._hold_account_members",
+      "line": 467,
+      "method": "fetch",
+      "tables": [
+        "tenant_users"
+      ],
+      "sql": "SELECT id,tenant_id,status,updated_at FROM tenant_users WHERE tenant_id=ANY($1::uuid[]) ORDER BY id FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Locks the membership rows of the hold's affected tenants (tenant_id = ANY($1::uuid[])) inside the platform-admin suspend/restore transactions (require_current_platform_admin), and a partner hold intentionally spans several tenants.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "1730409a1f9e04dce0838e9f89cacd1e31961e956b611c7313683696511b0ec8",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._effective_account",
+      "line": 490,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT * FROM {IfExp(test=Compare(left=Name(id='target_type', ctx=Load()), ops=[Eq()], comparators=[Attribute(value=Name(id='TargetType', ctx=Load()), attr='TENANT', ctx=Load())]), body=Constant(value='tenants'), orelse=Constant(value='white_label_partners'))} WHERE id=$1",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the tenant or partner account row by its own id (the table is an internal constant) for the platform-admin suspend/restore transactions (require_current_platform_admin) and the platform_admin-only status routes.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "45d66ad18e3632041da428c0a141d7b13638a767525ee46f1cb515788d123234",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._effective_account",
+      "line": 498,
+      "method": "fetchval",
+      "tables": [
+        "white_label_partners"
+      ],
+      "sql": "SELECT status FROM white_label_partners WHERE id=$1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads a tenant's parent-partner status by that tenant row's own white_label_partner_id for the platform-admin suspend/restore transactions (require_current_platform_admin) and the platform_admin-only status routes; the partner row is an account, not a tenant's data.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "607764ed2e93654096180068a0dae2e96139f89e5895d5811bfe002d64ea3003",
+      "file": "app/domain/services/suspension_service.py",
+      "function": "SuspensionService._restore_owned_account_row",
+      "line": 766,
+      "method": "execute",
+      "tables": [],
+      "sql": "UPDATE {table} SET status=$2,suspended_at=$3,suspended_by=$4, suspension_reason=$5,updated_at=clock_timestamp() WHERE id=$1",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Returns the tenant or partner account row to the state its own hold saved, keyed by that row's id, inside the platform-admin suspend/restore transactions (require_current_platform_admin) or the expiry job's exact-hold restore.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "8828cd3e41e3456fb19ae0a9a1e64dbe600a4009ae430039482e824c98f21fe7",
+      "file": "app/api/v1/endpoints/security_events.py",
+      "function": "list_security_events",
+      "line": 215,
+      "method": "fetch",
+      "tables": [
+        "security_events"
+      ],
+      "sql": "SELECT s.* FROM security_events s {IfExp(test=Name(id='conditions', ctx=Load()), body=JoinedStr(values=[Constant(value='WHERE '), FormattedValue(value=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[]), conversion=-1)]), orelse=Constant(value=''))} ORDER BY created_at DESC,event_id DESC LIMIT ${branch} OFFSET ${branch}{Constant(value=1)}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "resolve_tenant_scope pins every non-platform caller to its own tenant (a foreign tenant is a 403) and the handler then appends tenant_id = $n, so only a PLATFORM_ADMIN reaches the estate-wide list.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "e02f660a1ad4afab04eefc10636476a738cca4c9a7b561e823efd7ff3de4fa9b",
+      "file": "app/api/v1/endpoints/security_events.py",
+      "function": "get_security_event",
+      "line": 247,
+      "method": "fetchrow",
+      "tables": [
+        "security_events"
+      ],
+      "sql": "SELECT * FROM security_events WHERE event_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "Reached only when resolve_tenant_scope returns no tenant, which happens solely for a PLATFORM_ADMIN resolving an event before its tenant is known; a tenant caller takes the tenant-bound statement just above.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "6cf0b733a7424a623f07037669b75177856a161b7b318581248136d14fa252cb",
+      "file": "app/api/v1/endpoints/security_events.py",
+      "function": "update_security_event",
+      "line": 357,
+      "method": "fetchrow",
+      "tables": [
+        "security_events"
+      ],
+      "sql": "UPDATE security_events SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='assignments', ctx=Load())], keywords=[])} {branch} RETURNING *",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "resolve_tenant_scope refuses tenantless and foreign-tenant callers and the handler then appends AND tenant_id = $n to the UPDATE, so only a PLATFORM_ADMIN can update an event outside its own tenant.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "5ca27732ffee3261033582034d851514b423e20e6ac1b34055c0c37e80932dae",
+      "file": "app/api/v1/endpoints/security_events.py",
+      "function": "resolve_security_event",
+      "line": 404,
+      "method": "fetchrow",
+      "tables": [
+        "security_events"
+      ],
+      "sql": "UPDATE security_events SET status = 'resolved', resolved_at = $1, resolved_by = $2, resolution_notes = $3 {branch} RETURNING *",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "resolve_tenant_scope refuses tenantless and foreign-tenant callers and the handler then appends AND tenant_id = $5 to the UPDATE, so only a PLATFORM_ADMIN can resolve an event outside its own tenant.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "a9ea4ffdd9295d4b3df1614e8b9f92ef855b283a7ebd628b58278bf2bde0a9a3",
+      "file": "app/api/v1/endpoints/security_events.py",
+      "function": "get_open_alerts",
+      "line": 446,
+      "method": "fetch",
+      "tables": [
+        "security_events"
+      ],
+      "sql": "SELECT * FROM security_events WHERE status IN ('open', 'investigating', 'escalated') AND severity IN ('CRITICAL', 'HIGH') {branch} ORDER BY severity = 'CRITICAL' DESC, created_at DESC LIMIT 50",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "resolve_tenant_scope refuses tenantless and foreign-tenant callers and the handler then appends AND tenant_id = $1 to the alert query, so only a PLATFORM_ADMIN sees alerts across tenants.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "79f20a68a3cba638e3d5d8f50f5e42541b1a5ea3b6efa8d83b55e2ba0755a576",
+      "file": "app/api/v1/endpoints/security_events.py",
+      "function": "get_overdue_alerts",
+      "line": 481,
+      "method": "fetch",
+      "tables": [
+        "security_events"
+      ],
+      "sql": "SELECT * FROM security_events WHERE status IN ('open', 'investigating', 'escalated') AND sla_deadline IS NOT NULL AND sla_deadline < $1 {branch} ORDER BY sla_deadline ASC",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": false,
+      "count": 1,
+      "reason": "resolve_tenant_scope refuses tenantless and foreign-tenant callers and the handler then appends AND tenant_id = $2 to the overdue query, so only a PLATFORM_ADMIN sees overdue alerts across tenants.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "705fc6ef293ca22fc483fa86315a0276b29831ad2ad27635bf1d0cc824f7ab85",
+      "file": "app/domain/services/abuse_detection.py",
+      "function": "AbuseDetectionService._get_historical_avg_calls",
+      "line": 756,
+      "method": "fetchrow",
+      "tables": [
+        "calls"
+      ],
+      "sql": "SELECT AVG(call_count) as avg_calls FROM ( SELECT DATE_TRUNC('hour', created_at) as hour, COUNT(*) as call_count FROM calls WHERE tenant_id = $1 AND created_at > NOW() - INTERVAL '7 days' AND NOT is_test GROUP BY DATE_TRUNC('hour', created_at) ) hourly_counts",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The hourly-count derived table already filters WHERE tenant_id = $1 on a connection acquired for that same tenant; the scanner cannot see a predicate inside a derived table.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "dfd2e01a71f96b9e3a18283cd3d2f526a020512fcb857fa2412cd2355e49ef26",
+      "file": "app/domain/services/abuse_detection.py",
+      "function": "AbuseDetectionService._store_call_metrics",
+      "line": 790,
+      "method": "execute",
+      "tables": [
+        "call_velocity_snapshots"
+      ],
+      "sql": "INSERT INTO call_velocity_snapshots ( tenant_id, window_start, window_end, total_calls, unique_numbers, international_calls, premium_calls, short_duration_calls, top_destinations ) SELECT $1, DATE_TRUNC('hour', NOW()), DATE_TRUNC('hour', NOW()) + INTERVAL '1 hour', 1, 1, CASE WHEN $2 IS NOT NULL AND $2 != 'US' THEN 1 ELSE 0 END, 0, CASE WHEN $3 < 10 THEN 1 ELSE 0 END, '[]'::jsonb ON CONFLICT (tenant_id, window_start) DO UPDATE SET total_calls = call_velocity_snapshots.total_calls + 1, unique_numbers = call_velocity_snapshots.unique_numbers + 1, international_calls = call_velocity_snapshots.international_calls + CASE WHEN EXCLUDED.international_calls > 0 THEN 1 ELSE 0 END, short_duration_calls = call_velocity_snapshots.short_duration_calls + CASE WHEN EXCLUDED.short_duration_calls > 0 THEN 1 ELSE 0 END",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The INSERT ... SELECT writes the call's own tenant as $1 on a connection acquired for that tenant, and ON CONFLICT (tenant_id, window_start) limits the update to that tenant's snapshot row; the scanner only proves plain VALUES inserts.",
+      "category": "reviewed_tenant_scoped"
     }
   ]
 }
