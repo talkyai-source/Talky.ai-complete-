@@ -7914,7 +7914,7 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Resolves one platform request UUID for the session owner check (endpoint:146\u2013151) or details path (235\u2013246), which restricts response to requestor/recorded approver/admin condition. Current HTTP entry also has platform-only permission admission described above. Query does not fetch tenant business data."
     },
     {
-      "id": "08507902eaa7f1f9141d7a3042e8600bd1d805f15314fcfe4316397a7c6aef28",
+      "id": "40180cd0c72b803ac3fb18f7c65b0094834a683a8a83588e920708d7457ce04a",
       "file": "app/domain/services/support/staff_service.py",
       "function": "list_tickets",
       "line": 95,
@@ -8706,10 +8706,10 @@
       "reason": "Inherited platform break-glass query newly discovered by 0087 schema inventory; table has no tenant_id. Intentional global pending/unexpired platform recovery queue, exposed only by emergency admin endpoint:202\u2013207. Tenant filtering would hide other platform operators' incidents."
     },
     {
-      "id": "2ce8fcde516e6856dc67a26eb91f91c1d208a274af7afee32437e9d09cd55782",
+      "id": "471a7659026a7e512d546a27da3938c03896782fc09e711ee1b78271556acdd9",
       "file": "app/domain/services/support/article_admin.py",
       "function": "update_article",
-      "line": 102,
+      "line": 109,
       "method": "fetchrow",
       "tables": [
         "support_kb_articles"

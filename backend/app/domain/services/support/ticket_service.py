@@ -172,9 +172,13 @@ async def add_customer_message(pool, actor: SupportActor, ticket_id: UUID, *, re
                                attachment_ids: Sequence[UUID]) -> WriteResult:
     tenant_id = actor.require_tenant()
     now = _now()
+    # Which ticket, the text and the attachments (a set: attach_files drops order and repeats), so a
+    # reused request_id with another reply is refused instead of replaying the first (QA F2-09).
+    fingerprint = receipts.body_fingerprint(
+        ticket_id=ticket_id, body=body, attachment_ids=sorted({str(attachment_id) for attachment_id in attachment_ids}))
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation="ticket.message")
+                                      actor_id=actor.user_id, operation="ticket.message", fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         ticket = await _locked_ticket(conn, ticket_id, tenant_id)
@@ -201,17 +205,19 @@ async def add_customer_message(pool, actor: SupportActor, ticket_id: UUID, *, re
         response = projection.customer_message(message, projection.attachments_by_message(attachments).get(message["id"], []))
         saved = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                     operation="ticket.message", resource_id=message["id"], status_code=201,
-                                    response=response)
+                                    response=response, fingerprint=fingerprint)
     return WriteResult(saved, 201)
 
 
 async def _customer_transition(pool, actor: SupportActor, ticket_id: UUID, *, request_id: UUID,
-                               operation: str, decide) -> WriteResult:
+                               operation: str, decide, content: dict[str, Any] | None = None) -> WriteResult:
+    """``content`` is what the request says besides which ticket (the ticket is always part of it)."""
     tenant_id = actor.require_tenant()
     now = _now()
+    fingerprint = receipts.body_fingerprint(ticket_id=ticket_id, **(content or {}))
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation=operation)
+                                      actor_id=actor.user_id, operation=operation, fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         ticket = await _locked_ticket(conn, ticket_id, tenant_id)
@@ -222,7 +228,7 @@ async def _customer_transition(pool, actor: SupportActor, ticket_id: UUID, *, re
         ticket = await store.fetch_ticket(conn, ticket_id, tenant_id)
         body = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                    operation=operation, resource_id=ticket_id, status_code=200,
-                                   response=await _ticket_view(conn, ticket, actor, now))
+                                   response=await _ticket_view(conn, ticket, actor, now), fingerprint=fingerprint)
     return WriteResult(body, 200)
 
 
@@ -251,8 +257,10 @@ async def rate_ticket(pool, actor: SupportActor, ticket_id: UUID, *, request_id:
             raise InvalidTransition("A ticket can be rated once, after it is resolved.")
         return ({"csat_score": score, "csat_comment": comment or None},
                 {"type": "csat_submitted", "to_value": score})
+    # An empty comment is no comment: decide() stores `comment or None`, so both are one request.
     return await _customer_transition(pool, actor, ticket_id, request_id=request_id,
-                                      operation="ticket.csat", decide=decide)
+                                      operation="ticket.csat", decide=decide,
+                                      content={"score": score, "comment": comment or None})
 
 
 async def unread(pool, actor: SupportActor) -> dict:
