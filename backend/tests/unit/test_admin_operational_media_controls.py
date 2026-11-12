@@ -612,7 +612,8 @@ async def test_failed_media_delete_can_be_resumed_by_another_authorized_actor(
                 }
             if "UPDATE admin_media_deletion_intents" in query:
                 updates.append((query, args))
-                assert args == (intent_id, "intent_committed", recovery_actor)
+                # F2-03: the resume names the intent's own tenant ($4) as well as its id.
+                assert args == (intent_id, "intent_committed", recovery_actor, tenant_id)
                 return {
                     "id": intent_id,
                     "actor_id": origin_actor,
@@ -665,6 +666,7 @@ async def test_failed_media_delete_can_be_resumed_by_another_authorized_actor(
     assert claim.resumed_by_different_actor is True
     assert len(updates) == 1
     assert "array_append(attempt_actor_ids, $3)" in updates[0][0]
+    assert "tenant_id = $4" in updates[0][0]
 
 
 @pytest.mark.asyncio

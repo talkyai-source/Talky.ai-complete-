@@ -904,12 +904,13 @@ async def _resume_media_deletion_intent(
                attempt_actor_ids = array_append(attempt_actor_ids, $3),
                last_error = NULL,
                updated_at = NOW()
-         WHERE id = $1
+         WHERE id = $1 AND tenant_id = $4
         RETURNING *
         """,
         row["id"],
         resumed_status,
         actor_id,
+        row["tenant_id"],
     )
     return _claim_from_row(resumed, actor_id)
 

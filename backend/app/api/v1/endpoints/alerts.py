@@ -229,17 +229,19 @@ async def ack_alert(
             await conn.execute(
                 "UPDATE security_events SET resolution_notes = "
                 "  COALESCE(resolution_notes || E'\\n', '') || $2 "
-                "WHERE event_id = $1",
+                "WHERE event_id = $1 AND tenant_id = $3",
                 alert_id,
                 f"[ack by {current_user.id}] {body.note}",
+                current_user.tenant_id,
             )
             row = await conn.fetchrow(
                 """
                 SELECT event_id, created_at, severity, status, title, description,
                        evidence, assigned_to, resolved_at, resolution_notes, alert_type
-                FROM security_events WHERE event_id = $1
+                FROM security_events WHERE event_id = $1 AND tenant_id = $2
                 """,
                 alert_id,
+                current_user.tenant_id,
             )
 
     return _row_to_alert(dict(row))
