@@ -3716,10 +3716,10 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ebeeab29fe564fff5f1279ce2fd2fc745926d77b6efd893440d0eb14f72cb6a9",
+      "id": "89dce5d602d9ff1e9c6b84e200b59c499d9ff8dbfb83eefd2adc4b742216b4b3",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_campaign_counter",
-      "line": 919,
+      "line": 930,
       "method": "fetchrow",
       "tables": [
         "campaigns"
@@ -11247,13 +11247,13 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "8289f24da9a102e0884a590ae2cce596bb7910decd50e1b73451f9b22990e350",
+      "id": "d15c0170228d1ff30a7b9d018d6bc26d2119b378a4fc966965442bca3ea7880c",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_async",
-      "line": 262,
+      "line": 273,
       "method": "execute",
       "tables": [],
-      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
+      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='_tenant_guc_value', ctx=Load()), args=[Name(id='tenant_id', ctx=Load())], keywords=[])}'",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -11262,10 +11262,10 @@
       "category": "system_session_setup"
     },
     {
-      "id": "15aaf97ecf88d73ace8d146d6c07c1fd4303def061e80fde8bafa49aec3dd898",
+      "id": "a7cfe9feda753d40d51afd4276746b92872d8e529879d548af2b8699c9e3484d",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select_with_relations",
-      "line": 549,
+      "line": 560,
       "method": "fetch",
       "tables": [],
       "sql": "SELECT {base_select} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])}",
@@ -11277,10 +11277,10 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "08942a6a97fc3fe994b0a549a437f3dcb1c8a90388342562312d5378406e10cd",
+      "id": "8bfadf8fff8e07c28a63aa6fdf8c3d14668929ed39ade827184400a7c25b5488",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select_with_relations",
-      "line": 612,
+      "line": 623,
       "method": "fetch",
       "tables": [],
       "sql": "SELECT {branch} FROM {Attribute(value=Name(id='rel', ctx=Load()), attr='table', ctx=Load())} WHERE id = ANY($1){branch}",
@@ -11292,10 +11292,10 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "aa54aedd38914f7fbf3a6f7bf3745ef708eedc8f27c1a3e3a2040fda84279830",
+      "id": "4427e99238d2fa2306fa7ed5673c31cee0115fc4269f9245c04d2769189f42c8",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select",
-      "line": 678,
+      "line": 689,
       "method": "fetchval",
       "tables": [],
       "sql": "SELECT COUNT(*) FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked}",
@@ -11307,10 +11307,10 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "93c91caf014b1ae8efbdfa02af779627fc1919d3382f26ad8f2e2030643cbfbe",
+      "id": "1bb732e7f9d9182e4ae1bf576b28115985cfd1678339720db4a0c17f5ef62070",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_select",
-      "line": 681,
+      "line": 692,
       "method": "fetch",
       "tables": [],
       "sql": "SELECT {unpacked} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])} {IfExp(test=Compare(left=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=JoinedStr(values=[Constant(value='LIMIT '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))} {IfExp(test=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), body=JoinedStr(values=[Constant(value='OFFSET '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))}",
@@ -11322,10 +11322,10 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "4d94749b5c55e42949927bce539c7c0ec50b05a1dab38817674491da66c9f731",
+      "id": "a778ed369167318e293495d7145764ede45b8591f2a670def2567c3c5656ab33",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_insert",
-      "line": 716,
+      "line": 727,
       "method": "fetchrow",
       "tables": [],
       "sql": "{branch}",
@@ -11337,10 +11337,10 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "87d9d512f72851be75e6778f9cdb0ae349e7b603c726411b63272a020c16cf6e",
+      "id": "432ab5eb5ff14b5ee187bcf8c43c3018aaa667e13bf4f52869edccd7dfb3a433",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_update",
-      "line": 743,
+      "line": 754,
       "method": "fetch",
       "tables": [],
       "sql": "UPDATE {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='set_parts', ctx=Load())], keywords=[])} {unpacked} RETURNING *",
@@ -11352,10 +11352,10 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "c8f427468caa9eff5ad9ee2ae83cd4cc33c8e01928f45268be9ed3d510ea29fa",
+      "id": "9d0dddbbf2a9ff55bce421e1bfbb54fba8ecfcadde80d77b48998b27ecd58cbc",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_upsert",
-      "line": 787,
+      "line": 798,
       "method": "fetchrow",
       "tables": [],
       "sql": "INSERT INTO {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='keys', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) ON CONFLICT ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='conflict_cols', ctx=Load())], keywords=[])}) {branch} RETURNING *",
@@ -11367,10 +11367,10 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "f973b7c0c938b3c14292853fefe1b1a5392add84307df38bbca10cc88602fdd7",
+      "id": "f70f35db52200d872d2a90377a440f22514776760afbe17423162ae7cf1c4ad0",
       "file": "app/core/postgres_adapter.py",
       "function": "QueryBuilder._execute_delete",
-      "line": 800,
+      "line": 811,
       "method": "fetch",
       "tables": [],
       "sql": "DELETE FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} RETURNING *",
@@ -11382,13 +11382,13 @@
       "category": "system_generic_executor"
     },
     {
-      "id": "b1d98fda2d5b03b7d0ce9b595b1a1122fe4388d5a8752cd1e38449949240ecec",
+      "id": "59ad84965b6a8740a19420e1cf3adfe85c2471116a3e981c0cbf6aca062b74ef",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._execute_async",
-      "line": 868,
+      "line": 879,
       "method": "execute",
       "tables": [],
-      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
+      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='_tenant_guc_value', ctx=Load()), args=[Name(id='tenant_id', ctx=Load())], keywords=[])}'",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -11397,10 +11397,10 @@
       "category": "system_session_setup"
     },
     {
-      "id": "63e43c26b76aff972b627e1478b4b9449edc8dcd90f367116d7224d010e52c7e",
+      "id": "3ed9b87e56d55fa199b52ff64631e1ce581301b247a74d39a2040416d69f751d",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_quota_usage",
-      "line": 938,
+      "line": 949,
       "method": "execute",
       "tables": [
         "tenant_quota_usage"
@@ -11414,10 +11414,10 @@
       "category": "reviewed_tenant_scoped"
     },
     {
-      "id": "a3ced2865a0b13e3abac6b77875b3ec5b10d223dc8bb864194a1efb93908e846",
+      "id": "d7b21e9d4aefdb082c4c0060cb84a832b0649c6e9d99d82eda7051f12a2bd326",
       "file": "app/core/postgres_adapter.py",
       "function": "RpcBuilder._rpc_increment_quota_usage",
-      "line": 940,
+      "line": 951,
       "method": "fetchval",
       "tables": [
         "tenant_quota_usage"
