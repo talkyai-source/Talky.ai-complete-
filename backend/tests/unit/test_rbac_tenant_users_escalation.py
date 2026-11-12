@@ -60,8 +60,9 @@ class _FakeTransaction:
 
 
 class _MembershipAudit:
-    def __init__(self, conn):
+    def __init__(self, conn, actor=None):
         self.conn = conn
+        self.actor = actor or _tenant_admin_user()
         self.lock_calls = 0
         self.events = []
 
@@ -74,16 +75,16 @@ class _MembershipAudit:
         assert conn is self.conn and conn.fixture_transaction_depth == 1
         assert self.lock_calls == 1 and len(conn.fixture_writes) == 1
         assert event["tenant_id"] == conn.fixture_tenant_id
-        assert event["actor_id"] == _tenant_admin_user().id
-        assert event["actor_role"] == "tenant_admin"
+        assert event["actor_id"] == self.actor.id
+        assert event["actor_role"] == self.actor.role
         self.events.append(event)
 
 
-def _fake_db_client(conn) -> MagicMock:
+def _fake_db_client(conn, before=None, actor=None) -> MagicMock:
     conn.fixture_transaction_depth = 0
     conn.fixture_tenant_id = None
     conn.fixture_writes = []
-    conn.fixture_audit = _MembershipAudit(conn)
+    conn.fixture_audit = _MembershipAudit(conn, actor)
     original = conn.fetchrow
 
     async def fetchrow(sql, *args):
@@ -98,7 +99,7 @@ def _fake_db_client(conn) -> MagicMock:
             # user/tenant/role/INSERT response sequence.
             assert args == ("target-user", _tenant_admin_user().tenant_id)
             assert "tu.tenant_id=$2" in flat and "FOR UPDATE OF tu" in flat
-            return None
+            return before
         if flat.lstrip().startswith(("INSERT INTO tenant_users", "UPDATE tenant_users")):
             assert conn.fixture_audit.lock_calls == 1
             if flat.startswith("INSERT"):
@@ -171,9 +172,16 @@ async def test_post_tenant_admin_cannot_grant_role_above_own_tier(target_role):
     assert conn.fixture_writes == []
 
 
+def _removed_membership(tenant_id):
+    """A member this workspace removed earlier: the only kind a workspace admin
+    may (re-)add here; new members join by accepting an emailed invite."""
+    return {"id": "tu-1", "user_id": "target-user", "tenant_id": tenant_id, "role_id": "role-old",
+            "is_primary": False, "status": "removed", "current_role": "user"}
+
+
 @pytest.mark.parametrize("target_role", ["user", "readonly"])
 async def test_post_tenant_admin_can_grant_role_at_or_below_own_tier(target_role):
-    """tenant_admin (60) granting user (40) / readonly (20) -> allowed."""
+    """tenant_admin (60) re-adding an existing member as user (40) / readonly (20) -> allowed."""
     caller = _tenant_admin_user()
     request = AddTenantUserRequest(
         user_id="target-user",
@@ -204,7 +212,8 @@ async def test_post_tenant_admin_can_grant_role_at_or_below_own_tier(target_role
             "tenant_scoped": True,
         },
     ]
-    db_client = _fake_db_client(conn)
+    before = _removed_membership(caller.tenant_id)
+    db_client = _fake_db_client(conn, before=before)
 
     result = await add_user_to_tenant(
         request=request, current_user=caller, db_client=db_client, audit_logger=conn.fixture_audit,
@@ -212,8 +221,51 @@ async def test_post_tenant_admin_can_grant_role_at_or_below_own_tier(target_role
 
     assert result.role.name == target_role
     _assert_membership_audit(
-        conn, caller, action="rbac.member.add", before=None, role_id="role-id-1",
+        conn, caller, action="rbac.member.add", role_id="role-id-1",
+        before={k: before[k] for k in ("id", "user_id", "tenant_id", "role_id", "is_primary", "status")},
     )
+
+
+async def test_post_tenant_admin_cannot_attach_a_new_member_without_an_invite():
+    """Any existing account could be attached by its id alone, with no consent, and
+    the member list then showed that person's name and email to this workspace."""
+    caller = _tenant_admin_user()
+    request = AddTenantUserRequest(user_id="target-user", tenant_id=caller.tenant_id, role_name="user")
+    conn = AsyncMock()
+    db_client = _fake_db_client(conn, before=None)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await add_user_to_tenant(
+            request=request, current_user=caller, db_client=db_client, audit_logger=conn.fixture_audit,
+        )
+
+    assert exc_info.value.status_code == 403
+    assert "invite" in exc_info.value.detail.lower()
+    assert conn.fixture_writes == [] and conn.fixture_audit.events == []
+
+
+async def test_post_platform_admin_can_still_attach_a_new_member():
+    caller = CurrentUser(id="platform-1", email="ops@example.com",
+                         tenant_id=_tenant_admin_user().tenant_id, role="platform_admin")
+    request = AddTenantUserRequest(user_id="target-user", tenant_id=caller.tenant_id, role_name="user")
+    conn = AsyncMock()
+    conn.fetchrow.side_effect = [
+        {"id": "target-user"},
+        {"id": caller.tenant_id},
+        {"id": "role-id-1"},
+        {"id": "tu-1", "user_id": "target-user", "tenant_id": caller.tenant_id, "role_id": "role-id-1",
+         "is_primary": False, "status": "active", "invited_at": None, "joined_at": None},
+        {"id": "role-id-1", "name": "user", "description": None, "level": 40,
+         "is_system_role": True, "tenant_scoped": True},
+    ]
+    db_client = _fake_db_client(conn, before=None, actor=caller)
+
+    result = await add_user_to_tenant(
+        request=request, current_user=caller, db_client=db_client, audit_logger=conn.fixture_audit,
+    )
+
+    assert result.status == "active"
+    _assert_membership_audit(conn, caller, action="rbac.member.add", before=None, role_id="role-id-1")
 
 
 async def test_patch_tenant_admin_cannot_grant_role_above_own_tier():
