@@ -50,20 +50,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "02959db00a12225a15b72bcb8ca884d7530c7598c4f646d1fbd7fe9053a9ef5f",
-      "file": "app/core/db.py",
-      "function": "Database.insert_many",
-      "line": 458,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "INSERT INTO {table} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) RETURNING *",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "03310febc6ac22873c0963af53bf57f8408cd162837c09b05fb832bc451cb7cf",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reconcile_stale_reservations",
@@ -178,22 +164,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "074c0f4551956e1d51ae722eaa31a66a3e9f04fa8857a2f74f4e475da36d7e7a",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.get_metadata",
-      "line": 447,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "SELECT secret_id, tenant_id, secret_type, secret_name, description, version, created_at, updated_at, expires_at, last_accessed_at, access_count, is_active, is_compromised, permissions, rotated_from, rotated_to, revoked_at FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "07cca3a9405f4a4c3cf5a50e6a8e8ad03812ae0be53e569d2e808a2b2361cc66",
       "file": "app/core/security/tenant_isolation.py",
       "function": "get_user_primary_tenant",
@@ -203,37 +173,6 @@
         "tenant_users"
       ],
       "sql": "SELECT tu.tenant_id, r.name AS role_name, t.business_name FROM tenant_users tu JOIN roles r ON r.id = tu.role_id JOIN tenants t ON t.id = tu.tenant_id WHERE tu.user_id = $1 AND tu.is_primary = TRUE AND tu.status = 'active'",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "08942a6a97fc3fe994b0a549a437f3dcb1c8a90388342562312d5378406e10cd",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_select_with_relations",
-      "line": 612,
-      "method": "fetch",
-      "tables": [],
-      "sql": "SELECT {branch} FROM {Attribute(value=Name(id='rel', ctx=Load()), attr='table', ctx=Load())} WHERE id = ANY($1){branch}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "0ac9dd61905f40b5556653c9ee622b41b68e4580657c39ef90badf2b5e775a37",
-      "file": "app/core/security/rbac.py",
-      "function": "get_user_permissions",
-      "line": 590,
-      "method": "fetch",
-      "tables": [
-        "tenant_users",
-        "user_profiles"
-      ],
-      "sql": "SELECT DISTINCT p.name FROM tenant_users tu JOIN user_profiles profile ON profile.id=tu.user_id AND profile.is_active AND profile.is_verified JOIN roles r ON r.id = tu.role_id JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE tu.user_id = $1 AND tu.status = 'active' AND r.tenant_scoped = FALSE",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -258,22 +197,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "0c2b9e50916651ab25c6e3c6ace414672bf4688024f5d7d2c7775203f515fce1",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.get",
-      "line": 407,
-      "method": "execute",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "UPDATE tenant_secrets SET last_accessed_at = NOW(), last_accessed_by = $1, access_count = access_count + 1 WHERE secret_id = $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "0cdb4d95605cf71c940b9aa4f5898ec043ac408a8ee356ecb470857a0bf2868d",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.admit",
@@ -293,22 +216,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "11457fd275e0f8d4b113bef34e81fdf0da097ed80263a4d65c2ef12d5a6c3cb7",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.list_secrets",
-      "line": 960,
-      "method": "fetch",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "SELECT secret_id, tenant_id, secret_type, secret_name, description, version, created_at, updated_at, expires_at, last_accessed_at, access_count, is_active, is_compromised, permissions, rotated_from, rotated_to, revoked_at FROM tenant_secrets {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY created_at DESC",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -353,36 +260,6 @@
         "inbound_did_assignments"
       ],
       "sql": "SELECT config_id FROM inbound_did_assignments WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "15aaf97ecf88d73ace8d146d6c07c1fd4303def061e80fde8bafa49aec3dd898",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_select_with_relations",
-      "line": 549,
-      "method": "fetch",
-      "tables": [],
-      "sql": "SELECT {base_select} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "1705aa325736c5250b9508b98545e23678081484faec418340253b425c278bcf",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "rotate_refresh_token",
-      "line": 201,
-      "method": "execute",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "UPDATE refresh_tokens SET used_at = $2 WHERE id = $1",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -512,22 +389,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "1e94a4258439b91af76cb23df820d2906eb1c64e1bf83ae762180174591d9b6e",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.rotate",
-      "line": 608,
-      "method": "execute",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "UPDATE tenant_secrets SET rotated_to = $1 WHERE secret_id = $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -919,39 +780,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3e8c74ca9f8e6ca76ebe19da62830cac799ec35fe20be5ec5ec81c9c4509ab86",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "revoke_all_user_refresh_tokens",
-      "line": 289,
-      "method": "execute",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = $3 WHERE user_id = $1 AND family_id <> $4 AND revoked_at IS NULL",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3f2fba7dbcd84a0fc3eae9c8bcc49858e1276130d9fc5e302cc53ec68386561e",
-      "file": "app/api/v1/endpoints/admin/users.py",
-      "function": "_fetch_user",
-      "line": 267,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_users",
-        "user_profiles"
-      ],
-      "sql": "SELECT up.id, up.email, up.name, CASE WHEN up.role='platform_admin' THEN up.role ELSE COALESCE(r.name,up.role) END AS role, CASE WHEN NOT COALESCE(up.is_active,FALSE) OR NOT COALESCE(up.is_verified,FALSE) THEN NULL WHEN up.role='platform_admin' THEN 'platform_admin' WHEN tu.status='active' AND r.name IN ('partner_admin','tenant_admin','campaign_manager','user','agent','billing_user','readonly') THEN r.name ELSE NULL END AS effective_role, CASE WHEN up.role='platform_admin' THEN 'not_required' ELSE COALESCE(tu.status,'missing') END AS membership_status, up.tenant_id, t.business_name AS tenant_name, up.is_active, up.mfa_enabled, up.is_verified, up.last_login_at, up.created_at, up.admin_revision AS _profile_revision, tu.id AS _membership_id, tu.admin_revision AS _membership_revision FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN tenant_users tu ON tu.user_id=up.id AND tu.tenant_id=up.tenant_id LEFT JOIN roles r ON r.id=tu.role_id WHERE up.id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "4252a26ce5793c345f3c3fe16eef594cf4afd34b178712433fc831b2abc2f25c",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.record_pre_row_rejection",
@@ -964,24 +792,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "42aa466b1c9a2b7280af6e738399b461c91748a083bae246c51c01abbf5bbea4",
-      "file": "app/core/security/rbac.py",
-      "function": "get_user_permissions",
-      "line": 613,
-      "method": "fetch",
-      "tables": [
-        "tenant_users",
-        "user_permissions",
-        "user_profiles"
-      ],
-      "sql": "SELECT p.name FROM user_permissions up JOIN user_profiles profile ON profile.id=up.user_id AND profile.is_active AND profile.is_verified JOIN permissions p ON p.id = up.permission_id WHERE up.user_id = $1 AND (up.tenant_id IS NULL OR up.tenant_id = $2) AND (up.expires_at IS NULL OR up.expires_at > clock_timestamp()) AND ($2::uuid IS NULL OR EXISTS ( SELECT 1 FROM tenant_users member WHERE member.user_id=up.user_id AND member.tenant_id=$2::uuid AND member.status='active' ))",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -1002,22 +812,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "4375539d711cf14c2eb59dfa5760fe58bab3815f88be1552962fc46886233506",
-      "file": "app/core/security/passkeys.py",
-      "function": "store_credential",
-      "line": 815,
-      "method": "execute",
-      "tables": [
-        "user_profiles"
-      ],
-      "sql": "UPDATE user_profiles SET passkey_count = passkey_count + 1 WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "43ad2f98d9de7eb0e8c6d3fee628f17cee10f3db2f21da35acf4eab54f430436",
       "file": "app/domain/repositories/call_event_repository.py",
       "function": "CallEventRepository.log_event",
@@ -1027,23 +821,6 @@
         "call_events"
       ],
       "sql": "INSERT INTO call_events ( id, call_id, event_type, source, event_data, created_at, talklee_call_id, leg_id, previous_state, new_state ) VALUES ( $1::uuid, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8::uuid, $9, $10 )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "44637fe35e197c299c48add236234691e56a9ae5d9166287f2e3f485a5e22ef8",
-      "file": "app/api/v1/endpoints/admin/actions.py",
-      "function": "_recovery_owned",
-      "line": 79,
-      "method": "fetchval",
-      "tables": [
-        "calls",
-        "campaigns"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM calls c JOIN campaigns p ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id WHERE c.id=$1::uuid AND c.tenant_id=$2::uuid AND c.campaign_id=$3::uuid AND ($4::uuid IS NULL OR c.lead_id=$4::uuid))",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1132,22 +909,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "487c07e99ccecd3806aab4b792c8336caf49304ced72b30f2dceb340a365376f",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.get_expiring_secrets",
-      "line": 1016,
-      "method": "fetch",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "SELECT secret_id, tenant_id, secret_type, secret_name, description, version, created_at, updated_at, expires_at, last_accessed_at, access_count, is_active, is_compromised, permissions, rotated_from, rotated_to, revoked_at FROM tenant_secrets WHERE is_active = TRUE AND expires_at IS NOT NULL AND expires_at <= $1 AND ($2::uuid IS NULL OR tenant_id = $2) ORDER BY expires_at",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "4a2377ad22c11d47a833411dffdb0ee759beb5a79081e01dcc3d698d0683f172",
       "file": "app/core/telephony_observability.py",
       "function": "_fetch_transfer_metrics",
@@ -1193,20 +954,6 @@
       "sql": "WITH scoped_events AS ( SELECT event.action, event.stage, event.status, event.request_id, event.created_at FROM tenant_runtime_policy_events event JOIN tenant_runtime_policy_versions version ON version.id = event.policy_version_id AND version.tenant_id = event.tenant_id WHERE event.created_at >= $1::timestamptz AND event.tenant_id = $2::uuid AND event.request_id IS NOT NULL AND EXISTS ( SELECT 1 FROM jsonb_array_elements( COALESCE( version.input_snapshot->'route_policies', '[]'::jsonb ) ) AS route WHERE route->>'route_type' = 'inbound' AND route->'metadata'->'canary_scope' ->>'inbound_config_id' = $3 AND route->'metadata'->'canary_scope'->>'did' = $4 AND route->'metadata'->'canary_scope' ->>'candidate_digest' = $5 AND route->'metadata'->'canary_scope'->>'run_id' = $6 AND $4 ~ (route->>'match_pattern') ) ), activation_results AS ( SELECT terminal.request_id, BOOL_OR( terminal.stage = 'commit' AND terminal.status = 'succeeded' ) AS succeeded FROM scoped_events terminal WHERE terminal.action = 'activate' AND ( ( terminal.stage = 'commit' AND terminal.status = 'succeeded' ) OR ( terminal.stage IN ('apply', 'verify') AND terminal.status = 'failed' ) ) AND EXISTS ( SELECT 1 FROM scoped_events started WHERE started.action = 'activate' AND started.stage = 'precheck' AND started.status = 'succeeded' AND started.request_id = terminal.request_id AND started.created_at <= terminal.created_at ) GROUP BY terminal.request_id ), rollback_results AS ( SELECT started.request_id, BOOL_OR(done.status = 'succeeded') AS succeeded, MIN( EXTRACT(EPOCH FROM (done.created_at - started.created_at)) )::float8 AS latency_seconds FROM scoped_events started JOIN scoped_events done ON done.action = 'rollback' AND done.stage = 'rollback' AND done.status IN ('succeeded', 'failed') AND started.action = 'rollback' AND started.stage = 'rollback' AND started.status = 'started' AND started.request_id = done.request_id AND done.created_at >= started.created_at GROUP BY started.request_id ), counts AS ( SELECT (SELECT COUNT(*) FROM activation_results) AS activation_attempts, (SELECT COUNT(*) FROM activation_results WHERE succeeded) AS activation_successes, (SELECT COUNT(*) FROM rollback_results) AS rollback_attempts, (SELECT COUNT(*) FROM rollback_results WHERE succeeded) AS rollback_successes ), rollback_stats AS ( SELECT COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p50_seconds, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p95_seconds, COALESCE(MAX(latency_seconds), 0)::float8 AS max_seconds FROM rollback_results ) SELECT counts.activation_attempts, counts.activation_successes, counts.rollback_attempts, counts.rollback_successes, rollback_stats.p50_seconds, rollback_stats.p95_seconds, rollback_stats.max_seconds FROM counts CROSS JOIN rollback_stats",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "4d94749b5c55e42949927bce539c7c0ec50b05a1dab38817674491da66c9f731",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_insert",
-      "line": 716,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{branch}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -1320,20 +1067,6 @@
       "sql": "UPDATE tenant_sip_trunks SET sip_domain = $1, port = $2, transport = $3, direction = 'both', auth_username = $4, auth_password_encrypted = $5, is_active = TRUE, updated_at = NOW() WHERE id = $6",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "54ef68f0cd7d824a8c417e93c147a39fb4548875b777837652432e4b7c776560",
-      "file": "app/core/db.py",
-      "function": "Database.fetch_one",
-      "line": 404,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{query}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -1467,22 +1200,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5ed63f1f7b03b140431205d7d495bd4e24fa84bab37b44226be3487181a5e9af",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "revoke_family_by_token",
-      "line": 251,
-      "method": "execute",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = $3 WHERE family_id = ( SELECT family_id FROM refresh_tokens WHERE token_hash = $1 ) AND revoked_at IS NULL",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "5f331a162337f0f7f45c9a0470f4c70b91e6cab86ffd189847e6af90842d798c",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.finalize",
@@ -1540,22 +1257,6 @@
       "sql": "INSERT INTO calls ( id, tenant_id, campaign_id, phone_number, external_call_uuid, status, created_at, updated_at ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) ON CONFLICT (id) DO NOTHING",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "63e43c26b76aff972b627e1478b4b9449edc8dcd90f367116d7224d010e52c7e",
-      "file": "app/core/postgres_adapter.py",
-      "function": "RpcBuilder._rpc_increment_quota_usage",
-      "line": 938,
-      "method": "execute",
-      "tables": [
-        "tenant_quota_usage"
-      ],
-      "sql": "INSERT INTO tenant_quota_usage (tenant_id, usage_date, {Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])}) VALUES ($1, $2, 1) ON CONFLICT (tenant_id, usage_date) DO UPDATE SET {Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])} = COALESCE(tenant_quota_usage.{Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])}, 0) + 1",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -1675,22 +1376,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "67742285206eb3abd4e4922ddd001080eafa0072fcfa37af69d73bbea2519161",
-      "file": "app/api/v1/endpoints/admin/actions.py",
-      "function": "_recorded_recovery",
-      "line": 89,
-      "method": "fetchrow",
-      "tables": [
-        "assistant_action_resolutions"
-      ],
-      "sql": "SELECT * FROM assistant_action_resolutions WHERE actor_id=$1::uuid AND request_id=$2::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "6803a9d40cd46e432ec4b35a793353b4548dad545d30cf1f886d575946ac90e7",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reconcile_stale_reservations",
@@ -1705,22 +1390,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "692ed456b57f417eca53462447f656566194eea6713c4a90aba76d4f836a0952",
-      "file": "app/api/v1/endpoints/admin/actions.py",
-      "function": "cancel_action",
-      "line": 776,
-      "method": "fetchrow",
-      "tables": [
-        "assistant_actions"
-      ],
-      "sql": "SELECT * FROM assistant_actions WHERE id=$1::uuid AND ($2::uuid IS NULL OR tenant_id=$2::uuid) FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -1801,39 +1470,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "6c527462b88a704590cc96fe1dc5d41d11ac6710521805e3ba3637a71991e793",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.rotate",
-      "line": 615,
-      "method": "execute",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "UPDATE tenant_secrets SET expires_at = LEAST(expires_at, $1) WHERE secret_id = $2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "6cb2ba3c431e615e219fd8375e4b250f4521fdd7897e86ee507803208892e932",
-      "file": "app/api/v1/endpoints/admin/users.py",
-      "function": "_require_review",
-      "line": 274,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_users",
-        "user_profiles"
-      ],
-      "sql": "SELECT tu.id,tu.status FROM tenant_users tu JOIN user_profiles up ON up.id=tu.user_id AND up.tenant_id=tu.tenant_id WHERE up.id=$1 FOR NO KEY UPDATE OF tu",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -1932,22 +1568,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "72a111ac02fc6fb4c49d5ec14582b0645191b94c265cb430010a795d97eeb08e",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "rotate_refresh_token",
-      "line": 127,
-      "method": "fetchval",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "SELECT EXISTS (SELECT 1 FROM refresh_tokens WHERE parent_id = $1 AND used_at IS NULL AND revoked_at IS NULL)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "7460745a4a7d165ba7f1f0cddc6503e90ee816671b1d242dae249c6642e9ecae",
       "file": "app/domain/services/telephony/transfer_restart_recovery.py",
       "function": "claim_inbound_transfer_takeovers",
@@ -2042,22 +1662,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "777691b34afb1b74deb0f9d8d40c3abfa0c8dc4639a04e74766ed2ec006fd9c6",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.revoke",
-      "line": 667,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "SELECT tenant_id FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2163,20 +1767,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "7c14d87f438b620836e67858e6a03857b9a6aeb4373967e330588239817f18a9",
-      "file": "app/core/db.py",
-      "function": "Database.delete",
-      "line": 496,
-      "method": "execute",
-      "tables": [],
-      "sql": "DELETE FROM {table} WHERE {where}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "7d0a9604962d8df3f5eafcefb89b48abf174c59effcab695d0c687a0bf67da9e",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "complete_inbound_transfer",
@@ -2236,66 +1826,6 @@
       "sql": "INSERT INTO admin_media_deletion_request_keys ( intent_id, actor_id, idempotency_key, request_reason ) VALUES ($1, $2, $3, $4) ON CONFLICT (actor_id, idempotency_key) DO NOTHING RETURNING intent_id, request_reason",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "80e8e407cfd6b2babbadb5560c4c49d3a5b4b036acc0bcb765eccaf2d092d9fb",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "revoke_all_user_refresh_tokens",
-      "line": 300,
-      "method": "execute",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = $3 WHERE user_id = $1 AND revoked_at IS NULL",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "815391dbf32f317461c29412239543a3005eab922899f874fb19eb4885731d45",
-      "file": "app/core/db.py",
-      "function": "Database.upsert",
-      "line": 513,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "INSERT INTO {table} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) ON CONFLICT ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='conflict_columns', ctx=Load())], keywords=[])}) DO UPDATE SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[FormattedValue(value=Name(id='c', ctx=Load()), conversion=-1), Constant(value=' = EXCLUDED.'), FormattedValue(value=Name(id='c', ctx=Load()), conversion=-1)]), generators=[comprehension(target=Name(id='c', ctx=Store()), iter=Name(id='columns', ctx=Load()), ifs=[Compare(left=Name(id='c', ctx=Load()), ops=[NotIn()], comparators=[Name(id='conflict_columns', ctx=Load())])], is_async=0)])], keywords=[])} RETURNING {returning}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "818d10ffb1356eceec069970772fa4cba4fb49892541b78a4013439b2ad4b0c0",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "rotate_refresh_token",
-      "line": 142,
-      "method": "execute",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = 'reuse_detected' WHERE family_id = $1 AND revoked_at IS NULL",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "8289f24da9a102e0884a590ae2cce596bb7910decd50e1b73451f9b22990e350",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_async",
-      "line": 262,
-      "method": "execute",
-      "tables": [],
-      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -2361,20 +1891,6 @@
       "sql": "UPDATE call_legs l SET from_number = $3 WHERE l.call_id = $1::uuid AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' AND NULLIF(BTRIM(l.from_number), '') IS NULL AND EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid)",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "87d9d512f72851be75e6778f9cdb0ae349e7b603c726411b63272a020c16cf6e",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_update",
-      "line": 743,
-      "method": "fetch",
-      "tables": [],
-      "sql": "UPDATE {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='set_parts', ctx=Load())], keywords=[])} {unpacked} RETURNING *",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -2512,20 +2028,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "8f714e2188c7d91cae1cfc4ba987668bc907ff8ea47b848e67e4c080e6940632",
-      "file": "app/core/db.py",
-      "function": "Database.fetch_val",
-      "line": 411,
-      "method": "fetchval",
-      "tables": [],
-      "sql": "{query}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "8fe125280fc51f127189bb762035d2e8253cc824a9339703f57f19b66fba044a",
       "file": "app/api/v1/endpoints/passkeys.py",
       "function": "login_complete",
@@ -2554,38 +2056,6 @@
         "tenant_telephony_concurrency_policies"
       ],
       "sql": "SELECT c.*, ( c.admission_status='allowed' AND c.processing_status='active' AND c.billing_status='reserved' AND c.reserved_seconds >= 60 AND EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_leases lease JOIN tenant_telephony_concurrency_policies policy ON policy.id=lease.policy_id AND policy.tenant_id=lease.tenant_id WHERE lease.id=c.concurrency_lease_id AND lease.tenant_id=c.tenant_id AND lease.call_id=c.id AND lease.lease_kind='call' AND lease.state='active' AND lease.released_at IS NULL AND lease.last_heartbeat_at >= NOW() - ( policy.lease_ttl_seconds + policy.heartbeat_grace_seconds ) * INTERVAL '1 second' ) AND EXISTS ( SELECT 1 FROM inbound_usage_transactions reserve WHERE reserve.call_id=c.id AND reserve.tenant_id=c.tenant_id AND reserve.call_leg_id IS NULL AND reserve.transaction_type='reserve' AND reserve.id::text=( c.route_snapshot->'route'->>'usage_reservation_id' ) AND reserve.quantity_seconds=c.reserved_seconds ) AND NOT EXISTS ( SELECT 1 FROM inbound_usage_transactions terminal WHERE terminal.call_id=c.id AND terminal.call_leg_id IS NULL AND terminal.transaction_type IN ( 'finalize','release','reverse' ) ) ) AS replay_state_live FROM calls c WHERE c.direction='inbound' AND c.provider=$1 AND ( c.provider_call_id=$2 OR ($3::text IS NOT NULL AND c.provider_event_id=$3) ) ORDER BY c.created_at LIMIT 1 FOR UPDATE OF c",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "90a1f56fbbc9d813cb1b30769293b1f91de8901a3b50c2f2bb29c1bbe245a065",
-      "file": "app/core/security/passkeys.py",
-      "function": "verify_authentication",
-      "line": 732,
-      "method": "execute",
-      "tables": [
-        "user_profiles"
-      ],
-      "sql": "UPDATE user_profiles SET passkey_count = GREATEST(passkey_count - 1, 0) WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "9118f3d7d8b4284675c649008e492500007c9be8d41893f797abec99e65f269c",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "rotate_refresh_token",
-      "line": 104,
-      "method": "fetchrow",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "SELECT id, family_id, user_id, tenant_id, expires_at, used_at, revoked_at, session_id FROM refresh_tokens WHERE token_hash = $1",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -2668,20 +2138,6 @@
       "sql": "UPDATE tenant_phone_numbers SET status='revoked', updated_at=NOW(), metadata=metadata || $2::jsonb WHERE id=$1",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "93c91caf014b1ae8efbdfa02af779627fc1919d3382f26ad8f2e2030643cbfbe",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_select",
-      "line": 681,
-      "method": "fetch",
-      "tables": [],
-      "sql": "SELECT {unpacked} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])} {IfExp(test=Compare(left=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=JoinedStr(values=[Constant(value='LIMIT '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))} {IfExp(test=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), body=JoinedStr(values=[Constant(value='OFFSET '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -2778,22 +2234,6 @@
         "user_profiles"
       ],
       "sql": "SELECT id FROM user_profiles WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "9a4474ab6f00e506631da83c7c7e3dc4ed7e94e19c824f45402346360ecde239",
-      "file": "app/api/v1/endpoints/admin/actions.py",
-      "function": "_callback_reserved",
-      "line": 225,
-      "method": "fetchval",
-      "tables": [
-        "dialer_jobs"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid)",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -2965,22 +2405,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "a0cbad3203991eb3cfe87d9b274cdb306298ac725d136504699178b6f5aa8843",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "rotate_refresh_token",
-      "line": 176,
-      "method": "execute",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = 'expired_with_subsequent_use' WHERE family_id = $1 AND revoked_at IS NULL",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "a11a835f3545794b1e44ed77cdfb72152dcbaf22c18186bd5606eb49b1ebf62a",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "_settle_transfer_usage",
@@ -2992,36 +2416,6 @@
       "sql": "SELECT id, quantity_seconds FROM inbound_usage_transactions WHERE call_id=$1::uuid AND call_leg_id=$2::uuid AND transaction_type='reserve'",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "22e3cc669f6895183cab45ffc8ac313a6221e4d8ba0d9117585c505583d87efd",
-      "file": "app/core/security/passkeys.py",
-      "function": "get_credential_by_id",
-      "line": 840,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT id, user_id, credential_id, credential_public_key, sign_count, aaguid, device_type, backed_up, transports, display_name, created_at, last_used_at FROM user_passkeys WHERE credential_id = $1 {IfExp(test=Name(id='for_update', ctx=Load()), body=Constant(value=' FOR UPDATE'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a3ced2865a0b13e3abac6b77875b3ec5b10d223dc8bb864194a1efb93908e846",
-      "file": "app/core/postgres_adapter.py",
-      "function": "RpcBuilder._rpc_increment_quota_usage",
-      "line": 940,
-      "method": "fetchval",
-      "tables": [
-        "tenant_quota_usage"
-      ],
-      "sql": "SELECT {Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])} FROM tenant_quota_usage WHERE tenant_id = $1 AND usage_date = $2",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -3123,20 +2517,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "aa54aedd38914f7fbf3a6f7bf3745ef708eedc8f27c1a3e3a2040fda84279830",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_select",
-      "line": 678,
-      "method": "fetchval",
-      "tables": [],
-      "sql": "SELECT COUNT(*) FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "aba6c8db956e52ec43d97f253b76419e451f1fc27a15249e989bc09cdc727d6d",
       "file": "app/services/scripts/knowledge/retrieval.py",
       "function": "retrieve_knowledge",
@@ -3186,22 +2566,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ac7df539730eb461ed4c28d33580a82c0b9205a4dd80165fc284f58b0dd45693",
-      "file": "app/core/security/rbac.py",
-      "function": "get_user_tenants",
-      "line": 799,
-      "method": "fetch",
-      "tables": [
-        "tenant_users"
-      ],
-      "sql": "SELECT t.id AS tenant_id, t.business_name AS tenant_name, r.name AS role_name, tu.is_primary, tu.status FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id JOIN roles r ON r.id = tu.role_id WHERE tu.user_id = $1 AND tu.status = ANY($2) ORDER BY tu.is_primary DESC, t.business_name",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "ac8cce252cf95772071bc18ebe75886770ee4973466f95a2a460000cc0bb9506",
       "file": "app/api/v1/endpoints/rbac/tenant_users.py",
       "function": "list_tenant_members",
@@ -3228,22 +2592,6 @@
       "sql": "SELECT id, user_id, ip_address, expires_at, used, attempts FROM mfa_challenges WHERE challenge_hash = $1 AND used = FALSE AND expires_at > $2 {IfExp(test=Name(id='for_update', ctx=Load()), body=Constant(value=' FOR UPDATE'), orelse=Constant(value=''))}",
       "scoped": false,
       "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "ae7159c298995d1ab8ea9e213c38cdfa96277e9151637054450e3403586e2f6b",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.revoke",
-      "line": 676,
-      "method": "execute",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "UPDATE tenant_secrets SET is_active = FALSE, revoked_at = NOW(), revoked_reason = $1 WHERE secret_id = $2",
-      "scoped": false,
-      "unresolved": false,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -3298,22 +2646,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b11c3773e33a6b7a4d90d4e245248f9b209e8bb54b3be90e704d227ebd6bf900",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.get",
-      "line": 361,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "SELECT * FROM tenant_secrets WHERE secret_id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "b133d65f8612395a68377f699c787ae283b3ba29f53cdb4af392db697178d92d",
       "file": "app/api/v1/endpoints/admin/media.py",
       "function": "_bind_media_deletion_request_key",
@@ -3330,20 +2662,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b1d98fda2d5b03b7d0ce9b595b1a1122fe4388d5a8752cd1e38449949240ecec",
-      "file": "app/core/postgres_adapter.py",
-      "function": "RpcBuilder._execute_async",
-      "line": 868,
-      "method": "execute",
-      "tables": [],
-      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "b1e375590025c17d851db33ef95d9c8e6a8f46cfa827d4b5f9739f68b5d32cce",
       "file": "app/domain/services/lead_capture_service.py",
       "function": "LeadCaptureService.missing_required",
@@ -3354,22 +2672,6 @@
         "campaign_lead_fields"
       ],
       "sql": "SELECT f.field_key, f.field_type FROM calls c JOIN campaign_lead_fields f ON f.campaign_id=c.campaign_id WHERE c.id = $2::uuid AND c.tenant_id=$1::uuid AND f.is_required ORDER BY f.sort_order, f.field_key",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "b21a561939f901ae2c9e5578742f47e38dc939d16b00b73f3972383c4b683f84",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.mark_compromised",
-      "line": 740,
-      "method": "execute",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "UPDATE tenant_secrets SET is_active = FALSE, is_compromised = TRUE, revoked_at = NOW(), revoked_reason = $1 WHERE secret_id = $2",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -3727,22 +3029,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c25029929d2e24477d1ca77e948132a260485c8a61cf676c7dd0ff31d19c5fbe",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager._match_api_key_row",
-      "line": 908,
-      "method": "execute",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "UPDATE tenant_secrets SET lookup_hash = $1 WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3 AND lookup_hash IS NULL",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "c3e85b181ba0eb761a0e0c6b81b281986d62ba2f1b86153a4213388c3cd74a7b",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.set_lifecycle",
@@ -3807,22 +3093,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c46d2e94963e5f0bfa6dd1ff140020f40e30b79bd8fdd47d78c338b7cd26b324",
-      "file": "app/core/security/refresh_tokens.py",
-      "function": "issue_initial_refresh_token",
-      "line": 68,
-      "method": "fetchrow",
-      "tables": [
-        "refresh_tokens"
-      ],
-      "sql": "INSERT INTO refresh_tokens (family_id, user_id, tenant_id, token_hash, parent_id, issued_at, expires_at, ip, user_agent, session_id) VALUES (uuid_generate_v4(), $1, $2, $3, NULL, $4, $5, $6, $7, $8) RETURNING id, family_id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "b41e3511a638e2bcb09997390a800709fbecaa1280db8fd9968a5efaff009036",
       "file": "app/services/action_execution.py",
       "function": "find_owned_action_receipt",
@@ -3856,20 +3126,6 @@
         "tenant_telephony_concurrency_policies"
       ],
       "sql": "SELECT cfg.id AS config_id, cfg.tenant_id, cfg.campaign_id, cfg.name, cfg.status AS config_status, cfg.version AS config_version, cfg.opening_mode, cfg.greeting, cfg.timezone, cfg.business_hours, cfg.after_hours_action, cfg.transfer_number, cfg.recording_enabled, cfg.consent_message, cfg.recording_policy, cfg.transfer_policy, cfg.qualification_config, cfg.config_checksum, cfg.active_at, cfg.created_at, cfg.updated_at, c.name AS campaign_name, c.description AS campaign_description, c.status AS campaign_status, c.direction AS campaign_direction, c.system_prompt, c.voice_id, c.tts_provider, c.goal, c.script_config, c.calling_config, t.business_name AS tenant_name, t.status AS tenant_status, t.subscription_status, t.minutes_allocated, COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled, ai.id AS tenant_ai_config_id, ai.llm_provider, ai.llm_model, ai.stt_provider, ai.stt_model, ai.tts_provider AS tenant_tts_provider, ai.tts_model AS tenant_tts_model, ai.tts_voice_id AS tenant_tts_voice_id, ai.pipeline_mode AS tenant_pipeline_mode, EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies tcp WHERE tcp.tenant_id = cfg.tenant_id AND tcp.is_active = TRUE ) AS concurrency_policy_ready, COALESCE(prc.inbound_enabled, FALSE) AS platform_inbound_enabled, COALESCE(prc.inbound_recording_enabled, FALSE) AS platform_recording_enabled, COALESCE(prc.inbound_transfer_enabled, FALSE) AS platform_transfer_enabled, COALESCE(prc.inbound_settlement_enabled, FALSE) AS platform_settlement_enabled, a.id AS assignment_id, a.phone_number_id, a.sip_trunk_id, a.canonical_did, a.extension, CASE WHEN a.extension IS NOT NULL THEN 'extension' ELSE 'did' END AS address_kind, COALESCE('ext:' || a.extension, a.canonical_did) AS address, a.status AS assignment_status, a.version AS assignment_version, a.status_before_quarantine, a.quarantine_reason, a.last_error, pn.status AS phone_status, pn.verified_at, st.trunk_name AS sip_trunk_name, st.auth_username AS trunk_auth_username, st.direction AS trunk_direction, st.is_active AS trunk_active, st.metadata AS trunk_metadata, st.live_registration_status AS trunk_live_registration_status, st.live_status_detail AS trunk_live_status_detail, st.live_status_checked_at AS trunk_live_status_checked_at, EXISTS ( SELECT 1 FROM inbound_did_assignments conflict WHERE conflict.status = 'active' AND conflict.id <> a.id AND ( (a.canonical_did IS NOT NULL AND conflict.canonical_did = a.canonical_did) OR (a.extension IS NOT NULL AND conflict.extension = a.extension) ) ) AS active_did_conflict, ( SELECT MAX(call_row.created_at) FROM calls call_row WHERE call_row.assignment_id = a.id AND call_row.direction = 'inbound' ) AS last_call_at FROM inbound_campaign_configs cfg JOIN campaigns c ON c.id = cfg.campaign_id AND c.tenant_id = cfg.tenant_id JOIN LATERAL ( SELECT candidate.* FROM inbound_did_assignments candidate WHERE candidate.config_id = cfg.id ORDER BY (candidate.status <> 'archived') DESC, candidate.created_at DESC LIMIT 1 ) a ON TRUE LEFT JOIN tenant_phone_numbers pn ON pn.id = a.phone_number_id AND pn.tenant_id = a.tenant_id JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id JOIN tenants t ON t.id = cfg.tenant_id LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = cfg.tenant_id LEFT JOIN tenant_ai_configs ai ON ai.tenant_id = cfg.tenant_id LEFT JOIN platform_runtime_controls prc ON prc.id = 1 {branch}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c5e7e146444459936d91b01f087346f3f96395c8f246530fc51d5155eefd5894",
-      "file": "app/core/db.py",
-      "function": "Database.fetch_all",
-      "line": 400,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{query}",
       "scoped": false,
       "unresolved": true,
       "bypass": null,
@@ -3934,22 +3190,6 @@
       "sql": "{branch}",
       "scoped": false,
       "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c80e35f1aa128fca6aad9a5b77c918a7628350b78202e414cc255de75836c42c",
-      "file": "app/core/security/passkeys.py",
-      "function": "delete_credential",
-      "line": 911,
-      "method": "execute",
-      "tables": [
-        "user_profiles"
-      ],
-      "sql": "UPDATE user_profiles SET passkey_count = GREATEST(passkey_count - 1, 0) WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -4036,34 +3276,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c8f427468caa9eff5ad9ee2ae83cd4cc33c8e01928f45268be9ed3d510ea29fa",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_upsert",
-      "line": 787,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "INSERT INTO {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='keys', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) ON CONFLICT ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='conflict_cols', ctx=Load())], keywords=[])}) {branch} RETURNING *",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c9b0f0911bdc16fd63b2f813b9ffcb7f9c8a66f9ae17a8f13d91ef6ee79d723f",
-      "file": "app/core/db.py",
-      "function": "Database.insert",
-      "line": 445,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "INSERT INTO {table} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) RETURNING {returning}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4172,22 +3384,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "cdf39d0585b1d7e8c51aff5ad3aae47f1f9cf9396f5fd4e899ab10d2a40ee9fa",
-      "file": "app/api/v1/endpoints/admin/users.py",
-      "function": "_create_request_row",
-      "line": 287,
-      "method": "fetchrow",
-      "tables": [
-        "audit_logs"
-      ],
-      "sql": "SELECT event_id,resource_id,action,metadata FROM audit_logs WHERE actor_id=$1::uuid AND resource_type='user' AND action IN ('user_created','user_create_cancelled') AND metadata ? 'user_create_request_id' AND metadata->>'user_create_request_id'=$2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "cf77a46d263127266d63c842f67549c853549f16f72a1c60a848569e607a3b05",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "mark_inbound_transfer_answered",
@@ -4269,22 +3465,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d5228cc971d4fada52b70126bbf89bbbb5ad66239fb3d9b449a83dab1fb472da",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.mark_compromised",
-      "line": 731,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "SELECT tenant_id FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "d5834f3d398bce7a78c1fb266e4ea528f08133c12afc364e8993cc5bea14e9b7",
       "file": "app/api/v1/endpoints/mfa/status.py",
       "function": "disable_mfa",
@@ -4297,20 +3477,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "d7cb468de14e00d004540b859a76a882b46e49c0215ad5028d858060517eaad5",
-      "file": "app/core/db.py",
-      "function": "_apply_transaction_timeouts",
-      "line": 134,
-      "method": "execute",
-      "tables": [],
-      "sql": "SET LOCAL lock_timeout = '{unpacked}ms'",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4368,38 +3534,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a70917121950d3697fca773b08392224898bce90392c13be6be4bbc3741763f7",
-      "file": "app/api/v1/endpoints/admin/users.py",
-      "function": "_primary_membership_review",
-      "line": 338,
-      "method": "fetch",
-      "tables": [
-        "tenant_users"
-      ],
-      "sql": "SELECT tu.id,tu.tenant_id,tu.role_id,tu.status,tu.is_primary, tu.admin_revision,r.name AS role FROM tenant_users tu JOIN roles r ON r.id=tu.role_id WHERE tu.user_id=$1 AND (tu.tenant_id=$2 OR tu.is_primary=TRUE) ORDER BY tu.id{IfExp(test=Name(id='lock', ctx=Load()), body=Constant(value=' FOR NO KEY UPDATE OF tu'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "d9fd1d6df62e22f9384828796de6d05392d6bca363fdd74708176776bdb7cdd0",
-      "file": "app/domain/services/secrets_manager.py",
-      "function": "SecretsManager.rotate",
-      "line": 533,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_secrets"
-      ],
-      "sql": "SELECT * FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4463,20 +3597,6 @@
       "sql": "INSERT INTO tenant_users (user_id, tenant_id, role_id, is_primary, status, invited_by, invited_at) VALUES ($1, $2, $3, $4, 'active', $5, NOW()) ON CONFLICT (user_id, tenant_id) DO UPDATE SET role_id = EXCLUDED.role_id, status = 'active', updated_at = NOW() RETURNING id, user_id, tenant_id, role_id, is_primary, status, invited_at, joined_at",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "de6179d04e1d1b66e914fbabb96c11d976d883e1f4bf0eb0eac951ad9f7977c6",
-      "file": "app/core/db.py",
-      "function": "Database.execute",
-      "line": 408,
-      "method": "execute",
-      "tables": [],
-      "sql": "{query}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -4656,34 +3776,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "ee30912fd387ba9df40a55b8abc7e5c32d9a513f37fece51c4aabae835249681",
-      "file": "app/core/db.py",
-      "function": "Database.update",
-      "line": 491,
-      "method": "fetch",
-      "tables": [],
-      "sql": "UPDATE {table} SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='set_parts', ctx=Load())], keywords=[])} WHERE {Call(func=Attribute(value=Name(id='re', ctx=Load()), attr='sub', ctx=Load()), args=[Constant(value='\\\\$(\\\\d+)'), Lambda(args=arguments(posonlyargs=[], args=[arg(arg='m')], kwonlyargs=[], kw_defaults=[], defaults=[]), body=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Call(func=Name(id='int', ctx=Load()), args=[Call(func=Attribute(value=Name(id='m', ctx=Load()), attr='group', ctx=Load()), args=[Constant(value=1)], keywords=[])], keywords=[]), op=Add(), right=Name(id='offset', ctx=Load())), conversion=-1)])), Name(id='where', ctx=Load())], keywords=[])} RETURNING {returning}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "ee6ed980242c74a4ba9f0728fe4baf20b070e60749ae2cf75c90d94828a20594",
-      "file": "app/core/db.py",
-      "function": "Database.select_one",
-      "line": 436,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "{branch} LIMIT 1",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "eeb4f9c7ac1cca87025a36962645c481db06bd52af1435e50c2b96b303bc8327",
       "file": "app/domain/services/call_feedback_service.py",
       "function": "CallFeedbackRepository.begin_initial_attempt",
@@ -4696,23 +3788,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "ef58f609b8f6258dc04c6353ebf76855203d4175212b7ced26fa7fb98edf404e",
-      "file": "app/core/security/rbac.py",
-      "function": "get_user_permissions",
-      "line": 573,
-      "method": "fetch",
-      "tables": [
-        "tenant_users",
-        "user_profiles"
-      ],
-      "sql": "SELECT DISTINCT p.name FROM tenant_users tu JOIN user_profiles profile ON profile.id=tu.user_id AND profile.is_active AND profile.is_verified JOIN roles r ON r.id = tu.role_id JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE tu.user_id = $1 AND tu.tenant_id = $2 AND tu.status = 'active'",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -4890,34 +3965,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f973b7c0c938b3c14292853fefe1b1a5392add84307df38bbca10cc88602fdd7",
-      "file": "app/core/postgres_adapter.py",
-      "function": "QueryBuilder._execute_delete",
-      "line": 800,
-      "method": "fetch",
-      "tables": [],
-      "sql": "DELETE FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} RETURNING *",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "f973d009c0d1dca3b3deaa31dd9aa18a2114fccdb813fc5b3e85001a31f30035",
-      "file": "app/core/db.py",
-      "function": "_apply_transaction_timeouts",
-      "line": 133,
-      "method": "execute",
-      "tables": [],
-      "sql": "SET LOCAL statement_timeout = '{unpacked}ms'",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "f9779bfc8bc524a236e3ced3903b3ab20bf118cbba6ae9b18dfbda6131a4d660",
       "file": "app/api/v1/endpoints/auth/login.py",
       "function": "login",
@@ -4929,20 +3976,6 @@
       "sql": "UPDATE user_profiles SET password_hash = $1 WHERE id = $2",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "fa1294f9bf0bcd336543a5703d280823cb2b3dfd9290a308ce8e2b58b16c284e",
-      "file": "app/core/db.py",
-      "function": "Database.select",
-      "line": 427,
-      "method": "fetch",
-      "tables": [],
-      "sql": "{branch}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -11877,6 +10910,1036 @@
       "bypass": true,
       "count": 1,
       "reason": "Joins the transfer leg to its parent with c.id = $1 and c.tenant_id = $2 (the requested tenant) and the provider identity; the scanner cannot prove a join through call_legs, which has no tenant column. Exact reviewed operation: fetch; app/domain/services/telephony/transfer_provider_identity.py:354.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "44637fe35e197c299c48add236234691e56a9ae5d9166287f2e3f485a5e22ef8",
+      "file": "app/api/v1/endpoints/admin/actions.py",
+      "function": "_recovery_owned",
+      "line": 81,
+      "method": "fetchval",
+      "tables": [
+        "calls",
+        "campaigns"
+      ],
+      "sql": "SELECT EXISTS(SELECT 1 FROM calls c JOIN campaigns p ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id WHERE c.id=$1::uuid AND c.tenant_id=$2::uuid AND c.campaign_id=$3::uuid AND ($4::uuid IS NULL OR c.lead_id=$4::uuid))",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The ownership probe binds c.tenant_id = $2 to the locked action row's own tenant (str(row['tenant_id'])) and joins the campaign through p.tenant_id = c.tenant_id; the optional lead condition only narrows the match, and the scanner refuses the EXISTS wrapper and the optional-lead OR form. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/actions.py:81.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "67742285206eb3abd4e4922ddd001080eafa0072fcfa37af69d73bbea2519161",
+      "file": "app/api/v1/endpoints/admin/actions.py",
+      "function": "_recorded_recovery",
+      "line": 91,
+      "method": "fetchrow",
+      "tables": [
+        "assistant_action_resolutions"
+      ],
+      "sql": "SELECT * FROM assistant_action_resolutions WHERE actor_id=$1::uuid AND request_id=$2::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Idempotent replay lookup of the authenticated platform administrator's own recovery request (actor_id and request_id, the table's unique key): recover_saved_acknowledgement (require_platform_admin) runs it first, before the action row is locked, and again after the lock wait, so the lookup cannot depend on the action's tenant; a recorded request for a different action, digest or reason is refused with 409, and the INSERT it protects records the locked action's tenant. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/actions.py:91.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "9a4474ab6f00e506631da83c7c7e3dc4ed7e94e19c824f45402346360ecde239",
+      "file": "app/api/v1/endpoints/admin/actions.py",
+      "function": "_callback_reserved",
+      "line": 227,
+      "method": "fetchval",
+      "tables": [
+        "dialer_jobs"
+      ],
+      "sql": "SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND id=$2::uuid)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The existence probe binds tenant_id = $1 to the action row's own tenant (str(row['tenant_id'])) together with the deterministic callback job id; the scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchval; app/api/v1/endpoints/admin/actions.py:227.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "692ed456b57f417eca53462447f656566194eea6713c4a90aba76d4f836a0952",
+      "file": "app/api/v1/endpoints/admin/actions.py",
+      "function": "cancel_action",
+      "line": 777,
+      "method": "fetchrow",
+      "tables": [
+        "assistant_actions"
+      ],
+      "sql": "SELECT * FROM assistant_actions WHERE id=$1::uuid AND ($2::uuid IS NULL OR tenant_id=$2::uuid) FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "The before-state lock binds the caller's tenant for every administrator except the normalized platform administrator: _admin_tenant returns None only for that role and refuses an administrator with no tenant (403); the UPDATE that follows pins the locked row's own tenant (tenant_id = $2::uuid), and the scanner refuses the optional-tenant OR form. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/actions.py:777.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "3f2fba7dbcd84a0fc3eae9c8bcc49858e1276130d9fc5e302cc53ec68386561e",
+      "file": "app/api/v1/endpoints/admin/users.py",
+      "function": "_fetch_user",
+      "line": 267,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_users",
+        "user_profiles"
+      ],
+      "sql": "SELECT up.id, up.email, up.name, CASE WHEN up.role='platform_admin' THEN up.role ELSE COALESCE(r.name,up.role) END AS role, CASE WHEN NOT COALESCE(up.is_active,FALSE) OR NOT COALESCE(up.is_verified,FALSE) THEN NULL WHEN up.role='platform_admin' THEN 'platform_admin' WHEN tu.status='active' AND r.name IN ('partner_admin','tenant_admin','campaign_manager','user','agent','billing_user','readonly') THEN r.name ELSE NULL END AS effective_role, CASE WHEN up.role='platform_admin' THEN 'not_required' ELSE COALESCE(tu.status,'missing') END AS membership_status, up.tenant_id, t.business_name AS tenant_name, up.is_active, up.mfa_enabled, up.is_verified, up.last_login_at, up.created_at, up.admin_revision AS _profile_revision, tu.id AS _membership_id, tu.admin_revision AS _membership_revision FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN tenant_users tu ON tu.user_id=up.id AND tu.tenant_id=up.tenant_id LEFT JOIN roles r ON r.id=tu.role_id WHERE up.id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads one global account by primary key for the platform-administrator user directory: every caller sits behind require_platform_admin on a bypass connection and the administrator selects accounts of any tenant, while the membership join stays on the account's own tenant (tu.tenant_id = up.tenant_id). Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/users.py:267.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "6cb2ba3c431e615e219fd8375e4b250f4521fdd7897e86ee507803208892e932",
+      "file": "app/api/v1/endpoints/admin/users.py",
+      "function": "_require_review",
+      "line": 274,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_users",
+        "user_profiles"
+      ],
+      "sql": "SELECT tu.id,tu.status FROM tenant_users tu JOIN user_profiles up ON up.id=tu.user_id AND up.tenant_id=tu.tenant_id WHERE up.id=$1 FOR NO KEY UPDATE OF tu",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Locks the selected account's own membership row (joined on user and tenant, up.tenant_id = tu.tenant_id) for the review-token check before a platform-administrator update or delete; update_user and delete_user are behind require_platform_admin and select the account by ID for any tenant. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/users.py:274.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "cdf39d0585b1d7e8c51aff5ad3aae47f1f9cf9396f5fd4e899ab10d2a40ee9fa",
+      "file": "app/api/v1/endpoints/admin/users.py",
+      "function": "_create_request_row",
+      "line": 287,
+      "method": "fetchrow",
+      "tables": [
+        "audit_logs"
+      ],
+      "sql": "SELECT event_id,resource_id,action,metadata FROM audit_logs WHERE actor_id=$1::uuid AND resource_type='user' AND action IN ('user_created','user_create_cancelled') AND metadata ? 'user_create_request_id' AND metadata->>'user_create_request_id'=$2",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reads the acting platform administrator's own retained create-user receipt: actor_id is the authenticated operator's ID and the request ID is its idempotency key, so the lookup is by operator, not tenant; get_create_request, cancel_create_request and create_user are behind require_platform_admin. Exact reviewed operation: fetchrow; app/api/v1/endpoints/admin/users.py:287.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "a70917121950d3697fca773b08392224898bce90392c13be6be4bbc3741763f7",
+      "file": "app/api/v1/endpoints/admin/users.py",
+      "function": "_primary_membership_review",
+      "line": 338,
+      "method": "fetch",
+      "tables": [
+        "tenant_users"
+      ],
+      "sql": "SELECT tu.id,tu.tenant_id,tu.role_id,tu.status,tu.is_primary, tu.admin_revision,r.name AS role FROM tenant_users tu JOIN roles r ON r.id=tu.role_id WHERE tu.user_id=$1 AND (tu.tenant_id=$2 OR tu.is_primary=TRUE) ORDER BY tu.id{IfExp(test=Name(id='lock', ctx=Load()), body=Constant(value=' FOR NO KEY UPDATE OF tu'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reviewing a first primary membership must see the candidate tenant's membership and any existing primary membership in any other tenant (tu.tenant_id = $2 OR tu.is_primary), keyed by the selected global account; only the platform-administrator primary-membership routes call it, and the optional FOR NO KEY UPDATE OF tu fragment is what makes the SQL text dynamic. Exact reviewed operation: fetch; app/api/v1/endpoints/admin/users.py:338.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "f973d009c0d1dca3b3deaa31dd9aa18a2114fccdb813fc5b3e85001a31f30035",
+      "file": "app/core/db.py",
+      "function": "_apply_transaction_timeouts",
+      "line": 133,
+      "method": "execute",
+      "tables": [],
+      "sql": "SET LOCAL statement_timeout = '{unpacked}ms'",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The statement_timeout half of the per-transaction protection limits: the millisecond value is an integer validated by _transaction_timeout_settings (SET LOCAL takes no bind parameters), and the statement reads no table and no tenant row. Exact reviewed operation: execute; app/core/db.py:133.",
+      "category": "system_session_setup"
+    },
+    {
+      "id": "d7cb468de14e00d004540b859a76a882b46e49c0215ad5028d858060517eaad5",
+      "file": "app/core/db.py",
+      "function": "_apply_transaction_timeouts",
+      "line": 134,
+      "method": "execute",
+      "tables": [],
+      "sql": "SET LOCAL lock_timeout = '{unpacked}ms'",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The lock_timeout half of the per-transaction protection limits: the millisecond value is an integer validated by _transaction_timeout_settings (SET LOCAL takes no bind parameters), and the statement reads no table and no tenant row. Exact reviewed operation: execute; app/core/db.py:134.",
+      "category": "system_session_setup"
+    },
+    {
+      "id": "c5e7e146444459936d91b01f087346f3f96395c8f246530fc51d5155eefd5894",
+      "file": "app/core/db.py",
+      "function": "Database.fetch_all",
+      "line": 400,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{query}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.fetch_all runs the SQL text its caller supplies, so it cannot name a tenant itself; SQL passed to it is inventoried at the calling site, and no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetch; app/core/db.py:400.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "54ef68f0cd7d824a8c417e93c147a39fb4548875b777837652432e4b7c776560",
+      "file": "app/core/db.py",
+      "function": "Database.fetch_one",
+      "line": 404,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "{query}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.fetch_one runs the SQL text its caller supplies, so it cannot name a tenant itself; SQL passed to it is inventoried at the calling site, and no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetchrow; app/core/db.py:404.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "de6179d04e1d1b66e914fbabb96c11d976d883e1f4bf0eb0eac951ad9f7977c6",
+      "file": "app/core/db.py",
+      "function": "Database.execute",
+      "line": 408,
+      "method": "execute",
+      "tables": [],
+      "sql": "{query}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.execute runs the SQL text its caller supplies, so it cannot name a tenant itself; SQL passed to it is inventoried at the calling site, and no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: execute; app/core/db.py:408.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "8f714e2188c7d91cae1cfc4ba987668bc907ff8ea47b848e67e4c080e6940632",
+      "file": "app/core/db.py",
+      "function": "Database.fetch_val",
+      "line": 411,
+      "method": "fetchval",
+      "tables": [],
+      "sql": "{query}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.fetch_val runs the SQL text its caller supplies, so it cannot name a tenant itself; SQL passed to it is inventoried at the calling site, and no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetchval; app/core/db.py:411.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "fa1294f9bf0bcd336543a5703d280823cb2b3dfd9290a308ce8e2b58b16c284e",
+      "file": "app/core/db.py",
+      "function": "Database.select",
+      "line": 427,
+      "method": "fetch",
+      "tables": [],
+      "sql": "{branch}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.select builds a SELECT from a caller-supplied table, column list and WHERE text, so it cannot name a tenant itself; no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetch; app/core/db.py:427.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "ee6ed980242c74a4ba9f0728fe4baf20b070e60749ae2cf75c90d94828a20594",
+      "file": "app/core/db.py",
+      "function": "Database.select_one",
+      "line": 436,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "{branch} LIMIT 1",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.select_one builds a SELECT ... LIMIT 1 from a caller-supplied table, column list and WHERE text, so it cannot name a tenant itself; no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetchrow; app/core/db.py:436.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "c9b0f0911bdc16fd63b2f813b9ffcb7f9c8a66f9ae17a8f13d91ef6ee79d723f",
+      "file": "app/core/db.py",
+      "function": "Database.insert",
+      "line": 445,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "INSERT INTO {table} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) RETURNING {returning}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.insert writes the caller's column/value dict into a caller-named table, so the tenant column is whatever the caller puts in the dict; no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetchrow; app/core/db.py:445.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "02959db00a12225a15b72bcb8ca884d7530c7598c4f646d1fbd7fe9053a9ef5f",
+      "file": "app/core/db.py",
+      "function": "Database.insert_many",
+      "line": 458,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "INSERT INTO {table} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) RETURNING *",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.insert_many writes each caller-supplied column/value dict into a caller-named table, so the tenant column is whatever the caller puts in the dicts; no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetchrow; app/core/db.py:458.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "ee30912fd387ba9df40a55b8abc7e5c32d9a513f37fece51c4aabae835249681",
+      "file": "app/core/db.py",
+      "function": "Database.update",
+      "line": 491,
+      "method": "fetch",
+      "tables": [],
+      "sql": "UPDATE {table} SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='set_parts', ctx=Load())], keywords=[])} WHERE {Call(func=Attribute(value=Name(id='re', ctx=Load()), attr='sub', ctx=Load()), args=[Constant(value='\\\\$(\\\\d+)'), Lambda(args=arguments(posonlyargs=[], args=[arg(arg='m')], kwonlyargs=[], kw_defaults=[], defaults=[]), body=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Call(func=Name(id='int', ctx=Load()), args=[Call(func=Attribute(value=Name(id='m', ctx=Load()), attr='group', ctx=Load()), args=[Constant(value=1)], keywords=[])], keywords=[]), op=Add(), right=Name(id='offset', ctx=Load())), conversion=-1)])), Name(id='where', ctx=Load())], keywords=[])} RETURNING {returning}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.update builds an UPDATE from a caller-supplied table, SET dict and WHERE text (placeholders renumbered after the SET values), so it cannot name a tenant itself; its only caller in app/, DialerWorker._update_job_status, passes a WHERE that binds tenant_id together with id, campaign_id and lead_id. Exact reviewed operation: fetch; app/core/db.py:491.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "7c14d87f438b620836e67858e6a03857b9a6aeb4373967e330588239817f18a9",
+      "file": "app/core/db.py",
+      "function": "Database.delete",
+      "line": 496,
+      "method": "execute",
+      "tables": [],
+      "sql": "DELETE FROM {table} WHERE {where}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.delete builds a DELETE from a caller-supplied table and WHERE text, so it cannot name a tenant itself; no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: execute; app/core/db.py:496.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "815391dbf32f317461c29412239543a3005eab922899f874fb19eb4885731d45",
+      "file": "app/core/db.py",
+      "function": "Database.upsert",
+      "line": 513,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "INSERT INTO {table} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='columns', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) ON CONFLICT ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='conflict_columns', ctx=Load())], keywords=[])}) DO UPDATE SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[FormattedValue(value=Name(id='c', ctx=Load()), conversion=-1), Constant(value=' = EXCLUDED.'), FormattedValue(value=Name(id='c', ctx=Load()), conversion=-1)]), generators=[comprehension(target=Name(id='c', ctx=Store()), iter=Name(id='columns', ctx=Load()), ifs=[Compare(left=Name(id='c', ctx=Load()), ops=[NotIn()], comparators=[Name(id='conflict_columns', ctx=Load())])], is_async=0)])], keywords=[])} RETURNING {returning}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Database.upsert writes the caller's column/value dict into a caller-named table with the caller's conflict columns, so the tenant column is whatever the caller puts in the dict; no code in app/ calls it today (the dialer worker's only Database call is update). Exact reviewed operation: fetchrow; app/core/db.py:513.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "8289f24da9a102e0884a590ae2cce596bb7910decd50e1b73451f9b22990e350",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_async",
+      "line": 262,
+      "method": "execute",
+      "tables": [],
+      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Session set-up, not a data query: it installs the request context's tenant as app.current_tenant_id for the transaction the builder statement runs in, which is how row-level security learns the tenant (the bypass and no-tenant branches set the nil UUID instead); it reads no table. Exact reviewed operation: execute; app/core/postgres_adapter.py:262.",
+      "category": "system_session_setup"
+    },
+    {
+      "id": "15aaf97ecf88d73ace8d146d6c07c1fd4303def061e80fde8bafa49aec3dd898",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_select_with_relations",
+      "line": 549,
+      "method": "fetch",
+      "tables": [],
+      "sql": "SELECT {base_select} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Base read of a select with embedded relations: the table, columns, filters and values come from the caller's chain (identifiers pass _IDENT_RE and values are bound), so this executor cannot name a tenant itself; the tenant filter is each call site's own .eq('tenant_id', ...), which this scanner does not inventory, and the request's RLS context is installed in _execute_async. Exact reviewed operation: fetch; app/core/postgres_adapter.py:549.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "08942a6a97fc3fe994b0a549a437f3dcb1c8a90388342562312d5378406e10cd",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_select_with_relations",
+      "line": 612,
+      "method": "fetch",
+      "tables": [],
+      "sql": "SELECT {branch} FROM {Attribute(value=Name(id='rel', ctx=Load()), attr='table', ctx=Load())} WHERE id = ANY($1){branch}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Embedded-relation read: it fetches related rows by the primary keys (id = ANY($1)) found in the base rows the same call already returned, plus the caller's relation filters; the table and columns come from the caller's select spec (identifiers validated), so the executor cannot name a tenant itself. Exact reviewed operation: fetch; app/core/postgres_adapter.py:612.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "aa54aedd38914f7fbf3a6f7bf3745ef708eedc8f27c1a3e3a2040fda84279830",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_select",
+      "line": 678,
+      "method": "fetchval",
+      "tables": [],
+      "sql": "SELECT COUNT(*) FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Exact-count read of the builder's select, over the same caller-supplied table and WHERE as the data read that follows it: the table, columns, filters and values come from the caller's chain (identifiers pass _IDENT_RE and values are bound), so this executor cannot name a tenant itself; the tenant filter is each call site's own .eq('tenant_id', ...), which this scanner does not inventory, and the request's RLS context is installed in _execute_async. Exact reviewed operation: fetchval; app/core/postgres_adapter.py:678.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "93c91caf014b1ae8efbdfa02af779627fc1919d3382f26ad8f2e2030643cbfbe",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_select",
+      "line": 681,
+      "method": "fetch",
+      "tables": [],
+      "sql": "SELECT {unpacked} FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} {Call(func=Attribute(value=Name(id='self', ctx=Load()), attr='_build_order_clause', ctx=Load()), args=[], keywords=[])} {IfExp(test=Compare(left=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), ops=[IsNot()], comparators=[Constant(value=None)]), body=JoinedStr(values=[Constant(value='LIMIT '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='limit_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))} {IfExp(test=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), body=JoinedStr(values=[Constant(value='OFFSET '), FormattedValue(value=Attribute(value=Name(id='self', ctx=Load()), attr='offset_val', ctx=Load()), conversion=-1)]), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Data read of the builder's select: the table, columns, filters and values come from the caller's chain (identifiers pass _IDENT_RE and values are bound), so this executor cannot name a tenant itself; the tenant filter is each call site's own .eq('tenant_id', ...), which this scanner does not inventory, and the request's RLS context is installed in _execute_async. Exact reviewed operation: fetch; app/core/postgres_adapter.py:681.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "4d94749b5c55e42949927bce539c7c0ec50b05a1dab38817674491da66c9f731",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_insert",
+      "line": 716,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "{branch}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Legacy builder insert: the table and the column/value dicts are the caller's .insert(...) payload (identifiers validated, values bound), so the tenant column is whatever the call site supplies, and that choice is the call site's own, not inventoried by this scanner. Exact reviewed operation: fetchrow; app/core/postgres_adapter.py:716.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "87d9d512f72851be75e6778f9cdb0ae349e7b603c726411b63272a020c16cf6e",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_update",
+      "line": 743,
+      "method": "fetch",
+      "tables": [],
+      "sql": "UPDATE {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='set_parts', ctx=Load())], keywords=[])} {unpacked} RETURNING *",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Legacy builder update, the caller's .update(...).eq(...) chain: the table, columns, filters and values come from the caller's chain (identifiers pass _IDENT_RE and values are bound), so this executor cannot name a tenant itself; the tenant filter is each call site's own .eq('tenant_id', ...), which this scanner does not inventory, and the request's RLS context is installed in _execute_async. Exact reviewed operation: fetch; app/core/postgres_adapter.py:743.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "c8f427468caa9eff5ad9ee2ae83cd4cc33c8e01928f45268be9ed3d510ea29fa",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_upsert",
+      "line": 787,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "INSERT INTO {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='keys', ctx=Load())], keywords=[])}) VALUES ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[GeneratorExp(elt=JoinedStr(values=[Constant(value='$'), FormattedValue(value=BinOp(left=Name(id='i', ctx=Load()), op=Add(), right=Constant(value=1)), conversion=-1)]), generators=[comprehension(target=Name(id='i', ctx=Store()), iter=Call(func=Name(id='range', ctx=Load()), args=[Call(func=Name(id='len', ctx=Load()), args=[Name(id='args', ctx=Load())], keywords=[])], keywords=[]), ifs=[], is_async=0)])], keywords=[])}) ON CONFLICT ({Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='conflict_cols', ctx=Load())], keywords=[])}) {branch} RETURNING *",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Legacy builder upsert: the table, column/value dicts and conflict columns are the caller's .upsert(...) payload (identifiers validated, values bound), so the tenant column is whatever the call site supplies, and that choice is the call site's own, not inventoried by this scanner. Exact reviewed operation: fetchrow; app/core/postgres_adapter.py:787.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "f973b7c0c938b3c14292853fefe1b1a5392add84307df38bbca10cc88602fdd7",
+      "file": "app/core/postgres_adapter.py",
+      "function": "QueryBuilder._execute_delete",
+      "line": 800,
+      "method": "fetch",
+      "tables": [],
+      "sql": "DELETE FROM {Attribute(value=Name(id='self', ctx=Load()), attr='table_name', ctx=Load())} {unpacked} RETURNING *",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Legacy builder delete, the caller's .delete().eq(...) chain: the table, columns, filters and values come from the caller's chain (identifiers pass _IDENT_RE and values are bound), so this executor cannot name a tenant itself; the tenant filter is each call site's own .eq('tenant_id', ...), which this scanner does not inventory, and the request's RLS context is installed in _execute_async. Exact reviewed operation: fetch; app/core/postgres_adapter.py:800.",
+      "category": "system_generic_executor"
+    },
+    {
+      "id": "b1d98fda2d5b03b7d0ce9b595b1a1122fe4388d5a8752cd1e38449949240ecec",
+      "file": "app/core/postgres_adapter.py",
+      "function": "RpcBuilder._execute_async",
+      "line": 868,
+      "method": "execute",
+      "tables": [],
+      "sql": "SET LOCAL app.current_tenant_id = '{Call(func=Name(id='get_current_tenant_id', ctx=Load()), args=[], keywords=[])}'",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Session set-up, not a data query: it installs the request context's tenant as app.current_tenant_id for the transaction the RPC statement runs in, which is how row-level security learns the tenant (the bypass and no-tenant branches set the nil UUID instead); it reads no table. Exact reviewed operation: execute; app/core/postgres_adapter.py:868.",
+      "category": "system_session_setup"
+    },
+    {
+      "id": "63e43c26b76aff972b627e1478b4b9449edc8dcd90f367116d7224d010e52c7e",
+      "file": "app/core/postgres_adapter.py",
+      "function": "RpcBuilder._rpc_increment_quota_usage",
+      "line": 938,
+      "method": "execute",
+      "tables": [
+        "tenant_quota_usage"
+      ],
+      "sql": "INSERT INTO tenant_quota_usage (tenant_id, usage_date, {Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])}) VALUES ($1, $2, 1) ON CONFLICT (tenant_id, usage_date) DO UPDATE SET {Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])} = COALESCE(tenant_quota_usage.{Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])}, 0) + 1",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "increment_quota_usage binds tenant_id = $1 (p_tenant_id, which QuotaService.increment_usage passes from its tenant argument) as the first INSERT column, with ON CONFLICT (tenant_id, usage_date); the usage column name is the only dynamic part and must match ^[a-z_][a-z0-9_]*$, which is why the scanner cannot resolve it. Exact reviewed operation: execute; app/core/postgres_adapter.py:938.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "a3ced2865a0b13e3abac6b77875b3ec5b10d223dc8bb864194a1efb93908e846",
+      "file": "app/core/postgres_adapter.py",
+      "function": "RpcBuilder._rpc_increment_quota_usage",
+      "line": 940,
+      "method": "fetchval",
+      "tables": [
+        "tenant_quota_usage"
+      ],
+      "sql": "SELECT {Call(func=Attribute(value=Attribute(value=Name(id='self', ctx=Load()), attr='params', ctx=Load()), attr='get', ctx=Load()), args=[Constant(value='p_field')], keywords=[])} FROM tenant_quota_usage WHERE tenant_id = $1 AND usage_date = $2",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The read-back of the incremented counter binds tenant_id = $1 AND usage_date = $2; the usage column name is the only dynamic part and was validated against ^[a-z_][a-z0-9_]*$ before any SQL ran. Exact reviewed operation: fetchval; app/core/postgres_adapter.py:940.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "90a1f56fbbc9d813cb1b30769293b1f91de8901a3b50c2f2bb29c1bbe245a065",
+      "file": "app/core/security/passkeys.py",
+      "function": "verify_authentication",
+      "line": 732,
+      "method": "execute",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "UPDATE user_profiles SET passkey_count = GREATEST(passkey_count - 1, 0) WHERE id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Clone-detection cleanup decrements passkey_count of the account that owned the credential row just deleted by credential_id in the same savepoint (user_id comes from that DELETE ... RETURNING); user_profiles is addressed by its primary key as the global account, which may be a tenantless platform account. Exact reviewed operation: execute; app/core/security/passkeys.py:732.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "4375539d711cf14c2eb59dfa5760fe58bab3815f88be1552962fc46886233506",
+      "file": "app/core/security/passkeys.py",
+      "function": "store_credential",
+      "line": 815,
+      "method": "execute",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "UPDATE user_profiles SET passkey_count = passkey_count + 1 WHERE id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Increments passkey_count on the global account that just completed passkey registration: user_id is the authenticated user of the ceremony, addressed by primary key, and a platform account has no tenant to name. Exact reviewed operation: execute; app/core/security/passkeys.py:815.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "22e3cc669f6895183cab45ffc8ac313a6221e4d8ba0d9117585c505583d87efd",
+      "file": "app/core/security/passkeys.py",
+      "function": "get_credential_by_id",
+      "line": 840,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT id, user_id, credential_id, credential_public_key, sign_count, aaguid, device_type, backed_up, transports, display_name, created_at, last_used_at FROM user_passkeys WHERE credential_id = $1 {IfExp(test=Name(id='for_update', ctx=Load()), body=Constant(value=' FOR UPDATE'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "WebAuthn assertion lookup by credential_id: a discoverable credential identifies its account only through this lookup, before any tenant is known (the passkey login route resolves it first); user_passkeys has no tenant column, and the scanner counts the statement only because the optional FOR UPDATE makes its SQL text dynamic. Exact reviewed operation: fetchrow; app/core/security/passkeys.py:840.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "c80e35f1aa128fca6aad9a5b77c918a7628350b78202e414cc255de75836c42c",
+      "file": "app/core/security/passkeys.py",
+      "function": "delete_credential",
+      "line": 911,
+      "method": "execute",
+      "tables": [
+        "user_profiles"
+      ],
+      "sql": "UPDATE user_profiles SET passkey_count = GREATEST(passkey_count - 1, 0) WHERE id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Decrements passkey_count for the account whose passkey (id AND user_id) was deleted by the statement just before it in the same transaction; user_id is the authenticated user of the delete route, and user_profiles is addressed by primary key as the global account. Exact reviewed operation: execute; app/core/security/passkeys.py:911.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "ef58f609b8f6258dc04c6353ebf76855203d4175212b7ced26fa7fb98edf404e",
+      "file": "app/core/security/rbac.py",
+      "function": "get_user_permissions",
+      "line": 573,
+      "method": "fetch",
+      "tables": [
+        "tenant_users",
+        "user_profiles"
+      ],
+      "sql": "SELECT DISTINCT p.name FROM tenant_users tu JOIN user_profiles profile ON profile.id=tu.user_id AND profile.is_active AND profile.is_verified JOIN roles r ON r.id = tu.role_id JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE tu.user_id = $1 AND tu.tenant_id = $2 AND tu.status = 'active'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The role grants bind tu.tenant_id = $2 (the tenant of the authenticated principal, or the one an administrator asked about) and tu.status = 'active'; user_profiles is joined by primary key only to require the account to be active and verified, and a member of a tenant other than its primary one has a profile in a different tenant, so equating the profile's tenant would remove real memberships. Exact reviewed operation: fetch; app/core/security/rbac.py:573.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "0ac9dd61905f40b5556653c9ee622b41b68e4580657c39ef90badf2b5e775a37",
+      "file": "app/core/security/rbac.py",
+      "function": "get_user_permissions",
+      "line": 590,
+      "method": "fetch",
+      "tables": [
+        "tenant_users",
+        "user_profiles"
+      ],
+      "sql": "SELECT DISTINCT p.name FROM tenant_users tu JOIN user_profiles profile ON profile.id=tu.user_id AND profile.is_active AND profile.is_verified JOIN roles r ON r.id = tu.role_id JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE tu.user_id = $1 AND tu.status = 'active' AND r.tenant_scoped = FALSE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The no-tenant branch resolves the permissions of the user's active memberships whose role is not tenant-scoped, which scripts/seed_rbac.py defines as the platform_admin role only; tenant-scoped roles are excluded by r.tenant_scoped = FALSE, so no tenant's membership grants anything here. Exact reviewed operation: fetch; app/core/security/rbac.py:590.",
+      "category": "platform_admin"
+    },
+    {
+      "id": "42aa466b1c9a2b7280af6e738399b461c91748a083bae246c51c01abbf5bbea4",
+      "file": "app/core/security/rbac.py",
+      "function": "get_user_permissions",
+      "line": 613,
+      "method": "fetch",
+      "tables": [
+        "tenant_users",
+        "user_permissions",
+        "user_profiles"
+      ],
+      "sql": "SELECT p.name FROM user_permissions up JOIN user_profiles profile ON profile.id=up.user_id AND profile.is_active AND profile.is_verified JOIN permissions p ON p.id = up.permission_id WHERE up.user_id = $1 AND (up.tenant_id IS NULL OR up.tenant_id = $2) AND (up.expires_at IS NULL OR up.expires_at > clock_timestamp()) AND ($2::uuid IS NULL OR EXISTS ( SELECT 1 FROM tenant_users member WHERE member.user_id=up.user_id AND member.tenant_id=$2::uuid AND member.status='active' ))",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Direct grants bind up.user_id = $1 and (up.tenant_id IS NULL OR up.tenant_id = $2): a grant with no tenant is deliberately global, a grant naming a tenant applies only there, and with no tenant supplied only global grants match; when a tenant is supplied the user must also be an active member of it (the EXISTS). Exact reviewed operation: fetch; app/core/security/rbac.py:613.",
+      "category": "reviewed_tenant_plus_global"
+    },
+    {
+      "id": "ac7df539730eb461ed4c28d33580a82c0b9205a4dd80165fc284f58b0dd45693",
+      "file": "app/core/security/rbac.py",
+      "function": "get_user_tenants",
+      "line": 799,
+      "method": "fetch",
+      "tables": [
+        "tenant_users"
+      ],
+      "sql": "SELECT t.id AS tenant_id, t.business_name AS tenant_name, r.name AS role_name, tu.is_primary, tu.status FROM tenant_users tu JOIN tenants t ON t.id = tu.tenant_id JOIN roles r ON r.id = tu.role_id WHERE tu.user_id = $1 AND tu.status = ANY($2) ORDER BY tu.is_primary DESC, t.business_name",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Lists the memberships the account itself holds across tenants (user_id = $1, active or pending) for GET /users/me/tenants, which passes the authenticated user's own ID on a bypass connection; a tenant predicate would defeat the purpose of the list. Exact reviewed operation: fetch; app/core/security/rbac.py:799.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "c46d2e94963e5f0bfa6dd1ff140020f40e30b79bd8fdd47d78c338b7cd26b324",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "issue_initial_refresh_token",
+      "line": 68,
+      "method": "fetchrow",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "INSERT INTO refresh_tokens (family_id, user_id, tenant_id, token_hash, parent_id, issued_at, expires_at, ip, user_agent, session_id) VALUES (uuid_generate_v4(), $1, $2, $3, NULL, $4, $5, $6, $7, $8) RETURNING id, family_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reviewed tenant-bound INSERT: refresh_tokens.tenant_id is the third column and $2 is the tenant of the principal the sign-in flow has just authenticated (None only for a tenantless platform identity); the uuid_generate_v4() family default inside VALUES puts it outside the scanner's simple-insert parser. Exact reviewed operation: fetchrow; app/core/security/refresh_tokens.py:68.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "9118f3d7d8b4284675c649008e492500007c9be8d41893f797abec99e65f269c",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "rotate_refresh_token",
+      "line": 104,
+      "method": "fetchrow",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "SELECT id, family_id, user_id, tenant_id, expires_at, used_at, revoked_at, session_id FROM refresh_tokens WHERE token_hash = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Refresh rotation must find the token row from the SHA-256 of the presented opaque cookie before any trusted tenant context exists; the row then supplies the user, tenant and family that every later statement in rotate_refresh_token uses, and no caller-chosen row ID is accepted. Exact reviewed operation: fetchrow; app/core/security/refresh_tokens.py:104.",
+      "category": "credential_identity_boundary"
+    },
+    {
+      "id": "72a111ac02fc6fb4c49d5ec14582b0645191b94c265cb430010a795d97eeb08e",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "rotate_refresh_token",
+      "line": 127,
+      "method": "fetchval",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "SELECT EXISTS (SELECT 1 FROM refresh_tokens WHERE parent_id = $1 AND used_at IS NULL AND revoked_at IS NULL)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Grace-period probe for a concurrent refresh: parent_id is the ID of the row located by the presented token's hash, and every successor is inserted with its parent's own tenant_id (the rotation INSERT copies row['tenant_id']), so no other tenant's row can be a successor of it. Exact reviewed operation: fetchval; app/core/security/refresh_tokens.py:127.",
+      "category": "credential_identity_boundary"
+    },
+    {
+      "id": "818d10ffb1356eceec069970772fa4cba4fb49892541b78a4013439b2ad4b0c0",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "rotate_refresh_token",
+      "line": 142,
+      "method": "execute",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = 'reuse_detected' WHERE family_id = $1 AND revoked_at IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Reuse detection revokes every live member of the family of the token row located by hash; a family is created whole at sign-in and every successor copies its parent's tenant, so one family never spans tenants, and the revocation must stay as wide as the family (a tenant filter could only leave a live token behind). Exact reviewed operation: execute; app/core/security/refresh_tokens.py:142.",
+      "category": "credential_identity_boundary"
+    },
+    {
+      "id": "a0cbad3203991eb3cfe87d9b274cdb306298ac725d136504699178b6f5aa8843",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "rotate_refresh_token",
+      "line": 176,
+      "method": "execute",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = 'expired_with_subsequent_use' WHERE family_id = $1 AND revoked_at IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Presenting an expired token revokes every live member of the family of the row located by hash; a family never spans tenants (successors copy their parent's tenant), and the revocation must stay as wide as the family (a tenant filter could only leave a live token behind). Exact reviewed operation: execute; app/core/security/refresh_tokens.py:176.",
+      "category": "credential_identity_boundary"
+    },
+    {
+      "id": "1705aa325736c5250b9508b98545e23678081484faec418340253b425c278bcf",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "rotate_refresh_token",
+      "line": 201,
+      "method": "execute",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "UPDATE refresh_tokens SET used_at = $2 WHERE id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Marks consumed exactly the row located by hash a few statements earlier on the same connection (id = row['id'], server-derived, never caller-supplied), immediately before the successor INSERT that copies that row's tenant_id. Exact reviewed operation: execute; app/core/security/refresh_tokens.py:201.",
+      "category": "credential_identity_boundary"
+    },
+    {
+      "id": "5ed63f1f7b03b140431205d7d495bd4e24fa84bab37b44226be3487181a5e9af",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "revoke_family_by_token",
+      "line": 251,
+      "method": "execute",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = $3 WHERE family_id = ( SELECT family_id FROM refresh_tokens WHERE token_hash = $1 ) AND revoked_at IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Logout and failed-refresh revocation resolve the family from the presented token's SHA-256 hash in the subquery before any tenant is trusted; the statement is idempotent, touches only live members of that family, and a family never spans tenants. Exact reviewed operation: execute; app/core/security/refresh_tokens.py:251.",
+      "category": "credential_identity_boundary"
+    },
+    {
+      "id": "3e8c74ca9f8e6ca76ebe19da62830cac799ec35fe20be5ec5ec81c9c4509ab86",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "revoke_all_user_refresh_tokens",
+      "line": 289,
+      "method": "execute",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = $3 WHERE user_id = $1 AND family_id <> $4 AND revoked_at IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Password change, reset, MFA disable, administrator credential cutoff and suspension must end every refresh token the account holds in every tenant it belongs to, so the account is addressed by its own user_id and a tenant predicate would leave other tenants' sessions alive; the only exclusion is the caller's own family. Exact reviewed operation: execute; app/core/security/refresh_tokens.py:289.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "80e8e407cfd6b2babbadb5560c4c49d3a5b4b036acc0bcb765eccaf2d092d9fb",
+      "file": "app/core/security/refresh_tokens.py",
+      "function": "revoke_all_user_refresh_tokens",
+      "line": 300,
+      "method": "execute",
+      "tables": [
+        "refresh_tokens"
+      ],
+      "sql": "UPDATE refresh_tokens SET revoked_at = $2, revoked_reason = $3 WHERE user_id = $1 AND revoked_at IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Password change, reset, MFA disable, administrator credential cutoff and suspension must end every refresh token the account holds in every tenant it belongs to, so the account is addressed by its own user_id and a tenant predicate would leave other tenants' sessions alive. Exact reviewed operation: execute; app/core/security/refresh_tokens.py:300.",
+      "category": "account_identity_boundary"
+    },
+    {
+      "id": "b11c3773e33a6b7a4d90d4e245248f9b209e8bb54b3be90e704d227ebd6bf900",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.get",
+      "line": 361,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "SELECT * FROM tenant_secrets WHERE secret_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "SecretsManager.get takes only the opaque secret ID and no tenant (a platform-level read by design, and nothing in app/ calls it today), so this lookup is the step that establishes the secret's tenant; every later statement in get (access tracking and the audit rows) binds the tenant read here. Exact reviewed operation: fetchrow; app/domain/services/secrets_manager.py:361.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "65241c34eaa4d58da43d76e34350d7e7f8106cb0ccc7d9a016fb48eefdde8200",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.get",
+      "line": 408,
+      "method": "execute",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "UPDATE tenant_secrets SET last_accessed_at = NOW(), last_accessed_by = $1, access_count = access_count + 1 WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Access tracking binds the secret's own tenant (tenant_id IS NOT DISTINCT FROM $3, NULL for a platform-owned secret) from the row read at the start of get(), next to secret_id = $2; the scanner refuses IS NOT DISTINCT FROM. Exact reviewed operation: execute; app/domain/services/secrets_manager.py:408.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "074c0f4551956e1d51ae722eaa31a66a3e9f04fa8857a2f74f4e475da36d7e7a",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.get_metadata",
+      "line": 448,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "SELECT secret_id, tenant_id, secret_type, secret_name, description, version, created_at, updated_at, expires_at, last_accessed_at, access_count, is_active, is_compromised, permissions, rotated_from, rotated_to, revoked_at FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The metadata read binds the caller's tenant ($2) whenever one is supplied; its only caller, GET /tenants/{tenant_id}/secrets/{secret_id}, always passes the path tenant (which must equal the token's tenant when the token has one), and None is reserved for platform callers; the scanner refuses the optional-tenant OR form. Exact reviewed operation: fetchrow; app/domain/services/secrets_manager.py:448.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "d9fd1d6df62e22f9384828796de6d05392d6bca363fdd74708176776bdb7cdd0",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.rotate",
+      "line": 534,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "SELECT * FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The rotation read binds the caller's tenant ($2) whenever one is supplied: the tenant route passes the path tenant (which must equal the token's tenant when the token has one), and only POST /platform/secrets/{secret_id}/rotate (platform:admin) passes none; the scanner refuses the optional-tenant OR form. Exact reviewed operation: fetchrow; app/domain/services/secrets_manager.py:534.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "60cb666ef9fc31d0ab82ea1c343ee3860d353a002edc16fa31308f0a0327319b",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.rotate",
+      "line": 610,
+      "method": "execute",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "UPDATE tenant_secrets SET rotated_to = $1 WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Linking the old version to its successor binds the tenant of the row rotate() just read (tenant_id IS NOT DISTINCT FROM $3, NULL for a platform-owned secret) next to secret_id = $2; the scanner refuses IS NOT DISTINCT FROM. Exact reviewed operation: execute; app/domain/services/secrets_manager.py:610.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "0c0fe0dbb6a945d37d3728bb6cd772601ec349a70dbd2a7d18c044709746ba92",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.rotate",
+      "line": 618,
+      "method": "execute",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "UPDATE tenant_secrets SET expires_at = LEAST(expires_at, $1) WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Shortening the old version's expiry to the grace period binds the tenant of the row rotate() just read (tenant_id IS NOT DISTINCT FROM $3, NULL for a platform-owned secret) next to secret_id = $2; the scanner refuses IS NOT DISTINCT FROM. Exact reviewed operation: execute; app/domain/services/secrets_manager.py:618.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "777691b34afb1b74deb0f9d8d40c3abfa0c8dc4639a04e74766ed2ec006fd9c6",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.revoke",
+      "line": 670,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "SELECT tenant_id FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The revocation read binds the caller's tenant ($2) whenever one is supplied; its only caller, DELETE /tenants/{tenant_id}/secrets/{secret_id}, always passes the path tenant (which must equal the token's tenant when the token has one); the scanner refuses the optional-tenant OR form. Exact reviewed operation: fetchrow; app/domain/services/secrets_manager.py:670.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "bcb04991e38430b38d1176af0cfbbfe35f25950222aaed5c55737c47c715a417",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.revoke",
+      "line": 681,
+      "method": "execute",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "UPDATE tenant_secrets SET is_active = FALSE, revoked_at = NOW(), revoked_reason = $1 WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The revocation write binds the tenant of the row revoke() just read (tenant_id IS NOT DISTINCT FROM $3, NULL for a platform-owned secret) next to secret_id = $2; the scanner refuses IS NOT DISTINCT FROM. Exact reviewed operation: execute; app/domain/services/secrets_manager.py:681.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "d5228cc971d4fada52b70126bbf89bbbb5ad66239fb3d9b449a83dab1fb472da",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.mark_compromised",
+      "line": 736,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "SELECT tenant_id FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The compromise read binds the caller's tenant ($2) whenever one is supplied; its only caller, POST /tenants/{tenant_id}/secrets/{secret_id}/compromise, always passes the path tenant (which must equal the token's tenant when the token has one); the scanner refuses the optional-tenant OR form. Exact reviewed operation: fetchrow; app/domain/services/secrets_manager.py:736.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "a03c7381f4e9db473715dbdb5b95b2112dcd6315f648c6dcf490b80336562834",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.mark_compromised",
+      "line": 747,
+      "method": "execute",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "UPDATE tenant_secrets SET is_active = FALSE, is_compromised = TRUE, revoked_at = NOW(), revoked_reason = $1 WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The compromise write binds the tenant of the row mark_compromised() just read (tenant_id IS NOT DISTINCT FROM $3, NULL for a platform-owned secret) next to secret_id = $2; the scanner refuses IS NOT DISTINCT FROM. Exact reviewed operation: execute; app/domain/services/secrets_manager.py:747.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "c25029929d2e24477d1ca77e948132a260485c8a61cf676c7dd0ff31d19c5fbe",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager._match_api_key_row",
+      "line": 915,
+      "method": "execute",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "UPDATE tenant_secrets SET lookup_hash = $1 WHERE secret_id = $2 AND tenant_id IS NOT DISTINCT FROM $3 AND lookup_hash IS NULL",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The lookup-hash backfill binds the candidate row's own tenant (tenant_id IS NOT DISTINCT FROM $3, NULL for a platform-owned key) next to secret_id = $2 and lookup_hash IS NULL, for rows validate_api_key just selected; the scanner refuses IS NOT DISTINCT FROM. Exact reviewed operation: execute; app/domain/services/secrets_manager.py:915.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "abca32aafbba2c3e2abb31f67482140083a61256226c49f91388ca41030ef80a",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.list_secrets",
+      "line": 967,
+      "method": "fetch",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "SELECT secret_id, tenant_id, secret_type, secret_name, description, version, created_at, updated_at, expires_at, last_accessed_at, access_count, is_active, is_compromised, permissions, rotated_from, rotated_to, revoked_at FROM tenant_secrets {IfExp(test=Name(id='conditions', ctx=Load()), body=BinOp(left=Constant(value='WHERE '), op=Add(), right=Call(func=Attribute(value=Constant(value=' AND '), attr='join', ctx=Load()), args=[Name(id='conditions', ctx=Load())], keywords=[])), orelse=Constant(value=''))} ORDER BY created_at DESC",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "tenant_id = $n is appended to the WHERE whenever a tenant is supplied (GET /tenants/{tenant_id}/secrets always passes the path tenant), and only GET /platform/secrets (platform:admin) lists without one; the SQL is dynamic only because the WHERE fragment is built from the supplied filters. Exact reviewed operation: fetch; app/domain/services/secrets_manager.py:967.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "487c07e99ccecd3806aab4b792c8336caf49304ced72b30f2dceb340a365376f",
+      "file": "app/domain/services/secrets_manager.py",
+      "function": "SecretsManager.get_expiring_secrets",
+      "line": 1023,
+      "method": "fetch",
+      "tables": [
+        "tenant_secrets"
+      ],
+      "sql": "SELECT secret_id, tenant_id, secret_type, secret_name, description, version, created_at, updated_at, expires_at, last_accessed_at, access_count, is_active, is_compromised, permissions, rotated_from, rotated_to, revoked_at FROM tenant_secrets WHERE is_active = TRUE AND expires_at IS NOT NULL AND expires_at <= $1 AND ($2::uuid IS NULL OR tenant_id = $2) ORDER BY expires_at",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The expiry read binds the tenant of the caller's token ($2) whenever the token has one; only a caller whose token carries no tenant (the platform administrator) reads across tenants, as the method documents, and the scanner refuses the optional-tenant OR form. Exact reviewed operation: fetch; app/domain/services/secrets_manager.py:1023.",
       "category": "reviewed_tenant_scoped"
     }
   ]
