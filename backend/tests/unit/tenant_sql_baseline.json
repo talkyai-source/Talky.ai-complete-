@@ -33,7 +33,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Left as debt (F2-03 tail B): the function receives only the call id on a bypass connection, and its callers derive the tenant through a fallback chain (_disclosure_tenant_id) that is not proven to equal the durable row's tenant; a wrong value would silently leave consent_status unrecorded on a compliance path. Needs the admission-pinned tenant passed in."
     },
     {
       "id": "03310febc6ac22873c0963af53bf57f8408cd162837c09b05fb832bc451cb7cf",
@@ -85,22 +85,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "06747c1f0e222e2fd19a4fb08dd42f81c745c0ed28aeb11ddf4b4b3aea427d16",
-      "file": "app/domain/services/call_summary/business_details.py",
-      "function": "persist_business_details",
-      "line": 329,
-      "method": "execute",
-      "tables": [
-        "call_lead_details"
-      ],
-      "sql": "DELETE FROM call_lead_details d USING calls c WHERE d.call_id=$1::uuid AND d.tenant_id=$2::uuid AND c.id=d.call_id AND c.tenant_id=d.tenant_id AND c.summary_transcript_hash=$3 AND jsonb_build_array(COALESCE(c.transcript,''), c.transcript_json, c.action_results)=$5::jsonb AND d.source <> 'manual_edit' AND d.evidence->>'extraction'='post_call' AND (d.evidence->>'transcript_revision' IS DISTINCT FROM $3 OR NOT (d.field_key = ANY($4::text[])))",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "0679423f712f009418366a2a11ea15c8af8dfce12af69d198c980b8b743df029",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.admin_overview",
@@ -113,23 +97,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "072f453268a3b6df1a120831603e16a3636b52fe3b4f7ed4d44ffe4847306ae6",
-      "file": "app/services/scripts/knowledge/node_updates.py",
-      "function": "write_node_update",
-      "line": 39,
-      "method": "fetchval",
-      "tables": [
-        "campaign_knowledge_nodes",
-        "campaign_knowledge_sources"
-      ],
-      "sql": "WITH changed AS ( UPDATE campaign_knowledge_nodes n SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='setters', ctx=Load())], keywords=[])}, updated_at = NOW() WHERE n.id = $1 AND n.campaign_id = $2 AND n.tenant_id = $3 AND EXISTS (SELECT 1 FROM campaign_knowledge_sources s WHERE s.id=n.source_id AND s.campaign_id=$2 AND s.tenant_id=$3) RETURNING n.id, n.source_id ), revised AS ( UPDATE campaign_knowledge_sources s SET version = s.version + 1, updated_at = NOW() FROM changed WHERE s.id = changed.source_id AND s.campaign_id = $2 AND s.tenant_id = $3 RETURNING s.id ) SELECT changed.id FROM changed JOIN revised ON revised.id=changed.source_id",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -174,23 +141,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "11a163d6a57788f503a712047df0579592a0920270b7f6a971151ccae4008680",
-      "file": "app/domain/services/call_redial_service.py",
-      "function": "_job_state",
-      "line": 83,
-      "method": "fetchval",
-      "tables": [
-        "calls",
-        "dialer_jobs"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND lead_id=$2::uuid AND id<>$3::uuid AND status=ANY($4::text[])) OR EXISTS(SELECT 1 FROM calls WHERE tenant_id=$1::uuid AND lead_id=$2::uuid AND (status IS NULL OR NOT(status=ANY($5::text[]))))",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "14153fdce5931db54ab17b1384b55cb2d5e3e56b3aabd5704b208b60e0bc5cd2",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
@@ -202,36 +152,6 @@
       "sql": "SELECT config_id FROM inbound_did_assignments WHERE id=$1",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "1adc49fc45586791b6ec983b02eac3c5b19a5fb4773c6e6b210ef8c7ec621182",
-      "file": "app/api/v1/endpoints/telephony_sip/trunks.py",
-      "function": "delete_sip_trunk",
-      "line": 2114,
-      "method": "fetchval",
-      "tables": [
-        "inbound_did_assignments"
-      ],
-      "sql": "SELECT EXISTS ( SELECT 1 FROM inbound_did_assignments WHERE tenant_id = $1::uuid AND sip_trunk_id = $2::uuid )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "1b012c02c56487729e8e0bb31a8c7e0736479dc4b817c0a9eb243b3ca49a7221",
-      "file": "app/domain/services/campaign_knowledge_access.py",
-      "function": "_acquire_bounded_direction_lock",
-      "line": 173,
-      "method": "fetchval",
-      "tables": [],
-      "sql": "{IfExp(test=Name(id='mutate', ctx=Load()), body=Name(id='_MUTATION_LOCK_SQL', ctx=Load()), orelse=Name(id='_READ_LOCK_SQL', ctx=Load()))}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -285,22 +205,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "1e260247763be722441145ca86be4b835a02ddea8fa607c6ceebe98137452245",
-      "file": "app/infrastructure/assistant/tools/calls.py",
-      "function": "initiate_call",
-      "line": 105,
-      "method": "fetchval",
-      "tables": [
-        "dialer_jobs"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND lead_id=$2::uuid AND status IN ('pending','queued','processing','calling','retry_scheduled'))",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "1ef4d63c345eca44a8660ae3c092ca1a9f313a0c9470fd29bb9f00cad214ac24",
       "file": "app/domain/services/topup_service.py",
       "function": "TopupService.history",
@@ -334,22 +238,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "23885dfbb298ed849334c88e7a20b6c2671e3525f00faca3eefbff625a75d8c3",
-      "file": "app/domain/services/dialer/stuck_job_reaper.py",
-      "function": "reap_orphaned_scheduled_jobs",
-      "line": 101,
-      "method": "fetch",
-      "tables": [
-        "dialer_jobs"
-      ],
-      "sql": "UPDATE dialer_jobs SET failure_category = COALESCE(failure_category, 'internal'), failure_reason = $1, last_error = $1 WHERE status = 'retry_scheduled' AND GREATEST(updated_at, scheduled_at) < now() - make_interval(secs => $2::int) AND failure_reason IS DISTINCT FROM $1 RETURNING id, lead_id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "2599d0671bf281569b889dcddde55d76c2b6ac56275b3640ff88c69497a7f621",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reverse_finalized_usage",
@@ -362,40 +250,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "260e7f24b4f8c912a7956d9dcb70155e282281ae7ef3dada98ac11f035047e53",
-      "file": "app/domain/services/telephony/legacy_pending_identity.py",
-      "function": "reconcile_pending_identity",
-      "line": 52,
-      "method": "fetchval",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT count(*) FROM calls WHERE status='termination_pending' AND (NULLIF(BTRIM(provider),'') IS NULL OR COALESCE(NULLIF(BTRIM(provider_call_id),''), NULLIF(BTRIM(external_call_uuid),'')) IS NULL)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "27b07b700ce521496794bc10f1e1b14b6f6021d849e1ea31ee9882b7119518c0",
-      "file": "app/domain/services/voice_pipeline/action_execution.py",
-      "function": "_context",
-      "line": 91,
-      "method": "fetchrow",
-      "tables": [
-        "calls",
-        "campaigns",
-        "leads"
-      ],
-      "sql": "SELECT c.id AS call_id, COALESCE(c.provider_call_id,c.external_call_uuid) AS provider_call_id, c.lead_id, c.provider, c.status AS call_status, p.id AS campaign_id, p.status AS campaign_status, p.direction, p.script_config, l.phone_number, l.do_not_call, l.status AS lead_status, c.direction AS call_direction, c.route_snapshot, c.admission_status, c.processing_status, c.billing_status, c.reserved_seconds FROM calls c JOIN campaigns p ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id LEFT JOIN leads l ON l.id=c.lead_id AND l.tenant_id=c.tenant_id AND l.campaign_id=p.id WHERE c.tenant_id=$1::uuid AND p.id=$2::uuid AND (c.id::text=$3 OR c.provider_call_id=$3 OR c.external_call_uuid=$3 OR c.talklee_call_id=$3) ORDER BY c.created_at DESC LIMIT 1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -513,22 +367,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "35f13f7cb8bdaa6bee749262027a9e36588d971d4af30ce2e074c9109398c8df",
-      "file": "app/domain/services/dialer/stuck_job_reaper.py",
-      "function": "reap_stuck_calls",
-      "line": 190,
-      "method": "fetch",
-      "tables": [
-        "calls"
-      ],
-      "sql": "UPDATE calls SET status = 'termination_pending', updated_at = now() WHERE ( status = ANY($1::text[]) AND created_at < now() - make_interval(secs => $2::int) ) OR ( status = ANY($3::text[]) AND COALESCE(answered_at, created_at) < now() - make_interval(secs => $4::int) ) RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "36105efc7fae6277b3247a8bff5985b1c9c06ec5f0bb8087404a0a158a5393ac",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "complete_inbound_transfer",
@@ -538,22 +376,6 @@
         "call_legs"
       ],
       "sql": "UPDATE call_legs SET provider_leg_id=COALESCE(NULLIF($3,''),provider_leg_id), metadata=COALESCE(metadata,'{}'::jsonb) || $4::jsonb, updated_at=NOW() WHERE id=$1::uuid AND call_id=$2::uuid AND status IN ('initiated','ringing','answered') AND billing_status='reserved' RETURNING id, status",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "37ecb89bbb68dc6f653ac9d996329b65cb8619c2b77eb9aa8988edd078ca22eb",
-      "file": "app/domain/services/telephony/termination_receipts.py",
-      "function": "persist_termination_receipt",
-      "line": 111,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT id, tenant_id, provider, provider_call_id, external_call_uuid, status, route_snapshot FROM calls WHERE id=$1::uuid FOR UPDATE",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
@@ -589,22 +411,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3e03c7fefcea7d13567dc7a1c07d3bd522fc916f151387c9765c98f0b128dd43",
-      "file": "app/api/v1/endpoints/telephony_runtime/metrics.py",
-      "function": "get_runtime_activation_metrics",
-      "line": 43,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_runtime_policy_events"
-      ],
-      "sql": "WITH scoped_events AS ( SELECT action, stage, status, request_id, created_at FROM tenant_runtime_policy_events WHERE tenant_id = $1 AND created_at >= NOW() - ($2::int * INTERVAL '1 hour') ), counts AS ( SELECT COUNT(*) FILTER ( WHERE action = 'activate' AND stage = 'commit' AND status = 'succeeded' ) AS activation_success_count, COUNT(*) FILTER ( WHERE action = 'activate' AND status = 'failed' ) AS activation_failure_count, COUNT(*) FILTER ( WHERE action = 'rollback' AND stage = 'rollback' AND status = 'succeeded' ) AS rollback_success_count, COUNT(*) FILTER ( WHERE action = 'rollback' AND status = 'failed' ) AS rollback_failure_count FROM scoped_events ), rollback_latencies AS ( SELECT EXTRACT(EPOCH FROM (done.created_at - started.created_at)) * 1000.0 AS latency_ms FROM scoped_events started JOIN scoped_events done ON done.action = 'rollback' AND done.stage = 'rollback' AND done.status IN ('succeeded', 'failed') AND started.action = 'rollback' AND started.stage = 'rollback' AND started.status = 'started' AND started.request_id IS NOT NULL AND started.request_id = done.request_id AND done.created_at >= started.created_at ), rollback_stats AS ( SELECT percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_ms) AS p50_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_ms, MAX(latency_ms) AS max_ms FROM rollback_latencies ) SELECT counts.activation_success_count, counts.activation_failure_count, counts.rollback_success_count, counts.rollback_failure_count, COALESCE(rollback_stats.p50_ms, 0)::float8 AS rollback_p50_ms, COALESCE(rollback_stats.p95_ms, 0)::float8 AS rollback_p95_ms, COALESCE(rollback_stats.max_ms, 0)::float8 AS rollback_max_ms FROM counts CROSS JOIN rollback_stats",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -654,7 +460,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Left as debt (F2-03 tail B): call_events has no tenant column and log_event receives only the call id, so no tenant value is in scope here; a predicate needs a tenant argument (or a parent join) threaded through every caller of CallEventRepository.log_event."
     },
     {
       "id": "447f419ce95a047f476f12f9b672ec40b21478dc7353f432dfe9b5aaa6adb98d",
@@ -689,23 +495,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "462dc63e79fdaca11b08b6985b1b06ca974f87c372ae6e3707ed9a498f9230fa",
-      "file": "app/domain/services/telephony/call_authority.py",
-      "function": "read_call_authority_rows",
-      "line": 238,
-      "method": "fetch",
-      "tables": [
-        "audit_logs",
-        "white_label_partners"
-      ],
-      "sql": "SELECT t.id, t.status, t.subscription_status, t.suspended_at, t.suspended_by, t.suspension_reason, t.white_label_partner_id, p.id AS formal_partner_id, p.status AS formal_partner_status, COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE) AS authority_scope_ok, COALESCE(( SELECT jsonb_agg(jsonb_build_object( 'suspension_id', s.suspension_id, 'target_type', s.target_type, 'target_id', s.target_id, 'suspended_at', s.suspended_at, 'audited', s.audit_log_id IS NOT NULL AND COALESCE( a.metadata->'formal_account_hold_version' = '1'::jsonb, FALSE), 'policy_version', s.evidence->'_formal_account_hold'->'version', 'immediate', s.evidence->'_formal_account_hold'->'immediate', 'affected', COALESCE( (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text, FALSE), 'tenant_state', s.evidence->'_formal_account_hold'->'tenant_state'->t.id::text ) ORDER BY s.suspended_at, s.suspension_id) FROM suspension_events s LEFT JOIN audit_logs a ON a.event_id = s.audit_log_id WHERE s.is_active = TRUE AND ( (s.target_type = 'tenant' AND s.target_id = t.id) OR (s.target_type = 'partner' AND ( s.target_id = t.white_label_partner_id OR (s.audit_log_id IS NOT NULL AND a.metadata->'formal_account_hold_version' = '1'::jsonb AND s.evidence->'_formal_account_hold'->'version' = '1'::jsonb AND (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text) )) ) ), '[]'::jsonb) AS active_holds FROM tenants t LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE t.id = ANY($1::uuid[])",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "4675872d1d19aa884c06df771d9b709f255423636a7ac76e04d65dbfd7b06cf6",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reconcile_reenabled_settlement_holds",
@@ -718,56 +507,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "4a2377ad22c11d47a833411dffdb0ee759beb5a79081e01dcc3d698d0683f172",
-      "file": "app/core/telephony_observability.py",
-      "function": "_fetch_transfer_metrics",
-      "line": 594,
-      "method": "fetchrow",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "WITH scoped_legs AS ( SELECT parent.id AS parent_call_id, leg.status, leg.metadata FROM call_legs leg JOIN calls parent ON parent.id = leg.call_id WHERE leg.created_at >= $1::timestamptz AND parent.created_at >= $1::timestamptz AND leg.leg_type = 'transfer' AND parent.direction = 'inbound' AND NOT parent.is_test AND parent.tenant_id = $2::uuid AND parent.called_did = ('+' || $3) AND COALESCE( parent.route_snapshot #>> '{inbound_config,id}', parent.route_snapshot #>> '{route,config_id}' ) = $4 ) SELECT COUNT(DISTINCT parent_call_id)::int AS attempts, COUNT(DISTINCT parent_call_id) FILTER ( WHERE COALESCE(metadata->>'handoff_persisted', 'false') = 'true' )::int AS successes, COUNT(DISTINCT parent_call_id) FILTER ( WHERE status IN ('initiated', 'ringing') OR ( status = 'answered' AND COALESCE(metadata->>'handoff_persisted', 'false') <> 'true' ) )::int AS inflight FROM scoped_legs",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "4a94f09e5821c9c8770a4dd39e2e3d3586c0afbb91a35afe7ae35cf434508449",
-      "file": "app/domain/services/call_feedback_service.py",
-      "function": "CallFeedbackRepository.replace",
-      "line": 430,
-      "method": "fetchrow",
-      "tables": [
-        "call_feedback"
-      ],
-      "sql": "DELETE FROM call_feedback WHERE call_id = $1 AND id = $2 RETURNING audio_storage_provider, audio_bucket, audio_key",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "4cbc9c668d4a45740dd0b1611cbd8ac0e7c824ceeedeb65c0d084de4748b15cf",
-      "file": "app/core/telephony_observability.py",
-      "function": "_fetch_runtime_metrics",
-      "line": 393,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_runtime_policy_events",
-        "tenant_runtime_policy_versions"
-      ],
-      "sql": "WITH scoped_events AS ( SELECT event.action, event.stage, event.status, event.request_id, event.created_at FROM tenant_runtime_policy_events event JOIN tenant_runtime_policy_versions version ON version.id = event.policy_version_id AND version.tenant_id = event.tenant_id WHERE event.created_at >= $1::timestamptz AND event.tenant_id = $2::uuid AND event.request_id IS NOT NULL AND EXISTS ( SELECT 1 FROM jsonb_array_elements( COALESCE( version.input_snapshot->'route_policies', '[]'::jsonb ) ) AS route WHERE route->>'route_type' = 'inbound' AND route->'metadata'->'canary_scope' ->>'inbound_config_id' = $3 AND route->'metadata'->'canary_scope'->>'did' = $4 AND route->'metadata'->'canary_scope' ->>'candidate_digest' = $5 AND route->'metadata'->'canary_scope'->>'run_id' = $6 AND $4 ~ (route->>'match_pattern') ) ), activation_results AS ( SELECT terminal.request_id, BOOL_OR( terminal.stage = 'commit' AND terminal.status = 'succeeded' ) AS succeeded FROM scoped_events terminal WHERE terminal.action = 'activate' AND ( ( terminal.stage = 'commit' AND terminal.status = 'succeeded' ) OR ( terminal.stage IN ('apply', 'verify') AND terminal.status = 'failed' ) ) AND EXISTS ( SELECT 1 FROM scoped_events started WHERE started.action = 'activate' AND started.stage = 'precheck' AND started.status = 'succeeded' AND started.request_id = terminal.request_id AND started.created_at <= terminal.created_at ) GROUP BY terminal.request_id ), rollback_results AS ( SELECT started.request_id, BOOL_OR(done.status = 'succeeded') AS succeeded, MIN( EXTRACT(EPOCH FROM (done.created_at - started.created_at)) )::float8 AS latency_seconds FROM scoped_events started JOIN scoped_events done ON done.action = 'rollback' AND done.stage = 'rollback' AND done.status IN ('succeeded', 'failed') AND started.action = 'rollback' AND started.stage = 'rollback' AND started.status = 'started' AND started.request_id = done.request_id AND done.created_at >= started.created_at GROUP BY started.request_id ), counts AS ( SELECT (SELECT COUNT(*) FROM activation_results) AS activation_attempts, (SELECT COUNT(*) FROM activation_results WHERE succeeded) AS activation_successes, (SELECT COUNT(*) FROM rollback_results) AS rollback_attempts, (SELECT COUNT(*) FROM rollback_results WHERE succeeded) AS rollback_successes ), rollback_stats AS ( SELECT COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p50_seconds, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p95_seconds, COALESCE(MAX(latency_seconds), 0)::float8 AS max_seconds FROM rollback_results ) SELECT counts.activation_attempts, counts.activation_successes, counts.rollback_attempts, counts.rollback_successes, rollback_stats.p50_seconds, rollback_stats.p95_seconds, rollback_stats.max_seconds FROM counts CROSS JOIN rollback_stats",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -837,22 +576,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "52f529f0c2f9675aa347bce91627659912f4537b2a09c46fd47cae1ef1499032",
-      "file": "app/services/scripts/seed_platform_sip_trunk.py",
-      "function": "seed_for_tenant",
-      "line": 81,
-      "method": "execute",
-      "tables": [
-        "tenant_sip_trunks"
-      ],
-      "sql": "UPDATE tenant_sip_trunks SET sip_domain = $1, port = $2, transport = $3, direction = 'both', auth_username = $4, auth_password_encrypted = $5, is_active = TRUE, updated_at = NOW() WHERE id = $6",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "5826b98eaeebc8e404b42bb92566f26b34993cc0fb7f6927474c9c6e2a4f1a39",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.approve_reassignment",
@@ -864,22 +587,6 @@
       "sql": "UPDATE inbound_reassignment_requests SET approved_assignment_id=$4, status='approved', approved_by=$2, decision_reason=$3, decided_at=NOW() WHERE id=$1 RETURNING *",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "27f8718cdd0ed66a6bf218e871fb50c72a96ee7b2217b6e723b56a56db334aa3",
-      "file": "app/domain/services/lead_capture_service.py",
-      "function": "LeadCaptureService.fields_for_campaign",
-      "line": 208,
-      "method": "fetch",
-      "tables": [
-        "campaign_lead_fields"
-      ],
-      "sql": "SELECT field_key, label, field_type, is_required, agent_visible, user_visible, options, sort_order FROM campaign_lead_fields WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid{IfExp(test=Name(id='agent_only', ctx=Load()), body=Constant(value=' AND agent_visible'), orelse=Constant(value=''))} ORDER BY sort_order, label",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -933,22 +640,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "5e5ca9db5fcc535075d922db5814fd4388c3c14096eb1749639aa82767197efa",
-      "file": "app/domain/services/telephony_concurrency_limiter.py",
-      "function": "TelephonyConcurrencyLimiter.acquire_lease",
-      "line": 344,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_telephony_concurrency_leases"
-      ],
-      "sql": "INSERT INTO tenant_telephony_concurrency_leases ( tenant_id, policy_id, call_id, talklee_call_id, lease_kind, state, metadata, created_by, updated_by ) VALUES ($1, $2, $3, $4, $5, 'active', $6::jsonb, $7, $8) ON CONFLICT (tenant_id, call_id, lease_kind) WHERE released_at IS NULL AND state IN ('active', 'releasing') DO UPDATE SET last_heartbeat_at = NOW(), updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "5f331a162337f0f7f45c9a0470f4c70b91e6cab86ffd189847e6af90842d798c",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.finalize",
@@ -981,22 +672,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6173be488ae339d776867a9422ad07e80992ad1d3d5db5e6e825d8360c8351d6",
-      "file": "app/domain/services/telephony/recording.py",
-      "function": "_save_call_recording_with_budget",
-      "line": 338,
-      "method": "execute",
-      "tables": [
-        "calls"
-      ],
-      "sql": "INSERT INTO calls ( id, tenant_id, campaign_id, phone_number, external_call_uuid, status, created_at, updated_at ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) ON CONFLICT (id) DO NOTHING",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "64496598e159512efbb79ffe1dc20b621aae81c19d79871cbd93d3dcdbc0ad5d",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "complete_inbound_transfer",
@@ -1013,22 +688,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "65c54f59c9e5a0c1d4110c25e14a2f86b486db8ee2085ffea9eb31676118a2ea",
-      "file": "app/domain/services/telephony/trunk_resolver.py",
-      "function": "requires_sip_readiness",
-      "line": 338,
-      "method": "fetchrow",
-      "tables": [
-        "tenant_sip_trunks"
-      ],
-      "sql": "SELECT active_telephony_provider, calling_rules->'pool_trunk' AS pool_trunk, EXISTS (SELECT 1 FROM tenant_sip_trunks WHERE tenant_id=$1::uuid AND deleted_at IS NULL) AS has_trunks FROM tenants WHERE id=$1::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "65d9eaa45273c5abab4370f958818d774daf78bd288b3021a7b3b0229b9bc77f",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService._ensure_default_concurrency_policy",
@@ -1038,23 +697,6 @@
         "tenant_telephony_concurrency_policies"
       ],
       "sql": "INSERT INTO tenant_telephony_concurrency_policies (tenant_id, policy_name, max_active_calls, is_active, created_by, updated_by) SELECT $1, $2, GREATEST(1, COALESCE((SELECT p.concurrent_calls FROM tenants t JOIN plans p ON p.id = t.plan_id WHERE t.id = $1), 1)), TRUE, $3, $3 WHERE NOT EXISTS ( SELECT 1 FROM tenant_telephony_concurrency_policies WHERE tenant_id = $1 AND is_active = TRUE ) RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "66613a7831cf0d84f0ce7b8535c12d393cdf2c2ea8c1ca7e7d1edd0ea59283fb",
-      "file": "app/api/v1/endpoints/telephony_bridge.py",
-      "function": "_record_outbound_route",
-      "line": 1247,
-      "method": "execute",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "UPDATE call_legs l SET metadata = COALESCE(l.metadata, '{}'::jsonb) || $3::jsonb WHERE l.call_id = $1::uuid AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' AND EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid)",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1157,7 +799,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Left as debt (F2-03 tail B): bind_inbound_call has no callers in app or tests, and it writes campaign_id and lead_id without verifying that they belong to the tenant_id it is given. Verify ownership in the statement or delete the dead function before reviving it."
     },
     {
       "id": "6cbb6a6409cd4ef5142330741126296b6a51e53c63333063186fb8066872c075",
@@ -1208,23 +850,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "7460745a4a7d165ba7f1f0cddc6503e90ee816671b1d242dae249c6642e9ecae",
-      "file": "app/domain/services/telephony/transfer_restart_recovery.py",
-      "function": "claim_inbound_transfer_takeovers",
-      "line": 112,
-      "method": "fetch",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "SELECT c.id, c.tenant_id, c.provider, c.status, COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) AS provider_call_id FROM calls c WHERE c.direction='inbound' AND c.status <> 'termination_pending' AND NOT (c.status = ANY($1::text[])) AND c.billing_status IN ('reserved','held') AND COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) IS NOT NULL AND NOT ( COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) = ANY($2::text[]) ) AND EXISTS ( SELECT 1 FROM call_legs eligible_leg WHERE eligible_leg.call_id=c.id AND eligible_leg.leg_type='transfer' AND eligible_leg.billing_status='reserved' AND eligible_leg.status = ANY($3::text[]) AND eligible_leg.provider_leg_id IS NOT NULL AND BTRIM(eligible_leg.provider_leg_id) <> '' AND eligible_leg.provider_leg_id NOT LIKE 'transfer-%' AND eligible_leg.provider_leg_id <> COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) ) AND NOT EXISTS ( SELECT 1 FROM call_legs unusable_leg WHERE unusable_leg.call_id=c.id AND unusable_leg.leg_type='transfer' AND unusable_leg.billing_status='reserved' AND unusable_leg.status = ANY($3::text[]) AND ( unusable_leg.provider_leg_id IS NULL OR BTRIM(unusable_leg.provider_leg_id) = '' OR unusable_leg.provider_leg_id LIKE 'transfer-%' OR unusable_leg.provider_leg_id = COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) ) ) ORDER BY c.updated_at, c.id LIMIT $4 FOR UPDATE OF c SKIP LOCKED",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "74946fcb390f9dbb3c5cce1bb927da1b5a6cd984cd3bd20ee13703411b0cf402",
       "file": "app/domain/services/support/conversation_store.py",
       "function": "fetch_conversation",
@@ -1237,87 +862,6 @@
       "scoped": false,
       "unresolved": true,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "765bdc2ebdc4e91da66f8146cb0f64ed1ea22c600707eec03b4b33c7c1e7b85f",
-      "file": "app/domain/services/call_status.py",
-      "function": "record_call_state",
-      "line": 362,
-      "method": "fetchval",
-      "tables": [
-        "calls"
-      ],
-      "sql": "SELECT 1 FROM calls WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "769f265a20aedc95d5e7c27094babfcc1dc78ba9e0c6643940ab760e0e12f96f",
-      "file": "app/api/v1/endpoints/telephony_sip/trunks.py",
-      "function": "delete_sip_trunk",
-      "line": 2107,
-      "method": "execute",
-      "tables": [
-        "inbound_audit_events"
-      ],
-      "sql": "INSERT INTO inbound_audit_events (tenant_id, event_type, actor_id, actor_role, resource_type, resource_id, reason, metadata) SELECT $1::uuid, 'inbound_campaign_paused', $2::uuid, $3, 'inbound_campaign', config_id, 'Its phone line was deleted', jsonb_build_object('sip_trunk_id', $4::text) FROM unnest($5::uuid[]) AS config_id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "76d4dee95b3d44e3d6914bda8b22d69785e511eb2bea1cb45a74a0999fa61883",
-      "file": "app/domain/services/voice_pipeline/action_execution.py",
-      "function": "_context",
-      "line": 107,
-      "method": "fetchval",
-      "tables": [
-        "connector_accounts",
-        "connectors"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM connectors c JOIN connector_accounts a ON a.connector_id=c.id WHERE c.tenant_id=$1::uuid AND a.tenant_id=$1::uuid AND c.type='email' AND c.status='active' AND a.status='active')",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "7758b2edf4240150cc61eb9cc2900de7215d123319c8efeca5120bf45ca7e70c",
-      "file": "app/workers/reminder_worker.py",
-      "function": "ReminderWorker._process_reminder",
-      "line": 385,
-      "method": "execute",
-      "tables": [
-        "reminders"
-      ],
-      "sql": "UPDATE reminders SET status = 'processing', idempotency_key = $1 WHERE id = $2 AND status = 'pending'",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "781503f27e42aa1d8bfafaeea7e3871b84aedde9462b8bfce4484bd8665919e6",
-      "file": "app/domain/services/telephony/transfer_restart_recovery.py",
-      "function": "claim_inbound_transfer_takeovers",
-      "line": 226,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "UPDATE calls SET status='termination_pending', updated_at=NOW() WHERE id=$1::uuid AND direction='inbound' AND status=$2 AND status <> 'termination_pending' AND NOT (status = ANY($3::text[])) RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -1439,22 +983,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "8531acc485ba3f80e5b459e78256da26364ed9e26c5ba6f80bd10e9b2230a903",
-      "file": "app/services/action_execution.py",
-      "function": "DurableActionExecutor.execute",
-      "line": 167,
-      "method": "fetchrow",
-      "tables": [
-        "assistant_actions"
-      ],
-      "sql": "INSERT INTO assistant_actions (tenant_id, type, status, idempotency_key, input_data, call_id, lead_id, campaign_id, user_id, triggered_by, conversation_id) VALUES ($1::uuid,$2,'pending',$3,$4::jsonb,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9,$10::uuid) ON CONFLICT (tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING *",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "855b5fc0f46a3dcf7e3d189e32cc9c49aebb2904ad4c660c1444de4566c4112d",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "authorize_inbound_transfer",
@@ -1464,40 +992,6 @@
         "inbound_operation_idempotency"
       ],
       "sql": "DELETE FROM inbound_operation_idempotency WHERE scope_key=$1 AND operation=$2 AND idempotency_key=$3 AND expires_at <= NOW()",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "87a91c4e2eca26d303ce075342962832f30ce1bf791ea9259fa15e1cb44ceeb9",
-      "file": "app/api/v1/endpoints/telephony_bridge.py",
-      "function": "_record_outbound_from_number",
-      "line": 1208,
-      "method": "execute",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "UPDATE call_legs l SET from_number = $3 WHERE l.call_id = $1::uuid AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' AND NULLIF(BTRIM(l.from_number), '') IS NULL AND EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "8830896a63cb3773d0fc563826ebdb85a5a1f3ab69e60df47631d557f819d47e",
-      "file": "app/domain/services/lead_capture_service.py",
-      "function": "LeadCaptureService.capture",
-      "line": 380,
-      "method": "fetchrow",
-      "tables": [
-        "call_lead_details",
-        "calls"
-      ],
-      "sql": "INSERT INTO call_lead_details (tenant_id, call_id, campaign_id, lead_id, field_key, field_type, value, source, confirmed, is_required, raw_value, normalized_value, validation_status, confirmed_at, evidence) SELECT $1::uuid, $2::uuid, c.campaign_id, c.lead_id, $5::text, $6, $7::text, $8, $9::boolean, $10, $11, $12, $13::text, $14, $16::jsonb FROM calls c WHERE c.id = $2::uuid AND c.tenant_id = $1::uuid AND ($3::uuid IS NULL OR c.campaign_id = $3::uuid) AND ($4::uuid IS NULL OR c.lead_id = $4::uuid) AND ($17::text IS NULL OR transcript = $17) AND ($18::text IS NULL OR summary_transcript_hash = $18) AND ($19::jsonb IS NULL OR jsonb_build_array(COALESCE(transcript,''), transcript_json, action_results) = $19::jsonb) AND ($20::jsonb IS NULL OR $20->>'absent' = 'true' OR EXISTS (SELECT 1 FROM call_lead_details d WHERE d.call_id=$2::uuid AND d.tenant_id=$1::uuid AND d.field_key=$5::text AND (jsonb_build_object('value',d.value,'evidence',d.evidence)=$20::jsonb OR (d.value IS NOT DISTINCT FROM $7::text AND d.evidence=$16::jsonb AND d.confirmed=$9::boolean AND d.validation_status IS NOT DISTINCT FROM $13::text)))) ON CONFLICT (call_id, field_key) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source, confirmed = CASE WHEN EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled' THEN FALSE ELSE call_lead_details.confirmed OR EXCLUDED.confirmed END, field_type = EXCLUDED.field_type, raw_value = EXCLUDED.raw_value, normalized_value = EXCLUDED.normalized_value, validation_status = EXCLUDED.validation_status, confirmed_at = CASE WHEN EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled' THEN NULL WHEN EXCLUDED.confirmed THEN COALESCE( EXCLUDED.confirmed_at, call_lead_details.confirmed_at ) ELSE call_lead_details.confirmed_at END, evidence = CASE WHEN EXCLUDED.source = 'manual_edit' AND EXCLUDED.validation_status='cancelled' THEN EXCLUDED.evidence || '{\"status\":\"manually_withdrawn\"}'::jsonb WHEN EXCLUDED.source = 'manual_edit' THEN EXCLUDED.evidence || '{\"status\":\"manually_verified\"}'::jsonb ELSE EXCLUDED.evidence END, updated_at = NOW() WHERE array_position($15::text[], EXCLUDED.source) >= array_position($15::text[], call_lead_details.source) AND (NOT (call_lead_details.confirmed AND NOT EXCLUDED.confirmed) OR (EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled')) AND call_lead_details.tenant_id = $1::uuid AND ($20::jsonb IS NULL OR jsonb_build_object('value',call_lead_details.value,'evidence',call_lead_details.evidence)=$20::jsonb OR (call_lead_details.value IS NOT DISTINCT FROM EXCLUDED.value AND call_lead_details.evidence=EXCLUDED.evidence AND call_lead_details.confirmed=EXCLUDED.confirmed)) AND (EXCLUDED.source = 'manual_edit' OR NOT (call_lead_details.evidence ? 'turn_index') OR NOT (EXCLUDED.evidence ? 'turn_index') OR (EXCLUDED.evidence->>'turn_index')::int >= (call_lead_details.evidence->>'turn_index')::int) RETURNING id",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1518,23 +1012,6 @@
       "scoped": false,
       "unresolved": true,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "8af0d84349268d6cdce9990e24c21b07be69ef3b7f7277aaff5fe6dbafc06c21",
-      "file": "app/domain/services/telephony_concurrency_limiter.py",
-      "function": "TelephonyConcurrencyLimiter.expire_stale_leases",
-      "line": 524,
-      "method": "fetch",
-      "tables": [
-        "calls",
-        "tenant_telephony_concurrency_leases"
-      ],
-      "sql": "UPDATE tenant_telephony_concurrency_leases SET state = 'expired', released_at = NOW(), release_reason = 'lease_ttl_expired', updated_by = $3, updated_at = NOW() WHERE tenant_id = $1 AND released_at IS NULL AND state IN ('active', 'releasing') AND last_heartbeat_at < NOW() - ($2::int * INTERVAL '1 second') AND NOT ( lease_kind = 'call' AND EXISTS ( SELECT 1 FROM calls c WHERE c.id = tenant_telephony_concurrency_leases.call_id AND c.tenant_id = tenant_telephony_concurrency_leases.tenant_id AND c.direction = 'inbound' AND c.billing_status IN ('reserved', 'held') ) ) RETURNING id, policy_id, call_id, talklee_call_id, lease_kind",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -1568,24 +1045,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "8f501a973a1458c800383524b755f2274d0ba833b3da7391634b37e79df7a3f2",
-      "file": "app/domain/services/telephony_concurrency_limiter.py",
-      "function": "TelephonyConcurrencyLimiter._active_counts",
-      "line": 142,
-      "method": "fetchrow",
-      "tables": [
-        "calls",
-        "tenant_telephony_concurrency_leases"
-      ],
-      "sql": "SELECT COUNT(*) FILTER ( WHERE lease_kind = 'call' AND ( ( state IN ('active', 'releasing') AND released_at IS NULL ) OR ( state IN ('expired', 'releasing') AND EXISTS ( SELECT 1 FROM calls c WHERE c.id = lease.call_id AND c.tenant_id = lease.tenant_id AND c.direction = 'inbound' AND c.billing_status IN ('reserved', 'held') ) ) ) ) AS active_calls, COUNT(*) FILTER ( WHERE state IN ('active', 'releasing') AND released_at IS NULL AND lease_kind = 'transfer' ) AS active_transfers FROM tenant_telephony_concurrency_leases lease WHERE lease.tenant_id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Left as debt (F2-03 tail B): no tenant is in scope (campaign id only; prepare_prewarmed_session has no tenant argument). The only production caller already passes the tenant-validated campaign snapshot, so this fallback is not reached with a campaign id; fix by threading the tenant in or deleting the fallback."
     },
     {
       "id": "8fed02ad8121212ca907956797cc816ba8084a5caf57fa8a5cfbcf5513a1434c",
@@ -1666,24 +1126,6 @@
       "sql": "UPDATE tenant_phone_numbers SET status='revoked', updated_at=NOW(), metadata=metadata || $2::jsonb WHERE id=$1",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "9456c53d360a189d4dfde4d9fe8f3c7505e131a5f4c92e48568f45d40f426b87",
-      "file": "app/domain/services/call_redial_service.py",
-      "function": "_context",
-      "line": 41,
-      "method": "fetchrow",
-      "tables": [
-        "calls",
-        "campaigns",
-        "leads"
-      ],
-      "sql": "SELECT c.id, c.status, c.direction, c.outcome, c.phone_number AS original_phone, c.campaign_id, c.lead_id, l.phone_number, l.status AS lead_status, l.do_not_call, l.first_name, l.last_name, l.custom_fields, p.status AS campaign_status, p.direction AS campaign_direction, p.calling_config, t.calling_rules FROM calls c JOIN leads l ON l.id=c.lead_id AND l.tenant_id=c.tenant_id AND l.campaign_id=c.campaign_id JOIN campaigns p ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id JOIN tenants t ON t.id=c.tenant_id WHERE c.id=$1::uuid AND c.tenant_id=$2::uuid{IfExp(test=Name(id='lock', ctx=Load()), body=Constant(value=' FOR UPDATE OF c,l'), orelse=Constant(value=''))}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -1881,23 +1323,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "aba6c8db956e52ec43d97f253b76419e451f1fc27a15249e989bc09cdc727d6d",
-      "file": "app/services/scripts/knowledge/retrieval.py",
-      "function": "retrieve_knowledge",
-      "line": 173,
-      "method": "fetch",
-      "tables": [
-        "campaign_knowledge_nodes",
-        "campaign_knowledge_sources"
-      ],
-      "sql": "WITH eligible AS ( SELECT n.*, s.version AS source_version, to_tsvector('english', coalesce(n.heading, '') || ' ' || coalesce(n.content, '')) AS authored_tsv FROM campaign_knowledge_nodes n JOIN campaign_knowledge_sources s ON s.id = n.source_id AND s.tenant_id = n.tenant_id AND s.campaign_id = n.campaign_id WHERE n.campaign_id = $1 AND n.tenant_id = $5 AND n.enabled AND s.status = 'ready' ), tq AS ( SELECT websearch_to_tsquery('english', $2) AS q_and, NULLIF(replace( websearch_to_tsquery('english', $2)::text, ' & ', ' | '), '')::tsquery AS q_or ), cand AS ( SELECT n.id, n.heading, n.summary, n.voice_answer, n.content, n.search_tsv, n.search_text, n.authored_tsv, n.priority, n.hit_count, n.source_id, n.source_version, n.updated_at FROM eligible n, tq WHERE n.campaign_id = $1 AND n.tenant_id = $5 AND n.enabled AND ( n.search_tsv @@ tq.q_and OR (tq.q_or IS NOT NULL AND n.search_tsv @@ tq.q_or) OR word_similarity($2, n.search_text) >= $4 ) ORDER BY n.priority DESC, n.hit_count DESC LIMIT 200 ), w AS ( SELECT l.lexeme, ln((tot.n + 1.0) / (count(d.id) + 0.5)) AS idf FROM (SELECT DISTINCT lexeme FROM unnest(to_tsvector('english', $2)) WHERE NOT (lexeme = ANY($6::text[]))) l CROSS JOIN (SELECT count(*)::numeric AS n FROM eligible) tot LEFT JOIN eligible d ON d.campaign_id = $1 AND d.tenant_id = $5 AND d.enabled AND d.search_tsv @@ plainto_tsquery('simple', l.lexeme) GROUP BY l.lexeme, tot.n ), authored_w AS ( SELECT w.lexeme, ln((tot.n + 1.0) / (count(d.id) + 0.5)) AS idf FROM w CROSS JOIN (SELECT count(*)::numeric AS n FROM eligible) tot LEFT JOIN eligible d ON d.authored_tsv @@ plainto_tsquery('simple', w.lexeme) GROUP BY w.lexeme, tot.n ), top_k AS ( SELECT c.id, c.heading, c.summary, c.voice_answer, c.content, c.search_tsv, c.authored_tsv, c.source_id, c.source_version, c.updated_at, ts_rank(c.search_tsv, tq.q_and) AS fts, word_similarity($2, c.search_text) AS sim, row_number() OVER (ORDER BY COALESCE((SELECT sum(w.idf) FROM w WHERE to_tsvector('english', coalesce(c.heading, '')) @@ plainto_tsquery('simple', w.lexeme)), 0) / NULLIF((SELECT sum(w.idf) FROM w), 0) * 3 + COALESCE(COALESCE((SELECT sum(w.idf) FROM w WHERE c.search_tsv @@ plainto_tsquery('simple', w.lexeme)), 0) / NULLIF((SELECT sum(w.idf) FROM w), 0), 0) + CASE WHEN c.search_tsv @@ tq.q_and THEN 0.5 WHEN tq.q_or IS NOT NULL AND c.search_tsv @@ tq.q_or THEN 0.25 ELSE 0 END + 2 * GREATEST( ts_rank(c.search_tsv, COALESCE(tq.q_or, tq.q_and)), word_similarity($2, c.search_text) ) DESC NULLS LAST, c.priority DESC, c.hit_count DESC ) AS ord FROM cand c, tq ORDER BY ord LIMIT $3 ) SELECT t.id, t.heading, t.summary, t.voice_answer, t.content, t.source_id, t.source_version, t.updated_at, t.fts, t.sim, COALESCE((SELECT sum(a.idf) FROM authored_w a WHERE t.authored_tsv @@ plainto_tsquery('simple', a.lexeme)), 0) / NULLIF((SELECT sum(a.idf) FROM authored_w a), 0) AS coverage FROM top_k t ORDER BY t.ord",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "ac017cf78f4a99156cfd8006bb6a93b259493bab054e9755b90c9e2589ab49c6",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "complete_inbound_transfer",
@@ -1930,22 +1355,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "b05aaa3a9ef5bb9434c045590eff7496f808942c68ec1a32391f91c146a39844",
-      "file": "app/workers/reminder_worker.py",
-      "function": "ReminderWorker._process_reminder",
-      "line": 454,
-      "method": "execute",
-      "tables": [
-        "reminders"
-      ],
-      "sql": "UPDATE reminders SET status = 'sent', sent_at = NOW(), channel = $1, external_message_id = $2 WHERE id = $3",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "b0a92459b98044ec60358d3e18ece7b951d2144450910682e503d43444b0b087",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "finalize_connected_inbound_transfers",
@@ -1958,39 +1367,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "b1e375590025c17d851db33ef95d9c8e6a8f46cfa827d4b5f9739f68b5d32cce",
-      "file": "app/domain/services/lead_capture_service.py",
-      "function": "LeadCaptureService.missing_required",
-      "line": 702,
-      "method": "fetch",
-      "tables": [
-        "calls",
-        "campaign_lead_fields"
-      ],
-      "sql": "SELECT f.field_key, f.field_type FROM calls c JOIN campaign_lead_fields f ON f.campaign_id=c.campaign_id WHERE c.id = $2::uuid AND c.tenant_id=$1::uuid AND f.is_required ORDER BY f.sort_order, f.field_key",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "b413f8f43c7cda8e13884d38f6e07c795c62eb8d99f3d27b6295e117abc410b8",
-      "file": "app/api/v1/endpoints/lead_details.py",
-      "function": "set_lead_fields",
-      "line": 279,
-      "method": "execute",
-      "tables": [
-        "campaign_lead_fields"
-      ],
-      "sql": "DELETE FROM campaign_lead_fields WHERE campaign_id = $1::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2055,22 +1431,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "bad06c5e7bb8402cc53f7261b3d823033603ee6c01d88f2d313403de52650f37",
-      "file": "app/domain/services/telephony/transfer_restart_recovery.py",
-      "function": "claim_inbound_transfer_takeovers",
-      "line": 187,
-      "method": "fetch",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT id, provider_leg_id FROM call_legs WHERE call_id=$1::uuid AND leg_type='transfer' AND billing_status='reserved' AND status = ANY($2::text[]) ORDER BY created_at, id FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2155,38 +1515,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "bdfbd50cb6b1f65a33e7f4b428e94a22567d09ab1dee80cb4c42f9396f69ed0f",
-      "file": "app/domain/services/telephony/termination_receipts.py",
-      "function": "persist_termination_receipt",
-      "line": 115,
-      "method": "fetch",
-      "tables": [
-        "call_legs"
-      ],
-      "sql": "SELECT id, provider, provider_leg_id, status, created_at FROM call_legs WHERE call_id=$1::uuid ORDER BY created_at, id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c1519444bfd59ad793f451b82d665fd28d0a79127fc283b95272430828a93fa1",
-      "file": "app/domain/services/telephony/termination_receipts.py",
-      "function": "persist_termination_receipt",
-      "line": 141,
-      "method": "execute",
-      "tables": [
-        "call_events"
-      ],
-      "sql": "INSERT INTO call_events (call_id, event_type, source, event_data) VALUES ($1::uuid,$2,$3,$4::jsonb)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "c236893c4995e4d95486786173291e9d27975148b436582e008bc8aae4457e55",
       "file": "app/services/crm_delivery_store.py",
       "function": "CRMDeliveryStore.save",
@@ -2246,22 +1574,6 @@
       "sql": "UPDATE call_legs SET metadata=metadata || $2::jsonb, updated_at=NOW() WHERE id=$1",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "b41e3511a638e2bcb09997390a800709fbecaa1280db8fd9968a5efaff009036",
-      "file": "app/services/action_execution.py",
-      "function": "find_owned_action_receipt",
-      "line": 133,
-      "method": "fetchrow",
-      "tables": [
-        "assistant_actions"
-      ],
-      "sql": "SELECT id,type,status,triggered_by,lead_id,output_data,created_at,started_at,completed_at FROM assistant_actions WHERE tenant_id=$1::uuid AND user_id=$2::uuid AND {branch}",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -2339,20 +1651,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "c7443a5761d634808432f27cfb75fe924083c75b06e6dfa20e0581193b3999a7",
-      "file": "app/domain/services/call_status.py",
-      "function": "record_call_state",
-      "line": 353,
-      "method": "execute",
-      "tables": [],
-      "sql": "{branch}",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "c855225e777ff571d12e742627dc53c7f4fe8a1efc06e06252f16836975e941a",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
@@ -2382,23 +1680,6 @@
         "tenant_sip_trunks"
       ],
       "sql": "SELECT a.id AS inbound_campaign_id, a.tenant_id, a.campaign_id, a.sip_trunk_id, a.phone_number_id AS called_did_id, a.config_id, a.version AS route_version, cfg.version AS config_version FROM inbound_did_assignments a JOIN campaigns c ON c.id = a.campaign_id AND c.tenant_id = a.tenant_id AND c.direction = 'inbound' AND c.status = ANY($2::text[]) JOIN inbound_campaign_configs cfg ON cfg.id = a.config_id AND cfg.tenant_id = a.tenant_id AND cfg.campaign_id = a.campaign_id AND cfg.status = 'active' JOIN tenant_sip_trunks st ON st.id = a.sip_trunk_id AND st.tenant_id = a.tenant_id AND st.is_active = TRUE AND st.direction IN ('inbound', 'both') AND st.auth_username = $1 JOIN tenants t ON t.id = a.tenant_id AND t.status = 'active' AND t.subscription_status IN ('active', 'trialing') LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id = a.tenant_id WHERE a.extension = $1 AND a.status = 'active' AND a.valid_from <= NOW() AND (a.valid_to IS NULL OR a.valid_to > NOW()) AND COALESCE(tic.inbound_enabled, FALSE) = TRUE ORDER BY a.id LIMIT 2",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "c86ba1dc2c0f5ac4d63c80fc47fe5e8ba8d8c16733fc145cbd79b4022c7f7e5e",
-      "file": "app/domain/services/telephony/call_authority.py",
-      "function": "read_call_authority",
-      "line": 220,
-      "method": "fetchrow",
-      "tables": [
-        "audit_logs",
-        "white_label_partners"
-      ],
-      "sql": "SELECT t.id, t.status, t.subscription_status, t.suspended_at, t.suspended_by, t.suspension_reason, t.white_label_partner_id, p.id AS formal_partner_id, p.status AS formal_partner_status, COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE) AS authority_scope_ok, COALESCE(( SELECT jsonb_agg(jsonb_build_object( 'suspension_id', s.suspension_id, 'target_type', s.target_type, 'target_id', s.target_id, 'suspended_at', s.suspended_at, 'audited', s.audit_log_id IS NOT NULL AND COALESCE( a.metadata->'formal_account_hold_version' = '1'::jsonb, FALSE), 'policy_version', s.evidence->'_formal_account_hold'->'version', 'immediate', s.evidence->'_formal_account_hold'->'immediate', 'affected', COALESCE( (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text, FALSE), 'tenant_state', s.evidence->'_formal_account_hold'->'tenant_state'->t.id::text ) ORDER BY s.suspended_at, s.suspension_id) FROM suspension_events s LEFT JOIN audit_logs a ON a.event_id = s.audit_log_id WHERE s.is_active = TRUE AND ( (s.target_type = 'tenant' AND s.target_id = t.id) OR (s.target_type = 'partner' AND ( s.target_id = t.white_label_partner_id OR (s.audit_log_id IS NOT NULL AND a.metadata->'formal_account_hold_version' = '1'::jsonb AND s.evidence->'_formal_account_hold'->'version' = '1'::jsonb AND (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text) )) ) ), '[]'::jsonb) AS active_holds FROM tenants t LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE t.id = $1::uuid",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -2558,23 +1839,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "d18bba6dda38950b4edf2592e8e5b0a1dae69c0444ef9cdac55b0b7d16130a1d",
-      "file": "app/domain/services/telephony/legacy_pending_identity.py",
-      "function": "reconcile_pending_identity",
-      "line": 16,
-      "method": "execute",
-      "tables": [
-        "call_legs",
-        "calls"
-      ],
-      "sql": "WITH identity AS ( SELECT c.id, c.tenant_id, COALESCE(NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'')) AS provider_call_id FROM calls c WHERE c.status='termination_pending' AND c.direction='outbound' AND NULLIF(BTRIM(c.provider),'') IS NULL AND EXISTS ( SELECT 1 FROM call_legs leg WHERE leg.call_id=c.id AND leg.leg_type='pstn_outbound' AND leg.provider_leg_id=COALESCE(NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'')) AND LOWER(BTRIM(leg.provider))=$1 ) AND NOT EXISTS ( SELECT 1 FROM call_legs leg WHERE leg.call_id=c.id AND leg.leg_type='pstn_outbound' AND leg.provider_leg_id=COALESCE(NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'')) AND LOWER(BTRIM(leg.provider)) IS DISTINCT FROM $1 ) ORDER BY c.updated_at, c.id LIMIT 32 FOR UPDATE OF c SKIP LOCKED ) UPDATE calls c SET provider=$1, provider_call_id=identity.provider_call_id FROM identity WHERE c.id=identity.id AND c.tenant_id=identity.tenant_id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "d7cd916d13d44e3180d8613c21fb3c2e83368116ff61a4b4adc472a46ade986e",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.admin_list_assignments",
@@ -2595,39 +1859,6 @@
       "scoped": false,
       "unresolved": true,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "d853fae6f3c20f331ec8d6701cb77c5cc7589941505664de65dbb44c6bb16893",
-      "file": "app/domain/services/dialer/stuck_job_reaper.py",
-      "function": "reap_stuck_jobs",
-      "line": 139,
-      "method": "fetch",
-      "tables": [
-        "calls",
-        "dialer_jobs"
-      ],
-      "sql": "UPDATE dialer_jobs SET failure_category = COALESCE(failure_category, 'internal'), failure_reason = $2, last_error = $2 WHERE status = ANY($1::text[]) AND GREATEST(updated_at, scheduled_at) < now() - make_interval(secs => $3::int) AND failure_reason IS DISTINCT FROM $2 AND NOT EXISTS ( SELECT 1 FROM calls c WHERE c.dialer_job_id = dialer_jobs.id AND c.status = ANY($4::text[]) ) RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "dd36ae25588e67c3fa772713085d4e631b00e85f6f5ebb61f44bd3df311d777a",
-      "file": "app/workers/reminder_worker.py",
-      "function": "ReminderWorker._process_reminder",
-      "line": 487,
-      "method": "execute",
-      "tables": [
-        "reminders"
-      ],
-      "sql": "UPDATE reminders SET status = 'pending', retry_count = $1, next_retry_at = NOW() + $2 * interval '1 second', last_error = $3, scheduled_at = NOW() + $2 * interval '1 second' WHERE id = $4",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2658,22 +1889,6 @@
         "calls"
       ],
       "sql": "SELECT COALESCE(( SELECT SUM( CASE WHEN c.billing_status='reversed' THEN 0 WHEN c.direction='inbound' AND c.billing_status='reserved' THEN GREATEST( COALESCE(c.reserved_seconds,0), COALESCE(c.duration_seconds,0) ) WHEN c.direction='inbound' AND c.billing_status='held' THEN GREATEST( COALESCE(c.reserved_seconds,0), COALESCE(c.duration_seconds,0) ) ELSE COALESCE(c.duration_seconds,0) END ) FROM calls c WHERE c.tenant_id=$1 AND c.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW())) AND ($2::uuid IS NULL OR c.id <> $2::uuid) AND NOT c.is_test ),0) + COALESCE(( SELECT SUM( CASE WHEN leg.billing_status='reversed' THEN 0 WHEN leg.billing_status='reserved' THEN COALESCE(leg.reserved_seconds,0) WHEN leg.billing_status='held' THEN GREATEST( COALESCE(leg.reserved_seconds,0), COALESCE(leg.duration_seconds,0) ) WHEN leg.billing_status='finalized' THEN COALESCE(leg.duration_seconds,0) ELSE 0 END ) FROM call_legs leg JOIN calls parent ON parent.id=leg.call_id WHERE parent.tenant_id=$1 AND parent.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW())) AND ($2::uuid IS NULL OR parent.id <> $2::uuid) AND NOT parent.is_test AND leg.leg_type='transfer' ),0)",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "df6c2f89e03b828f0409798baea9080d49e886b2ea57b7b773a0cba12cb68cd0",
-      "file": "app/domain/services/voice_orchestrator.py",
-      "function": "VoiceOrchestrator._persist_prompt_identity",
-      "line": 526,
-      "method": "execute",
-      "tables": [
-        "calls"
-      ],
-      "sql": "UPDATE calls SET prompt_template = $2, prompt_version = $3, prompt_hash = $4 WHERE id = $1::uuid",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -2713,22 +1928,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "eeb4f9c7ac1cca87025a36962645c481db06bd52af1435e50c2b96b303bc8327",
-      "file": "app/domain/services/call_feedback_service.py",
-      "function": "CallFeedbackRepository.begin_initial_attempt",
-      "line": 477,
-      "method": "fetchrow",
-      "tables": [
-        "call_feedback"
-      ],
-      "sql": "UPDATE call_feedback SET transcription_attempts = transcription_attempts + 1, transcription_started_at = NOW(), transcript_error = NULL, updated_at = NOW() WHERE id = $1 AND transcript_status = 'pending' AND transcription_attempts = 0 RETURNING id, tenant_id, call_id, created_by, audio_storage_provider, audio_bucket, audio_key, audio_mime_type, audio_size_bytes, audio_sha256, duration_seconds, transcript, transcript_status, transcript_error, transcription_attempts, transcript_provider, transcript_provider_request_id, transcription_started_at, transcribed_at, created_at, updated_at",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "f04ca2e84e695bb9fcd5a0b8942bdc8be6dcd94ee09a0b639acc35f6d7fd8ea0",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_campaign",
@@ -2741,23 +1940,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "f140609d2df7c626546773d0df404e0057b40597e11eac9a8aa4b1e12f695ca3",
-      "file": "app/domain/services/campaign_knowledge_access.py",
-      "function": "_current_permission_names",
-      "line": 149,
-      "method": "fetch",
-      "tables": [
-        "tenant_users",
-        "user_permissions"
-      ],
-      "sql": "SELECT DISTINCT permission_name AS name FROM ( SELECT p.name AS permission_name FROM tenant_users tu JOIN roles r ON r.id = tu.role_id JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE tu.user_id = $1 AND tu.tenant_id = $2 AND tu.status = 'active' UNION SELECT p.name AS permission_name FROM user_permissions up JOIN permissions p ON p.id = up.permission_id WHERE up.user_id = $1 AND (up.tenant_id IS NULL OR up.tenant_id = $2) AND (up.expires_at IS NULL OR up.expires_at > NOW()) ) effective",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2826,22 +2008,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f3a1001209d3bf5f42c7c6cc24a730624edddd0ea44ffccafda89c581f2698e9",
-      "file": "app/workers/reminder_worker.py",
-      "function": "ReminderWorker._process_reminder",
-      "line": 506,
-      "method": "execute",
-      "tables": [
-        "reminders"
-      ],
-      "sql": "UPDATE reminders SET status = 'failed', retry_count = $1, last_error = $2 WHERE id = $3",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "f65f542090afab7dc9a2be8e615fe54d8c3634bbe38b9575c7a2eeae76d230c8",
       "file": "app/services/scripts/call_transcript_persister.py",
       "function": "bind_inbound_call",
@@ -2855,40 +2021,7 @@
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "faf4d128a639fb4abe03622f588482374d1803b122147ef9e350099325e2d0de",
-      "file": "app/core/telephony_observability.py",
-      "function": "_fetch_call_metrics",
-      "line": 521,
-      "method": "fetchrow",
-      "tables": [
-        "calls"
-      ],
-      "sql": "WITH scoped_calls AS ( SELECT id, created_at, answered_at, status FROM calls WHERE created_at >= $1::timestamptz AND NOT is_test AND direction = 'inbound' AND tenant_id = $2::uuid AND called_did = ('+' || $3) AND COALESCE( route_snapshot #>> '{inbound_config,id}', route_snapshot #>> '{route,config_id}' ) = $4 ), counts AS ( SELECT COUNT(DISTINCT id)::int AS setup_attempts, COUNT(DISTINCT id) FILTER ( WHERE answered_at IS NOT NULL OR status IN ('answered', 'completed', 'in_progress') )::int AS setup_successes, COALESCE(EXTRACT(EPOCH FROM MAX(created_at)), 0)::float8 AS latest_call_timestamp_seconds FROM scoped_calls ), answer_latencies AS ( SELECT EXTRACT(EPOCH FROM (answered_at - created_at))::float8 AS latency_seconds FROM scoped_calls WHERE answered_at IS NOT NULL AND answered_at >= created_at ), latency_stats AS ( SELECT COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p50_seconds, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p95_seconds, COALESCE(MAX(latency_seconds), 0)::float8 AS max_seconds FROM answer_latencies ) SELECT counts.setup_attempts, counts.setup_successes, counts.latest_call_timestamp_seconds, latency_stats.p50_seconds, latency_stats.p95_seconds, latency_stats.max_seconds FROM counts CROSS JOIN latency_stats",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "fecbc9be319c8d73689445f674b4acb84e904afcb107ea36d10c4c91d859e3c0",
-      "file": "app/api/v1/endpoints/campaign_knowledge.py",
-      "function": "upload_knowledge",
-      "line": 286,
-      "method": "fetchval",
-      "tables": [
-        "campaigns",
-        "tenant_ai_configs"
-      ],
-      "sql": "SELECT COALESCE( (SELECT c.knowledge_model FROM campaigns c WHERE c.id = $1 AND c.tenant_id = $2), (SELECT a.llm_model FROM tenant_ai_configs a WHERE a.tenant_id = $2) )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
+      "reason": "Left as debt (F2-03 tail B): bind_inbound_call has no callers in app or tests, and the lead upsert by (campaign_id, phone_number) does not verify that campaign_id belongs to the tenant_id it is given, so a foreign campaign would touch that campaign's lead. Verify ownership in the statement or delete the dead function before reviving it."
     },
     {
       "id": "ff4501907e5e16fb8e34e388022e2266d252c2ebc38102347953ea41e6fda608",
@@ -4185,8 +3318,8 @@
       "unresolved": false,
       "bypass": false,
       "count": 1,
-      "reason": "Before a tenant deletes a shared SIP line, this exact existence query searches other tenants/campaigns (tenant_id <> requester) for references to the line. The bypass is turned off before subsequent local operations. Hiding other tenant references would permit a destructive shared-line deletion. Exact reviewed operation: fetchval; app/api/v1/endpoints/telephony_sip/trunks.py:1927.",
-      "category": "system_reference_safety"
+      "reason": "The open-call probe binds tenant_id = $1::uuid, the tenant deleting its own line, and runs after _delete_blocker has switched the platform bypass back off, so it only counts that tenant's recent non-terminal calls; the cross-tenant reference search is the separate shared-line statement before it. The scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchval; app/api/v1/endpoints/telephony_sip/trunks.py:1927.",
+      "category": "reviewed_tenant_scoped"
     },
     {
       "id": "3809318ba0cfc567bd4aa3d0eb775a5c05a3650f1dd9a288414308e88411cb36",
@@ -6397,7 +5530,7 @@
       "id": "aeba481680f32b5b68e6e0772d205483e8632d40fc65cfda3265d3926f0eff70",
       "file": "app/api/v1/endpoints/campaign_knowledge.py",
       "function": "delete_source",
-      "line": 571,
+      "line": 577,
       "method": "fetchval",
       "tables": [
         "campaigns",
@@ -6408,7 +5541,7 @@
       "unresolved": false,
       "bypass": null,
       "count": 1,
-      "reason": "DELETE binds source ID, campaign ID and authenticated tenant_id=$3 before RETURNING. The conservative direct-predicate suffix recognizer does not prove RETURNING syntax; the explicit tenant boundary is present. Exact reviewed operation: fetchval; app/api/v1/endpoints/campaign_knowledge.py:571.",
+      "reason": "The budget-model lookup after a source delete is the same shared SQL as the upload path and runs on the mutation lease's connection: campaigns by c.id = $1 AND c.tenant_id = $2 and the tenant's AI config by a.tenant_id = $2, with the authenticated tenant bound in both arms. The scanner refuses a COALESCE over two sub-selects. Exact reviewed operation: fetchval; app/api/v1/endpoints/campaign_knowledge.py:577.",
       "category": "reviewed_tenant_scoped"
     },
     {
@@ -11944,6 +11077,721 @@
       "bypass": null,
       "count": 1,
       "reason": "The appended WHERE is id = $n AND tenant_id = $n+1, binding the tenant that owns the action so one tenant cannot complete another's receipt; the SQL is dynamic only because the optional output_data and error assignments are appended. Exact reviewed operation: execute; app/services/sms_service.py:330.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "fecbc9be319c8d73689445f674b4acb84e904afcb107ea36d10c4c91d859e3c0",
+      "file": "app/api/v1/endpoints/campaign_knowledge.py",
+      "function": "upload_knowledge",
+      "line": 292,
+      "method": "fetchval",
+      "tables": [
+        "campaigns",
+        "tenant_ai_configs"
+      ],
+      "sql": "SELECT COALESCE( (SELECT c.knowledge_model FROM campaigns c WHERE c.id = $1 AND c.tenant_id = $2), (SELECT a.llm_model FROM tenant_ai_configs a WHERE a.tenant_id = $2) )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The budget-model lookup runs on the authorized mutation lease's connection and binds the campaign id ($1) and the authenticated tenant ($2) in both arms: campaigns by c.id = $1 AND c.tenant_id = $2, and the tenant's AI config by a.tenant_id = $2. The scanner refuses a COALESCE over two sub-selects; neither arm can read another tenant's row. Exact reviewed operation: fetchval; app/api/v1/endpoints/campaign_knowledge.py:292.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "87a91c4e2eca26d303ce075342962832f30ce1bf791ea9259fa15e1cb44ceeb9",
+      "file": "app/api/v1/endpoints/telephony_bridge.py",
+      "function": "_record_outbound_from_number",
+      "line": 1209,
+      "method": "execute",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "UPDATE call_legs l SET from_number = $3 WHERE l.call_id = $1::uuid AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' AND NULLIF(BTRIM(l.from_number), '') IS NULL AND EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "call_legs has no tenant column, so the from_number UPDATE reaches the outbound leg through its parent call: EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid) binds the tenant of the durable call the bridge has just bound with a tenant-bound compare-and-set (also the connection's tenant). The scanner cannot prove an EXISTS join through call_legs. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:1209.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "66613a7831cf0d84f0ce7b8535c12d393cdf2c2ea8c1ca7e7d1edd0ea59283fb",
+      "file": "app/api/v1/endpoints/telephony_bridge.py",
+      "function": "_record_outbound_route",
+      "line": 1248,
+      "method": "execute",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "UPDATE call_legs l SET metadata = COALESCE(l.metadata, '{}'::jsonb) || $3::jsonb WHERE l.call_id = $1::uuid AND l.direction = 'outbound' AND l.leg_type = 'pstn_outbound' AND EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "call_legs has no tenant column, so the route-metadata merge reaches the outbound leg through its parent call: EXISTS (SELECT 1 FROM calls c WHERE c.id = l.call_id AND c.tenant_id = $2::uuid) binds the tenant of the durable call the bridge has just bound with a tenant-bound compare-and-set (also the connection's tenant). The scanner cannot prove an EXISTS join through call_legs. Exact reviewed operation: execute; app/api/v1/endpoints/telephony_bridge.py:1248.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "3e03c7fefcea7d13567dc7a1c07d3bd522fc916f151387c9765c98f0b128dd43",
+      "file": "app/api/v1/endpoints/telephony_runtime/metrics.py",
+      "function": "get_runtime_activation_metrics",
+      "line": 43,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_runtime_policy_events"
+      ],
+      "sql": "WITH scoped_events AS ( SELECT action, stage, status, request_id, created_at FROM tenant_runtime_policy_events WHERE tenant_id = $1 AND created_at >= NOW() - ($2::int * INTERVAL '1 hour') ), counts AS ( SELECT COUNT(*) FILTER ( WHERE action = 'activate' AND stage = 'commit' AND status = 'succeeded' ) AS activation_success_count, COUNT(*) FILTER ( WHERE action = 'activate' AND status = 'failed' ) AS activation_failure_count, COUNT(*) FILTER ( WHERE action = 'rollback' AND stage = 'rollback' AND status = 'succeeded' ) AS rollback_success_count, COUNT(*) FILTER ( WHERE action = 'rollback' AND status = 'failed' ) AS rollback_failure_count FROM scoped_events ), rollback_latencies AS ( SELECT EXTRACT(EPOCH FROM (done.created_at - started.created_at)) * 1000.0 AS latency_ms FROM scoped_events started JOIN scoped_events done ON done.action = 'rollback' AND done.stage = 'rollback' AND done.status IN ('succeeded', 'failed') AND started.action = 'rollback' AND started.stage = 'rollback' AND started.status = 'started' AND started.request_id IS NOT NULL AND started.request_id = done.request_id AND done.created_at >= started.created_at ), rollback_stats AS ( SELECT percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_ms) AS p50_ms, percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_ms) AS p95_ms, MAX(latency_ms) AS max_ms FROM rollback_latencies ) SELECT counts.activation_success_count, counts.activation_failure_count, counts.rollback_success_count, counts.rollback_failure_count, COALESCE(rollback_stats.p50_ms, 0)::float8 AS rollback_p50_ms, COALESCE(rollback_stats.p95_ms, 0)::float8 AS rollback_p95_ms, COALESCE(rollback_stats.max_ms, 0)::float8 AS rollback_max_ms FROM counts CROSS JOIN rollback_stats",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "The windowed activation and rollback counts read tenant_runtime_policy_events with tenant_id = $1 bound to the authenticated current_user.tenant_id (a request without a tenant returns before any query), and every later CTE reads only that scoped_events set. The scanner refuses the WITH/CTE form. Exact reviewed operation: fetchrow; app/api/v1/endpoints/telephony_runtime/metrics.py:43.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "769f265a20aedc95d5e7c27094babfcc1dc78ba9e0c6643940ab760e0e12f96f",
+      "file": "app/api/v1/endpoints/telephony_sip/trunks.py",
+      "function": "delete_sip_trunk",
+      "line": 2107,
+      "method": "execute",
+      "tables": [
+        "inbound_audit_events"
+      ],
+      "sql": "INSERT INTO inbound_audit_events (tenant_id, event_type, actor_id, actor_role, resource_type, resource_id, reason, metadata) SELECT $1::uuid, 'inbound_campaign_paused', $2::uuid, $3, 'inbound_campaign', config_id, 'Its phone line was deleted', jsonb_build_object('sip_trunk_id', $4::text) FROM unnest($5::uuid[]) AS config_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The audit insert writes tenant_id = $1::uuid, the tenant deleting its own line, for the inbound configs that the tenant-bound pause UPDATE (WHERE tenant_id = $1::uuid ... RETURNING id) returned a statement earlier in the same transaction. The scanner cannot prove an INSERT ... SELECT from unnest(). Exact reviewed operation: execute; app/api/v1/endpoints/telephony_sip/trunks.py:2107.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "1adc49fc45586791b6ec983b02eac3c5b19a5fb4773c6e6b210ef8c7ec621182",
+      "file": "app/api/v1/endpoints/telephony_sip/trunks.py",
+      "function": "delete_sip_trunk",
+      "line": 2114,
+      "method": "fetchval",
+      "tables": [
+        "inbound_did_assignments"
+      ],
+      "sql": "SELECT EXISTS ( SELECT 1 FROM inbound_did_assignments WHERE tenant_id = $1::uuid AND sip_trunk_id = $2::uuid )",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The probe asks whether any inbound number assignment of the deleting tenant (tenant_id = $1::uuid AND sip_trunk_id = $2::uuid) still references the line, so history is archived instead of removed; the tenant is the authenticated one, also the connection's. The scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchval; app/api/v1/endpoints/telephony_sip/trunks.py:2114.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "4cbc9c668d4a45740dd0b1611cbd8ac0e7c824ceeedeb65c0d084de4748b15cf",
+      "file": "app/core/telephony_observability.py",
+      "function": "_fetch_runtime_metrics",
+      "line": 393,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_runtime_policy_events",
+        "tenant_runtime_policy_versions"
+      ],
+      "sql": "WITH scoped_events AS ( SELECT event.action, event.stage, event.status, event.request_id, event.created_at FROM tenant_runtime_policy_events event JOIN tenant_runtime_policy_versions version ON version.id = event.policy_version_id AND version.tenant_id = event.tenant_id WHERE event.created_at >= $1::timestamptz AND event.tenant_id = $2::uuid AND event.request_id IS NOT NULL AND EXISTS ( SELECT 1 FROM jsonb_array_elements( COALESCE( version.input_snapshot->'route_policies', '[]'::jsonb ) ) AS route WHERE route->>'route_type' = 'inbound' AND route->'metadata'->'canary_scope' ->>'inbound_config_id' = $3 AND route->'metadata'->'canary_scope'->>'did' = $4 AND route->'metadata'->'canary_scope' ->>'candidate_digest' = $5 AND route->'metadata'->'canary_scope'->>'run_id' = $6 AND $4 ~ (route->>'match_pattern') ) ), activation_results AS ( SELECT terminal.request_id, BOOL_OR( terminal.stage = 'commit' AND terminal.status = 'succeeded' ) AS succeeded FROM scoped_events terminal WHERE terminal.action = 'activate' AND ( ( terminal.stage = 'commit' AND terminal.status = 'succeeded' ) OR ( terminal.stage IN ('apply', 'verify') AND terminal.status = 'failed' ) ) AND EXISTS ( SELECT 1 FROM scoped_events started WHERE started.action = 'activate' AND started.stage = 'precheck' AND started.status = 'succeeded' AND started.request_id = terminal.request_id AND started.created_at <= terminal.created_at ) GROUP BY terminal.request_id ), rollback_results AS ( SELECT started.request_id, BOOL_OR(done.status = 'succeeded') AS succeeded, MIN( EXTRACT(EPOCH FROM (done.created_at - started.created_at)) )::float8 AS latency_seconds FROM scoped_events started JOIN scoped_events done ON done.action = 'rollback' AND done.stage = 'rollback' AND done.status IN ('succeeded', 'failed') AND started.action = 'rollback' AND started.stage = 'rollback' AND started.status = 'started' AND started.request_id = done.request_id AND done.created_at >= started.created_at GROUP BY started.request_id ), counts AS ( SELECT (SELECT COUNT(*) FROM activation_results) AS activation_attempts, (SELECT COUNT(*) FROM activation_results WHERE succeeded) AS activation_successes, (SELECT COUNT(*) FROM rollback_results) AS rollback_attempts, (SELECT COUNT(*) FROM rollback_results WHERE succeeded) AS rollback_successes ), rollback_stats AS ( SELECT COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p50_seconds, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p95_seconds, COALESCE(MAX(latency_seconds), 0)::float8 AS max_seconds FROM rollback_results ) SELECT counts.activation_attempts, counts.activation_successes, counts.rollback_attempts, counts.rollback_successes, rollback_stats.p50_seconds, rollback_stats.p95_seconds, rollback_stats.max_seconds FROM counts CROSS JOIN rollback_stats",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Service-authenticated canary evidence read on the deliberate bypass connection of _acquire_metrics_connection: every CTE row is bound to the one tenant of the validated canary scope (event.tenant_id = $2::uuid and version.tenant_id = event.tenant_id, with scope.tenant_id parsed as a UUID from TELEPHONY_CANARY_TENANT_ID), and only counts and latency percentiles are returned. The scanner refuses the WITH/CTE and EXISTS forms. Exact reviewed operation: fetchrow; app/core/telephony_observability.py:393.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "faf4d128a639fb4abe03622f588482374d1803b122147ef9e350099325e2d0de",
+      "file": "app/core/telephony_observability.py",
+      "function": "_fetch_call_metrics",
+      "line": 521,
+      "method": "fetchrow",
+      "tables": [
+        "calls"
+      ],
+      "sql": "WITH scoped_calls AS ( SELECT id, created_at, answered_at, status FROM calls WHERE created_at >= $1::timestamptz AND NOT is_test AND direction = 'inbound' AND tenant_id = $2::uuid AND called_did = ('+' || $3) AND COALESCE( route_snapshot #>> '{inbound_config,id}', route_snapshot #>> '{route,config_id}' ) = $4 ), counts AS ( SELECT COUNT(DISTINCT id)::int AS setup_attempts, COUNT(DISTINCT id) FILTER ( WHERE answered_at IS NOT NULL OR status IN ('answered', 'completed', 'in_progress') )::int AS setup_successes, COALESCE(EXTRACT(EPOCH FROM MAX(created_at)), 0)::float8 AS latest_call_timestamp_seconds FROM scoped_calls ), answer_latencies AS ( SELECT EXTRACT(EPOCH FROM (answered_at - created_at))::float8 AS latency_seconds FROM scoped_calls WHERE answered_at IS NOT NULL AND answered_at >= created_at ), latency_stats AS ( SELECT COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p50_seconds, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p95_seconds, COALESCE(MAX(latency_seconds), 0)::float8 AS max_seconds FROM answer_latencies ) SELECT counts.setup_attempts, counts.setup_successes, counts.latest_call_timestamp_seconds, latency_stats.p50_seconds, latency_stats.p95_seconds, latency_stats.max_seconds FROM counts CROSS JOIN latency_stats",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Service-authenticated canary evidence read on the deliberate bypass connection of _acquire_metrics_connection: calls are bound by tenant_id = $2::uuid (the one tenant of the validated canary scope, parsed as a UUID from TELEPHONY_CANARY_TENANT_ID) plus the canary DID and config id, and only counts and latency percentiles are returned. The scanner refuses the WITH/CTE form. Exact reviewed operation: fetchrow; app/core/telephony_observability.py:521.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "4a2377ad22c11d47a833411dffdb0ee759beb5a79081e01dcc3d698d0683f172",
+      "file": "app/core/telephony_observability.py",
+      "function": "_fetch_transfer_metrics",
+      "line": 594,
+      "method": "fetchrow",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "WITH scoped_legs AS ( SELECT parent.id AS parent_call_id, leg.status, leg.metadata FROM call_legs leg JOIN calls parent ON parent.id = leg.call_id WHERE leg.created_at >= $1::timestamptz AND parent.created_at >= $1::timestamptz AND leg.leg_type = 'transfer' AND parent.direction = 'inbound' AND NOT parent.is_test AND parent.tenant_id = $2::uuid AND parent.called_did = ('+' || $3) AND COALESCE( parent.route_snapshot #>> '{inbound_config,id}', parent.route_snapshot #>> '{route,config_id}' ) = $4 ) SELECT COUNT(DISTINCT parent_call_id)::int AS attempts, COUNT(DISTINCT parent_call_id) FILTER ( WHERE COALESCE(metadata->>'handoff_persisted', 'false') = 'true' )::int AS successes, COUNT(DISTINCT parent_call_id) FILTER ( WHERE status IN ('initiated', 'ringing') OR ( status = 'answered' AND COALESCE(metadata->>'handoff_persisted', 'false') <> 'true' ) )::int AS inflight FROM scoped_legs",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Service-authenticated canary evidence read on the deliberate bypass connection of _acquire_metrics_connection: transfer legs are reached through their parent call, bound by parent.tenant_id = $2::uuid (the one tenant of the validated canary scope), because call_legs has no tenant column; only counts are returned. The scanner refuses the WITH/CTE form and the call_legs join. Exact reviewed operation: fetchrow; app/core/telephony_observability.py:594.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "9456c53d360a189d4dfde4d9fe8f3c7505e131a5f4c92e48568f45d40f426b87",
+      "file": "app/domain/services/call_redial_service.py",
+      "function": "_context",
+      "line": 41,
+      "method": "fetchrow",
+      "tables": [
+        "calls",
+        "campaigns",
+        "leads"
+      ],
+      "sql": "SELECT c.id, c.status, c.direction, c.outcome, c.phone_number AS original_phone, c.campaign_id, c.lead_id, l.phone_number, l.status AS lead_status, l.do_not_call, l.first_name, l.last_name, l.custom_fields, p.status AS campaign_status, p.direction AS campaign_direction, p.calling_config, t.calling_rules FROM calls c JOIN leads l ON l.id=c.lead_id AND l.tenant_id=c.tenant_id AND l.campaign_id=c.campaign_id JOIN campaigns p ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id JOIN tenants t ON t.id=c.tenant_id WHERE c.id=$1::uuid AND c.tenant_id=$2::uuid{IfExp(test=Name(id='lock', ctx=Load()), body=Constant(value=' FOR UPDATE OF c,l'), orelse=Constant(value=''))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The original-call lookup binds the authenticated tenant ($2) on calls and joins leads, campaigns and tenants through c.tenant_id; the only dynamic part is the optional FOR UPDATE OF c,l suffix appended after the WHERE clause, which cannot remove a predicate. Exact reviewed operation: fetchrow; app/domain/services/call_redial_service.py:41.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "11a163d6a57788f503a712047df0579592a0920270b7f6a971151ccae4008680",
+      "file": "app/domain/services/call_redial_service.py",
+      "function": "_job_state",
+      "line": 83,
+      "method": "fetchval",
+      "tables": [
+        "calls",
+        "dialer_jobs"
+      ],
+      "sql": "SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND lead_id=$2::uuid AND id<>$3::uuid AND status=ANY($4::text[])) OR EXISTS(SELECT 1 FROM calls WHERE tenant_id=$1::uuid AND lead_id=$2::uuid AND (status IS NULL OR NOT(status=ANY($5::text[]))))",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Both EXISTS arms (dialer_jobs and calls) bind tenant_id = $1::uuid, the authenticated tenant, next to the lead id of the call the tenant-bound context lookup just returned. The scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchval; app/domain/services/call_redial_service.py:83.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "e6cc2acb589fa514c1c4665416446b1f0fa5e0b30b455a51f8f5c2b6fa33c6e8",
+      "file": "app/domain/services/call_status.py",
+      "function": "record_call_state",
+      "line": 359,
+      "method": "execute",
+      "tables": [],
+      "sql": "{branch}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The monotonic compare-and-set UPDATE binds tenant_id = $3::uuid in both branches (the call's own tenant: the dialer job's, or the tenant discovered from the very provider row); the SQL is dynamic only because the optional timestamp column name (from the closed _STATE_TIMESTAMP_COLUMN map) and the status guard are appended after that fixed predicate. Exact reviewed operation: execute; app/domain/services/call_status.py:359.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "06747c1f0e222e2fd19a4fb08dd42f81c745c0ed28aeb11ddf4b4b3aea427d16",
+      "file": "app/domain/services/call_summary/business_details.py",
+      "function": "persist_business_details",
+      "line": 329,
+      "method": "execute",
+      "tables": [
+        "call_lead_details"
+      ],
+      "sql": "DELETE FROM call_lead_details d USING calls c WHERE d.call_id=$1::uuid AND d.tenant_id=$2::uuid AND c.id=d.call_id AND c.tenant_id=d.tenant_id AND c.summary_transcript_hash=$3 AND jsonb_build_array(COALESCE(c.transcript,''), c.transcript_json, c.action_results)=$5::jsonb AND d.source <> 'manual_edit' AND d.evidence->>'extraction'='post_call' AND (d.evidence->>'transcript_revision' IS DISTINCT FROM $3 OR NOT (d.field_key = ANY($4::text[])))",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "The cleanup DELETE binds d.tenant_id = $2::uuid (the call's tenant, also the connection's) and ties the joined calls row through c.tenant_id = d.tenant_id, so it can only remove this tenant's own post-call extraction rows. The scanner refuses the DELETE ... USING form. Exact reviewed operation: execute; app/domain/services/call_summary/business_details.py:329.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "f140609d2df7c626546773d0df404e0057b40597e11eac9a8aa4b1e12f695ca3",
+      "file": "app/domain/services/campaign_knowledge_access.py",
+      "function": "_current_permission_names",
+      "line": 149,
+      "method": "fetch",
+      "tables": [
+        "tenant_users",
+        "user_permissions"
+      ],
+      "sql": "SELECT DISTINCT permission_name AS name FROM ( SELECT p.name AS permission_name FROM tenant_users tu JOIN roles r ON r.id = tu.role_id JOIN role_permissions rp ON rp.role_id = r.id JOIN permissions p ON p.id = rp.permission_id WHERE tu.user_id = $1 AND tu.tenant_id = $2 AND tu.status = 'active' UNION SELECT p.name AS permission_name FROM user_permissions up JOIN permissions p ON p.id = up.permission_id WHERE up.user_id = $1 AND (up.tenant_id IS NULL OR up.tenant_id = $2) AND (up.expires_at IS NULL OR up.expires_at > NOW()) ) effective",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Effective permissions bind the role grants to tu.tenant_id = $2 and add only unexpired direct grants that belong to this tenant or are global (up.tenant_id IS NULL OR up.tenant_id = $2); a global grant must apply in every tenant. The scanner refuses the UNION and the NULL arm. Exact reviewed operation: fetch; app/domain/services/campaign_knowledge_access.py:149.",
+      "category": "reviewed_tenant_plus_global"
+    },
+    {
+      "id": "1b012c02c56487729e8e0bb31a8c7e0736479dc4b817c0a9eb243b3ca49a7221",
+      "file": "app/domain/services/campaign_knowledge_access.py",
+      "function": "_acquire_bounded_direction_lock",
+      "line": 173,
+      "method": "fetchval",
+      "tables": [],
+      "sql": "{IfExp(test=Name(id='mutate', ctx=Load()), body=Name(id='_MUTATION_LOCK_SQL', ctx=Load()), orelse=Name(id='_READ_LOCK_SQL', ctx=Load()))}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The direction-lock probe is SELECT pg_try_advisory_xact_lock(...) keyed on the campaign id: it reads no table and no tenant row. The SQL is dynamic only because the caller picks the shared or the exclusive module constant; the tenant is established by the tenant-bound campaign SELECT that follows on the same connection. Exact reviewed operation: fetchval; app/domain/services/campaign_knowledge_access.py:173.",
+      "category": "system_session_setup"
+    },
+    {
+      "id": "23885dfbb298ed849334c88e7a20b6c2671e3525f00faca3eefbff625a75d8c3",
+      "file": "app/domain/services/dialer/stuck_job_reaper.py",
+      "function": "reap_orphaned_scheduled_jobs",
+      "line": 101,
+      "method": "fetch",
+      "tables": [
+        "dialer_jobs"
+      ],
+      "sql": "UPDATE dialer_jobs SET failure_category = COALESCE(failure_category, 'internal'), failure_reason = $1, last_error = $1 WHERE status = 'retry_scheduled' AND GREATEST(updated_at, scheduled_at) < now() - make_interval(secs => $2::int) AND failure_reason IS DISTINCT FROM $1 RETURNING id, lead_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The dialer worker's reaper tick runs on the platform bypass connection (acquire_with_tenant(pool, None)) and flags every overdue retry_scheduled job across tenants for reconciliation by age alone; it changes only the failure diagnostics, keeps status and active ownership, and returns ids for a warning log line. No tenant-selected input reaches it. Exact reviewed operation: fetch; app/domain/services/dialer/stuck_job_reaper.py:101.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "d853fae6f3c20f331ec8d6701cb77c5cc7589941505664de65dbb44c6bb16893",
+      "file": "app/domain/services/dialer/stuck_job_reaper.py",
+      "function": "reap_stuck_jobs",
+      "line": 139,
+      "method": "fetch",
+      "tables": [
+        "calls",
+        "dialer_jobs"
+      ],
+      "sql": "UPDATE dialer_jobs SET failure_category = COALESCE(failure_category, 'internal'), failure_reason = $2, last_error = $2 WHERE status = ANY($1::text[]) AND GREATEST(updated_at, scheduled_at) < now() - make_interval(secs => $3::int) AND failure_reason IS DISTINCT FROM $2 AND NOT EXISTS ( SELECT 1 FROM calls c WHERE c.dialer_job_id = dialer_jobs.id AND c.status = ANY($4::text[]) ) RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The dialer worker's reaper tick runs on the platform bypass connection (acquire_with_tenant(pool, None)) and flags every stale in-flight job that has no live linked call across tenants by age alone; it changes only the failure diagnostics, keeps status and active ownership, and returns ids for a warning log line. No tenant-selected input reaches it. Exact reviewed operation: fetch; app/domain/services/dialer/stuck_job_reaper.py:139.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "35f13f7cb8bdaa6bee749262027a9e36588d971d4af30ce2e074c9109398c8df",
+      "file": "app/domain/services/dialer/stuck_job_reaper.py",
+      "function": "reap_stuck_calls",
+      "line": 190,
+      "method": "fetch",
+      "tables": [
+        "calls"
+      ],
+      "sql": "UPDATE calls SET status = 'termination_pending', updated_at = now() WHERE ( status = ANY($1::text[]) AND created_at < now() - make_interval(secs => $2::int) ) OR ( status = ANY($3::text[]) AND COALESCE(answered_at, created_at) < now() - make_interval(secs => $4::int) ) RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The dialer worker's reaper tick runs on the platform bypass connection (acquire_with_tenant(pool, None)) and moves every stale pre-answer or connected call across tenants to the nonterminal termination_pending state by age alone; the telephony owner then re-reads each call by its own id and tenant before proving the PBX legs absent. No tenant-selected input reaches it. Exact reviewed operation: fetch; app/domain/services/dialer/stuck_job_reaper.py:190.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "12c33422f46c00c4472a58306e7988b1646f9a80148644d3e272fd6104713a12",
+      "file": "app/domain/services/lead_capture_service.py",
+      "function": "LeadCaptureService.fields_for_campaign",
+      "line": 208,
+      "method": "fetch",
+      "tables": [
+        "campaign_lead_fields"
+      ],
+      "sql": "SELECT field_key, label, field_type, is_required, agent_visible, user_visible, options, sort_order FROM campaign_lead_fields WHERE campaign_id = $1::uuid AND tenant_id = $2::uuid{IfExp(test=Name(id='agent_only', ctx=Load()), body=Constant(value=' AND agent_visible'), orelse=Constant(value=''))} ORDER BY sort_order, label",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The field-definition read binds campaign_id = $1::uuid AND tenant_id = $2::uuid (the authenticated tenant, also the connection's tenant); the only dynamic part is the optional AND agent_visible fragment appended after that predicate. Exact reviewed operation: fetch; app/domain/services/lead_capture_service.py:208.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "8830896a63cb3773d0fc563826ebdb85a5a1f3ab69e60df47631d557f819d47e",
+      "file": "app/domain/services/lead_capture_service.py",
+      "function": "LeadCaptureService.capture",
+      "line": 385,
+      "method": "fetchrow",
+      "tables": [
+        "call_lead_details",
+        "calls"
+      ],
+      "sql": "INSERT INTO call_lead_details (tenant_id, call_id, campaign_id, lead_id, field_key, field_type, value, source, confirmed, is_required, raw_value, normalized_value, validation_status, confirmed_at, evidence) SELECT $1::uuid, $2::uuid, c.campaign_id, c.lead_id, $5::text, $6, $7::text, $8, $9::boolean, $10, $11, $12, $13::text, $14, $16::jsonb FROM calls c WHERE c.id = $2::uuid AND c.tenant_id = $1::uuid AND ($3::uuid IS NULL OR c.campaign_id = $3::uuid) AND ($4::uuid IS NULL OR c.lead_id = $4::uuid) AND ($17::text IS NULL OR transcript = $17) AND ($18::text IS NULL OR summary_transcript_hash = $18) AND ($19::jsonb IS NULL OR jsonb_build_array(COALESCE(transcript,''), transcript_json, action_results) = $19::jsonb) AND ($20::jsonb IS NULL OR $20->>'absent' = 'true' OR EXISTS (SELECT 1 FROM call_lead_details d WHERE d.call_id=$2::uuid AND d.tenant_id=$1::uuid AND d.field_key=$5::text AND (jsonb_build_object('value',d.value,'evidence',d.evidence)=$20::jsonb OR (d.value IS NOT DISTINCT FROM $7::text AND d.evidence=$16::jsonb AND d.confirmed=$9::boolean AND d.validation_status IS NOT DISTINCT FROM $13::text)))) ON CONFLICT (call_id, field_key) DO UPDATE SET value = EXCLUDED.value, source = EXCLUDED.source, confirmed = CASE WHEN EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled' THEN FALSE ELSE call_lead_details.confirmed OR EXCLUDED.confirmed END, field_type = EXCLUDED.field_type, raw_value = EXCLUDED.raw_value, normalized_value = EXCLUDED.normalized_value, validation_status = EXCLUDED.validation_status, confirmed_at = CASE WHEN EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled' THEN NULL WHEN EXCLUDED.confirmed THEN COALESCE( EXCLUDED.confirmed_at, call_lead_details.confirmed_at ) ELSE call_lead_details.confirmed_at END, evidence = CASE WHEN EXCLUDED.source = 'manual_edit' AND EXCLUDED.validation_status='cancelled' THEN EXCLUDED.evidence || '{\"status\":\"manually_withdrawn\"}'::jsonb WHEN EXCLUDED.source = 'manual_edit' THEN EXCLUDED.evidence || '{\"status\":\"manually_verified\"}'::jsonb ELSE EXCLUDED.evidence END, updated_at = NOW() WHERE array_position($15::text[], EXCLUDED.source) >= array_position($15::text[], call_lead_details.source) AND (NOT (call_lead_details.confirmed AND NOT EXCLUDED.confirmed) OR (EXCLUDED.source='manual_edit' AND EXCLUDED.validation_status='cancelled')) AND call_lead_details.tenant_id = $1::uuid AND ($20::jsonb IS NULL OR jsonb_build_object('value',call_lead_details.value,'evidence',call_lead_details.evidence)=$20::jsonb OR (call_lead_details.value IS NOT DISTINCT FROM EXCLUDED.value AND call_lead_details.evidence=EXCLUDED.evidence AND call_lead_details.confirmed=EXCLUDED.confirmed)) AND (EXCLUDED.source = 'manual_edit' OR NOT (call_lead_details.evidence ? 'turn_index') OR NOT (EXCLUDED.evidence ? 'turn_index') OR (EXCLUDED.evidence->>'turn_index')::int >= (call_lead_details.evidence->>'turn_index')::int) RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The capture INSERT ... SELECT reads the call with c.id = $2::uuid AND c.tenant_id = $1::uuid and writes tenant_id = $1::uuid, and its ON CONFLICT DO UPDATE repeats call_lead_details.tenant_id = $1::uuid, so a row of another tenant can neither be created for nor updated by it. The scanner refuses an INSERT ... SELECT with ON CONFLICT DO UPDATE. Exact reviewed operation: fetchrow; app/domain/services/lead_capture_service.py:385.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "c86ba1dc2c0f5ac4d63c80fc47fe5e8ba8d8c16733fc145cbd79b4022c7f7e5e",
+      "file": "app/domain/services/telephony/call_authority.py",
+      "function": "read_call_authority",
+      "line": 220,
+      "method": "fetchrow",
+      "tables": [
+        "audit_logs",
+        "white_label_partners"
+      ],
+      "sql": "SELECT t.id, t.status, t.subscription_status, t.suspended_at, t.suspended_by, t.suspension_reason, t.white_label_partner_id, p.id AS formal_partner_id, p.status AS formal_partner_status, COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE) AS authority_scope_ok, COALESCE(( SELECT jsonb_agg(jsonb_build_object( 'suspension_id', s.suspension_id, 'target_type', s.target_type, 'target_id', s.target_id, 'suspended_at', s.suspended_at, 'audited', s.audit_log_id IS NOT NULL AND COALESCE( a.metadata->'formal_account_hold_version' = '1'::jsonb, FALSE), 'policy_version', s.evidence->'_formal_account_hold'->'version', 'immediate', s.evidence->'_formal_account_hold'->'immediate', 'affected', COALESCE( (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text, FALSE), 'tenant_state', s.evidence->'_formal_account_hold'->'tenant_state'->t.id::text ) ORDER BY s.suspended_at, s.suspension_id) FROM suspension_events s LEFT JOIN audit_logs a ON a.event_id = s.audit_log_id WHERE s.is_active = TRUE AND ( (s.target_type = 'tenant' AND s.target_id = t.id) OR (s.target_type = 'partner' AND ( s.target_id = t.white_label_partner_id OR (s.audit_log_id IS NOT NULL AND a.metadata->'formal_account_hold_version' = '1'::jsonb AND s.evidence->'_formal_account_hold'->'version' = '1'::jsonb AND (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text) )) ) ), '[]'::jsonb) AS active_holds FROM tenants t LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE t.id = $1::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The formal-authority read is keyed by the tenant being admitted (FROM tenants t ... WHERE t.id = $1::uuid) and projects only that tenant's policy state; its formal partner and the active suspension holds that name this tenant or its partner are other tenants' rows by design, so a caller-tenant filter would hide the hold. It requires the service RLS context: authority_scope_ok makes a read without it raise CallAuthorityUnavailable. Exact reviewed operation: fetchrow; app/domain/services/telephony/call_authority.py:220.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "462dc63e79fdaca11b08b6985b1b06ca974f87c372ae6e3707ed9a498f9230fa",
+      "file": "app/domain/services/telephony/call_authority.py",
+      "function": "read_call_authority_rows",
+      "line": 238,
+      "method": "fetch",
+      "tables": [
+        "audit_logs",
+        "white_label_partners"
+      ],
+      "sql": "SELECT t.id, t.status, t.subscription_status, t.suspended_at, t.suspended_by, t.suspension_reason, t.white_label_partner_id, p.id AS formal_partner_id, p.status AS formal_partner_status, COALESCE(NULLIF(current_setting('app.bypass_rls', TRUE), '')::boolean, FALSE) AS authority_scope_ok, COALESCE(( SELECT jsonb_agg(jsonb_build_object( 'suspension_id', s.suspension_id, 'target_type', s.target_type, 'target_id', s.target_id, 'suspended_at', s.suspended_at, 'audited', s.audit_log_id IS NOT NULL AND COALESCE( a.metadata->'formal_account_hold_version' = '1'::jsonb, FALSE), 'policy_version', s.evidence->'_formal_account_hold'->'version', 'immediate', s.evidence->'_formal_account_hold'->'immediate', 'affected', COALESCE( (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text, FALSE), 'tenant_state', s.evidence->'_formal_account_hold'->'tenant_state'->t.id::text ) ORDER BY s.suspended_at, s.suspension_id) FROM suspension_events s LEFT JOIN audit_logs a ON a.event_id = s.audit_log_id WHERE s.is_active = TRUE AND ( (s.target_type = 'tenant' AND s.target_id = t.id) OR (s.target_type = 'partner' AND ( s.target_id = t.white_label_partner_id OR (s.audit_log_id IS NOT NULL AND a.metadata->'formal_account_hold_version' = '1'::jsonb AND s.evidence->'_formal_account_hold'->'version' = '1'::jsonb AND (s.evidence->'_formal_account_hold'->'affected_tenant_ids') ? t.id::text) )) ) ), '[]'::jsonb) AS active_holds FROM tenants t LEFT JOIN white_label_partners p ON p.id = t.white_label_partner_id WHERE t.id = ANY($1::uuid[])",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The batch formal-authority read is keyed by the tenants being checked (WHERE t.id = ANY($1::uuid[]), at most MAX_AUTHORITY_BATCH ids supplied by the owner loop) and projects only each tenant's policy state; its formal partner and the active suspension holds that name a tenant or its partner are other tenants' rows by design. It requires the service RLS context: authority_scope_ok makes a read without it raise CallAuthorityUnavailable. Exact reviewed operation: fetch; app/domain/services/telephony/call_authority.py:238.",
+      "category": "platform_account_enforcement"
+    },
+    {
+      "id": "d18bba6dda38950b4edf2592e8e5b0a1dae69c0444ef9cdac55b0b7d16130a1d",
+      "file": "app/domain/services/telephony/legacy_pending_identity.py",
+      "function": "reconcile_pending_identity",
+      "line": 16,
+      "method": "execute",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "WITH identity AS ( SELECT c.id, c.tenant_id, COALESCE(NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'')) AS provider_call_id FROM calls c WHERE c.status='termination_pending' AND c.direction='outbound' AND NULLIF(BTRIM(c.provider),'') IS NULL AND EXISTS ( SELECT 1 FROM call_legs leg WHERE leg.call_id=c.id AND leg.leg_type='pstn_outbound' AND leg.provider_leg_id=COALESCE(NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'')) AND LOWER(BTRIM(leg.provider))=$1 ) AND NOT EXISTS ( SELECT 1 FROM call_legs leg WHERE leg.call_id=c.id AND leg.leg_type='pstn_outbound' AND leg.provider_leg_id=COALESCE(NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'')) AND LOWER(BTRIM(leg.provider)) IS DISTINCT FROM $1 ) ORDER BY c.updated_at, c.id LIMIT 32 FOR UPDATE OF c SKIP LOCKED ) UPDATE calls c SET provider=$1, provider_call_id=identity.provider_call_id FROM identity WHERE c.id=identity.id AND c.tenant_id=identity.tenant_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Platform-wide recovery sweep on a bypass connection: it selects termination-pending outbound calls that lost their provider identity across tenants (FOR UPDATE SKIP LOCKED, 32 at a time) and restores it only from that call's own pstn_outbound leg, and the UPDATE is keyed c.id = identity.id AND c.tenant_id = identity.tenant_id, the discovered row's own tenant. The scanner refuses the WITH/CTE and EXISTS forms. Exact reviewed operation: execute; app/domain/services/telephony/legacy_pending_identity.py:16.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "260e7f24b4f8c912a7956d9dcb70155e282281ae7ef3dada98ac11f035047e53",
+      "file": "app/domain/services/telephony/legacy_pending_identity.py",
+      "function": "reconcile_pending_identity",
+      "line": 52,
+      "method": "fetchval",
+      "tables": [
+        "calls"
+      ],
+      "sql": "SELECT count(*) FROM calls WHERE status='termination_pending' AND (NULLIF(BTRIM(provider),'') IS NULL OR COALESCE(NULLIF(BTRIM(provider_call_id),''), NULLIF(BTRIM(external_call_uuid),'')) IS NULL)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Platform-wide count(*) of termination-pending calls whose provider identity is still missing, run on the same bypass connection as the recovery sweep and used only for an operator warning log; it returns one number, never a row. Exact reviewed operation: fetchval; app/domain/services/telephony/legacy_pending_identity.py:52.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "6173be488ae339d776867a9422ad07e80992ad1d3d5db5e6e825d8360c8351d6",
+      "file": "app/domain/services/telephony/recording.py",
+      "function": "_save_call_recording_with_budget",
+      "line": 338,
+      "method": "execute",
+      "tables": [
+        "calls"
+      ],
+      "sql": "INSERT INTO calls ( id, tenant_id, campaign_id, phone_number, external_call_uuid, status, created_at, updated_at ) VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW()) ON CONFLICT (id) DO NOTHING",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The stub calls INSERT writes tenant_id = $2, the authoritative session tenant (expected_tenant, the same value the call lookup used and against which the campaign, when present, was just checked), for a fresh voice-session call id on a connection scoped to that tenant. The scanner cannot parse NOW() inside the VALUES list. Exact reviewed operation: execute; app/domain/services/telephony/recording.py:338.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "bdfbd50cb6b1f65a33e7f4b428e94a22567d09ab1dee80cb4c42f9396f69ed0f",
+      "file": "app/domain/services/telephony/termination_receipts.py",
+      "function": "persist_termination_receipt",
+      "line": 119,
+      "method": "fetch",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT id, provider, provider_leg_id, status, created_at FROM call_legs WHERE call_id=$1::uuid ORDER BY created_at, id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "call_legs has no tenant column; the legs are read by the id of the call that the preceding lock SELECT addresses with tenant_id = the context's tenant, and they are only compared with the context's leg identities, never returned. Exact reviewed operation: fetch; app/domain/services/telephony/termination_receipts.py:119.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "c1519444bfd59ad793f451b82d665fd28d0a79127fc283b95272430828a93fa1",
+      "file": "app/domain/services/telephony/termination_receipts.py",
+      "function": "persist_termination_receipt",
+      "line": 145,
+      "method": "execute",
+      "tables": [
+        "call_events"
+      ],
+      "sql": "INSERT INTO call_events (call_id, event_type, source, event_data) VALUES ($1::uuid,$2,$3,$4::jsonb)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "call_events has no tenant column; the receipt event is written for the call id only after receipt_matches has proved the locked row's tenant, provider identity and legs against the context, which was built from that same call row. Exact reviewed operation: execute; app/domain/services/telephony/termination_receipts.py:145.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "7460745a4a7d165ba7f1f0cddc6503e90ee816671b1d242dae249c6642e9ecae",
+      "file": "app/domain/services/telephony/transfer_restart_recovery.py",
+      "function": "claim_inbound_transfer_takeovers",
+      "line": 112,
+      "method": "fetch",
+      "tables": [
+        "call_legs",
+        "calls"
+      ],
+      "sql": "SELECT c.id, c.tenant_id, c.provider, c.status, COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) AS provider_call_id FROM calls c WHERE c.direction='inbound' AND c.status <> 'termination_pending' AND NOT (c.status = ANY($1::text[])) AND c.billing_status IN ('reserved','held') AND COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) IS NOT NULL AND NOT ( COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) = ANY($2::text[]) ) AND EXISTS ( SELECT 1 FROM call_legs eligible_leg WHERE eligible_leg.call_id=c.id AND eligible_leg.leg_type='transfer' AND eligible_leg.billing_status='reserved' AND eligible_leg.status = ANY($3::text[]) AND eligible_leg.provider_leg_id IS NOT NULL AND BTRIM(eligible_leg.provider_leg_id) <> '' AND eligible_leg.provider_leg_id NOT LIKE 'transfer-%' AND eligible_leg.provider_leg_id <> COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) ) AND NOT EXISTS ( SELECT 1 FROM call_legs unusable_leg WHERE unusable_leg.call_id=c.id AND unusable_leg.leg_type='transfer' AND unusable_leg.billing_status='reserved' AND unusable_leg.status = ANY($3::text[]) AND ( unusable_leg.provider_leg_id IS NULL OR BTRIM(unusable_leg.provider_leg_id) = '' OR unusable_leg.provider_leg_id LIKE 'transfer-%' OR unusable_leg.provider_leg_id = COALESCE( NULLIF(BTRIM(c.provider_call_id),''), NULLIF(BTRIM(c.external_call_uuid),'') ) ) ) ORDER BY c.updated_at, c.id LIMIT $4 FOR UPDATE OF c SKIP LOCKED",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "Platform-wide restart-recovery claim, run on a bypass connection by the process that already holds the exclusive telephony ownership lease (exclusive_owner_confirmed is required): it locks orphaned inbound parents of every tenant (FOR UPDATE SKIP LOCKED) and fences each one with an UPDATE that names that parent's own tenant_id. No tenant-selected input reaches it. Exact reviewed operation: fetch; app/domain/services/telephony/transfer_restart_recovery.py:112.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "bad06c5e7bb8402cc53f7261b3d823033603ee6c01d88f2d313403de52650f37",
+      "file": "app/domain/services/telephony/transfer_restart_recovery.py",
+      "function": "claim_inbound_transfer_takeovers",
+      "line": 187,
+      "method": "fetch",
+      "tables": [
+        "call_legs"
+      ],
+      "sql": "SELECT id, provider_leg_id FROM call_legs WHERE call_id=$1::uuid AND leg_type='transfer' AND billing_status='reserved' AND status = ANY($2::text[]) ORDER BY created_at, id FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "count": 1,
+      "reason": "call_legs has no tenant column; the transfer children are locked by the id of the parent the claim query has just locked in the same transaction, and that parent is fenced afterwards by an UPDATE that names its own tenant_id. Exact reviewed operation: fetch; app/domain/services/telephony/transfer_restart_recovery.py:187.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "65c54f59c9e5a0c1d4110c25e14a2f86b486db8ee2085ffea9eb31676118a2ea",
+      "file": "app/domain/services/telephony/trunk_resolver.py",
+      "function": "requires_sip_readiness",
+      "line": 338,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_sip_trunks"
+      ],
+      "sql": "SELECT active_telephony_provider, calling_rules->'pool_trunk' AS pool_trunk, EXISTS (SELECT 1 FROM tenant_sip_trunks WHERE tenant_id=$1::uuid AND deleted_at IS NULL) AS has_trunks FROM tenants WHERE id=$1::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "The readiness probe reads the tenant row by id = $1::uuid and EXISTS (SELECT 1 FROM tenant_sip_trunks WHERE tenant_id = $1::uuid ...) with the same caller tenant, which is also the connection's tenant. The scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchrow; app/domain/services/telephony/trunk_resolver.py:338.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "8f501a973a1458c800383524b755f2274d0ba833b3da7391634b37e79df7a3f2",
+      "file": "app/domain/services/telephony_concurrency_limiter.py",
+      "function": "TelephonyConcurrencyLimiter._active_counts",
+      "line": 142,
+      "method": "fetchrow",
+      "tables": [
+        "calls",
+        "tenant_telephony_concurrency_leases"
+      ],
+      "sql": "SELECT COUNT(*) FILTER ( WHERE lease_kind = 'call' AND ( ( state IN ('active', 'releasing') AND released_at IS NULL ) OR ( state IN ('expired', 'releasing') AND EXISTS ( SELECT 1 FROM calls c WHERE c.id = lease.call_id AND c.tenant_id = lease.tenant_id AND c.direction = 'inbound' AND c.billing_status IN ('reserved', 'held') ) ) ) ) AS active_calls, COUNT(*) FILTER ( WHERE state IN ('active', 'releasing') AND released_at IS NULL AND lease_kind = 'transfer' ) AS active_transfers FROM tenant_telephony_concurrency_leases lease WHERE lease.tenant_id = $1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The lease counts bind lease.tenant_id = $1, and the correlated EXISTS on calls repeats c.tenant_id = lease.tenant_id. The scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchrow; app/domain/services/telephony_concurrency_limiter.py:142.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "5e5ca9db5fcc535075d922db5814fd4388c3c14096eb1749639aa82767197efa",
+      "file": "app/domain/services/telephony_concurrency_limiter.py",
+      "function": "TelephonyConcurrencyLimiter.acquire_lease",
+      "line": 344,
+      "method": "fetchrow",
+      "tables": [
+        "tenant_telephony_concurrency_leases"
+      ],
+      "sql": "INSERT INTO tenant_telephony_concurrency_leases ( tenant_id, policy_id, call_id, talklee_call_id, lease_kind, state, metadata, created_by, updated_by ) VALUES ($1, $2, $3, $4, $5, 'active', $6::jsonb, $7, $8) ON CONFLICT (tenant_id, call_id, lease_kind) WHERE released_at IS NULL AND state IN ('active', 'releasing') DO UPDATE SET last_heartbeat_at = NOW(), updated_at = NOW(), updated_by = EXCLUDED.updated_by RETURNING id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The lease INSERT writes tenant_id = $1 and its ON CONFLICT (tenant_id, call_id, lease_kind) target is tenant-scoped, so a re-acquire can only refresh this tenant's own lease. The scanner cannot prove an INSERT with a partial-index ON CONFLICT ... DO UPDATE. Exact reviewed operation: fetchrow; app/domain/services/telephony_concurrency_limiter.py:344.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "8af0d84349268d6cdce9990e24c21b07be69ef3b7f7277aaff5fe6dbafc06c21",
+      "file": "app/domain/services/telephony_concurrency_limiter.py",
+      "function": "TelephonyConcurrencyLimiter.expire_stale_leases",
+      "line": 524,
+      "method": "fetch",
+      "tables": [
+        "calls",
+        "tenant_telephony_concurrency_leases"
+      ],
+      "sql": "UPDATE tenant_telephony_concurrency_leases SET state = 'expired', released_at = NOW(), release_reason = 'lease_ttl_expired', updated_by = $3, updated_at = NOW() WHERE tenant_id = $1 AND released_at IS NULL AND state IN ('active', 'releasing') AND last_heartbeat_at < NOW() - ($2::int * INTERVAL '1 second') AND NOT ( lease_kind = 'call' AND EXISTS ( SELECT 1 FROM calls c WHERE c.id = tenant_telephony_concurrency_leases.call_id AND c.tenant_id = tenant_telephony_concurrency_leases.tenant_id AND c.direction = 'inbound' AND c.billing_status IN ('reserved', 'held') ) ) RETURNING id, policy_id, call_id, talklee_call_id, lease_kind",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The stale-lease reap binds tenant_id = $1, and its NOT EXISTS probe repeats c.tenant_id = tenant_telephony_concurrency_leases.tenant_id. The scanner refuses NOT/EXISTS. Exact reviewed operation: fetch; app/domain/services/telephony_concurrency_limiter.py:524.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "78fb00ee7858eaf60bc4507bff68b8ca68facf252ebd1eff403e254dd1b697fb",
+      "file": "app/domain/services/voice_orchestrator.py",
+      "function": "VoiceOrchestrator._persist_prompt_identity",
+      "line": 531,
+      "method": "execute",
+      "tables": [
+        "calls"
+      ],
+      "sql": "UPDATE calls SET prompt_template = $2, prompt_version = $3, prompt_hash = $4 WHERE id = $1::uuid AND ($5::uuid IS NULL OR tenant_id = $5::uuid)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "The prompt-identity write names the tenant ($5) the session was stamped with (_dialer_tenant_id, else the session config's, both set together with the durable call id) next to that call id; only a session with no tenant at all, which already runs on the bypass connection, is matched by call id alone. The scanner refuses the IS NULL OR form. Exact reviewed operation: execute; app/domain/services/voice_orchestrator.py:531.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "27b07b700ce521496794bc10f1e1b14b6f6021d849e1ea31ee9882b7119518c0",
+      "file": "app/domain/services/voice_pipeline/action_execution.py",
+      "function": "_context",
+      "line": 91,
+      "method": "fetchrow",
+      "tables": [
+        "calls",
+        "campaigns",
+        "leads"
+      ],
+      "sql": "SELECT c.id AS call_id, COALESCE(c.provider_call_id,c.external_call_uuid) AS provider_call_id, c.lead_id, c.provider, c.status AS call_status, p.id AS campaign_id, p.status AS campaign_status, p.direction, p.script_config, l.phone_number, l.do_not_call, l.status AS lead_status, c.direction AS call_direction, c.route_snapshot, c.admission_status, c.processing_status, c.billing_status, c.reserved_seconds FROM calls c JOIN campaigns p ON p.id=c.campaign_id AND p.tenant_id=c.tenant_id LEFT JOIN leads l ON l.id=c.lead_id AND l.tenant_id=c.tenant_id AND l.campaign_id=p.id WHERE c.tenant_id=$1::uuid AND p.id=$2::uuid AND (c.id::text=$3 OR c.provider_call_id=$3 OR c.external_call_uuid=$3 OR c.talklee_call_id=$3) ORDER BY c.created_at DESC LIMIT 1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The live-call context read binds c.tenant_id = $1::uuid (the live call's tenant, also the connection's tenant) and joins campaigns and leads through c.tenant_id. The scanner refuses the LEFT JOIN. Exact reviewed operation: fetchrow; app/domain/services/voice_pipeline/action_execution.py:91.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "76d4dee95b3d44e3d6914bda8b22d69785e511eb2bea1cb45a74a0999fa61883",
+      "file": "app/domain/services/voice_pipeline/action_execution.py",
+      "function": "_context",
+      "line": 107,
+      "method": "fetchval",
+      "tables": [
+        "connector_accounts",
+        "connectors"
+      ],
+      "sql": "SELECT EXISTS(SELECT 1 FROM connectors c JOIN connector_accounts a ON a.connector_id=c.id WHERE c.tenant_id=$1::uuid AND a.tenant_id=$1::uuid AND c.type='email' AND c.status='active' AND a.status='active')",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The email-connector probe binds c.tenant_id = $1::uuid and a.tenant_id = $1::uuid for the live call's tenant (also the connection's). The scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchval; app/domain/services/voice_pipeline/action_execution.py:107.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "1e260247763be722441145ca86be4b835a02ddea8fa607c6ceebe98137452245",
+      "file": "app/infrastructure/assistant/tools/calls.py",
+      "function": "initiate_call",
+      "line": 115,
+      "method": "fetchval",
+      "tables": [
+        "dialer_jobs"
+      ],
+      "sql": "SELECT EXISTS(SELECT 1 FROM dialer_jobs WHERE tenant_id=$1::uuid AND lead_id=$2::uuid AND status IN ('pending','queued','processing','calling','retry_scheduled'))",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "The active-job probe binds tenant_id = $1::uuid (the authenticated tenant, also the connection's) with the lead id that the tenant-bound lead lookup just above returned. The scanner refuses the EXISTS wrapper. Exact reviewed operation: fetchval; app/infrastructure/assistant/tools/calls.py:115.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "b41e3511a638e2bcb09997390a800709fbecaa1280db8fd9968a5efaff009036",
+      "file": "app/services/action_execution.py",
+      "function": "find_owned_action_receipt",
+      "line": 133,
+      "method": "fetchrow",
+      "tables": [
+        "assistant_actions"
+      ],
+      "sql": "SELECT id,type,status,triggered_by,lead_id,output_data,created_at,started_at,completed_at FROM assistant_actions WHERE tenant_id=$1::uuid AND user_id=$2::uuid AND {branch}",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The receipt lookup binds tenant_id = $1::uuid AND user_id = $2::uuid on a connection scoped to that tenant; the only dynamic part is the final id = $3 or idempotency_key = $3 predicate, appended with AND. Exact reviewed operation: fetchrow; app/services/action_execution.py:133.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "8531acc485ba3f80e5b459e78256da26364ed9e26c5ba6f80bd10e9b2230a903",
+      "file": "app/services/action_execution.py",
+      "function": "DurableActionExecutor.execute",
+      "line": 173,
+      "method": "fetchrow",
+      "tables": [
+        "assistant_actions"
+      ],
+      "sql": "INSERT INTO assistant_actions (tenant_id, type, status, idempotency_key, input_data, call_id, lead_id, campaign_id, user_id, triggered_by, conversation_id) VALUES ($1::uuid,$2,'pending',$3,$4::jsonb,$5::uuid,$6::uuid,$7::uuid,$8::uuid,$9,$10::uuid) ON CONFLICT (tenant_id,idempotency_key) WHERE idempotency_key IS NOT NULL DO NOTHING RETURNING *",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": false,
+      "count": 1,
+      "reason": "The idempotent action INSERT writes tenant_id = $1::uuid, the tenant the action runs for (also the connection's), and its ON CONFLICT (tenant_id, idempotency_key) target is tenant-scoped. The scanner cannot prove an ON CONFLICT target with an index predicate. Exact reviewed operation: fetchrow; app/services/action_execution.py:173.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "072f453268a3b6df1a120831603e16a3636b52fe3b4f7ed4d44ffe4847306ae6",
+      "file": "app/services/scripts/knowledge/node_updates.py",
+      "function": "write_node_update",
+      "line": 39,
+      "method": "fetchval",
+      "tables": [
+        "campaign_knowledge_nodes",
+        "campaign_knowledge_sources"
+      ],
+      "sql": "WITH changed AS ( UPDATE campaign_knowledge_nodes n SET {Call(func=Attribute(value=Constant(value=', '), attr='join', ctx=Load()), args=[Name(id='setters', ctx=Load())], keywords=[])}, updated_at = NOW() WHERE n.id = $1 AND n.campaign_id = $2 AND n.tenant_id = $3 AND EXISTS (SELECT 1 FROM campaign_knowledge_sources s WHERE s.id=n.source_id AND s.campaign_id=$2 AND s.tenant_id=$3) RETURNING n.id, n.source_id ), revised AS ( UPDATE campaign_knowledge_sources s SET version = s.version + 1, updated_at = NOW() FROM changed WHERE s.id = changed.source_id AND s.campaign_id = $2 AND s.tenant_id = $3 RETURNING s.id ) SELECT changed.id FROM changed JOIN revised ON revised.id=changed.source_id",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "The node edit binds n.tenant_id = $3 (and s.tenant_id = $3 on the source revision) together with the campaign and node ids; the SQL is dynamic only because the SET list is built from an allowlisted set of column names, with every value bound. Exact reviewed operation: fetchval; app/services/scripts/knowledge/node_updates.py:39.",
+      "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "aba6c8db956e52ec43d97f253b76419e451f1fc27a15249e989bc09cdc727d6d",
+      "file": "app/services/scripts/knowledge/retrieval.py",
+      "function": "retrieve_knowledge",
+      "line": 173,
+      "method": "fetch",
+      "tables": [
+        "campaign_knowledge_nodes",
+        "campaign_knowledge_sources"
+      ],
+      "sql": "WITH eligible AS ( SELECT n.*, s.version AS source_version, to_tsvector('english', coalesce(n.heading, '') || ' ' || coalesce(n.content, '')) AS authored_tsv FROM campaign_knowledge_nodes n JOIN campaign_knowledge_sources s ON s.id = n.source_id AND s.tenant_id = n.tenant_id AND s.campaign_id = n.campaign_id WHERE n.campaign_id = $1 AND n.tenant_id = $5 AND n.enabled AND s.status = 'ready' ), tq AS ( SELECT websearch_to_tsquery('english', $2) AS q_and, NULLIF(replace( websearch_to_tsquery('english', $2)::text, ' & ', ' | '), '')::tsquery AS q_or ), cand AS ( SELECT n.id, n.heading, n.summary, n.voice_answer, n.content, n.search_tsv, n.search_text, n.authored_tsv, n.priority, n.hit_count, n.source_id, n.source_version, n.updated_at FROM eligible n, tq WHERE n.campaign_id = $1 AND n.tenant_id = $5 AND n.enabled AND ( n.search_tsv @@ tq.q_and OR (tq.q_or IS NOT NULL AND n.search_tsv @@ tq.q_or) OR word_similarity($2, n.search_text) >= $4 ) ORDER BY n.priority DESC, n.hit_count DESC LIMIT 200 ), w AS ( SELECT l.lexeme, ln((tot.n + 1.0) / (count(d.id) + 0.5)) AS idf FROM (SELECT DISTINCT lexeme FROM unnest(to_tsvector('english', $2)) WHERE NOT (lexeme = ANY($6::text[]))) l CROSS JOIN (SELECT count(*)::numeric AS n FROM eligible) tot LEFT JOIN eligible d ON d.campaign_id = $1 AND d.tenant_id = $5 AND d.enabled AND d.search_tsv @@ plainto_tsquery('simple', l.lexeme) GROUP BY l.lexeme, tot.n ), authored_w AS ( SELECT w.lexeme, ln((tot.n + 1.0) / (count(d.id) + 0.5)) AS idf FROM w CROSS JOIN (SELECT count(*)::numeric AS n FROM eligible) tot LEFT JOIN eligible d ON d.authored_tsv @@ plainto_tsquery('simple', w.lexeme) GROUP BY w.lexeme, tot.n ), top_k AS ( SELECT c.id, c.heading, c.summary, c.voice_answer, c.content, c.search_tsv, c.authored_tsv, c.source_id, c.source_version, c.updated_at, ts_rank(c.search_tsv, tq.q_and) AS fts, word_similarity($2, c.search_text) AS sim, row_number() OVER (ORDER BY COALESCE((SELECT sum(w.idf) FROM w WHERE to_tsvector('english', coalesce(c.heading, '')) @@ plainto_tsquery('simple', w.lexeme)), 0) / NULLIF((SELECT sum(w.idf) FROM w), 0) * 3 + COALESCE(COALESCE((SELECT sum(w.idf) FROM w WHERE c.search_tsv @@ plainto_tsquery('simple', w.lexeme)), 0) / NULLIF((SELECT sum(w.idf) FROM w), 0), 0) + CASE WHEN c.search_tsv @@ tq.q_and THEN 0.5 WHEN tq.q_or IS NOT NULL AND c.search_tsv @@ tq.q_or THEN 0.25 ELSE 0 END + 2 * GREATEST( ts_rank(c.search_tsv, COALESCE(tq.q_or, tq.q_and)), word_similarity($2, c.search_text) ) DESC NULLS LAST, c.priority DESC, c.hit_count DESC ) AS ord FROM cand c, tq ORDER BY ord LIMIT $3 ) SELECT t.id, t.heading, t.summary, t.voice_answer, t.content, t.source_id, t.source_version, t.updated_at, t.fts, t.sim, COALESCE((SELECT sum(a.idf) FROM authored_w a WHERE t.authored_tsv @@ plainto_tsquery('simple', a.lexeme)), 0) / NULLIF((SELECT sum(a.idf) FROM authored_w a), 0) AS coverage FROM top_k t ORDER BY t.ord",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Every read of the retrieval CTE chain binds n.tenant_id = $5 (the tenant passed in, refused when empty) and joins sources through s.tenant_id = n.tenant_id. The scanner refuses the WITH/CTE form. Exact reviewed operation: fetch; app/services/scripts/knowledge/retrieval.py:173.",
       "category": "reviewed_tenant_scoped"
     }
   ]
