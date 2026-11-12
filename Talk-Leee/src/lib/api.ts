@@ -375,17 +375,23 @@ class ApiClient {
      *
      * The backend decides which path it serves based on whether
      * `password` is in the body.
+     *
+     * `turnstileToken` is the Cloudflare Turnstile token (QA F4-12); the
+     * backend reads it from the body as `turnstile_token`.
      */
     async login(
         email: string,
         password?: string,
-        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean; turnstileToken?: string }
     ): Promise<LoginResponse> {
         const path = "/auth/login";
         const method = "POST" as const;
         const body: Record<string, string> = { email };
         if (password !== undefined) {
             body.password = password;
+        }
+        if (options?.turnstileToken) {
+            body.turnstile_token = options.turnstileToken;
         }
         const data = await this.client().request({
             path,
@@ -419,13 +425,23 @@ class ApiClient {
      * Two-step signup, step 1: send name/business/email; backend emails a 6-digit code.
      * No password, no plan_id — plan is hardcoded to "free" server-side.
      */
-    async signupStart(name: string, businessName: string, email: string): Promise<SignupStartResponse> {
+    async signupStart(
+        name: string,
+        businessName: string,
+        email: string,
+        turnstileToken?: string,
+    ): Promise<SignupStartResponse> {
         const path = "/auth/signup/start";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
-            body: { name, business_name: businessName, email },
+            body: {
+                name,
+                business_name: businessName,
+                email,
+                ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+            },
             timeoutMs: 12_000,
         });
         return this.parseOrThrow(SignupStartResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
