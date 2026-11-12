@@ -340,3 +340,12 @@ def test_delete_client_removes_only_the_callers_row():
 ])
 def test_response_models_still_accept_plain_strings(model, kwargs):
     assert model(**kwargs).id in {"meeting-123", "client-1"}
+
+
+@pytest.mark.parametrize("query", ["from_date=garbage", "to_date=2026-13-45", "from_date=12/11/2026"])
+def test_list_meetings_refuses_a_malformed_date_with_400(monkeypatch, query):
+    client = TestClient(_meetings_client(monkeypatch, _FakeDB(meetings=[])).app,
+                        raise_server_exceptions=False)
+    response = client.get(f"/meetings/?{query}")
+    assert response.status_code == 400, response.text
+    assert "YYYY-MM-DD" in response.text

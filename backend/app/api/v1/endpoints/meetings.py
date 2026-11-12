@@ -275,9 +275,12 @@ async def list_meetings(
     """
     service = get_meeting_service(db_client)
     
-    # Parse dates if provided
-    from_dt = datetime.strptime(from_date, "%Y-%m-%d") if from_date else None
-    to_dt = datetime.strptime(to_date, "%Y-%m-%d") if to_date else None
+    # Parse dates if provided; a malformed one is the caller's error, not a 500.
+    try:
+        from_dt = datetime.strptime(from_date, "%Y-%m-%d") if from_date else None
+        to_dt = datetime.strptime(to_date, "%Y-%m-%d") if to_date else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="from_date and to_date must be dates in YYYY-MM-DD form")
     
     meetings = await service.list_meetings(
         tenant_id=current_user.tenant_id,
