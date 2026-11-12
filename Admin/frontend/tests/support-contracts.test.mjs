@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-    isVersionConflict, validArticle, validArticles, validMetrics, validQueueItem, validQueuePage,
+    isRequestIdConflict, isVersionConflict, validArticle, validArticles, validMetrics, validQueueItem, validQueuePage,
     validStaffMessage, validTicketDetail, validUploadReceipt, SUPPORT_CATEGORIES, categoryLabel,
 } from '../src/lib/support-contracts.ts';
 import {
@@ -117,6 +117,14 @@ test('a 409 is a version conflict only with the backend code version_conflict (u
     assert.equal(isVersionConflict({ status: 409, code: 'INVALID_STATUS_TRANSITION' }), false);
     assert.equal(isVersionConflict({ status: 200, code: 'VERSION_CONFLICT' }), false);
     assert.equal(isVersionConflict(undefined), false);
+});
+
+test('a 409 is a reused request_id only with the backend code request_id_conflict, never the sign-in change or a stale version', () => {
+    assert.equal(isRequestIdConflict({ status: 409, code: 'REQUEST_ID_CONFLICT' }), true);
+    assert.equal(isRequestIdConflict({ status: 409, code: 'IDENTITY_CHANGED' }), false);
+    assert.equal(isRequestIdConflict({ status: 409, code: 'VERSION_CONFLICT' }), false);
+    assert.equal(isRequestIdConflict({ status: 200, code: 'REQUEST_ID_CONFLICT' }), false);
+    assert.equal(isRequestIdConflict(undefined), false);
 });
 
 test('queue filters: parse strictly, serialise stably, and a filter change drops the cursor', () => {

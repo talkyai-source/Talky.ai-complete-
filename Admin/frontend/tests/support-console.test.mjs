@@ -1,9 +1,10 @@
 // Support console pages through the real React renderer with a stubbed API:
 // role denial, the queue's honest gaps, the 409 reload path, a retry that
-// reuses its request_id, and metrics with null figures.
+// reuses its request_id, a request_id reused with other content (QA F2-09),
+// and metrics with null figures.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { C, api, el, act, state, render, response, find, text, click, button, settle } from './bh-harness.mjs';
+import { C, api, el, act, state, render, response, find, text, click, button, settle, setInput } from './bh-harness.mjs';
 
 const PLATFORM = { id: 'admin-A', email: 'a@example.invalid', name: 'Admin A', role: 'platform_admin', tenant_id: null };
 const TENANT_ADMIN = { ...PLATFORM, id: 'tenant-B', role: 'tenant_admin', tenant_id: 'tenant-uuid' };
@@ -144,6 +145,82 @@ test('a reply that fails is sent again with the same request_id, then clears on 
     assert.equal(sent[0].body.request_id, sent[1].body.request_id);
     assert.deepEqual(sent[1].body, { request_id: sent[0].body.request_id, body: 'Hello from staff', internal: false, attachment_ids: [] });
     assert.equal(find('#support-composer-body').value, '');
+});
+
+// The backend's rule (QA F2-09): a request_id reused with different content is a 409 and nothing is written.
+const conflictResponse = () => response({ error: { code: 'request_id_conflict', message: 'This request_id was already used with different content. Generate a new one.', details: null, request_id: 'r' } }, 409);
+const setTextarea = (node, value) => act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value').set.call(node, value);
+    node.dispatchEvent(new window.Event('input', { bubbles: true }));
+});
+
+test('a reply whose request_id was already used with other text shows a plain message, keeps the draft, and the next send gets a new request_id', async () => {
+    const seen = new Map();
+    let posts = 0;
+    state.support = (request) => {
+        if (request.method !== 'POST') return response(detail());
+        posts += 1;
+        const { request_id, ...content } = request.body;
+        const stored = seen.get(request_id);
+        if (stored === undefined) seen.set(request_id, JSON.stringify(content));
+        else if (stored !== JSON.stringify(content)) return conflictResponse();
+        // The first request is stored but its response is lost; every other accepted request answers 201.
+        if (posts === 1) return response({ detail: 'storage unavailable' }, 503);
+        return response({ id: 'm3', author_type: 'staff', author_name: 'Admin A', body: request.body.body, attachments: [], created_at: stamp, is_internal: request.body.internal }, 201);
+    };
+    await draw('/support/ticket-1', PLATFORM);
+    await setTextarea(find('#support-composer-body'), 'First version');
+    await click('Send reply');
+    assert.match(text(), /storage unavailable/);
+    // After an attempt the id is kept, so an edited text goes out under the same id and the server refuses it.
+    await setTextarea(find('#support-composer-body'), 'Second version');
+    await click('Send again (same request)');
+    assert.match(text(), /Your earlier version was already sent\. Refresh the ticket to see it\./);
+    assert.doesNotMatch(text(), /Generate a new one|request_id/, 'the raw server error is not shown');
+    assert.equal(find('#support-composer-body').value, 'Second version', 'the edited draft is kept');
+    assert.equal(button('Send reply').disabled, false, 'it is offered as a new reply, not as the same request');
+    await click('Send reply');
+    const sent = state.requests.filter((request) => request.method === 'POST');
+    assert.equal(sent.length, 3);
+    assert.equal(sent[1].body.request_id, sent[0].body.request_id, 'the edited send before the conflict reused the id');
+    assert.notEqual(sent[2].body.request_id, sent[0].body.request_id, 'the next send uses a new request_id');
+    assert.equal(sent[2].body.body, 'Second version');
+    assert.equal(find('#support-composer-body').value, '', 'the accepted reply clears the composer');
+    assert.doesNotMatch(text(), /already sent/);
+});
+
+test('creating an article: an unchanged retry keeps its request_id, an edited draft gets a new one', async () => {
+    const seen = new Map();
+    const row = (body) => ({ id: 'a9', slug: body.slug, title: body.title, section: '', body_md: body.body_md, category: body.category, source: 'staff',
+        published: body.published, url: `/support/articles/${body.slug}`, updated_by: 'admin-A', created_at: stamp, updated_at: stamp });
+    let posts = 0;
+    state.support = (request) => {
+        if (request.method !== 'POST') return response({ items: [] });
+        posts += 1;
+        const { request_id, ...content } = request.body;
+        const stored = seen.get(request_id);
+        if (stored === undefined) seen.set(request_id, JSON.stringify(content));
+        else if (stored !== JSON.stringify(content)) return conflictResponse();
+        return posts <= 2 ? response({ detail: 'storage unavailable' }, 503) : response(row(request.body), 201);
+    };
+    await draw('/support/articles', PLATFORM);
+    await click('New article');
+    await setInput(find('#support-article-slug'), 'refund-policy');
+    await setInput(find('#support-article-title'), 'Refund policy');
+    await setTextarea(find('#support-article-body'), 'Refunds take five days.');
+    await click('Create article');
+    assert.match(text(), /storage unavailable/);
+    await click('Create article');
+    // The draft changes after the failed attempts, so the server must not see it under the old id.
+    await setTextarea(find('#support-article-body'), 'Refunds take three days.');
+    await click('Create article');
+    const sent = state.requests.filter((request) => request.method === 'POST');
+    assert.equal(sent.length, 3);
+    assert.equal(sent[1].body.request_id, sent[0].body.request_id, 'an unchanged retry reuses the request_id');
+    assert.notEqual(sent[2].body.request_id, sent[0].body.request_id, 'an edited draft gets a new request_id');
+    assert.equal(sent[2].body.body_md, 'Refunds take three days.');
+    assert.match(text(), /Article "Refund policy" created\./);
+    assert.doesNotMatch(text(), /request_id|Retry sends the same request/);
 });
 
 test('the metrics card renders null figures as unavailable and a 7/30 toggle re-reads', async () => {

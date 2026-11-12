@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { api } from '../lib/api';
-import { SUPPORT_MAX_ATTACHMENTS, validStaffMessage, validUploadReceipt, type StaffMessage } from '../lib/support-contracts';
+import { SUPPORT_MAX_ATTACHMENTS, isRequestIdConflict, validStaffMessage, validUploadReceipt, type StaffMessage } from '../lib/support-contracts';
 import './SupportConsole.css';
 
 type FileRow = { key: string; name: string; status: 'uploading' | 'done' | 'failed'; attachmentId?: string; error?: string };
@@ -8,7 +8,10 @@ type FileRow = { key: string; name: string; status: 'uploading' | 'done' | 'fail
 /**
  * Reply or internal note with attachments. One request_id per draft: a
  * failed send is retried with the same id, so the server either replays the
- * stored result or finishes the first attempt; nothing is sent twice.
+ * stored result or finishes the first attempt; nothing is sent twice. When
+ * the draft was edited after an attempt the server refuses the old id (409):
+ * the earlier version was stored, so the text is kept and the next send is a
+ * new request.
  */
 export function SupportComposer({ ticketId, disabled, owns, onSent }: {
     ticketId: string; disabled: boolean; owns: () => boolean; onSent: (message: StaffMessage) => void;
@@ -53,6 +56,12 @@ export function SupportComposer({ ticketId, disabled, owns, onSent }: {
             });
             if (!owns()) return;
             if (response.error || !validStaffMessage(response.data)) {
+                if (isRequestIdConflict(response.error)) {
+                    requestId.current = null;
+                    setAttempted(false);
+                    setError('Your earlier version was already sent. Refresh the ticket to see it. Your draft is still here; sending it again posts it as a new message.');
+                    return;
+                }
                 setError(response.error?.message ?? 'The reply could not be confirmed. Send again to retry the same request.');
                 return;
             }

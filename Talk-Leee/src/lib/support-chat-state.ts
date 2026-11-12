@@ -1,10 +1,13 @@
-import type { BotMessage, Conversation, Escalation, ExistingTicket } from "@/lib/support-api";
+import type { BotMessage, Conversation, Escalation, ExistingTicket, PageContext } from "@/lib/support-api";
 
 /*
  * The support drawer's chat logic as a pure reducer. The component only
  * dispatches events and executes whatever `pending` write the state names;
  * every request_id is created by the caller and carried in the event, so a
- * retry re-executes the same pending write with the same id.
+ * retry re-executes the same pending write with the same id. What a write
+ * sends is carried the same way (the start's page context is read once, when
+ * the start is dispatched), because the server refuses a request_id reused
+ * with different content.
  *
  * idle → chatting → awaiting_feedback → drafting_ticket → submitting → submitted | failed
  */
@@ -14,7 +17,7 @@ export type ChatPhase = "idle" | "chatting" | "awaiting_feedback" | "drafting_ti
 export type ChatMessage = { id: string; role: "user" | "assistant"; content: string; sources: BotMessage["sources"]; createdAt: string };
 
 export type PendingWrite =
-    | { kind: "start"; requestId: string }
+    | { kind: "start"; requestId: string; pageContext: PageContext }
     | { kind: "message"; requestId: string; content: string }
     | { kind: "feedback"; requestId: string; solved: boolean }
     | { kind: "escalate"; requestId: string }
@@ -42,7 +45,7 @@ export type ChatState = {
 };
 
 export type ChatEvent =
-    | { type: "start"; requestId: string }
+    | { type: "start"; requestId: string; pageContext: PageContext }
     | { type: "started"; conversationId: string; greeting: string; suggestions: string[]; at: string }
     | { type: "resumed"; conversation: Conversation; suggestions: string[] }
     | { type: "send"; requestId: string; content: string; at: string }
@@ -86,7 +89,7 @@ export function chatReducer(state: ChatState, event: ChatEvent): ChatState {
     switch (event.type) {
         case "start":
             if (state.phase !== "idle") return state;
-            return { ...initialChatState, phase: "chatting", pending: { kind: "start", requestId: event.requestId } };
+            return { ...initialChatState, phase: "chatting", pending: { kind: "start", requestId: event.requestId, pageContext: event.pageContext } };
         case "started":
             return {
                 ...state, phase: "chatting", conversationId: event.conversationId, pending: null, error: null, resumePhase: null,
