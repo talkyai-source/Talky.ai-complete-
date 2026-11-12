@@ -375,7 +375,7 @@ async def list_recordings(
                          )
                    ) AS legal_hold
             FROM recordings_s3 r
-            LEFT JOIN calls c ON c.id = r.call_id
+            LEFT JOIN calls c ON c.id = r.call_id AND c.tenant_id = r.tenant_id
             WHERE {where}
             ORDER BY r.created_at DESC
             LIMIT ${idx} OFFSET ${idx+1}

@@ -461,8 +461,8 @@ async def _finalise_test_call(container, tenant_id, call_id, started_at) -> None
                       SET status = 'completed',
                           duration_seconds = $2,
                           ended_at = NOW()
-                    WHERE id = $1""",
-                uuid.UUID(str(call_id)), seconds,
+                    WHERE id = $1 AND tenant_id = $3""",
+                uuid.UUID(str(call_id)), seconds, uuid.UUID(str(tenant_id)),
             )
         logger.info("campaign_test_call_finalised call=%s seconds=%s (not billed)",
                     str(call_id)[:8], seconds)

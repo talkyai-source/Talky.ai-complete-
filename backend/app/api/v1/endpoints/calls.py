@@ -883,7 +883,8 @@ async def list_live_calls(
                c.called_did, c.admission_status, c.consent_status,
                c.processing_status, c.updated_at
         FROM   calls c
-        LEFT   JOIN campaigns camp ON camp.id = c.campaign_id
+        LEFT   JOIN campaigns camp
+               ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id
         WHERE  c.tenant_id = ${len(_LIVE_STATUSES) + 1}
           AND  c.is_test IS NOT TRUE
           AND  (
@@ -1011,7 +1012,8 @@ async def list_rejected_inbound_calls(
                    r.inbound_config_id,
                    r.assignment_id
             FROM inbound_rejections r
-            LEFT JOIN campaigns camp ON camp.id=r.campaign_id
+            LEFT JOIN campaigns camp
+              ON camp.id=r.campaign_id AND camp.tenant_id=r.tenant_id
             WHERE r.tenant_id=$1
               AND r.retention_until >= NOW()
 
@@ -1033,7 +1035,8 @@ async def list_rejected_inbound_calls(
                    NULL::uuid AS inbound_config_id,
                    c.assignment_id
             FROM calls c
-            LEFT JOIN campaigns camp ON camp.id=c.campaign_id
+            LEFT JOIN campaigns camp
+              ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id
             WHERE c.tenant_id=$1
               AND c.direction='inbound'
               AND (
@@ -1152,7 +1155,8 @@ async def list_call_issues(
                camp.name AS campaign_name, camp.status AS campaign_status,
                camp.calling_config AS calling_config
         FROM   dialer_jobs dj
-        LEFT   JOIN campaigns camp ON camp.id = dj.campaign_id
+        LEFT   JOIN campaigns camp
+               ON camp.id = dj.campaign_id AND camp.tenant_id = dj.tenant_id
         WHERE  dj.tenant_id = $1
           AND  dj.updated_at >= NOW() - make_interval(mins => $2)
           AND  dj.status NOT IN ('completed', 'goal_achieved')
@@ -1169,6 +1173,7 @@ async def list_call_issues(
           AND  NOT EXISTS (
                  SELECT 1 FROM calls c2
                  WHERE c2.lead_id = dj.lead_id
+                   AND c2.tenant_id = dj.tenant_id
                    AND c2.created_at > dj.updated_at
                )
           {where_campaign}

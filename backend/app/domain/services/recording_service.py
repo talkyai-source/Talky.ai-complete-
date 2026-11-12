@@ -977,14 +977,21 @@ class RecordingService:
         try:
             tenant_uuid = UUID(tenant_id)
         except (ValueError, AttributeError, TypeError):
-            tenant_uuid = None
+            # A lookup that cannot name its tenant must not search every
+            # tenant's calls, so there is nothing to resolve.
+            logger.warning(
+                "recording_call_id_unresolved call_id=%s — tenant id is not a UUID; "
+                "the external_call_uuid lookup is tenant-scoped and was not run",
+                call_id,
+            )
+            return None
 
         try:
             row = await conn.fetchrow(
                 """
                 SELECT id FROM calls
                 WHERE external_call_uuid = $1
-                  AND ($2::uuid IS NULL OR tenant_id = $2)
+                  AND tenant_id = $2
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
@@ -1110,10 +1117,11 @@ class RecordingService:
                     """
                     UPDATE calls
                     SET recording_url = $1, updated_at = NOW()
-                    WHERE id = $2
+                    WHERE id = $2 AND tenant_id = $3
                     """,
                     f"/api/v1/recordings/{recording_id}/stream",
                     UUID(call_id),
+                    UUID(tenant_id),
                 )
         except Exception as exc:
             logger.warning(f"Could not update calls.recording_url for {call_id}: {exc}")
