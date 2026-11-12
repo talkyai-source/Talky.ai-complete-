@@ -177,22 +177,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "06f96a76b75bb8b03a6bb28c3d7c93746bc54cf2e6a4b51b147c26cde2e8b456",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.reinstate_dispute",
-      "line": 539,
-      "method": "execute",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "UPDATE topup_orders SET status='paid', updated_at=NOW() WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "072f453268a3b6df1a120831603e16a3636b52fe3b4f7ed4d44ffe4847306ae6",
       "file": "app/services/scripts/knowledge/node_updates.py",
       "function": "write_node_update",
@@ -388,22 +372,6 @@
       "sql": "SET LOCAL lock_timeout = {Constant(value=5000)}; SELECT pg_advisory_xact_lock({Constant(value=7022629598040908648)}); SET LOCAL lock_timeout TO DEFAULT",
       "scoped": false,
       "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "131f2f16b6b2674faefa13d90ca70f595b966162372b6b7f85c83262ad996720",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.reinstate_dispute",
-      "line": 520,
-      "method": "fetchrow",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "SELECT id, tenant_id, minutes, status FROM topup_orders WHERE provider_payment_id=$1 FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -923,22 +891,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "2e650443cfab95741485c35856c6716e1b12ad210ee9c7e1ab9c9633f3c39b47",
-      "file": "app/domain/services/billing_state_events.py",
-      "function": "_apply_dispute",
-      "line": 510,
-      "method": "fetchrow",
-      "tables": [
-        "invoices"
-      ],
-      "sql": "SELECT tenant_id, stripe_subscription_id FROM invoices WHERE stripe_invoice_id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "2ea35a05b2c8e6827d981921eb06942de851eaaabdcb9dbf62e981652e75a44c",
       "file": "app/domain/services/support/bot/runner.py",
       "function": "_tool_loop",
@@ -1011,22 +963,6 @@
         "calls"
       ],
       "sql": "SELECT cl.metadata FROM call_legs cl JOIN calls c ON c.id = cl.call_id WHERE cl.call_id = $1 AND c.tenant_id = $2 AND cl.leg_type = 'pstn_outbound' ORDER BY cl.created_at ASC LIMIT 1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "346092b23a80d6469a1ab9b43475c1ee73e1225083885e8840c514a2adb190fe",
-      "file": "app/domain/services/billing_state_events.py",
-      "function": "_invoice_for_adjustment",
-      "line": 458,
-      "method": "fetchval",
-      "tables": [
-        "invoices"
-      ],
-      "sql": "SELECT id FROM invoices WHERE stripe_invoice_id=$1",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1243,38 +1179,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "3e9983ac2a7439603a9179ef038970c06ef783ccd0d181d8ba3493932070b0fe",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.credit_paid_order",
-      "line": 381,
-      "method": "execute",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "UPDATE topup_orders SET status='paid', paid_at=NOW(), updated_at=NOW(), provider_payment_id=COALESCE($2, provider_payment_id) WHERE id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3ed0ba96e146cf161d2f5eb7f69cc0d30701f5a994bbf837f452f0745097ea24",
-      "file": "app/domain/services/billing_state_events.py",
-      "function": "_binding",
-      "line": 114,
-      "method": "fetchrow",
-      "tables": [
-        "billing_checkout_attempts"
-      ],
-      "sql": "SELECT * FROM billing_checkout_attempts WHERE id=$1::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "3f2fba7dbcd84a0fc3eae9c8bcc49858e1276130d9fc5e302cc53ec68386561e",
       "file": "app/api/v1/endpoints/admin/users.py",
       "function": "_fetch_user",
@@ -1285,22 +1189,6 @@
         "user_profiles"
       ],
       "sql": "SELECT up.id, up.email, up.name, CASE WHEN up.role='platform_admin' THEN up.role ELSE COALESCE(r.name,up.role) END AS role, CASE WHEN NOT COALESCE(up.is_active,FALSE) OR NOT COALESCE(up.is_verified,FALSE) THEN NULL WHEN up.role='platform_admin' THEN 'platform_admin' WHEN tu.status='active' AND r.name IN ('partner_admin','tenant_admin','campaign_manager','user','agent','billing_user','readonly') THEN r.name ELSE NULL END AS effective_role, CASE WHEN up.role='platform_admin' THEN 'not_required' ELSE COALESCE(tu.status,'missing') END AS membership_status, up.tenant_id, t.business_name AS tenant_name, up.is_active, up.mfa_enabled, up.is_verified, up.last_login_at, up.created_at, up.admin_revision AS _profile_revision, tu.id AS _membership_id, tu.admin_revision AS _membership_revision FROM user_profiles up LEFT JOIN tenants t ON t.id = up.tenant_id LEFT JOIN tenant_users tu ON tu.user_id=up.id AND tu.tenant_id=up.tenant_id LEFT JOIN roles r ON r.id=tu.role_id WHERE up.id = $1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "3f50e1efc256e31fc0b3a2da1c07931fdd68e3c6f1d90bcb48635ec63a8c86f9",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.reverse",
-      "line": 442,
-      "method": "fetchrow",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "SELECT id, tenant_id, minutes, price_cents, currency, status FROM topup_orders WHERE ($2::text IS NOT NULL AND provider_session_id = $2 AND ($1::text IS NULL OR provider_payment_id = $1 OR provider_payment_id IS NULL)) OR ($2::text IS NULL AND $1::text IS NOT NULL AND provider_payment_id = $1) FOR UPDATE",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1433,22 +1321,6 @@
         "call_events"
       ],
       "sql": "INSERT INTO call_events ( id, call_id, event_type, source, event_data, created_at, talklee_call_id, leg_id, previous_state, new_state ) VALUES ( $1::uuid, $2::uuid, $3, $4, $5::jsonb, $6, $7, $8::uuid, $9, $10 )",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "440be749a4b2020b4a547c7a3d63d5c2b1c22eff8cbfef6d6f1acac85b1be330",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.reinstate_dispute",
-      "line": 526,
-      "method": "fetchval",
-      "tables": [
-        "billing_ledger"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='dispute')",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -1872,22 +1744,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": false,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "50e7306238039319c37098238c57637fa5df04926d47b41791501f8d2136c034",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.credit_paid_order",
-      "line": 277,
-      "method": "fetchrow",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "SELECT id, tenant_id, minutes, price_cents, currency, status FROM topup_orders WHERE provider_session_id = $1 FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2389,20 +2245,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "6782908b6555c71139dd57959454df92b502b59f04fc5dd6333162bd4208cec1",
-      "file": "app/domain/services/topup_usage.py",
-      "function": "_closed_windows",
-      "line": 85,
-      "method": "fetch",
-      "tables": [],
-      "sql": "SELECT to_char(w.start, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='w.start')], keywords=[])} AS precise_key, w.start, $1::timestamptz + make_interval(months => w.k + 1) AS end FROM (SELECT k, $1::timestamptz + make_interval(months => k) AS start FROM generate_series({Call(func=Name(id='allowance_window_index_sql', ctx=Load()), args=[Constant(value='$1::timestamptz'), Constant(value='GREATEST($2::timestamptz, $1::timestamptz)')], keywords=[])}, {Call(func=Name(id='allowance_window_index_sql', ctx=Load()), args=[Constant(value='$1::timestamptz'), Constant(value='NOW()')], keywords=[])} - 1) AS k) w ORDER BY w.k",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "6803a9d40cd46e432ec4b35a793353b4548dad545d30cf1f886d575946ac90e7",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reconcile_stale_reservations",
@@ -2417,22 +2259,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "68a331da83be559b2c3bef85256d546eddf52ea7a6971c01e2605c3f63c791d2",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.reverse",
-      "line": 462,
-      "method": "fetchval",
-      "tables": [
-        "billing_ledger"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind IN ('refund','dispute'))",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -2723,22 +2549,6 @@
       "scoped": false,
       "unresolved": false,
       "bypass": true,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "748c6880e7c5ba75f40279b635671acacabffc5157d01eef6986e225a1857608",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.credit_paid_order",
-      "line": 293,
-      "method": "fetchval",
-      "tables": [
-        "billing_ledger"
-      ],
-      "sql": "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='topup')",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
@@ -3049,38 +2859,6 @@
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required. Item19 review: only entry-point init_sentry import/call changed this module AST; SQL, parameters and existing debt classification are unchanged."
-    },
-    {
-      "id": "7d57110ee8cf98f1615cd92b7116bf0fc15e16a0ef33b2e55c0dc0c16f94187c",
-      "file": "app/domain/services/billing_state_events.py",
-      "function": "_apply_invoice",
-      "line": 269,
-      "method": "fetchrow",
-      "tables": [
-        "invoices"
-      ],
-      "sql": "SELECT tenant_id,stripe_subscription_id,status,notification_history_known FROM invoices WHERE stripe_invoice_id=$1 FOR UPDATE",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "7d606d341b03cdb36053e635fec24df9629a04fc650272a95deabd852e693292",
-      "file": "app/domain/services/billing_state_events.py",
-      "function": "_apply_checkout",
-      "line": 380,
-      "method": "fetchrow",
-      "tables": [
-        "billing_checkout_attempts"
-      ],
-      "sql": "SELECT * FROM billing_checkout_attempts WHERE id=$1::uuid",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
       "id": "7e1dfd5f1e4237de04fdba93b5018aa82b131d10afa25b808ee4ac018ad4ea71",
@@ -3548,20 +3326,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "916a97c5f38c881bd66b63a7dfdfd68ba3df559f8e40cad77948f6af9694f75b",
-      "file": "app/domain/services/topup_usage.py",
-      "function": "_closed_windows",
-      "line": 76,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT to_char(m, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='m')], keywords=[])} AS precise_key, m AS start, NOW() AS end FROM (SELECT date_trunc('month', NOW()) AS m) w",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "91d16ec16b836619df8acd328100104877a92fc3305cbb77a4442c69acb5ec5d",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "_settle_transfer_usage",
@@ -3871,20 +3635,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "9ec2a8e68baefd5f8fa029eba902fa7da772db1c7b964fd1b9713d5434a54a7d",
-      "file": "app/domain/services/topup_usage.py",
-      "function": "_closed_windows",
-      "line": 67,
-      "method": "fetch",
-      "tables": [],
-      "sql": "SELECT to_char(m, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='m')], keywords=[])} AS precise_key, m AS start, m + interval '1 month' AS end FROM generate_series(date_trunc('month', $1::timestamptz), date_trunc('month', NOW()) - interval '1 month', interval '1 month') AS m ORDER BY m",
-      "scoped": false,
-      "unresolved": true,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "9f491d87722f6bfca3cba0beb7b84160e09be4431aad130e5a7f80bf6637b8b4",
       "file": "app/domain/services/inbound_campaign_service.py",
       "function": "InboundCampaignService.create_reassignment_request",
@@ -4164,22 +3914,6 @@
         "campaign_knowledge_nodes"
       ],
       "sql": "INSERT INTO campaign_knowledge_nodes (campaign_id, tenant_id, source_id, parent_id, depth, path, position, heading, content, summary, voice_answer, keywords, example_questions, search_text, search_tsv) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, to_tsvector('english', $14)) RETURNING id",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "a68312705dca5ed8cbcc4e9608159420c6e689484446a22d97d1a1cf34e6bb31",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.credit_paid_order",
-      "line": 373,
-      "method": "execute",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "UPDATE tenants SET plan_id = $2 WHERE id = $1 AND plan_id IS NULL AND stripe_subscription_id IS NULL AND EXISTS (SELECT 1 FROM topup_orders o JOIN topup_packages p ON p.code = o.package_code WHERE o.id = $3 AND p.audience = $4)",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -5382,22 +5116,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "cc1d074d33dd76aca6fa051a800a51219d39483404c014525f49d68a5626f857",
-      "file": "app/domain/services/billing_state_events.py",
-      "function": "_binding",
-      "line": 106,
-      "method": "fetchrow",
-      "tables": [
-        "subscriptions"
-      ],
-      "sql": "SELECT * FROM subscriptions WHERE stripe_subscription_id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "cd450245381760b8ab62dc2fda8bd6164cc72b0151201f603b6df43c9ae26cd8",
       "file": "app/domain/services/telephony/inbound_admission.py",
       "function": "InboundAdmissionService.reverse_finalized_usage",
@@ -5705,20 +5423,6 @@
       "sql": "SELECT * FROM tenant_secrets WHERE secret_id = $1 AND ($2::uuid IS NULL OR tenant_id = $2)",
       "scoped": false,
       "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "dbdb7256ffd27d5ed7c172d7f926775ca113e8f9ea64bfe3a409a168772e9b68",
-      "file": "app/domain/services/topup_usage.py",
-      "function": "_closed_windows",
-      "line": 93,
-      "method": "fetchrow",
-      "tables": [],
-      "sql": "SELECT to_char(s, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='s')], keywords=[])} AS precise_key, s AS start, NOW() AS end FROM (SELECT $1::timestamptz + make_interval(months => {Call(func=Name(id='allowance_window_index_sql', ctx=Load()), args=[Constant(value='$1::timestamptz'), Constant(value='NOW()')], keywords=[])}) AS s) w",
-      "scoped": false,
-      "unresolved": true,
       "bypass": null,
       "count": 1,
       "reason": "Existing unresolved debt; tenant-scoping review required."
@@ -6103,22 +5807,6 @@
       "reason": "Existing unresolved debt; tenant-scoping review required."
     },
     {
-      "id": "f1578b904607837d8693d5744dcd4c86b074765ebae1de7d46ca34cdb72c7389",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.reverse",
-      "line": 500,
-      "method": "execute",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "UPDATE topup_orders SET status=$2, updated_at=NOW() WHERE id=$1",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
       "id": "f16b0d01dc0110cae2a9152131a23aeab6bc4b9445700cf9e221960bf5043a53",
       "file": "app/domain/services/telephony/inbound_transfer.py",
       "function": "finalize_connected_inbound_transfers",
@@ -6406,22 +6094,6 @@
         "calls"
       ],
       "sql": "WITH scoped_calls AS ( SELECT id, created_at, answered_at, status FROM calls WHERE created_at >= $1::timestamptz AND NOT is_test AND direction = 'inbound' AND tenant_id = $2::uuid AND called_did = ('+' || $3) AND COALESCE( route_snapshot #>> '{inbound_config,id}', route_snapshot #>> '{route,config_id}' ) = $4 ), counts AS ( SELECT COUNT(DISTINCT id)::int AS setup_attempts, COUNT(DISTINCT id) FILTER ( WHERE answered_at IS NOT NULL OR status IN ('answered', 'completed', 'in_progress') )::int AS setup_successes, COALESCE(EXTRACT(EPOCH FROM MAX(created_at)), 0)::float8 AS latest_call_timestamp_seconds FROM scoped_calls ), answer_latencies AS ( SELECT EXTRACT(EPOCH FROM (answered_at - created_at))::float8 AS latency_seconds FROM scoped_calls WHERE answered_at IS NOT NULL AND answered_at >= created_at ), latency_stats AS ( SELECT COALESCE(percentile_cont(0.50) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p50_seconds, COALESCE(percentile_cont(0.95) WITHIN GROUP (ORDER BY latency_seconds), 0)::float8 AS p95_seconds, COALESCE(MAX(latency_seconds), 0)::float8 AS max_seconds FROM answer_latencies ) SELECT counts.setup_attempts, counts.setup_successes, counts.latest_call_timestamp_seconds, latency_stats.p50_seconds, latency_stats.p95_seconds, latency_stats.max_seconds FROM counts CROSS JOIN latency_stats",
-      "scoped": false,
-      "unresolved": false,
-      "bypass": null,
-      "count": 1,
-      "reason": "Existing unresolved debt; tenant-scoping review required."
-    },
-    {
-      "id": "fd83ea8c34c468312d1cdb2e46aa9c8caf62a259a85ee7ae118825226135a6a0",
-      "file": "app/domain/services/topup_service.py",
-      "function": "TopupService.mark_failed",
-      "line": 404,
-      "method": "execute",
-      "tables": [
-        "topup_orders"
-      ],
-      "sql": "UPDATE topup_orders SET status=$2, updated_at=NOW() WHERE provider_session_id = $1 AND status = 'pending'",
       "scoped": false,
       "unresolved": false,
       "bypass": null,
@@ -12176,6 +11848,236 @@
       "count": 1,
       "reason": "The INSERT ... SELECT writes the call's own tenant as $1 on a connection acquired for that tenant, and ON CONFLICT (tenant_id, window_start) limits the update to that tenant's snapshot row; the scanner only proves plain VALUES inserts.",
       "category": "reviewed_tenant_scoped"
+    },
+    {
+      "id": "50e7306238039319c37098238c57637fa5df04926d47b41791501f8d2136c034",
+      "file": "app/domain/services/topup_service.py",
+      "function": "TopupService.credit_paid_order",
+      "line": 277,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT id, tenant_id, minutes, price_cents, currency, status FROM topup_orders WHERE provider_session_id = $1 FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "TopupService names a paid checkout only by the provider's unique checkout-session id (idx_topup_orders_session) and takes no tenant, so this lookup is the step that establishes the order's tenant; every later statement in credit_paid_order binds the tenant read here, and its only caller, billing_topup_events.apply_topup_event, runs inside the receipt transaction of a signature-verified Stripe event after matching session, order and tenant metadata. Exact reviewed operation: fetchrow; app/domain/services/topup_service.py:277.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "fd83ea8c34c468312d1cdb2e46aa9c8caf62a259a85ee7ae118825226135a6a0",
+      "file": "app/domain/services/topup_service.py",
+      "function": "TopupService.mark_failed",
+      "line": 409,
+      "method": "execute",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "UPDATE topup_orders SET status=$2, updated_at=NOW() WHERE provider_session_id = $1 AND status = 'pending'",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "A checkout-expired or async-payment-failed event is recorded by the provider's unique checkout-session id alone, because mark_failed takes no tenant; its only caller, billing_topup_events.apply_topup_event, has already locked that order and matched session, order and tenant metadata inside the receipt transaction of a signature-verified Stripe event, and the write only moves a still-pending order to a terminal failure state. Exact reviewed operation: execute; app/domain/services/topup_service.py:409.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "3f50e1efc256e31fc0b3a2da1c07931fdd68e3c6f1d90bcb48635ec63a8c86f9",
+      "file": "app/domain/services/topup_service.py",
+      "function": "TopupService.reverse",
+      "line": 447,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT id, tenant_id, minutes, price_cents, currency, status FROM topup_orders WHERE ($2::text IS NOT NULL AND provider_session_id = $2 AND ($1::text IS NULL OR provider_payment_id = $1 OR provider_payment_id IS NULL)) OR ($2::text IS NULL AND $1::text IS NOT NULL AND provider_payment_id = $1) FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "A refund or dispute event is applied by the provider's payment and checkout-session ids, because reverse takes no tenant, so this lookup establishes the paid order's tenant; every later statement in reverse binds the tenant read here, and its only caller, billing_topup_events.apply_topup_event, passes identifiers already matched to the locked order and tenant inside the receipt transaction of a signature-verified Stripe event. Exact reviewed operation: fetchrow; app/domain/services/topup_service.py:447.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "131f2f16b6b2674faefa13d90ca70f595b966162372b6b7f85c83262ad996720",
+      "file": "app/domain/services/topup_service.py",
+      "function": "TopupService.reinstate_dispute",
+      "line": 528,
+      "method": "fetchrow",
+      "tables": [
+        "topup_orders"
+      ],
+      "sql": "SELECT id, tenant_id, minutes, status FROM topup_orders WHERE provider_payment_id=$1 FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "A charge.dispute.closed event reaches reinstate_dispute from _apply_dispute knowing only the provider's payment id, before any tenant is resolved, so this lookup is how a won top-up dispute finds its order and tenant; every later statement binds the tenant read here, inside the receipt transaction of a signature-verified Stripe event. Exact reviewed operation: fetchrow; app/domain/services/topup_service.py:528.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "cc1d074d33dd76aca6fa051a800a51219d39483404c014525f49d68a5626f857",
+      "file": "app/domain/services/billing_state_events.py",
+      "function": "_binding",
+      "line": 106,
+      "method": "fetchrow",
+      "tables": [
+        "subscriptions"
+      ],
+      "sql": "SELECT * FROM subscriptions WHERE stripe_subscription_id=$1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Subscription events carry only Stripe's globally unique subscription id, so this read of the recorded binding is how the owning tenant is found for renewal and lifecycle events; _binding then refuses any customer, tenant or checkout metadata that disagrees with the stored row (stored_subscription_binding_mismatch) before a write, inside the receipt transaction of a signature-verified Stripe event. Exact reviewed operation: fetchrow; app/domain/services/billing_state_events.py:106.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "3ed0ba96e146cf161d2f5eb7f69cc0d30701f5a994bbf837f452f0745097ea24",
+      "file": "app/domain/services/billing_state_events.py",
+      "function": "_binding",
+      "line": 114,
+      "method": "fetchrow",
+      "tables": [
+        "billing_checkout_attempts"
+      ],
+      "sql": "SELECT * FROM billing_checkout_attempts WHERE id=$1::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The checkout-attempt UUID in the provider's subscription metadata identifies the purchase before its tenant is known, so this read discovers the owning tenant; _binding then requires the attempt's customer, tenant and price option to equal the Stripe-retrieved subscription (purchase_binding_mismatch) and locks the tenant row before any write, inside the receipt transaction of a signature-verified Stripe event. Exact reviewed operation: fetchrow; app/domain/services/billing_state_events.py:114.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "7d606d341b03cdb36053e635fec24df9629a04fc650272a95deabd852e693292",
+      "file": "app/domain/services/billing_state_events.py",
+      "function": "_apply_checkout",
+      "line": 385,
+      "method": "fetchrow",
+      "tables": [
+        "billing_checkout_attempts"
+      ],
+      "sql": "SELECT * FROM billing_checkout_attempts WHERE id=$1::uuid",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "The checkout-attempt UUID in the provider's checkout-session metadata identifies the purchase before its tenant is known, so this read discovers the owning tenant; CheckoutAttempts.check_session then requires the Stripe-retrieved session's customer, client reference and tenant metadata to match the row (session_mismatch) before any write, inside the receipt transaction of a signature-verified Stripe event. Exact reviewed operation: fetchrow; app/domain/services/billing_state_events.py:385.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "7d57110ee8cf98f1615cd92b7116bf0fc15e16a0ef33b2e55c0dc0c16f94187c",
+      "file": "app/domain/services/billing_state_events.py",
+      "function": "_apply_invoice",
+      "line": 274,
+      "method": "fetchrow",
+      "tables": [
+        "invoices"
+      ],
+      "sql": "SELECT tenant_id,stripe_subscription_id,status,notification_history_known FROM invoices WHERE stripe_invoice_id=$1 FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "Invoice ownership verification must see a row for this globally unique stripe_invoice_id in any tenant, so an invoice already bound to another tenant or subscription is refused (invoice_binding_conflict) before provider snapshots or subscription writes; a tenant predicate would hide exactly that conflict until the upsert guard, and the row lock stops concurrent receipts re-binding it. Exact reviewed operation: fetchrow; app/domain/services/billing_state_events.py:274.",
+      "category": "system_uniqueness"
+    },
+    {
+      "id": "346092b23a80d6469a1ab9b43475c1ee73e1225083885e8840c514a2adb190fe",
+      "file": "app/domain/services/billing_state_events.py",
+      "function": "_invoice_for_adjustment",
+      "line": 463,
+      "method": "fetchval",
+      "tables": [
+        "invoices"
+      ],
+      "sql": "SELECT id FROM invoices WHERE stripe_invoice_id=$1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "A refund, credit-note or charge event reaches this existence probe knowing only Stripe's globally unique invoice id, before any tenant is resolved; it reads only the recorded invoice's id, and the caller then re-reads the provider invoice, checks its customer (invoice_adjustment_customer_mismatch) and resolves the tenant through _binding, inside the receipt transaction of a signature-verified Stripe event. Exact reviewed operation: fetchval; app/domain/services/billing_state_events.py:463.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "2e650443cfab95741485c35856c6716e1b12ad210ee9c7e1ab9c9633f3c39b47",
+      "file": "app/domain/services/billing_state_events.py",
+      "function": "_apply_dispute",
+      "line": 515,
+      "method": "fetchrow",
+      "tables": [
+        "invoices"
+      ],
+      "sql": "SELECT tenant_id, stripe_subscription_id FROM invoices WHERE stripe_invoice_id=$1",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": null,
+      "count": 1,
+      "reason": "A dispute event has no tenant until the disputed charge's invoice is found, so this read of the invoice by its globally unique Stripe id is how the subscription and tenant are discovered; every later subscription and tenant statement in _apply_dispute binds that tenant, inside the receipt transaction of a signature-verified Stripe event. Exact reviewed operation: fetchrow; app/domain/services/billing_state_events.py:515.",
+      "category": "system_discovery"
+    },
+    {
+      "id": "9ec2a8e68baefd5f8fa029eba902fa7da772db1c7b964fd1b9713d5434a54a7d",
+      "file": "app/domain/services/topup_usage.py",
+      "function": "_closed_windows",
+      "line": 67,
+      "method": "fetch",
+      "tables": [],
+      "sql": "SELECT to_char(m, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='m')], keywords=[])} AS precise_key, m AS start, m + interval '1 month' AS end FROM generate_series(date_trunc('month', $1::timestamptz), date_trunc('month', NOW()) - interval '1 month', interval '1 month') AS m ORDER BY m",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Calendar-month window list built by generate_series over the bound first-ledger timestamp and NOW(); it reads no table and no tenant row, and the scanner counts it only because its SQL is assembled from the _PRECISE_KEY_SQL fragment. Exact reviewed operation: fetch; app/domain/services/topup_usage.py:67.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "916a97c5f38c881bd66b63a7dfdfd68ba3df559f8e40cad77948f6af9694f75b",
+      "file": "app/domain/services/topup_usage.py",
+      "function": "_closed_windows",
+      "line": 76,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT to_char(m, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='m')], keywords=[])} AS precise_key, m AS start, NOW() AS end FROM (SELECT date_trunc('month', NOW()) AS m) w",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Current calendar-month window from date_trunc('month', NOW()); it reads no table and no tenant row, and the scanner counts it only because its SQL is assembled from the _PRECISE_KEY_SQL fragment. Exact reviewed operation: fetchrow; app/domain/services/topup_usage.py:76.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "6782908b6555c71139dd57959454df92b502b59f04fc5dd6333162bd4208cec1",
+      "file": "app/domain/services/topup_usage.py",
+      "function": "_closed_windows",
+      "line": 85,
+      "method": "fetch",
+      "tables": [],
+      "sql": "SELECT to_char(w.start, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='w.start')], keywords=[])} AS precise_key, w.start, $1::timestamptz + make_interval(months => w.k + 1) AS end FROM (SELECT k, $1::timestamptz + make_interval(months => k) AS start FROM generate_series({Call(func=Name(id='allowance_window_index_sql', ctx=Load()), args=[Constant(value='$1::timestamptz'), Constant(value='GREATEST($2::timestamptz, $1::timestamptz)')], keywords=[])}, {Call(func=Name(id='allowance_window_index_sql', ctx=Load()), args=[Constant(value='$1::timestamptz'), Constant(value='NOW()')], keywords=[])} - 1) AS k) w ORDER BY w.k",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Anchored allowance-window list built by generate_series over the bound anchor and first-ledger timestamps; its SQL is assembled from _PRECISE_KEY_SQL and minutes_quota.allowance_window_index_sql (pure date arithmetic), and it reads no table and no tenant row. Exact reviewed operation: fetch; app/domain/services/topup_usage.py:85.",
+      "category": "individually_reviewed"
+    },
+    {
+      "id": "dbdb7256ffd27d5ed7c172d7f926775ca113e8f9ea64bfe3a409a168772e9b68",
+      "file": "app/domain/services/topup_usage.py",
+      "function": "_closed_windows",
+      "line": 93,
+      "method": "fetchrow",
+      "tables": [],
+      "sql": "SELECT to_char(s, 'YYYY-MM-DD') AS key, {Call(func=Attribute(value=Name(id='_PRECISE_KEY_SQL', ctx=Load()), attr='format', ctx=Load()), args=[Constant(value='s')], keywords=[])} AS precise_key, s AS start, NOW() AS end FROM (SELECT $1::timestamptz + make_interval(months => {Call(func=Name(id='allowance_window_index_sql', ctx=Load()), args=[Constant(value='$1::timestamptz'), Constant(value='NOW()')], keywords=[])}) AS s) w",
+      "scoped": false,
+      "unresolved": true,
+      "bypass": null,
+      "count": 1,
+      "reason": "Current anchored allowance window computed from the bound anchor and NOW(); its SQL is assembled from _PRECISE_KEY_SQL and minutes_quota.allowance_window_index_sql (pure date arithmetic), and it reads no table and no tenant row. Exact reviewed operation: fetchrow; app/domain/services/topup_usage.py:93.",
+      "category": "individually_reviewed"
     }
   ]
 }
