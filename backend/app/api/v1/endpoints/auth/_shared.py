@@ -24,6 +24,7 @@ from datetime import timedelta
 from app.core.api_security_middleware import resolve_client_ip
 from app.core.config import get_settings
 from app.core.jwt_security import ACCESS_TOKEN_TTL_MINUTES, encode_access_token
+from app.core.rate_limit_storage import limiter_storage
 from app.core.security.cookies import (
     REFRESH_COOKIE_NAME,
     clear_auth_cookies,
@@ -59,7 +60,20 @@ def _real_client_ip(request: "Request") -> str:
     return resolve_client_ip(request)
 
 
-limiter = Limiter(key_func=_real_client_ip)
+def _build_limiter() -> Limiter:
+    """Production counts live in Redis, shared by every API process and
+    server; a Redis outage falls back to per-process counts instead of
+    failing sign-in."""
+    storage_uri, storage_options = limiter_storage()
+    return Limiter(
+        key_func=_real_client_ip,
+        storage_uri=storage_uri,
+        storage_options=storage_options,
+        in_memory_fallback_enabled=storage_uri is not None,
+    )
+
+
+limiter = _build_limiter()
 
 # `get_remote_address` import retained for backwards compatibility with
 # any test that imports it from this module's namespace; safe to remove
