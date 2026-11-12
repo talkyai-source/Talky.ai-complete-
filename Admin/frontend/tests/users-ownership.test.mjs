@@ -76,6 +76,9 @@ test('rapid block clicks dispatch only one mutation and late old-session result 
     await draw();
     const control = find('[aria-label="Block one@example.invalid"]');
     await act(async () => { control.click(); control.click(); });
+    assert.equal(state.requests.filter((r) => r.method !== 'GET').length, 0, 'Block only asks for confirmation (QA F1-33)');
+    const confirm = button('Confirm');
+    await act(async () => { confirm.click(); confirm.click(); });
     assert.equal(state.requests.filter((r) => r.method === 'PATCH').length, 1);
     await act(async () => api.setToken('different-session'));
     await act(async () => pending.resolve(response({ ...user(), is_active: false })));
@@ -84,7 +87,7 @@ test('rapid block clicks dispatch only one mutation and late old-session result 
 
 test('failed mutation remains visible through a successful list reload', async () => {
     state.route = (r) => r.method === 'PATCH' ? response({ detail: 'Current authority changed' }, 409) : ordinary(r);
-    await draw(); await ariaClick('Block one@example.invalid'); await click('Refresh');
+    await draw(); await ariaClick('Block one@example.invalid'); await click('Confirm'); await click('Refresh');
     assert.match(find('[role="alert"]').textContent, /Current authority changed/);
 });
 
