@@ -130,7 +130,9 @@ async def test_correct_key_preserves_success_audit_and_access_tracking():
     assert len(conn.committed) == 2
     update, audit = conn.committed
     assert "access_count = access_count + 1" in update[0]
-    assert update[1] == (accessor, conn.row["secret_id"])
+    # F2-03: the write names the tenant of the row just read, not the id alone.
+    assert "tenant_id IS NOT DISTINCT FROM $3" in update[0]
+    assert update[1] == (accessor, conn.row["secret_id"], conn.row["tenant_id"])
     assert audit[0].startswith("INSERT INTO secret_access_log")
     assert audit[1] == (
         conn.row["secret_id"], conn.row["tenant_id"], accessor, "read", "Recovery drill", True,
