@@ -302,7 +302,7 @@ async def create_topup_checkout(
             minutes=order["minutes"],
             price_cents=order["price_cents"],
             currency=order["currency"],
-            product_name=f"Talky.ai — {order['name']}",
+            product_name=f"Talk-Lee — {order['name']}",
             success_url=success_url,
             cancel_url=cancel_url,
             business_name=getattr(current_user, "business_name", None),
