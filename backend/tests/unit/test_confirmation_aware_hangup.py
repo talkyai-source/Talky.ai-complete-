@@ -291,9 +291,10 @@ async def test_load_active_provider_leg_ids_uses_durable_parent_lookup(monkeypat
     captured: dict[str, object] = {}
 
     class Conn:
-        async def fetch(self, query, call_reference):
+        async def fetch(self, query, call_reference, sql_tenant_id):
             captured["query"] = query
             captured["call_reference"] = call_reference
+            captured["sql_tenant_id"] = sql_tenant_id
             return [
                 {"provider_leg_id": "parent", "provider": "asterisk"},
                 {"provider_leg_id": "talky-xfer-a", "provider": "asterisk"},
@@ -321,6 +322,9 @@ async def test_load_active_provider_leg_ids_uses_durable_parent_lookup(monkeypat
     assert captured["pool"] is pool
     assert captured["call_reference"] == "durable-call-id"
     assert captured["tenant_id"] == "00000000-0000-0000-0000-000000000001"
+    # F2-03: the caller's tenant is bound in the query itself, not only in the RLS scope.
+    assert captured["sql_tenant_id"] == "00000000-0000-0000-0000-000000000001"
+    assert "c.tenant_id=$2::uuid" in str(captured["query"])
     assert "c.id::text=$1" in str(captured["query"])
     assert "c.provider_call_id=$1" in str(captured["query"])
     assert "c.external_call_uuid=$1" in str(captured["query"])
@@ -332,9 +336,12 @@ async def test_termination_context_fences_before_snapshotting_linked_legs(monkey
     events: list[str] = []
 
     class Conn:
-        async def fetchrow(self, query, call_reference):
+        async def fetchrow(self, query, call_reference, caller_tenant):
             assert "FOR UPDATE" in query
             assert call_reference == "durable-call"
+            # F2-03: a tenant-scoped caller's tenant is part of the lock's predicate.
+            assert caller_tenant == "00000000-0000-0000-0000-000000000001"
+            assert "tenant_id=$2::uuid" in query
             events.append("lock")
             return {
                 "call_id": "00000000-0000-0000-0000-000000000010",
@@ -349,6 +356,9 @@ async def test_termination_context_fences_before_snapshotting_linked_legs(monkey
 
         async def execute(self, query, *_args):
             assert "status='termination_pending'" in query
+            # F2-03: the fence names the tenant of the row it just locked.
+            assert "tenant_id=$3::uuid" in query
+            assert _args[2] == "00000000-0000-0000-0000-000000000001"
             events.append("fence")
 
         async def fetch(self, query, *_args):
@@ -534,7 +544,8 @@ async def test_persisted_terminal_duration_requires_new_provider_proof(
             assert "answered_at IS NOT NULL" not in normalized
             assert "provider_terminated_at IS NOT NULL" not in normalized
             assert "NOW()" not in normalized
-            assert args == ("durable-parent", "provider-parent")
+            # F2-03: the caller's tenant is bound in the query (third slot).
+            assert args == ("durable-parent", "provider-parent", "tenant-1")
             return {
                 "answered_at": datetime(2026, 9, 2, 12, 0, tzinfo=timezone.utc),
                 "provider_terminated_at": terminated_at,
@@ -579,7 +590,8 @@ async def test_persisted_terminal_duration_marks_inflight_answer_as_ambiguous(
             assert "answered_at IS NOT NULL" not in normalized
             assert "provider_terminated_at IS NOT NULL" not in normalized
             assert "NOW()" not in normalized
-            assert args == ("durable-parent", "provider-parent")
+            # F2-03: the caller's tenant is bound in the query (third slot).
+            assert args == ("durable-parent", "provider-parent", "tenant-1")
             return {
                 "answered_at": None,
                 "provider_terminated_at": datetime(

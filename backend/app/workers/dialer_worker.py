@@ -529,7 +529,9 @@ class DialerWorker:
             # client enabled the "call anytime" override we skip the window
             # gate entirely — the UI still warns, but we never block.
             tenant_rules = await self._get_tenant_rules(job.tenant_id)
-            campaign_cfg = await self._get_campaign_calling_config(job.campaign_id)
+            campaign_cfg = await self._get_campaign_calling_config(
+                job.campaign_id, job.tenant_id
+            )
             from app.domain.services.dialer.campaign_schedule import (
                 effective_rules,
                 schedule_ignored,
@@ -539,7 +541,9 @@ class DialerWorker:
             ignore_schedule = schedule_ignored(campaign_cfg)
 
             # 2. Get lead info for cooldown check
-            lead_last_called = await self._get_lead_last_called(job.lead_id)
+            lead_last_called = await self._get_lead_last_called(
+                job.lead_id, job.tenant_id
+            )
 
             # 2b. COMPLIANCE: the calling window is evaluated in the LEAD's
             # timezone, not the account owner's. `can_make_call` has always
@@ -556,7 +560,9 @@ class DialerWorker:
             )
 
             lead_tz = resolve_effective_lead_timezone(
-                explicit_timezone=await self._get_lead_timezone(job.lead_id),
+                explicit_timezone=await self._get_lead_timezone(
+                    job.lead_id, job.tenant_id
+                ),
                 phone_number=job.phone_number,
             )
 
@@ -573,7 +579,9 @@ class DialerWorker:
             # Repeat-dial cap (QA F12-05): dials to this lead's number in the
             # last 24 hours across all the tenant's campaigns. Always counted,
             # since the platform cap applies when the tenant set none.
-            lead_attempts_today = await self._get_lead_attempts_today(job.lead_id)
+            lead_attempts_today = await self._get_lead_attempts_today(
+                job.lead_id, job.tenant_id
+            )
 
             can_call, reason = await self.rules_engine.can_make_call(
                 tenant_id=job.tenant_id,
@@ -818,7 +826,9 @@ class DialerWorker:
             # batch_size); 0 disables the gate (unbounded, legacy behaviour).
             batch_size = self._resolve_batch_size(campaign_cfg)
             if batch_size > 0:
-                inflight = await self._campaign_inflight_calls(job.campaign_id)
+                inflight = await self._campaign_inflight_calls(
+                    job.campaign_id, job.tenant_id
+                )
                 if inflight >= batch_size:
                     logger.debug(
                         "batch_gate: campaign %s at capacity (%d/%d in flight) — "
@@ -2192,16 +2202,24 @@ class DialerWorker:
 
         return CallingRules.default()
 
-    async def _get_campaign_calling_config(self, campaign_id: str) -> Optional[dict]:
+    async def _get_campaign_calling_config(
+        self, campaign_id: str, tenant_id: str
+    ) -> Optional[dict]:
         """Load a campaign's per-campaign calling schedule (timezone, window,
         days, ignore_schedule override). Returns None when unset so the
         worker falls back to tenant defaults; a FAILED query raises
-        ``ComplianceLookupUnavailable`` (the schedule overlay is a gate)."""
+        ``ComplianceLookupUnavailable`` (the schedule overlay is a gate).
+
+        The worker's connection bypasses RLS, so the job's tenant is part of
+        the predicate: another tenant's campaign id reads as no config.
+        """
         try:
             async with self._acquire_db() as conn:
                 cfg = await conn.fetchval(
-                    "SELECT calling_config FROM campaigns WHERE id = $1",
+                    "SELECT calling_config FROM campaigns "
+                    "WHERE id = $1 AND tenant_id = $2::uuid",
                     campaign_id,
+                    tenant_id,
                 )
         except Exception as e:
             logger.warning(f"Failed to load campaign calling_config for {campaign_id}: {e}")
@@ -2233,7 +2251,7 @@ class DialerWorker:
                     pass
         return max(0, default)
 
-    async def _campaign_inflight_calls(self, campaign_id: str) -> int:
+    async def _campaign_inflight_calls(self, campaign_id: str, tenant_id: str) -> int:
         """Count calls currently IN FLIGHT for a campaign — those still holding
         a batch slot (dialing / ringing / answered / in_call / initiated).
         Terminal states (ended / completed / failed) have freed their slot.
@@ -2257,6 +2275,7 @@ class DialerWorker:
                     """
                     SELECT count(*) FROM calls
                      WHERE campaign_id = $1
+                       AND tenant_id = $3::uuid
                        AND (
                               status IN ('answered', 'in_call')
                            OR (
@@ -2271,6 +2290,7 @@ class DialerWorker:
                     """,
                     campaign_id,
                     max_age,
+                    tenant_id,
                 )
             return int(val or 0)
         except Exception as exc:
@@ -2380,22 +2400,26 @@ class DialerWorker:
             )
             return None
 
-    async def _get_lead_last_called(self, lead_id: str) -> Optional[datetime]:
-        """Get the last time a lead was called.
+    async def _get_lead_last_called(self, lead_id: str, tenant_id: str) -> Optional[datetime]:
+        """Get the last time a lead (of the job's tenant) was called.
 
         NULL means never called; a FAILED query raises
         ``ComplianceLookupUnavailable`` (None here would skip the cooldown).
         """
         try:
             async with self._acquire_db() as conn:
-                val = await conn.fetchval("SELECT last_called_at FROM leads WHERE id = $1", lead_id)
+                val = await conn.fetchval(
+                    "SELECT last_called_at FROM leads WHERE id = $1 AND tenant_id = $2::uuid",
+                    lead_id,
+                    tenant_id,
+                )
                 return val  # asyncpg returns appropriate datetime object
 
         except Exception as e:
             logger.warning(f"Failed to get lead last_called_at: {e}")
             raise ComplianceLookupUnavailable("lead last_called_at unavailable") from e
 
-    async def _get_lead_timezone(self, lead_id: str) -> Optional[str]:
+    async def _get_lead_timezone(self, lead_id: str, tenant_id: str) -> Optional[str]:
         """Read the customer-supplied per-lead IANA timezone.
 
         ``leads.timezone`` (migration 0020, captured by CSV import and the
@@ -2414,7 +2438,11 @@ class DialerWorker:
         """
         try:
             async with self._acquire_db() as conn:
-                return await conn.fetchval("SELECT timezone FROM leads WHERE id = $1", lead_id)
+                return await conn.fetchval(
+                    "SELECT timezone FROM leads WHERE id = $1 AND tenant_id = $2::uuid",
+                    lead_id,
+                    tenant_id,
+                )
         except asyncpg.UndefinedColumnError as e:
             logger.warning(f"Failed to get lead timezone (column absent): {e}")
         except (
@@ -2429,9 +2457,10 @@ class DialerWorker:
             logger.warning(f"Failed to get lead timezone: {e}")
         return None
 
-    async def _get_lead_attempts_today(self, lead_id: str) -> int:
+    async def _get_lead_attempts_today(self, lead_id: str, tenant_id: str) -> int:
         """Count dials to this lead's number in the last 24 hours, across all
-        of the lead's tenant's campaigns (QA F12-05).
+        of the lead's tenant's campaigns (QA F12-05). The lead is looked up
+        within the job's tenant, so another tenant's lead id counts nothing.
 
         The same number in another campaign or list is the same person, so
         the count follows the number, and the window rolls rather than
@@ -2442,7 +2471,8 @@ class DialerWorker:
         try:
             async with self._acquire_db() as conn:
                 val = await conn.fetchval(
-                    "SELECT COUNT(*) FROM calls c JOIN leads l ON l.id = $1 "
+                    "SELECT COUNT(*) FROM calls c "
+                    "JOIN leads l ON l.id = $1 AND l.tenant_id = $2::uuid "
                     "WHERE c.tenant_id = l.tenant_id AND c.phone_number = l.phone_number "
                     "AND c.created_at >= now() - interval '24 hours' "
                     # Testing an agent must not burn a lead's daily attempt quota.
@@ -2452,6 +2482,7 @@ class DialerWorker:
                     "AND NOT (c.provider_call_id IS NULL AND COALESCE(c.failure_reason, '') "
                     "IN ('line_not_ready', 'telephony_unavailable'))",
                     lead_id,
+                    tenant_id,
                 )
                 return int(val or 0)
         except Exception as e:
@@ -2818,7 +2849,9 @@ class DialerWorker:
         from app.domain.services.dialer.campaign_schedule import effective_rules
 
         tenant_rules = await self._get_tenant_rules(job.tenant_id)
-        campaign_cfg = await self._get_campaign_calling_config(job.campaign_id)
+        campaign_cfg = await self._get_campaign_calling_config(
+            job.campaign_id, job.tenant_id
+        )
         rules = effective_rules(tenant_rules, campaign_cfg)
         if (
             intent.provider_call_id is None
@@ -3069,7 +3102,9 @@ class DialerWorker:
         )
 
         lead_tz = resolve_effective_lead_timezone(
-            explicit_timezone=await self._get_lead_timezone(job.lead_id),
+            explicit_timezone=await self._get_lead_timezone(
+                job.lead_id, job.tenant_id
+            ),
             phone_number=job.phone_number,
         )
         # The same oracle the fresh path uses, but with ONLY the window input:

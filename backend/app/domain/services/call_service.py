@@ -130,6 +130,9 @@ class _CallStatusExecution:
     job_id: Optional[str] = None
     campaign_id: Optional[str] = None
     retry_args: Optional[tuple] = field(default=None, repr=False)
+    # The locked call row's own tenant: the post-commit outbox acknowledgement
+    # names it (the production role bypasses RLS, so an id alone is not enough).
+    tenant_id: Optional[str] = field(default=None, repr=False)
 
     def __iter__(self) -> Iterator[object]:
         yield self.job_id
@@ -351,6 +354,7 @@ class CallService:
                 result = await self._mark_retry_enqueued(
                     call_uuid,
                     applied=execution.result.applied,
+                    scope_tenant_id=execution.tenant_id,
                 )
                 if result.durable:
                     # The marker deliberately had no expiry while PostgreSQL
@@ -568,6 +572,15 @@ class CallService:
                         )
                     )
 
+                # The LOCKED call row's own tenant. The lookup above is by
+                # primary key (teardown callers hold bypass_rls and may know no
+                # tenant yet), so this is where the tenant is learned; every
+                # statement below that touches the call, its lead, job or
+                # campaign names it. The production DB role bypasses RLS, so an
+                # id alone must never be enough to reach a row. Captured here
+                # because the terminal-fact updates return rows without it.
+                call_tenant_id = row["tenant_id"]
+
                 # Serialize lead projection with a concurrent opt-out purge
                 # before reading DNC. Otherwise a cached negative lookup can
                 # overwrite an opt-out which committed while this lock waited.
@@ -610,8 +623,9 @@ class CallService:
                                 )
                             await conn.execute(
                                 """UPDATE calls SET terminal_retry_payload = NULL,
-                                       terminal_retry_enqueued_at = NULL, updated_at=NOW() WHERE id=$1""",
-                                call_uuid,
+                                       terminal_retry_enqueued_at = NULL, updated_at=NOW()
+                                   WHERE id=$1 AND tenant_id=$2""",
+                                call_uuid, call_tenant_id,
                             )
                             row = dict(row)
                             row["terminal_retry_payload"] = None
@@ -631,6 +645,7 @@ class CallService:
                             outcome_value,
                             duration,
                             already_terminal=True,
+                            scope_tenant_id=call_tenant_id,
                         )
                     durable = _terminal_row_is_durable(row)
                     pending_retry_args = None
@@ -672,6 +687,7 @@ class CallService:
                             and row["campaign_id"] else None
                         ),
                         retry_args=pending_retry_args,
+                        tenant_id=str(call_tenant_id),
                     )
 
                 terminal_row = await self._update_call_row_pooled(
@@ -682,6 +698,7 @@ class CallService:
                     already_terminal=(
                         str(row["status"] or "") in TERMINAL_CALL_STATUSES
                     ),
+                    scope_tenant_id=call_tenant_id,
                 )
                 effective_outcome = _effective_terminal_outcome(
                     terminal_row["outcome"] if terminal_row else None,
@@ -692,10 +709,8 @@ class CallService:
                 campaign_id = str(row["campaign_id"]) if row["campaign_id"] else None
                 job_id = str(row["dialer_job_id"]) if row["dialer_job_id"] else None
 
-                # Every lead / job / campaign statement below is scoped by the
-                # LOCKED call row's tenant: the production DB role bypasses
-                # RLS, so an id alone must never be enough to reach a row.
-                call_tenant_id = row["tenant_id"]
+                # Every lead / job / campaign statement below is scoped by
+                # ``call_tenant_id`` (the LOCKED call row's tenant, read above).
 
                 if lead_id:
                     await self._update_lead_status_pooled(
@@ -780,13 +795,14 @@ class CallService:
                             ELSE terminal_retry_enqueued_at
                         END,
                         updated_at = NOW()
-                    WHERE id = $1
+                    WHERE id = $1 AND tenant_id = $3
                     RETURNING status, outcome, ended_at, terminal_settled_at,
                               terminal_retry_payload,
                               terminal_retry_enqueued_at
                     """,
                     call_uuid,
                     retry_payload,
+                    call_tenant_id,
                 )
         except (asyncio.TimeoutError, DatabasePoolTimeoutError) as exc:
             logger.error(
@@ -820,6 +836,7 @@ class CallService:
             job_id=job_id,
             campaign_id=campaign_id,
             retry_args=retry_args,
+            tenant_id=str(call_tenant_id),
         )
 
     async def _mark_retry_enqueued(
@@ -827,6 +844,7 @@ class CallService:
         call_uuid: str,
         *,
         applied: bool,
+        scope_tenant_id: Optional[str],
     ) -> CallStatusResult:
         """Acknowledge a durable retry outbox only after Redis confirms it.
 
@@ -834,6 +852,10 @@ class CallService:
         Redis write but before this PostgreSQL acknowledgement is safe: the
         next terminal/recovery callback replays the same key, Redis reports it
         already present, and this update completes the cross-store commit.
+
+        ``scope_tenant_id`` is the settled call row's own tenant (carried from
+        the locked read of the settlement transaction): the acknowledgement
+        names it, so another tenant's call can never be marked enqueued.
         """
 
         bypass = get_bypass_rls()
@@ -860,6 +882,7 @@ class CallService:
                         ),
                         updated_at = NOW()
                     WHERE id = $1
+                      AND tenant_id = $2
                       AND terminal_retry_payload IS NOT NULL
                     RETURNING status, outcome, ended_at,
                               terminal_settled_at,
@@ -867,6 +890,7 @@ class CallService:
                               terminal_retry_enqueued_at
                     """,
                     call_uuid,
+                    scope_tenant_id,
                 )
         except Exception as exc:  # noqa: BLE001 - returned as commit failure
             logger.error(
@@ -901,12 +925,16 @@ class CallService:
         duration: Optional[int],
         *,
         already_terminal: bool,
+        scope_tenant_id,
     ):
         """Persist terminal facts without overwriting an earlier terminal.
 
         An operator endpoint may have written ``ended`` first. In that case
         its status/outcome/duration remain authoritative and we only fill
         missing facts before running the once-only settlement side effects.
+
+        ``scope_tenant_id`` is the locked call row's tenant: both updates name
+        it (the production DB role bypasses RLS).
         """
         if already_terminal:
             return await conn.fetchrow(
@@ -916,7 +944,7 @@ class CallService:
                     duration_seconds = COALESCE(duration_seconds, $3),
                     ended_at = COALESCE(ended_at, NOW()),
                     updated_at = NOW()
-                WHERE id = $1
+                WHERE id = $1 AND tenant_id = $4
                 RETURNING status, outcome, ended_at, duration_seconds,
                           terminal_settled_at, terminal_retry_payload,
                           terminal_retry_enqueued_at
@@ -924,6 +952,7 @@ class CallService:
                 call_uuid,
                 outcome_value,
                 int(duration) if duration is not None else None,
+                scope_tenant_id,
             )
 
         return await conn.fetchrow(
@@ -933,6 +962,7 @@ class CallService:
                 duration_seconds = COALESCE($3, duration_seconds),
                 ended_at = COALESCE(ended_at, NOW()), updated_at = NOW()
             WHERE id = $1
+              AND tenant_id = $5
               AND status <> ALL($4::text[])
             RETURNING status, outcome, ended_at, duration_seconds,
                       terminal_settled_at, terminal_retry_payload,
@@ -942,6 +972,7 @@ class CallService:
             outcome_value,
             int(duration) if duration is not None else None,
             list(TERMINAL_CALL_STATUSES),
+            scope_tenant_id,
         )
 
     async def _active_caller_opt_out_pooled(self, conn, call_row) -> bool:

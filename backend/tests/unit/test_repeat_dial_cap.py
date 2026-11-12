@@ -64,9 +64,10 @@ async def test_dials_are_counted_per_number_across_campaigns_for_24_hours():
 
     worker = DialerWorker.__new__(DialerWorker)
     worker._acquire_db = acquire
-    assert await worker._get_lead_attempts_today("lead-1") == 2
+    assert await worker._get_lead_attempts_today("lead-1", "tenant-1") == 2
     query, args = seen[0]
-    assert args == ("lead-1",)
+    assert args == ("lead-1", "tenant-1")
+    assert "l.tenant_id = $2" in query, "the lead is looked up within the job's tenant"
     assert "c.tenant_id = l.tenant_id" in query
     assert "c.phone_number = l.phone_number" in query
     assert "interval '24 hours'" in query
