@@ -274,7 +274,7 @@ async def test_a_won_top_up_dispute_returns_the_minutes_once():
             return {"id": "o1", "tenant_id": TENANT, "minutes": 125, "status": self.status}
 
         async def fetchval(self, sql, *args):
-            if sql.lstrip().startswith("SELECT EXISTS"):
+            if sql.lstrip().startswith("SELECT COUNT(*) > 0"):
                 return True
             event = args[3]
             if any(row[1] == event for row in self.ledger):

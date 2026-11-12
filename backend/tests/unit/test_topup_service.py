@@ -130,7 +130,7 @@ class FakeConn:
 
     async def fetchval(self, sql, *args):
         self.sql.append(sql)
-        if "EXISTS" in sql and "billing_ledger" in sql:
+        if "COUNT(*) > 0" in sql and "billing_ledger" in sql:
             if "'refund'" in sql:
                 return any(row["kind"] in {"refund", "dispute"} for row in self.store["ledger"])
             return any(row["kind"] == "topup" for row in self.store["ledger"])

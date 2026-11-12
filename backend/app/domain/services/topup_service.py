@@ -290,9 +290,12 @@ class TopupService:
 
             # Different Stripe event IDs can describe the same payment. The
             # immutable credit survives refund/dispute and stale order status.
+            # From here on every statement names the tenant read from the order.
             already_credited = await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='topup')",
+                "SELECT COUNT(*) > 0 FROM billing_ledger "
+                " WHERE order_id=$1 AND tenant_id=$2 AND kind='topup'",
                 order["id"],
+                order["tenant_id"],
             )
             if already_credited or order["status"] in {"paid", "refunded", "disputed"}:
                 logger.info(
@@ -372,18 +375,20 @@ class TopupService:
             # plan and no subscription on the prepaid plan, in this transaction.
             await conn.execute(
                 """UPDATE tenants SET plan_id = $2
-                    WHERE id = $1 AND plan_id IS NULL AND stripe_subscription_id IS NULL
-                      AND EXISTS (SELECT 1 FROM topup_orders o JOIN topup_packages p ON p.code = o.package_code
-                                  WHERE o.id = $3 AND p.audience = $4)""",
+                     FROM topup_orders o JOIN topup_packages p ON p.code = o.package_code
+                    WHERE tenants.id = $1 AND tenants.plan_id IS NULL
+                      AND tenants.stripe_subscription_id IS NULL
+                      AND o.id = $3 AND o.tenant_id = $1 AND p.audience = $4""",
                 order["tenant_id"], PAYG_PLAN_ID, order["id"], PAYG,
             )
 
             await conn.execute(
                 "UPDATE topup_orders SET status='paid', paid_at=NOW(), updated_at=NOW(), "
                 "       provider_payment_id=COALESCE($2, provider_payment_id) "
-                " WHERE id = $1",
+                " WHERE id = $1 AND tenant_id = $3",
                 order["id"],
                 payment_id,
+                order["tenant_id"],
             )
 
         logger.info(
@@ -460,8 +465,10 @@ class TopupService:
                 return False
 
             if await conn.fetchval(
-                "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind IN ('refund','dispute'))",
+                "SELECT COUNT(*) > 0 FROM billing_ledger "
+                " WHERE order_id=$1 AND tenant_id=$2 AND kind IN ('refund','dispute')",
                 order["id"],
+                order["tenant_id"],
             ):
                 return False
 
@@ -498,9 +505,10 @@ class TopupService:
                 order["minutes"],
             )
             await conn.execute(
-                "UPDATE topup_orders SET status=$2, updated_at=NOW() WHERE id=$1",
+                "UPDATE topup_orders SET status=$2, updated_at=NOW() WHERE id=$1 AND tenant_id=$3",
                 order["id"],
                 "refunded" if kind == "refund" else "disputed",
+                order["tenant_id"],
             )
         logger.info(
             "topup_reversed tenant=%s order=%s kind=%s minutes=-%d",
@@ -524,7 +532,8 @@ class TopupService:
         if not order:
             return False
         if order["status"] != "disputed" or not await conn.fetchval(
-            "SELECT EXISTS(SELECT 1 FROM billing_ledger WHERE order_id=$1 AND kind='dispute')", order["id"],
+            "SELECT COUNT(*) > 0 FROM billing_ledger WHERE order_id=$1 AND tenant_id=$2 AND kind='dispute'",
+            order["id"], order["tenant_id"],
         ):
             return True
         inserted = await conn.fetchval(
@@ -537,7 +546,8 @@ class TopupService:
         )
         if inserted:
             await conn.execute(
-                "UPDATE topup_orders SET status='paid', updated_at=NOW() WHERE id=$1", order["id"],
+                "UPDATE topup_orders SET status='paid', updated_at=NOW() WHERE id=$1 AND tenant_id=$2",
+                order["id"], order["tenant_id"],
             )
             logger.info("topup_dispute_won order=%s minutes=%d event=%s",
                         str(order["id"])[:8], order["minutes"], str(event_id)[:24])
