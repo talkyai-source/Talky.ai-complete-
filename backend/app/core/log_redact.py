@@ -618,6 +618,19 @@ def _sensitive_arg_slots(msg: str) -> "tuple[frozenset, frozenset]":
     return frozenset(positional), frozenset(mapping)
 
 
+# Arguments whose rendered text can carry personal data: an exception's message
+# (a database error quotes the offending value) and a container's repr.
+_RENDERED_AS_TEXT = (BaseException, dict, list, tuple, set, frozenset)
+
+
+def _scrub_rendered(value: Any) -> Any:
+    """The masked text of ``value`` when masking changes it, else ``value``
+    itself, so a line with nothing to hide renders exactly as before."""
+    text = str(value)
+    scrubbed = scrub_text(text)
+    return value if scrubbed == text else scrubbed
+
+
 def _redact_record_inplace(record: logging.LogRecord) -> None:
     positional: frozenset = frozenset()
     mapping: frozenset = frozenset()
@@ -646,6 +659,10 @@ def _redact_record_inplace(record: logging.LogRecord) -> None:
                 )
                 changed = changed or new_value is not value
                 redacted_map[key] = new_value
+            elif isinstance(value, _RENDERED_AS_TEXT):
+                new_value = _scrub_rendered(value)
+                changed = changed or new_value is not value
+                redacted_map[key] = new_value
             else:
                 redacted_map[key] = value
         if changed:
@@ -662,6 +679,8 @@ def _redact_record_inplace(record: logging.LogRecord) -> None:
                 # Numbers/bools/None can't carry speech, and mangling them
                 # (``partial=%s`` -> ``partial=[redacted...]``) is pure damage.
                 new_value = summarize_sensitive(str(value))
+            elif isinstance(value, _RENDERED_AS_TEXT):
+                new_value = _scrub_rendered(value)
             else:
                 continue
             if new_value is not value:
@@ -669,6 +688,16 @@ def _redact_record_inplace(record: logging.LogRecord) -> None:
                 changed = True
         if changed:
             record.args = tuple(redacted_args)
+
+    # The handler's Formatter renders a traceback from exc_info after this
+    # filter ran. Render it here once and keep the masked text, which the
+    # standard Formatter reuses instead of rendering it again (QA F2-10).
+    exc_info = record.exc_info
+    if exc_info and exc_info[0] is not None and not record.exc_text:
+        text = logging.Formatter().formatException(exc_info)
+        scrubbed = scrub_text(text)
+        if scrubbed != text:
+            record.exc_text = scrubbed
 
     # extra={...} fields — where the full untruncated utterance lives.
     record_dict = record.__dict__
