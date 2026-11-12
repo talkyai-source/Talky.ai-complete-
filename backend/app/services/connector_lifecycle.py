@@ -517,8 +517,8 @@ class ConnectorLifecycle:
             encrypted_tokens = [row.get("refresh_token_encrypted") or row.get("access_token_encrypted")
                                 for row in accounts if row["status"] in {"active", "expired"}]
             await self._retire(conn, tenant_id, [connector_id], status="disconnected")
-            await conn.execute("UPDATE connectors SET provider_revocation_status='pending' WHERE id=$1",
-                               UUID(str(connector_id)))
+            await conn.execute("UPDATE connectors SET provider_revocation_status='pending' WHERE id=$1 AND tenant_id=$2",
+                               UUID(str(connector_id)), UUID(str(tenant_id)))
             local_audit_id = await self._record(conn, tenant_id, connector_id, actor,
                 "connector.disabled_locally", operation_id=operation_id, event=AuditEvent.SECRET_REVOKED,
                 account_ids=[str(row["id"]) for row in accounts],
@@ -625,7 +625,8 @@ class ConnectorLifecycle:
                 account_data.get("refresh_token_encrypted"), account_data.get("token_expires_at"),
                 account_data.get("scopes") or [], account_data.get("account_email"), account_data.get("external_account_id"))
             await conn.execute("""UPDATE connectors SET status='active',config=$2::jsonb,
-                provider_revocation_status='not_requested' WHERE id=$1""", UUID(str(connector_id)), json.dumps(config))
+                provider_revocation_status='not_requested' WHERE id=$1 AND tenant_id=$3""",
+                UUID(str(connector_id)), json.dumps(config), UUID(str(tenant_id)))
             audit_id = await self._record(conn, tenant_id, connector_id, actor, "connector.oauth_activated",
                 account_id=str(account["id"]), generation=account["credential_generation"],
                 retired_connector_ids=retire, abandoned_pending_ids=abandoned, local_status="active")
@@ -635,8 +636,9 @@ class ConnectorLifecycle:
         async with acquire_with_tenant(self.pool, str(tenant_id)) as conn:
             await self._begin(conn, tenant_id)
             await lock_connector(conn, tenant_id, connector_id)
-            saved = await conn.fetchval("UPDATE connectors SET status='error' WHERE id=$1 AND status='pending' RETURNING id",
-                                        UUID(str(connector_id)))
+            saved = await conn.fetchval(
+                "UPDATE connectors SET status='error' WHERE id=$1 AND tenant_id=$2 AND status='pending' RETURNING id",
+                UUID(str(connector_id)), UUID(str(tenant_id)))
             if saved:
                 await self._record(conn, tenant_id, connector_id, self.actor,
                     "connector.oauth_rejected", local_status="error")
@@ -655,8 +657,8 @@ class ConnectorLifecycle:
                     config.pop(key, None)
                 else:
                     config[key] = value
-            await conn.execute("UPDATE connectors SET config=$2::jsonb WHERE id=$1",
-                               UUID(str(connector_id)), json.dumps(config))
+            await conn.execute("UPDATE connectors SET config=$2::jsonb WHERE id=$1 AND tenant_id=$3",
+                               UUID(str(connector_id)), json.dumps(config), UUID(str(tenant_id)))
             await self._record(conn, tenant_id, connector_id, actor, "connector.config_updated",
                 changed_fields=sorted(patch))
         return config

@@ -148,7 +148,7 @@ class CRMDeliveryStore:
                    AND destination_connector_id::text=$5::jsonb->>'connector_id'
                    AND destination_account_id=$5::jsonb->>'account_id'
                    AND EXISTS (SELECT 1 FROM calls c WHERE c.id=crm_deliveries.call_id
-                       AND c.tenant_id=crm_deliveries.tenant_id
+                       AND c.tenant_id=$1::uuid
                        AND c.xmin::text=$5::jsonb->>'source_call_revision')
                    AND (contact_effect IS NULL OR contact_effect=$5::jsonb)
             """, str(receipt["tenant_id"]), str(receipt["call_id"]), receipt["provider"],
@@ -170,7 +170,7 @@ class CRMDeliveryStore:
                    AND destination_connector_id::text=$5::jsonb->>'connector_id'
                    AND destination_account_id=$5::jsonb->>'account_id'
                    AND EXISTS (SELECT 1 FROM calls c WHERE c.id=crm_deliveries.call_id
-                       AND c.tenant_id=crm_deliveries.tenant_id
+                       AND c.tenant_id=$1::uuid
                        AND c.xmin::text=$6::text)
             """, str(receipt["tenant_id"]), str(receipt["call_id"]), receipt["provider"],
                 receipt["lease_token"], encoded, source_revision or effect.get("source_call_revision"))

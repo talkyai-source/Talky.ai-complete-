@@ -210,8 +210,8 @@ class ConversationReviewService:
         async with acquire_with_tenant(self._pool, tenant_id) as conn:
             row = await conn.fetchrow(
                 f"SELECT {_COLUMNS} FROM conversation_reviews "
-                "WHERE call_id = $1 AND user_id = $2",
-                self._uuid(call_id), self._uuid(user_id),
+                "WHERE call_id = $1 AND user_id = $2 AND tenant_id = $3",
+                self._uuid(call_id), self._uuid(user_id), self._uuid(tenant_id),
             )
         return dict(row) if row else None
 
@@ -221,8 +221,8 @@ class ConversationReviewService:
         async with acquire_with_tenant(self._pool, tenant_id) as conn:
             rows = await conn.fetch(
                 f"SELECT {_COLUMNS} FROM conversation_reviews "
-                "WHERE call_id = $1 ORDER BY created_at",
-                self._uuid(call_id),
+                "WHERE call_id = $1 AND tenant_id = $2 ORDER BY created_at",
+                self._uuid(call_id), self._uuid(tenant_id),
             )
         return [dict(r) for r in rows]
 
@@ -260,6 +260,7 @@ class ConversationReviewService:
                        review_tags = EXCLUDED.review_tags,
                        comment = EXCLUDED.comment,
                        updated_at = NOW()
+                 WHERE conversation_reviews.tenant_id = $1
                 RETURNING {_COLUMNS}
                 """,
                 self._uuid(tenant_id), self._uuid(call_id),
@@ -268,6 +269,11 @@ class ConversationReviewService:
                 call["prompt_template"], call["prompt_version"], call["prompt_hash"],
             )
 
+        if row is None:
+            # The conflict key is (call_id, user_id), which names no tenant. A
+            # review row owned by another tenant is skipped by the guard above,
+            # so nothing was written: answer exactly as for an unknown call.
+            raise ReviewCallNotFoundError("Call not found")
         review = dict(row)
         review["awarded_points"] = await self._maybe_award(
             tenant_id=tenant_id,
@@ -302,8 +308,8 @@ class ConversationReviewService:
         try:
             async with acquire_with_tenant(self._pool, tenant_id) as conn:
                 already = await conn.fetchval(
-                    "SELECT 1 FROM review_reward_ledger WHERE review_id = $1",
-                    self._uuid(review_id),
+                    "SELECT 1 FROM review_reward_ledger WHERE review_id = $1 AND tenant_id = $2",
+                    self._uuid(review_id), self._uuid(tenant_id),
                 )
                 if already:
                     # The edit case. Deliberately silent: this is the normal,
@@ -312,9 +318,9 @@ class ConversationReviewService:
 
                 today = await conn.fetchval(
                     """SELECT count(*) FROM review_reward_ledger
-                        WHERE user_id = $1
+                        WHERE user_id = $1 AND tenant_id = $2
                           AND awarded_at >= date_trunc('day', NOW() AT TIME ZONE 'utc')""",
-                    self._uuid(user_id),
+                    self._uuid(user_id), self._uuid(tenant_id),
                 )
                 cap = reward_daily_cap()
                 if today >= cap:
@@ -482,8 +488,8 @@ class ConversationReviewService:
                           count(*) FILTER (
                               WHERE awarded_at >= date_trunc('day', NOW() AT TIME ZONE 'utc')
                           )::int AS today
-                     FROM review_reward_ledger WHERE user_id = $1""",
-                self._uuid(user_id),
+                     FROM review_reward_ledger WHERE user_id = $1 AND tenant_id = $2""",
+                self._uuid(user_id), self._uuid(tenant_id),
             )
         return {
             "total_points": row["total"],
