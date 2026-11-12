@@ -841,7 +841,11 @@ export default function CallsPage() {
         permissions.isSuccess ? permissions.data.permissions : undefined,
     );
     const canPlayMedia = permissions.isSuccess && recordingCapabilities.canRead;
-    const [page, setPage] = useState(1);
+    // Call history pages with the server's cursor, not offsets (QA F6-03):
+    // cursors[i] loads page i + 1 and null is the newest page. A cursor is only
+    // valid for the tenant and filters it was issued under (the server answers
+    // 422 otherwise), so a different scope resolves to the first page below.
+    const [navigation, setNavigation] = useState<{ scope: string; cursors: Array<string | null> }>({ scope: "", cursors: [null] });
     const pageSize = 50;
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | "leads" | "issues">("all");
@@ -861,7 +865,14 @@ export default function CallsPage() {
         return () => window.clearTimeout(timer);
     }, []);
 
-    const q = useCalls(page, pageSize, { direction: direction === "all" ? undefined : direction, inboundCampaignId });
+    const scope = JSON.stringify([user?.tenant_id ?? null, direction, inboundCampaignId ?? null]);
+    const cursors = navigation.scope === scope ? navigation.cursors : [null];
+    const page = cursors.length;
+    const firstPage = () => setNavigation({ scope, cursors: [null] });
+    const q = useCalls(cursors[page - 1], pageSize, { direction: direction === "all" ? undefined : direction, inboundCampaignId });
+    // Placeholder rows are the page just left, and their cursor is the one just
+    // used: keep Next off until the requested page has actually arrived.
+    const nextCursor = q.isPlaceholderData ? null : (q.data?.nextCursor ?? null);
     const allCalls = useMemo(() => q.data?.calls ?? [], [q.data]);
     const workflowSync = useCallHistoryWorkflow(allCalls, user?.tenant_id, user?.id);
     const { workflow, update: updateWorkflow } = workflowSync;
@@ -898,10 +909,8 @@ export default function CallsPage() {
             return true;
         });
     }, [allCalls, search, filter, direction, inboundCampaignId, selectedDid]);
-    const total = q.data?.total ?? 0;
     const error = q.isError ? (q.error instanceof Error ? q.error.message : "Failed to load calls") : "";
     const groups = useMemo(() => groupByCampaign(calls), [calls]);
-    const totalPages = Math.ceil(total / pageSize);
     const hasActiveFilters = Boolean(search.trim()) || filter !== "all" || direction !== "all" || Boolean(inboundCampaignId) || Boolean(selectedDid);
 
     return (
@@ -945,14 +954,14 @@ export default function CallsPage() {
                                 id="call-history-search"
                                 type="text"
                                 value={search}
-                                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                                onChange={(e) => { setSearch(e.target.value); firstPage(); }}
                                 placeholder="Search by phone number…"
                                 className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
                             />
                         </div>
                         <div className="flex max-w-full flex-wrap items-center gap-2">
                         <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1" role="group" aria-label="Filter calls by direction">
-                            {(["all", "inbound", "outbound"] as const).map((key) => <button key={key} type="button" aria-pressed={direction === key} onClick={() => { setDirection(key); setPage(1); }} className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-colors ${direction === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{key}</button>)}
+                            {(["all", "inbound", "outbound"] as const).map((key) => <button key={key} type="button" aria-pressed={direction === key} onClick={() => { setDirection(key); firstPage(); }} className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-colors ${direction === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{key}</button>)}
                         </div>
                         <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1" role="group" aria-label="Filter calls by outcome">
                             {([
@@ -964,7 +973,7 @@ export default function CallsPage() {
                                     key={key}
                                     type="button"
                                     aria-pressed={filter === key}
-                                    onClick={() => { setFilter(key); setPage(1); }}
+                                    onClick={() => { setFilter(key); firstPage(); }}
                                     className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors duration-150 ease-out ${
                                         filter === key
                                             ? "bg-accent text-accent-foreground"
@@ -981,7 +990,7 @@ export default function CallsPage() {
                             ariaLabel="Filter calls by DID"
                             fitLongestOption
                             value={selectedDid ?? ""}
-                            onChange={(next) => { setSelectedDid(next || undefined); setPage(1); }}
+                            onChange={(next) => { setSelectedDid(next || undefined); firstPage(); }}
                             selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All DIDs</option>
@@ -993,7 +1002,7 @@ export default function CallsPage() {
                             ariaLabel="Filter calls by inbound campaign"
                             fitLongestOption
                             value={inboundCampaignId ?? ""}
-                            onChange={(next) => { setInboundCampaignId(next || undefined); setPage(1); }}
+                            onChange={(next) => { setInboundCampaignId(next || undefined); firstPage(); }}
                             selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All campaigns</option>
@@ -1013,7 +1022,7 @@ export default function CallsPage() {
                                     setDirection("all");
                                     setInboundCampaignId(undefined);
                                     setSelectedDid(undefined);
-                                    setPage(1);
+                                    firstPage();
                                 }}
                                 className="mt-3 text-sm font-semibold text-foreground underline-offset-4 hover:underline"
                             >
@@ -1035,27 +1044,28 @@ export default function CallsPage() {
                         ))
                     )}
 
-                    {totalPages > 1 && (
+                    {(page > 1 || nextCursor !== null) && (
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             transition={{ delay: 0.3 }}
                             className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
                         >
+                            {/* Cursor mode has no total, so no "of N" and no page count. */}
                             <p className="text-sm text-muted-foreground">
-                                Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, total)} of {total} calls
+                                Showing {(page - 1) * pageSize + 1} to {(page - 1) * pageSize + allCalls.length} calls
                             </p>
                             <div className="flex gap-2">
                                 <button
-                                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                    onClick={() => setNavigation({ scope, cursors: cursors.slice(0, -1) })}
                                     disabled={page === 1}
                                     className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     Previous
                                 </button>
                                 <button
-                                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                                    disabled={page === totalPages}
+                                    onClick={() => { if (nextCursor !== null) setNavigation({ scope, cursors: [...cursors, nextCursor] }); }}
+                                    disabled={nextCursor === null}
                                     className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     Next
