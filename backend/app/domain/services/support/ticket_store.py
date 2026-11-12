@@ -170,14 +170,14 @@ async def mark_read(conn, *, user_id: str, ticket_id: UUID, tenant_id: str, now:
     )
 
 
-# A ticket is unread for a user when a public staff message is newer than the
-# user's last view (or the user has never opened it).
+# A ticket is unread for a user when a public staff message is newer than the user's last view (or never
+# opened). Both queries embedding this bind $1 = tenant and $2 = user; each table filters on $1 itself.
 _UNREAD_SQL = """EXISTS (
     SELECT 1 FROM support_ticket_messages sm
-    WHERE sm.ticket_id = t.id AND sm.tenant_id = t.tenant_id
+    WHERE sm.ticket_id = t.id AND sm.tenant_id = $1
       AND sm.author_type = 'staff' AND NOT sm.is_internal
       AND sm.created_at > COALESCE((SELECT r.last_seen_at FROM support_ticket_reads r
-                                    WHERE r.user_id = $2 AND r.ticket_id = t.id AND r.tenant_id = t.tenant_id),
+                                    WHERE r.user_id = $2 AND r.ticket_id = t.id AND r.tenant_id = $1),
                                    '-infinity'::timestamptz))"""
 
 
