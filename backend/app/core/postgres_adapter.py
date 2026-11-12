@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
@@ -47,6 +48,16 @@ class _NoopAsyncContext:
 
     async def __aexit__(self, *args):
         return False
+
+
+def _tenant_guc_value(tenant_id: Any) -> str:
+    """The tenant id as a canonical UUID string; ValueError for anything else.
+
+    SET LOCAL takes no bind parameters, so the value is interpolated into the
+    SQL text. Only a parsed UUID (hex digits and hyphens) may go there, as in
+    db_utils.acquire_with_tenant.
+    """
+    return str(uuid.UUID(str(tenant_id)))
 
 
 def _transaction_or_noop(conn):
@@ -259,7 +270,7 @@ class QueryBuilder:
                     await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
                 elif tenant_id:
-                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{_tenant_guc_value(tenant_id)}'")
                     await conn.execute("SET LOCAL app.bypass_rls = 'false'")
                 else:
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
@@ -865,7 +876,7 @@ class RpcBuilder:
                     await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
                 elif tenant_id:
-                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{tenant_id}'")
+                    await conn.execute(f"SET LOCAL app.current_tenant_id = '{_tenant_guc_value(tenant_id)}'")
                     await conn.execute("SET LOCAL app.bypass_rls = 'false'")
                 else:
                     await conn.execute(f"SET LOCAL app.current_tenant_id = '{_NIL_UUID}'")
