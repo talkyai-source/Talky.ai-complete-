@@ -472,8 +472,8 @@ class SuspensionService:
         for row in rows:
             if row["status"] == "active":
                 version = await conn.fetchval(
-                    "UPDATE tenant_users SET status='suspended',updated_at=clock_timestamp() WHERE id=$1 "
-                    "RETURNING updated_at", row["id"],
+                    "UPDATE tenant_users SET status='suspended',updated_at=clock_timestamp() "
+                    "WHERE id=$1 AND tenant_id=$2 RETURNING updated_at", row["id"], row["tenant_id"],
                 )
                 saved.append({"id": str(row["id"]), "tenant_id": str(row["tenant_id"]),
                               "prior_status": "active", "held_updated_at": _json_value(version)})
