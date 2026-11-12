@@ -127,7 +127,6 @@ npm run storybook
 ## 2) Folder Structure & Key Files
 - `src/app/*`: App Router pages + local API routes
   - Prototype backend route: [src/app/api/v1/[...path]/route.ts](file:///c:/Users/User/Desktop/Talk-Leee/src/app/api/v1/%5B...path%5D/route.ts)
-  - AI voices route: [src/app/api/voices/route.ts](file:///c:/Users/User/Desktop/Talk-Leee/src/app/api/voices/route.ts)
   - High-signal feature pages: [ai-options/page.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/app/ai-options/page.tsx), [meetings/page.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/app/meetings/page.tsx), [reminders/page.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/app/reminders/page.tsx), [settings/connectors/page.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/app/settings/connectors/page.tsx), [email/page.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/app/email/page.tsx)
 - `src/components/*`: reusable UI + domain components
   - Layout + shell: [dashboard-layout.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/components/layout/dashboard-layout.tsx)
@@ -193,9 +192,6 @@ npm run storybook
 - AI Options / Provider config
   - Page: [ai-options/page.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/app/ai-options/page.tsx)
   - Supports provider selection, saving config, LLM “test” flows, and voice preview (base64 audio decode)
-- AI Voices
-  - Page: [ai-voices/page.tsx](file:///c:/Users/User/Desktop/Talk-Leee/src/app/ai-voices/page.tsx)
-  - Route: [api/voices/route.ts](file:///c:/Users/User/Desktop/Talk-Leee/src/app/api/voices/route.ts) (server-side aggregation/proxy)
 Screenshot:
 
 
@@ -239,7 +235,6 @@ Screenshot:
 
 | Feature | Status |
 | --- | --- |
-| AI Voices | Production |
 | Email | Production |
 | Meetings | Prototype |
 | Reminders | Prototype |
@@ -286,7 +281,6 @@ Screenshot:
 ## 10) Implementation Status, Roadmap & Links
 ### Implementation Status Summary (based on code)
 - “Real” server endpoints in this repo:
-  - `/api/voices` is implemented as a Next route ([api/voices/route.ts](file:///c:/Users/User/Desktop/Talk-Leee/src/app/api/voices/route.ts))
   - `/api/v1/email/*` endpoints exist (templates + send) in the catchall route ([route.ts](file:///c:/Users/User/Desktop/Talk-Leee/src/app/api/v1/%5B...path%5D/route.ts))
 - “Prototype mode” modules (explicitly marked / used as placeholders):
   - `dashboardApi` returns dummy data ([dashboard-api.ts](file:///c:/Users/User/Desktop/Talk-Leee/src/lib/dashboard-api.ts))

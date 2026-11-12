@@ -19,7 +19,7 @@ const paygBundle = { code: "payg_125", minutes: 125, price_cents: 5000, currency
 afterEach(() => { cleanup(); env.NEXT_PUBLIC_API_BASE_URL = originalApiBase; });
 
 // The marketing navbar calls usePathname(), useRouter() and useAuth(); supply
-// the contexts exactly as ai-voices/page.test.tsx does. Real components stay
+// the contexts. Real components stay
 // mounted; the public PAYG catalogue read has an exact synthetic fixture below.
 function renderPublic(pathname: string, ui: React.ReactElement) {
     const router = {

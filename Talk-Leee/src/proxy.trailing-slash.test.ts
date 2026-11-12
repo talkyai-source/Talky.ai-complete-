@@ -25,7 +25,6 @@ const PAGE_ROUTES = [
     "/ai-options",
     "/ai-voice-agent",
     "/ai-voice-dialer",
-    "/ai-voices",
     "/analytics",
     "/assistant",
     "/assistant/actions",
@@ -108,8 +107,8 @@ test("every page route redirects to its trailing-slashed form", () => {
 });
 
 test("page route count matches the app router page count", () => {
-    // 92 pages: 91 listed above plus "/" itself, which is already canonical.
-    assert.equal(PAGE_ROUTES.length + 1, 92);
+    // 91 pages: 90 listed above plus "/" itself, which is already canonical.
+    assert.equal(PAGE_ROUTES.length + 1, 91);
 });
 
 test("already-canonical paths are not redirected again", () => {
@@ -124,7 +123,7 @@ test("api routes are never redirected", () => {
     // Stripe treats a 3xx as a failed delivery and does not follow it.
     assert.equal(trailingSlashRedirectPath("/api/v1/billing/webhooks/stripe"), null);
     assert.equal(trailingSlashRedirectPath("/api/v1/billing/webhooks/stripe/"), null);
-    assert.equal(trailingSlashRedirectPath("/api/voices"), null);
+    assert.equal(trailingSlashRedirectPath("/api/contact-enquiries"), null);
     assert.equal(trailingSlashRedirectPath("/api/white-label/branding/acme"), null);
     assert.equal(trailingSlashRedirectPath("/api/v1/auth/login"), null);
     assert.equal(trailingSlashRedirectPath("/api"), null);
