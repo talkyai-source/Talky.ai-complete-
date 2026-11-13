@@ -403,27 +403,40 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         setSubmitting(true);
         setError(null);
         let campaignId = createdCampaignId;
+        let updateFailed = false;
         try {
+            const body = {
+                ...voiceSelection,
+                name: name.trim(),
+                description: undefined,
+                system_prompt: goal.trim(),      // additional instructions
+                voice_id: voiceId,
+                tts_provider: provider || undefined,   // per-campaign engine
+                goal: goal.trim() || undefined,
+                persona_type: personaType,
+                company_name: companyName.trim(),
+                agent_names: agentNames,
+                agent_name_genders: pruneGenders(agentGenders, agentNames),
+                campaign_slots: {},
+                campaign_brief: campaignBrief,
+                knowledge_driven: true,
+            };
             if (!campaignId) {
                 const { campaign } = await dashboardApi.createCampaign({
-                    ...voiceSelection,
-                    name: name.trim(),
-                    description: undefined,
-                    system_prompt: goal.trim(),      // additional instructions
-                    voice_id: voiceId,
-                    tts_provider: provider || undefined,   // per-campaign engine
-                    goal: goal.trim() || undefined,
-                    persona_type: personaType,
-                    company_name: companyName.trim(),
-                    agent_names: agentNames,
-                    agent_name_genders: pruneGenders(agentGenders, agentNames),
-                    campaign_slots: {},
-                    campaign_brief: campaignBrief,
-                    knowledge_driven: true,
+                    ...body,
                     ...(inbound ? { direction: "inbound" as const } : { calling_schedule: callingSchedulePayload(schedule) }),
                 });
                 campaignId = campaign.id;
                 setCreatedCampaignId(campaign.id);
+            } else {
+                // A retry after a partial failure: the user may have changed step 1
+                // since the first attempt, so send the current values too.
+                updateFailed = true;
+                await dashboardApi.updateCampaign(campaignId, {
+                    ...body,
+                    ...(inbound ? {} : { calling_schedule: callingSchedulePayload(schedule) }),
+                });
+                updateFailed = false;
             }
             await leadDetailsApi.setCampaignFields(campaignId, leadFields.fields);
             // The outbound campaign exists: its draft must not come back.
@@ -443,7 +456,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         } catch (err) {
             const detail = err instanceof Error ? err.message : "Failed to create campaign";
             setError(
-                campaignId
+                campaignId && !updateFailed
                     ? `Campaign details were created, but its contact-field policy was not saved. Retry to finish without creating a duplicate. ${detail}`
                     : detail,
             );
