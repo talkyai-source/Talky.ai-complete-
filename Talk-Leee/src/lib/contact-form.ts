@@ -48,6 +48,40 @@ export function optionalE164(raw: string, country: CountrySelection): string {
     return requiredE164(raw, country);
 }
 
+/** Every IANA zone this browser knows; empty when the browser cannot list them
+ *  (the API still checks, so an empty list only skips the early message). */
+export function supportedTimeZones(): string[] {
+    try {
+        return Intl.supportedValuesOf("timeZone");
+    } catch {
+        return [];
+    }
+}
+
+/** Empty is fine; anything typed must be a real IANA zone (same rule as the API). */
+export function contactTimezoneError(raw: string, zones: string[] = supportedTimeZones()): string | null {
+    const value = raw.trim();
+    if (!value || zones.length === 0 || zones.includes(value)) return null;
+    return `"${value}" is not a time zone. Pick one from the list, for example Europe/London or America/New_York.`;
+}
+
+/** The first reason an OPTIONAL field blocks Add/Save, in plain words, or null.
+ *  The form shows it beside the button because these fields live inside the
+ *  collapsible "More details" section. */
+export function contactOptionalFieldProblem(
+    form: ContactFormState,
+    country: CountrySelection,
+    zones: string[] = supportedTimeZones(),
+): string | null {
+    for (const [label, raw] of [["Mobile number", form.mobile_number], ["Business number", form.business_number]] as const) {
+        if (!raw.trim()) continue;
+        const parsed = parsePhoneNumber(raw, country);
+        if (!parsed.ok) return `${label} is not valid: ${parsed.error}`;
+    }
+    const tz = contactTimezoneError(form.timezone, zones);
+    return tz ? `Timezone: ${tz}` : null;
+}
+
 export function contactPayload(form: ContactFormState, country: CountrySelection = ""): ContactMutation {
     const firstName = form.first_name.trim();
     const lastName = form.last_name.trim();
