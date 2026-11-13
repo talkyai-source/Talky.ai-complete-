@@ -113,3 +113,26 @@ test("an import reports what was added, already listed and not valid", async () 
     await screen.findByText("Added 2, already listed 1, not valid 1.");
     assert.ok(screen.getByText("Not valid: 123"));
 });
+
+test("an import of more than 10,000 numbers is refused before sending, with the limit named (forms audit B-F14)", async () => {
+    mount(async () => []);
+    const bulk = mock.method(dncApi, "bulkImport", async () => ({ accepted_count: 0, skipped_count: 0, invalid_count: 0, accepted: [], invalid: [] }));
+    await screen.findByText("No numbers on your Do-Not-Call list yet.", undefined, { timeout: SLOW });
+    const lines = Array.from({ length: 10_001 }, (_, i) => `+4474001${String(i).padStart(5, "0")}`).join("\n");
+    fireEvent.change(screen.getByLabelText("Numbers, one per line"), { target: { value: lines } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Import numbers/ })); });
+    assert.ok(screen.getByText("Import at most 10,000 numbers at a time."));
+    assert.equal(bulk.mock.callCount(), 0);
+});
+
+test("a refused import does not claim the numbers were invalid (forms audit B-F14)", async () => {
+    mount(async () => []);
+    mock.method(dncApi, "bulkImport", async () => {
+        throw new ApiClientError({ message: "Request payload failed validation", code: "validation_error", status: 422, url: "/dnc/bulk-import", method: "POST" } as never);
+    });
+    await screen.findByText("No numbers on your Do-Not-Call list yet.", undefined, { timeout: SLOW });
+    fireEvent.change(screen.getByLabelText("Numbers, one per line"), { target: { value: "+447400123456" } });
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Import numbers/ })); });
+    await screen.findByText(/The import was refused/);
+    assert.equal(screen.queryByText("Not a valid phone number for the selected country."), null);
+});
