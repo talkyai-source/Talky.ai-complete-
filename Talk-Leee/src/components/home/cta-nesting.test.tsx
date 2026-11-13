@@ -15,6 +15,7 @@ import EducationPage from "@/app/industries/education/page";
 
 const originalApiBase = env.NEXT_PUBLIC_API_BASE_URL;
 const syntheticApiBase = "https://catalog.example.invalid/api/v1";
+const displayCurrencyPath = "/api/display-currency";
 const paygBundle = { code: "payg_125", minutes: 125, price_cents: 5000, currency: "usd", currency_exponent: 2 };
 afterEach(() => { cleanup(); env.NEXT_PUBLIC_API_BASE_URL = originalApiBase; });
 
@@ -55,10 +56,19 @@ for (const [pathname, Page, expectedCtas] of cases) {
         env.NEXT_PUBLIC_API_BASE_URL = syntheticApiBase;
         assert.equal(apiBaseUrl(), syntheticApiBase);
         const catalogRequests: Array<Parameters<typeof fetch>> = [];
-        // Pricing's real PAYG child remains mounted. Admit only its exact,
-        // synthetic read; unknown requests fail and never reach a network.
+        // Pricing's real PAYG child and its display-currency lookup remain
+        // mounted. Admit only those two exact reads; unknown requests fail and
+        // never reach a network.
         context.mock.method(globalThis, "fetch", async (...args: Parameters<typeof fetch>) => {
             catalogRequests.push(args);
+            if (args[0] === displayCurrencyPath) {
+                assert.deepEqual(args, [displayCurrencyPath]);
+                // "Dollars only": the page renders exactly as it does for a US visitor.
+                return new Response(JSON.stringify({ currency: null }), {
+                    status: 200,
+                    headers: { "Content-Type": "application/json" },
+                });
+            }
             assert.deepEqual(args, [`${syntheticApiBase}/plans/payg`]);
             assert.equal(args[1]?.method ?? "GET", "GET");
             assert.equal(args[1]?.body, undefined);
@@ -84,9 +94,9 @@ for (const [pathname, Page, expectedCtas] of cases) {
             assert.ok(a.textContent?.trim(), "CTA link has an accessible name");
         }
         assert.deepEqual(
-            catalogRequests,
-            pathname === "/pricing/" ? [[`${syntheticApiBase}/plans/payg`]] : [],
-            "Only Pricing may request its public catalogue, exactly once with no options",
+            catalogRequests.map((args) => args.map(String)).sort((a, b) => a[0].localeCompare(b[0])),
+            pathname === "/pricing/" ? [[displayCurrencyPath], [`${syntheticApiBase}/plans/payg`]] : [],
+            "Only Pricing may make requests: its display-currency lookup and its public catalogue, each exactly once with no options",
         );
     });
 }
