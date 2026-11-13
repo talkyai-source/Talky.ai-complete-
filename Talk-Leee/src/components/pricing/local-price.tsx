@@ -18,7 +18,9 @@ export async function loadDisplayCurrency(fetchImpl: typeof fetch = fetch): Prom
     // A team member can preview another country with /pricing/?country=GB.
     const preview = new URLSearchParams(window.location.search).get("country");
     const query = preview && /^[A-Za-z]{2}$/.test(preview) ? `?country=${preview.toUpperCase()}` : "";
-    const response = await fetchImpl(`/api/display-currency${query}`, { credentials: "omit" });
+    // Default credentials on purpose: a protected preview deployment only
+    // answers a request that carries its own access cookie. The route reads no cookie.
+    const response = await fetchImpl(`/api/display-currency${query}`);
     if (!response.ok) return null;
     const answer = answerSchema.parse(await response.json());
     if (!answer.currency || answer.currency === BILLING_CURRENCY || !isUsableRate(answer.rate)) return null;
