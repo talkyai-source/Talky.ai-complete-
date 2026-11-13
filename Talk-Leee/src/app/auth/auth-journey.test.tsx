@@ -324,3 +324,15 @@ test("A-F11 a code that expired on the password step returns to the code step wi
     assert.ok(screen.getByRole("button", { name: /Resend/ }));
     assert.equal(screen.queryByLabelText("Password"), null);
 });
+
+test("A-F12 callback uses theme colours, an h1, and never prints text taken from the link", async () => {
+    mock.method(api, "getMe", async () => { throw anonymousSession; });
+    window.history.replaceState({}, "", "/auth/callback?error=access_denied&error_description=Call%20555-0100%20to%20claim%20your%20prize");
+    const { container } = renderPage(<CallbackPage />);
+    await screen.findByRole("heading", { level: 1, name: "Authentication failed" });
+    assert.equal(screen.queryByText(/prize|555-0100/), null);
+    assert.match(screen.getByText(/The sign-in provider reported a problem/).textContent!, /Please try again/);
+    assert.equal(container.innerHTML.includes("bg-white"), false);
+    assert.equal(/text-gray-\d/.test(container.innerHTML), false);
+    assert.equal(container.querySelector("h2"), null);
+});
