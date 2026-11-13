@@ -283,3 +283,25 @@ test("FX3a2 password reset: Send reset code and Reset password", async () => {
     assert.equal(hasButton("Reset password"), true);
     assert.equal(hasButton("Reset Password"), false);
 });
+
+// ── Forms audit A-F7: browsers and password managers can fill and save ─────
+const autocomplete = (label: string | RegExp) => screen.getByLabelText(label).getAttribute("autocomplete");
+
+test("A-F7 sign-up form fields name what they hold", () => {
+    renderPage(<RegisterPage />);
+    assert.equal(autocomplete("Your Name"), "name");
+    assert.equal(autocomplete("Business Name"), "organization");
+    assert.equal(autocomplete("Work Email"), "email");
+});
+
+test("A-F7 reset screens use email, one-time-code and new-password", async () => {
+    mock.method(api, "request", async () => ({ message: "sent" }));
+    renderPage(<ForgotPasswordPage />, "");
+    assert.equal(autocomplete("Email"), "email");
+    input("Email", "person@example.test");
+    fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
+    await screen.findByLabelText("Code");
+    assert.equal(autocomplete("Code"), "one-time-code");
+    assert.equal(autocomplete("New password"), "new-password");
+    assert.equal(autocomplete("Confirm new password"), "new-password");
+});

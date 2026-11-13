@@ -39,6 +39,15 @@ describe("ContactSection", () => {
     assert.ok(screen.getByText("contact@talk-lee.com"));
   });
 
+  it("lets the browser fill the name, email and company", () => {
+    render(React.createElement(ContactSection));
+    for (const [label, name, ac] of [["Full Name", "name", "name"], ["Email Address", "email", "email"], ["Company", "company", "organization"]]) {
+      const field = screen.getByLabelText(label);
+      assert.equal(field.getAttribute("name"), name);
+      assert.equal(field.getAttribute("autocomplete"), ac);
+    }
+  });
+
   it("submits once despite synchronous duplicate events and waits for a durable receipt", async () => {
     let calls = 0;
     let resolve!: (response: Response) => void;

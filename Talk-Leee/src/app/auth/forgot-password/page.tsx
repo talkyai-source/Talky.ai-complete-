@@ -207,6 +207,7 @@ function ForgotPasswordInner() {
                                         <Input
                                             id="reset-code"
                                             type="text"
+                                            autoComplete="one-time-code"
                                             inputMode="numeric"
                                             placeholder="123456"
                                             value={code}
@@ -232,6 +233,7 @@ function ForgotPasswordInner() {
                                         <Input
                                             id="reset-new-password"
                                             type="password"
+                                            autoComplete="new-password"
                                             placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                                             value={newPassword}
                                             onChange={(e) => {
@@ -255,6 +257,7 @@ function ForgotPasswordInner() {
                                         <Input
                                             id="reset-confirm-password"
                                             type="password"
+                                            autoComplete="new-password"
                                             placeholder="Repeat new password"
                                             value={confirmPassword}
                                             onChange={(e) => {
@@ -337,6 +340,7 @@ function ForgotPasswordInner() {
                                         <Input
                                             id="reset-email"
                                             type="email"
+                                            autoComplete="email"
                                             placeholder="you@example.com"
                                             value={email}
                                             onChange={(e) => {

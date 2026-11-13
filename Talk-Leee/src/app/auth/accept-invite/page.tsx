@@ -153,18 +153,18 @@ export default function AcceptInvitePage() {
                         <CardContent className="space-y-4">
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-name">Your name</Label>
-                                <Input id="invite-name" autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} />
+                                <Input id="invite-name" autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? "invite-error" : undefined} />
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-password">Password</Label>
-                                <Input id="invite-password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+                                <Input id="invite-password" type="password" autoComplete="new-password" value={password} onChange={(event) => setPassword(event.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? "invite-error" : undefined} />
                                 <p className="text-xs text-muted-foreground">At least {MIN_PASSWORD_LENGTH} characters.</p>
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-confirm">Confirm password</Label>
-                                <Input id="invite-confirm" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+                                <Input id="invite-confirm" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} aria-invalid={error ? true : undefined} aria-describedby={error ? "invite-error" : undefined} />
                             </div>
-                            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+                            {error ? <p id="invite-error" role="alert" className="text-sm text-destructive">{error}</p> : null}
                             {legal.required ? (
                                 <LegalAcceptanceField legal={legal} disabled={submitting} />
                             ) : (

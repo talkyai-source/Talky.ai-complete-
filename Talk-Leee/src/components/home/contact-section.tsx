@@ -133,6 +133,8 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                       <Label htmlFor="name" className="text-gray-900 dark:text-foreground font-semibold">Full Name</Label>
                       <Input 
                         id="name" 
+                        name="name"
+                        autoComplete="name"
                         data-testid="name-input"
                         value={formData.name}
                         onChange={(e) => updateField("name", e.target.value)}
@@ -152,6 +154,8 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                       <Label htmlFor="email" className="text-gray-900 dark:text-foreground font-semibold">Email Address</Label>
                       <Input 
                         id="email" 
+                        name="email"
+                        autoComplete="email"
                         data-testid="email-input"
                         type="email"
                         value={formData.email}
@@ -172,6 +176,8 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                       <Label htmlFor="company" className="text-gray-900 dark:text-foreground font-semibold">Company</Label>
                       <Input 
                         id="company" 
+                        name="company"
+                        autoComplete="organization"
                         data-testid="company-input"
                         value={formData.company}
                         onChange={(e) => updateField("company", e.target.value)}

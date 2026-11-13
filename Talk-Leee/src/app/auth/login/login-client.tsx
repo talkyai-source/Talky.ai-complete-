@@ -454,6 +454,7 @@ export default function LoginClientPage() {
                                                 <Input
                                                     id="email"
                                                     type="email"
+                                                    autoComplete="email"
                                                     placeholder="you@example.com"
                                                     value={email}
                                                     onChange={(e) => {
@@ -579,6 +580,17 @@ export default function LoginClientPage() {
                                     aria-describedby={error ? errorId : undefined}
                                 >
                                     <CardContent className="space-y-4">
+                                        {/* Lets a password manager pair the saved login with this email. */}
+                                        <input
+                                            type="email"
+                                            name="username"
+                                            autoComplete="username"
+                                            value={email}
+                                            readOnly
+                                            tabIndex={-1}
+                                            aria-hidden
+                                            className="sr-only"
+                                        />
                                         <div className="space-y-2">
                                             <Label htmlFor="login-password">Password</Label>
                                             <div className="relative">

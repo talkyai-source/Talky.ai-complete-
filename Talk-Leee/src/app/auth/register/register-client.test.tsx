@@ -100,3 +100,15 @@ test("the password step keeps the length rule on screen and says live when the t
     fireEvent.change(screen.getByLabelText("Confirm Password"), { target: { value: "a long enough passphrase" } });
     assert.equal(screen.queryByText("Passwords do not match."), null);
 });
+
+test("A-F7 sign-in asks the browser for the email, and the password step carries it as the username", async () => {
+    mount(<LoginClientPage />);
+    const email = screen.getByLabelText("Email");
+    assert.equal(email.getAttribute("autocomplete"), "email");
+    fireEvent.change(email, { target: { value: "owner@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Continue with password" }));
+    const password = await screen.findByLabelText("Password");
+    const username = password.closest("form")!.querySelector('input[autocomplete="username"]') as HTMLInputElement | null;
+    assert.ok(username);
+    assert.equal(username.value, "owner@example.com");
+});

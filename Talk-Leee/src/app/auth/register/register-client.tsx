@@ -291,6 +291,7 @@ export default function RegisterClientPage() {
                                             name="name"
                                             type="text"
                                             placeholder="John Doe"
+                                            autoComplete="name"
                                             value={formData.name}
                                             onChange={handleChange}
                                             className="pl-10"
@@ -313,6 +314,7 @@ export default function RegisterClientPage() {
                                             name="businessName"
                                             type="text"
                                             placeholder="Acme Inc."
+                                            autoComplete="organization"
                                             value={formData.businessName}
                                             onChange={handleChange}
                                             className="pl-10"
@@ -332,6 +334,7 @@ export default function RegisterClientPage() {
                                             name="email"
                                             type="email"
                                             placeholder="you@company.com"
+                                            autoComplete="email"
                                             value={formData.email}
                                             onChange={handleChange}
                                             className="pl-10"
