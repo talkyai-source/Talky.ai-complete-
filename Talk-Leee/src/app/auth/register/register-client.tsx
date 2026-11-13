@@ -193,7 +193,12 @@ export default function RegisterClientPage() {
             }
         } catch (err) {
             if (legal.handleRefusal(err)) return;
-            setError(extractError(err, "Could not create account. Please try again."));
+            const text = extractError(err, "Could not create account. Please try again.");
+            if (/expired or not found/i.test(text)) {
+                // The code is gone; the code step has the Resend button.
+                handleBackToOtp();
+            }
+            setError(text);
         } finally {
             setLoading(false);
         }
