@@ -122,10 +122,13 @@ export function TopupCard({
   const pending = start.isPending;
   const [chosen, setChosen] = useState<string | null>(null);
   const [mockNotice, setMockNotice] = useState<string | null>(null);
+  // The order was created but the payment page could not be opened.
+  const [notice, setNotice] = useState<string | null>(null);
 
   async function buy(pkg: TopupPackage) {
     if (pending) return; // the double-click guard — a second order is a second charge
     setMockNotice(null);
+    setNotice(null);
     setChosen(pkg.code);
     try {
       const result = await start.mutateAsync(pkg.code);
@@ -148,7 +151,16 @@ export function TopupCard({
         // Leaves the app entirely. The button stays disabled behind us because
         // `pending` never clears before navigation. Only Stripe's own checkout
         // host is followed, as for plan checkout.
-        window.location.assign(approvedCheckoutUrl(result.checkout_url));
+        try {
+          window.location.assign(approvedCheckoutUrl(result.checkout_url));
+        } catch (err) {
+          // The order may already exist: say why the payment page did not open.
+          setNotice(`${err instanceof Error ? err.message : "The payment page could not be opened."} Check your saved orders before trying again.`);
+          setChosen(null);
+        }
+      } else {
+        setNotice("The payment page could not be opened because no payment address came back. Check your saved orders before trying again.");
+        setChosen(null);
       }
     } catch (err) {
       // A refusal the backend can only make after the click (test-mode team
@@ -239,13 +251,13 @@ export function TopupCard({
           <Button variant="outline" size="sm" onClick={() => { void ordersQ.refetch(); void balanceQ.refetch(); }}>Refresh saved status</Button>
         </div>}
 
-        {mockNotice ? (
+        {mockNotice ?? notice ? (
           <div
             role="alert"
             className="flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm"
           >
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
-            <span>{mockNotice}</span>
+            <span>{mockNotice ?? notice}</span>
           </div>
         ) : null}
 

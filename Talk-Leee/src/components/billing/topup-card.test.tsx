@@ -251,3 +251,19 @@ test("a 400 on Buy keeps today's behaviour: the message shows and the Buy button
   await screen.findByText("Package not found");
   for (const button of screen.getAllByRole("button", { name: /^Buy \d+ minutes/ })) assert.equal((button as HTMLButtonElement).disabled, false);
 });
+
+test("a payment address that is not Stripe's shows a notice and re-enables Buy (forms audit B-F10)", async () => {
+  checkout = () => json({ checkout_url: "https://evil.example/pay", order_id: "o1", mock_mode: false });
+  setup("", [], undefined, [paygPackage, secondPackage]);
+  fireEvent.click(await screen.findByRole("button", { name: /^Buy 125 minutes/ }));
+  await screen.findByText(/The payment destination could not be verified/);
+  assert.match(screen.getByRole("alert", { name: "" }).textContent ?? "", /Check your saved orders/);
+  for (const button of screen.getAllByRole("button", { name: /^Buy \d+ minutes/ })) assert.equal((button as HTMLButtonElement).disabled, false);
+});
+
+test("an answer with no payment address shows a notice (forms audit B-F10)", async () => {
+  checkout = () => json({ order_id: "o1", mock_mode: false });
+  setup("", [], undefined, [paygPackage, secondPackage]);
+  fireEvent.click(await screen.findByRole("button", { name: /^Buy 125 minutes/ }));
+  await screen.findByText(/no payment address came back/);
+});
