@@ -33,6 +33,7 @@ import { getRequestIdentityGeneration, markFreshLogin, subscribeRequestIdentityG
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
 import MFAVerification from "@/components/auth/mfa-verification";
 import PasskeyLogin from "@/components/auth/passkey-login";
+import { useTurnstile } from "@/components/auth/turnstile-widget";
 import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -55,9 +56,6 @@ type LoginTokens = {
 
 // ─── Validation ──────────────────────────────────────────────────────────────
 const emailSchema = z.string().email("Please enter a valid email address");
-
-// ─── Constants ───────────────────────────────────────────────────────────────
-const TURNSTILE_SITE_KEY = process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY;
 
 // ─── Animation variants ─────────────────────────────────────────────────────
 const stepVariants = {
@@ -96,78 +94,6 @@ async function checkPasswordBreach(password: string): Promise<number> {
     }
 }
 
-// ─── Turnstile CAPTCHA Widget (conditional on env var) ───────────────────────
-function TurnstileWidget({
-    siteKey,
-    onVerify,
-    onExpire,
-}: {
-    siteKey: string;
-    onVerify: (token: string) => void;
-    onExpire: () => void;
-}) {
-    const containerRef = useRef<HTMLDivElement>(null);
-    const widgetIdRef = useRef<string | null>(null);
-
-    useEffect(() => {
-        if (!containerRef.current) return;
-
-        const existing = document.querySelector(
-            'script[src*="challenges.cloudflare.com/turnstile"]',
-        );
-
-        function render() {
-            if (!containerRef.current || widgetIdRef.current) return;
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const w = (window as any).turnstile as
-                | { render: (el: HTMLElement, opts: Record<string, unknown>) => string; remove: (id: string) => void }
-                | undefined;
-            if (!w) return;
-            widgetIdRef.current = w.render(containerRef.current, {
-                sitekey: siteKey,
-                callback: onVerify,
-                "expired-callback": onExpire,
-                theme: "auto",
-                size: "flexible",
-            });
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        if (existing && (window as any).turnstile) {
-            render();
-        } else if (!existing) {
-            const script = document.createElement("script");
-            script.src =
-                "https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit";
-            script.async = true;
-            script.onload = () => render();
-            document.head.appendChild(script);
-        } else {
-            const id = setInterval(() => {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                if ((window as any).turnstile) {
-                    clearInterval(id);
-                    render();
-                }
-            }, 100);
-            return () => clearInterval(id);
-        }
-
-        return () => {
-            if (widgetIdRef.current) {
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                const w = (window as any).turnstile as
-                    | { remove: (id: string) => void }
-                    | undefined;
-                try { w?.remove(widgetIdRef.current); } catch { /* ignore */ }
-                widgetIdRef.current = null;
-            }
-        };
-    }, [siteKey, onVerify, onExpire]);
-
-    return <div ref={containerRef} className="flex justify-center" />;
-}
-
 // ─── Main Login Component ────────────────────────────────────────────────────
 export default function LoginClientPage() {
     const router = useRouter();
@@ -185,7 +111,9 @@ export default function LoginClientPage() {
     const [showPasskey, setShowPasskey] = useState(false);
     const [breachCount, setBreachCount] = useState<number | null>(null);
     const [checkingBreach, setCheckingBreach] = useState(false);
-    const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    // Cloudflare accepts a Turnstile token once, so the challenge lives on the
+    // password step, beside the one request that spends it.
+    const turnstile = useTurnstile("login");
     // Captured from POST /auth/login when mfa_required=true. Forwarded to
     // <MFAVerification /> so it can call /auth/mfa/verify with the right
     // proof — the email field on its own is not accepted by the backend.
@@ -395,8 +323,8 @@ export default function LoginClientPage() {
         setError("");
 
         try {
-            void turnstileToken;
-            const response = await api.login(email, password, { signal: operation.controller.signal, ownsOperation });
+            const response = await turnstile.run((turnstileToken) =>
+                api.login(email, password, { signal: operation.controller.signal, ownsOperation, turnstileToken }));
             if (!ownsOperation()) return;
 
             if (response.mfa_required) {
@@ -570,15 +498,6 @@ export default function LoginClientPage() {
                                             </span>
                                         </label>
 
-                                        {/* Turnstile CAPTCHA */}
-                                        {TURNSTILE_SITE_KEY && (
-                                            <TurnstileWidget
-                                                siteKey={TURNSTILE_SITE_KEY}
-                                                onVerify={setTurnstileToken}
-                                                onExpire={() => setTurnstileToken(null)}
-                                            />
-                                        )}
-
                                         {error && (
                                             <div
                                                 id={errorId}
@@ -596,10 +515,7 @@ export default function LoginClientPage() {
                                         <Button
                                             type="submit"
                                             className="w-full"
-                                            disabled={
-                                                loading ||
-                                                (!!TURNSTILE_SITE_KEY && !turnstileToken)
-                                            }
+                                            disabled={loading}
                                         >
                                             {loading ? (
                                                 <>
@@ -749,6 +665,9 @@ export default function LoginClientPage() {
                                             </p>
                                         )}
 
+                                        {/* Turnstile CAPTCHA (only when a site key is configured) */}
+                                        {turnstile.widget}
+
                                         {error && (
                                             <div
                                                 id={errorId}
@@ -765,7 +684,7 @@ export default function LoginClientPage() {
                                         <Button
                                             type="submit"
                                             className="w-full"
-                                            disabled={loading || !!completionError || !password}
+                                            disabled={loading || !!completionError || !password || turnstile.pending}
                                         >
                                             {loading ? (
                                                 <>

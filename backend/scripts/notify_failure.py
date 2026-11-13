@@ -11,7 +11,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.core.operational_alerts import send_alert
+from app.core.operational_alerts import claim_alert_slot, release_alert_slot, send_alert
 
 
 def main(argv=None):
@@ -25,7 +25,16 @@ def main(argv=None):
         print("alert-test dry-run: no notification sent; use --send for a synthetic delivery test")
         return 0
     try:
-        result = asyncio.run(send_alert(args.unit, synthetic=args.test))
+        detail = ""
+        if not args.test:
+            # A unit that keeps failing alerts once an hour, not on every run.
+            send, detail = asyncio.run(claim_alert_slot(args.unit))
+            if not send:
+                print(f"alert suppressed: {args.unit} already alerted within the hour")
+                return 0
+        result = asyncio.run(send_alert(args.unit, synthetic=args.test, detail=detail))
+        if not result["delivered"] and not args.test:
+            asyncio.run(release_alert_slot(args.unit, detail))
         print(json.dumps(result, sort_keys=True))
         return 0 if result["delivered"] else 1
     except Exception as exc:
