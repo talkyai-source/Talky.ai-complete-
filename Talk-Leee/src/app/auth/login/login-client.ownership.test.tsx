@@ -211,3 +211,10 @@ test("A-F4 sign-in has no Remember me checkbox and stores no such preference", a
   f.pending.resolve(response); await settle();
   assert.equal(localStorage.getItem("remember_me"), null);
 });
+
+test("A-F9 the show-password button can be reached with the keyboard and is a 40px target", async () => {
+  await setup(); await submit();
+  const toggle = screen.getByRole("button", { name: "Show password" });
+  assert.equal(toggle.hasAttribute("tabindex"), false);
+  assert.ok(toggle.className.split(/\s+/).includes("p-2.5"));
+});
