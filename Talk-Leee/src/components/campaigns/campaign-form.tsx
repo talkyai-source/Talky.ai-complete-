@@ -48,6 +48,7 @@ import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-nam
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
+import { callingHoursInverted, HOURS_ORDER_ERROR } from "@/lib/calling-window";
 import { PromptLayerPreview } from "@/components/campaigns/prompt-layer-preview";
 import {
     CampaignLeadFieldsPicker,
@@ -635,6 +636,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
         if (!isRealtime && briefError) {
             setError(briefError);
+            return;
+        }
+        if (direction === "outbound" && callingHoursInverted(schedule)) {
+            setError(HOURS_ORDER_ERROR);
             return;
         }
         const missing = missingRequiredSlots();

@@ -24,6 +24,7 @@ import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picke
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 import { callingSchedulePayload } from "@/lib/calling-schedule-text";
+import { callingHoursInverted } from "@/lib/calling-window";
 import { guidanceBudgetStatus } from "@/lib/campaign-guidance";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
 import {
@@ -107,6 +108,7 @@ export function CampaignBasicsEditor({
         && (isRealtime ? voiceSelection.realtime_voice : voiceId)
         && (isRealtime || guidance.valid)
         && (isRealtime || !briefError)
+        && !callingHoursInverted(schedule)
         && !leadFields.isLoading
         && !leadFields.isError,
     );

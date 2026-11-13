@@ -42,6 +42,7 @@ import {
     useCampaignLeadFieldDraft,
 } from "@/components/campaigns/campaign-lead-fields";
 import { leadDetailsApi, type CampaignLeadField } from "@/lib/lead-details-api";
+import { callingHoursInverted } from "@/lib/calling-window";
 import { DraftRestoredNotice } from "@/components/campaigns/draft-restored-notice";
 
 /**
@@ -278,7 +279,8 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         && agentNames.length >= 1
         && (isRealtime ? voiceSelection.realtime_voice : voiceId)
         && (isRealtime || !briefError)
-        && (isRealtime || guidance.valid),
+        && (isRealtime || guidance.valid)
+        && (inbound || !callingHoursInverted(schedule)),
     );
 
     const onPickFile = (f: File | null) => {
