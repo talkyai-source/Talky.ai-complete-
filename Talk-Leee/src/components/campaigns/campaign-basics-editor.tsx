@@ -130,6 +130,7 @@ export function CampaignBasicsEditor({
         setSaving(true);
         setError(null);
         setConflict(false);
+        let detailsSaved = false;
         try {
             const result = await dashboardApi.updateCampaign(campaignId, {
                 ...voiceSelection,
@@ -151,12 +152,20 @@ export function CampaignBasicsEditor({
             });
             // A retry after a failed field-policy save is not a conflict with this write.
             if (result.campaign.updated_at) setVersion(result.campaign.updated_at);
+            detailsSaved = true;
             await leadDetailsApi.setCampaignFields(campaignId, leadFields.fields);
             setCleanSnapshot(editSnapshot);
             router.push(`/campaigns/${campaignId}`);
         } catch (err) {
             if (isCampaignVersionConflict(err)) setConflict(true);
-            else setError(err instanceof Error ? err.message : "Failed to save campaign");
+            else {
+                const detail = err instanceof Error ? err.message : "Failed to save campaign";
+                setError(
+                    detailsSaved
+                        ? `Campaign details were saved, but its contact-field policy was not. Retry to finish. ${detail}`
+                        : detail,
+                );
+            }
             setSaving(false);
         }
     };
