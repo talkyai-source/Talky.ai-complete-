@@ -91,3 +91,10 @@ test("the server's refusal is shown, and a link spent meanwhile turns the page",
     await fillAndJoin();
     await screen.findByRole("heading", { level: 1, name: "This invite cannot be used" });
 });
+
+test("the invite name field stops at the 100 characters the server accepts", async () => {
+    mock.method(inviteApi, "preview", async () => INVITE);
+    openLink(`#token=${TOKEN}`);
+    const field = await screen.findByLabelText("Your name", undefined, { timeout: SLOW });
+    assert.equal((field as HTMLInputElement).maxLength, 100);
+});

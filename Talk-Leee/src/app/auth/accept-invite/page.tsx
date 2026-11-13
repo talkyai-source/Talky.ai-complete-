@@ -153,7 +153,7 @@ export default function AcceptInvitePage() {
                         <CardContent className="space-y-4">
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-name">Your name</Label>
-                                <Input id="invite-name" autoComplete="name" value={name} onChange={(event) => setName(event.target.value)} />
+                                <Input id="invite-name" autoComplete="name" maxLength={100} value={name} onChange={(event) => setName(event.target.value)} />
                             </div>
                             <div className="space-y-1.5">
                                 <Label htmlFor="invite-password">Password</Label>

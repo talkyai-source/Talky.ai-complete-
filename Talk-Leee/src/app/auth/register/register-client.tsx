@@ -293,6 +293,7 @@ export default function RegisterClientPage() {
                                             onChange={handleChange}
                                             className="pl-10"
                                             required
+                                            maxLength={100}
                                             disabled={loading}
                                             ref={nameInputRef}
                                             aria-invalid={error ? true : undefined}
@@ -314,6 +315,7 @@ export default function RegisterClientPage() {
                                             onChange={handleChange}
                                             className="pl-10"
                                             required
+                                            maxLength={100}
                                             disabled={loading}
                                         />
                                     </div>

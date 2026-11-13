@@ -67,3 +67,9 @@ test("spaces in the name or business name are refused before anything is sent", 
     assert.equal((await screen.findByRole("alert")).textContent, "Enter your business name.");
     assert.equal(calls, 0);
 });
+
+test("the name and business name fields stop at the 100 characters the server accepts", () => {
+    mount(<RegisterClientPage />);
+    assert.equal((screen.getByLabelText("Your Name") as HTMLInputElement).maxLength, 100);
+    assert.equal((screen.getByLabelText("Business Name") as HTMLInputElement).maxLength, 100);
+});
