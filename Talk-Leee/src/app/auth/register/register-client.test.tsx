@@ -51,3 +51,19 @@ test("an unconfirmed logout is explained without claiming server revocation", as
     assert.match((await screen.findByRole("status")).textContent ?? "", /could not confirm that the server session ended/);
     assert.match(screen.getByRole("status").textContent ?? "", /revoke other sessions/);
 });
+
+test("spaces in the name or business name are refused before anything is sent", async () => {
+    let calls = 0;
+    api.signupStart = async () => { calls += 1; throw new Error("must not be called"); };
+    mount(<RegisterClientPage />);
+    fireEvent.change(screen.getByLabelText("Your Name"), { target: { value: "   " } });
+    fireEvent.change(screen.getByLabelText("Business Name"), { target: { value: "Example" } });
+    fireEvent.change(screen.getByLabelText("Work Email"), { target: { value: "owner@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+    assert.equal((await screen.findByRole("alert")).textContent, "Enter your name.");
+    fireEvent.change(screen.getByLabelText("Your Name"), { target: { value: "Example Owner" } });
+    fireEvent.change(screen.getByLabelText("Business Name"), { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+    assert.equal((await screen.findByRole("alert")).textContent, "Enter your business name.");
+    assert.equal(calls, 0);
+});

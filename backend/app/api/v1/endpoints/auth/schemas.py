@@ -13,7 +13,17 @@ def _validate_account_name(value: str) -> str:
     return value
 
 
-AccountName = Annotated[str, Field(max_length=100), AfterValidator(_validate_account_name)]
+def _require_non_blank_name(value: str) -> str:
+    if not value.strip():
+        raise ValueError("Name must not be blank.")
+    return value
+
+
+# Profile updates (UpdateMeRequest) keep accepting a blank value: a blank name
+# clears it and a blank business name gets its own 400 in profile.py.
+AccountNameAllowBlank = Annotated[str, Field(max_length=100), AfterValidator(_validate_account_name)]
+# Sign-up, register and invite acceptance need a real name (forms audit A-F2).
+AccountName = Annotated[AccountNameAllowBlank, AfterValidator(_require_non_blank_name)]
 
 
 class RegisterRequest(BaseModel):
@@ -116,8 +126,8 @@ class MeResponse(BaseModel):
 
 
 class UpdateMeRequest(BaseModel):
-    name: Optional[AccountName] = None
-    business_name: Optional[AccountName] = None
+    name: Optional[AccountNameAllowBlank] = None
+    business_name: Optional[AccountNameAllowBlank] = None
 
 
 class AccountTimezoneRequest(BaseModel):

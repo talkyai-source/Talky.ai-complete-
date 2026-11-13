@@ -75,9 +75,17 @@ export default function RegisterClientPage() {
 
     async function handleFormSubmit(e: React.FormEvent) {
         e.preventDefault();
-        setLoading(true);
         setError("");
         setMessage("");
+        if (!formData.name.trim()) {
+            setError("Enter your name.");
+            return;
+        }
+        if (!formData.businessName.trim()) {
+            setError("Enter your business name.");
+            return;
+        }
+        setLoading(true);
 
         try {
             const response = await turnstile.run((token) => api.signupStart(

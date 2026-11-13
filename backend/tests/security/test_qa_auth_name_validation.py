@@ -23,3 +23,24 @@ def test_normal_unicode_names_and_profile_updates_are_supported():
 def test_profile_update_cannot_bypass_name_bounds():
     with pytest.raises(ValidationError):
         UpdateMeRequest(name="A" * 101)
+
+
+@pytest.mark.parametrize("field", ["name", "business_name"])
+@pytest.mark.parametrize("value", ["", "   ", "\u00a0\t "])
+def test_signup_rejects_blank_names(field, value):
+    values = {"email": "person@example.com", "name": "Owner", "business_name": "Company"}
+    values[field] = value
+    with pytest.raises(ValidationError):
+        SignupStartRequest(**values)
+
+
+def test_invite_accept_rejects_blank_name():
+    from app.api.v1.endpoints.auth.schemas import InviteAcceptRequest
+
+    with pytest.raises(ValidationError):
+        InviteAcceptRequest(token="t" * 24, name="   ", password="x", confirm_password="x")
+
+
+def test_profile_update_still_accepts_blank_so_a_name_can_be_cleared():
+    assert UpdateMeRequest(name="").name == ""
+    assert UpdateMeRequest(business_name="  ").business_name == "  "
