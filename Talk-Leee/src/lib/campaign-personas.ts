@@ -184,7 +184,26 @@ export function representativeNameTooLong(names: string[]): boolean {
     return (names[0]?.length ?? 0) > MAX_BRIEF_NAME_LENGTH;
 }
 
-/** Parse agent-name input (comma or newline separated, max 3). */
-export function parseAgentNames(raw: string): string[] {
-    return parseList(raw).slice(0, 3);
+/** Every distinct name typed (comma or newline separated). A repeat, ignoring
+ *  case, is dropped: the server refuses duplicate names. */
+function distinctAgentNames(raw: string): string[] {
+    const seen = new Set<string>();
+    return parseList(raw).filter((name) => {
+        const key = name.toLowerCase();
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
 }
+
+/** Parse agent-name input (comma or newline separated, repeats removed, max 3). */
+export function parseAgentNames(raw: string): string[] {
+    return distinctAgentNames(raw).slice(0, 3);
+}
+
+/** True when more than three distinct names were typed (the rest are not used). */
+export function agentNamesOverflow(raw: string): boolean {
+    return distinctAgentNames(raw).length > 3;
+}
+
+export const AGENT_NAMES_OVERFLOW_TEXT = "Only the first 3 names are used.";

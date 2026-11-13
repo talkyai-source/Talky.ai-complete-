@@ -36,10 +36,12 @@ import {
     type CampaignBriefDraft,
 } from "@/lib/campaign-brief";
 import {
+    AGENT_NAMES_OVERFLOW_TEXT,
     MAX_BRIEF_NAME_LENGTH,
     PERSONAS,
     PersonaSpec,
     SlotDef,
+    agentNamesOverflow,
     isRecommendedVoiceForPersona,
     parseAgentNames,
     parseKvList,
@@ -1292,6 +1294,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                             />
                             <p className="text-xs text-muted-foreground">
                                 Comma-separated. One is picked per call — supply 2–3 to rotate.
+                                {agentNamesOverflow(agentNamesRaw) && <span className="ml-1 text-amber-600 dark:text-amber-400">{AGENT_NAMES_OVERFLOW_TEXT}</span>}
                             </p>
                             {/*
                              * Voice-gender attention notice — surfaces ONLY when the

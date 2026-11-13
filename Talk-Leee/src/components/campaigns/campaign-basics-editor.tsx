@@ -19,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, isCampaignVersionConflict, PersonaType, CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { CampaignVersionConflictNotice } from "@/components/campaigns/campaign-version-conflict";
 import { confirmLeave, useUnsavedChangesGuard } from "@/lib/unsaved-changes";
-import { MAX_BRIEF_NAME_LENGTH, PERSONAS, parseAgentNames, representativeNameTooLong } from "@/lib/campaign-personas";
+import { AGENT_NAMES_OVERFLOW_TEXT, MAX_BRIEF_NAME_LENGTH, PERSONAS, agentNamesOverflow, parseAgentNames, representativeNameTooLong } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
@@ -208,6 +208,7 @@ export function CampaignBasicsEditor({
                     <p className="mt-1 text-xs text-muted-foreground">
                         1–3 names, comma-separated.
                         {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
+                        {agentNamesOverflow(agentNamesRaw) && <span className="ml-1 text-amber-600 dark:text-amber-400">{AGENT_NAMES_OVERFLOW_TEXT}</span>}
                     </p>
                     {representativeNameTooLong(agentNames) && <p role="alert" className="mt-1 text-xs text-destructive">The first representative name must be 120 characters or fewer.</p>}
                     <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
