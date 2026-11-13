@@ -36,6 +36,7 @@ import {
     type CampaignBriefDraft,
 } from "@/lib/campaign-brief";
 import {
+    MAX_BRIEF_NAME_LENGTH,
     PERSONAS,
     PersonaSpec,
     SlotDef,
@@ -43,6 +44,7 @@ import {
     parseAgentNames,
     parseKvList,
     parseList,
+    representativeNameTooLong,
 } from "@/lib/campaign-personas";
 import { conflictingNames, pruneGenders } from "@/components/campaigns/agent-name-gender";
 import { CampaignBriefFields } from "@/components/campaigns/campaign-brief-fields";
@@ -625,6 +627,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
         if (!companyName.trim()) {
             setError("Add the company or business name your agent represents.");
+            return;
+        }
+        if (representativeNameTooLong(agentNames)) {
+            setError("The first representative name must be 120 characters or fewer.");
             return;
         }
         if (!isRealtime && !guidance.valid) {
@@ -1263,6 +1269,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                                 name="company_name"
                                 placeholder="The name your agent says on the call"
                                 value={companyName}
+                                maxLength={MAX_BRIEF_NAME_LENGTH}
                                 onChange={(e) => setCompanyName(e.target.value)}
                                 required
                                 disabled={submitting}

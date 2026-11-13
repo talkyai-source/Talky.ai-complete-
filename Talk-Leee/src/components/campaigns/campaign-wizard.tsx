@@ -23,7 +23,7 @@ import { Label } from "@/components/ui/label";
 import { dashboardApi, PersonaType, CampaignCallingSchedule } from "@/lib/dashboard-api";
 import { api } from "@/lib/api";
 import { AgentNameGender, pruneGenders } from "@/components/campaigns/agent-name-gender";
-import { PERSONAS, parseAgentNames } from "@/lib/campaign-personas";
+import { MAX_BRIEF_NAME_LENGTH, PERSONAS, parseAgentNames, representativeNameTooLong } from "@/lib/campaign-personas";
 import { VoiceProviderPicker } from "@/components/campaigns/voice-provider-picker";
 import { CallingScheduleEditor } from "@/components/campaigns/calling-schedule-editor";
 import { callingSchedulePayload, defaultCallingSchedule } from "@/lib/calling-schedule-text";
@@ -277,6 +277,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
         name.trim()
         && companyName.trim()
         && agentNames.length >= 1
+        && !representativeNameTooLong(agentNames)
         && (isRealtime ? voiceSelection.realtime_voice : voiceId)
         && (isRealtime || !briefError)
         && (isRealtime || guidance.valid)
@@ -488,7 +489,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             </div>
                             <div>
                                 <Label htmlFor="cw-company">Brand / company name</Label>
-                                <Input id="cw-company" value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Talk-Lee" className="mt-1" />
+                                <Input id="cw-company" value={companyName} maxLength={MAX_BRIEF_NAME_LENGTH} onChange={(e) => setCompanyName(e.target.value)} placeholder="Talk-Lee" className="mt-1" />
                             </div>
                         </div>
 
@@ -519,6 +520,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                                 1–3 names, comma-separated. The agent introduces itself with one (rotated per call).
                                 {agentNames.length > 0 && <span className="ml-1 text-emerald-600 dark:text-emerald-400">{agentNames.length} name{agentNames.length > 1 ? "s" : ""}.</span>}
                             </p>
+                            {representativeNameTooLong(agentNames) && <p role="alert" className="mt-1 text-xs text-destructive">The first representative name must be 120 characters or fewer.</p>}
                             <AgentNameGender names={agentNames} value={agentGenders} onChange={setAgentGenders} voiceGender={voiceGender} />
                         </div>
 

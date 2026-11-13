@@ -176,6 +176,14 @@ export function parseList(raw: string): string[] {
         .filter(Boolean);
 }
 
+/** The server caps the brand and the first representative name at 120 characters. */
+export const MAX_BRIEF_NAME_LENGTH = 120;
+
+/** True when the first representative name is longer than the server accepts. */
+export function representativeNameTooLong(names: string[]): boolean {
+    return (names[0]?.length ?? 0) > MAX_BRIEF_NAME_LENGTH;
+}
+
 /** Parse agent-name input (comma or newline separated, max 3). */
 export function parseAgentNames(raw: string): string[] {
     return parseList(raw).slice(0, 3);
