@@ -73,7 +73,7 @@ async function reachPasswordStep() {
     fireEvent.change(screen.getByLabelText("Business Name"), { target: { value: "Example" } });
     fireEvent.change(screen.getByLabelText("Work Email"), { target: { value: email } });
     fireEvent.submit(screen.getByLabelText("Your Name").closest("form")!);
-    const otp = await screen.findByLabelText("Verification Code", {}, { timeout: 3000 });
+    const otp = await screen.findByLabelText("Verification code", {}, { timeout: 3000 });
     fireEvent.change(otp, { target: { value: "123456" } });
     fireEvent.submit(otp.closest("form")!);
     await screen.findByLabelText("Password", {}, { timeout: 3000 });
@@ -89,7 +89,7 @@ const checkbox = () => screen.queryByRole("checkbox", { name: /I agree to the Te
 test("sign-up with acceptance off shows no checkbox and sends neither version", async () => {
     await reachPasswordStep();
     assert.equal(checkbox(), null);
-    assert.equal(button(/Create Account/).disabled, false);
+    assert.equal(button(/Create account/).disabled, false);
     await createAccount();
     await waitFor(() => assert.equal(sent.length, 1));
     assert.deepEqual(sent[0].body, { email, code: "123456", password: PASSWORD, confirm_password: PASSWORD });
@@ -106,11 +106,11 @@ test("sign-up with acceptance required cannot be submitted unticked, and sends b
     assert.equal(row.getByRole("link", { name: "Terms of Service" }).getAttribute("href"), "/terms");
     assert.equal(row.getByRole("link", { name: "Terms of Service" }).getAttribute("target"), "_blank");
     assert.equal(row.getByRole("link", { name: "Privacy Policy" }).getAttribute("href"), "/privacy");
-    assert.equal(button(/Create Account/).disabled, true);
+    assert.equal(button(/Create account/).disabled, true);
     await createAccount();
     assert.equal(sent.length, 0, "nothing is sent while the box is unticked");
     fireEvent.click(box);
-    assert.equal(button(/Create Account/).disabled, false);
+    assert.equal(button(/Create account/).disabled, false);
     await createAccount();
     await waitFor(() => assert.equal(sent.length, 1));
     assert.deepEqual(sent[0].body, {
@@ -129,7 +129,7 @@ test("sign-up whose first read failed recovers from a 422 with the versions the 
     assert.equal(checkbox()!.checked, false);
     const notice = await screen.findByText("Our terms were updated. Please review and accept them to continue.");
     assert.ok(checkbox()!.getAttribute("aria-describedby")!.split(" ").includes(notice.id));
-    assert.equal(button(/Create Account/).disabled, true);
+    assert.equal(button(/Create account/).disabled, true);
     submitAnswer = stop;
     fireEvent.click(checkbox()!);
     await createAccount();
@@ -147,7 +147,7 @@ test("sign-up says it is unavailable when acceptance is required but no versions
     </AppRouterContext.Provider>);
     await screen.findByText(/Sign-up is temporarily unavailable/);
     assert.equal(checkbox(), null);
-    assert.equal(button(/Get Started/).disabled, true);
+    assert.equal(button(/Get started/).disabled, true);
 });
 
 // ─── Accept invite ──────────────────────────────────────────────────────────
