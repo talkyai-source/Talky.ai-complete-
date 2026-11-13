@@ -218,6 +218,15 @@ async def add_user_to_tenant(
         _check_role_ceiling(user_role, before["current_role"] if before else None)
         # An existing membership is re-activated with the requested role.
         _refuse_own_membership(before, current_user)
+        # A new member joins by accepting an emailed invite (rbac/tenant_invites).
+        # A workspace admin may not attach someone else's account by its id
+        # alone: no consent, and the member list then showed that person's name
+        # and email. The platform team keeps the direct path.
+        if before is None and normalize_role(current_user.role) != UserRole.PLATFORM_ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invite new members by email; they join when they accept the invite.",
+            )
         if before:
             await _keep_an_administrator(conn, before, role_name=request.role_name, new_status="active")
         # Verify user exists
