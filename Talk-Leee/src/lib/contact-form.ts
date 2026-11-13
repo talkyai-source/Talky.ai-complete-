@@ -51,13 +51,14 @@ export function optionalE164(raw: string, country: CountrySelection): string {
 export function contactPayload(form: ContactFormState, country: CountrySelection = ""): ContactMutation {
     const firstName = form.first_name.trim();
     const lastName = form.last_name.trim();
-    const fullName = [firstName, lastName].filter(Boolean).join(" ");
     return {
         phone_number: requiredE164(form.phone_number, country),
         mobile_number: optionalE164(form.mobile_number, country),
-        full_name: fullName,
-        first_name: firstName || undefined,
-        last_name: lastName || undefined,
+        // No full_name: the API re-splits it on the first space and would
+        // overwrite a multi-word first name. Empty names are sent as "" so an
+        // edit can clear one (the API treats "" as remove).
+        first_name: firstName,
+        last_name: lastName,
         email: form.email.trim(),
         company_name: form.company_name.trim(),
         job_title: form.job_title.trim(),
