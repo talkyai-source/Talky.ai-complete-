@@ -201,7 +201,7 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                         readOnly={Boolean(submission || expiredRequestId)}
                         rows={6}
                         className={cn(
-                          "flex w-full rounded-xl border border-input bg-white px-3 py-3 text-sm text-gray-900 ring-offset-background placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none transition-all hover:bg-white dark:bg-background dark:text-foreground dark:placeholder:text-muted-foreground dark:hover:bg-accent/20",
+                          "flex w-full rounded-xl border border-input bg-white px-3 py-3 text-base md:text-sm text-gray-900 ring-offset-background placeholder:text-gray-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none transition-all hover:bg-white dark:bg-background dark:text-foreground dark:placeholder:text-muted-foreground dark:hover:bg-accent/20",
                           errors.message && "border-red-500 focus-visible:ring-red-500"
                         )}
                         aria-invalid={errors.message ? true : undefined}

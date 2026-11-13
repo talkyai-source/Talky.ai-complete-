@@ -39,6 +39,13 @@ describe("ContactSection", () => {
     assert.ok(screen.getByText("contact@talk-lee.com"));
   });
 
+  it("keeps the message box at 16px on phones so iOS does not zoom", () => {
+    render(React.createElement(ContactSection));
+    const classes = screen.getByLabelText("Message").className.split(/\s+/);
+    assert.ok(classes.includes("text-base") && classes.includes("md:text-sm"));
+    assert.equal(classes.includes("text-sm"), false);
+  });
+
   it("lets the browser fill the name, email and company", () => {
     render(React.createElement(ContactSection));
     for (const [label, name, ac] of [["Full Name", "name", "name"], ["Email Address", "email", "email"], ["Company", "company", "organization"]]) {
