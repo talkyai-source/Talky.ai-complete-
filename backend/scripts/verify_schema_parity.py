@@ -27,6 +27,11 @@ _OWNED_NAME = re.compile(r"qa_schema_parity_[a-f0-9]{32}_(?:clean|lineage)\Z")
 _DUMP_VERSION = re.compile(r"^-- Dumped (?:from database|by pg_dump) version .+\s*$")
 _RESTRICT = re.compile(r"^\\restrict ([A-Za-z0-9_]+)\s*$")
 _UNRESTRICT = re.compile(r"^\\unrestrict ([A-Za-z0-9_]+)\s*$")
+# Since 12 Nov 2026 the CI database (PostgreSQL 15.20) dumps a per-column
+# ``pg_attver`` option whose value is a per-database counter, so a clean and a
+# migrated database always differ there. Only the number of a line that is
+# exactly this option is masked; the line itself, and any other option, stay.
+_ATTVER_LINE = re.compile(r"^(ALTER TABLE ONLY \S+ ALTER COLUMN \S+ SET \(pg_attver=)\d+(\);\s*)$")
 _SSL_ENV = {"sslmode": "PGSSLMODE", "sslrootcert": "PGSSLROOTCERT", "sslcert": "PGSSLCERT",
             "sslkey": "PGSSLKEY", "sslcrl": "PGSSLCRL"}
 
@@ -56,7 +61,8 @@ def normalize_dump(value: str) -> str:
         closing_guard = _UNRESTRICT.fullmatch(lines[last])
         if closing_guard and closing_guard.group(1) == opening_guard[1]:
             excluded.update((opening_guard[0], last))
-    return "".join(line for index, line in enumerate(lines) if index not in excluded)
+    return "".join(_ATTVER_LINE.sub(r"\g<1><attver>\g<2>", line)
+                   for index, line in enumerate(lines) if index not in excluded)
 
 
 def compare_dumps(clean: str, lineage: str) -> str:
