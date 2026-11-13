@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isApiClientError } from "@/lib/http-client";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
+import { LegalAcceptanceField, useLegalAcceptance } from "@/components/auth/legal-acceptance";
 import { inviteApi, roleName, type InvitePreview } from "@/lib/team-api";
 
 /**
@@ -52,6 +53,7 @@ export default function AcceptInvitePage() {
     const [confirmPassword, setConfirmPassword] = useState("");
     const [error, setError] = useState("");
     const [submitting, setSubmitting] = useState(false);
+    const legal = useLegalAcceptance();
 
     useEffect(() => {
         let live = true;
@@ -91,12 +93,17 @@ export default function AcceptInvitePage() {
             setError("Passwords do not match.");
             return;
         }
+        if (legal.blocked) {
+            setError("Accept the Terms of Service and Privacy Policy to continue.");
+            return;
+        }
         setSubmitting(true);
         try {
-            const joined = await inviteApi.accept({ token: token.current, name: name.trim(), password, confirmPassword });
+            const joined = await inviteApi.accept({ token: token.current, name: name.trim(), password, confirmPassword, ...legal.fields() });
             setPhase({ kind: "done", email: joined.email });
         } catch (err) {
-            if (isApiClientError(err) && err.status === 410) setPhase({ kind: "invalid" });
+            if (legal.handleRefusal(err)) setError("");
+            else if (isApiClientError(err) && err.status === 410) setPhase({ kind: "invalid" });
             else setError(failureMessage(err));
         } finally {
             setSubmitting(false);
@@ -158,15 +165,19 @@ export default function AcceptInvitePage() {
                                 <Input id="invite-confirm" type="password" autoComplete="new-password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
                             </div>
                             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-                            <p className="text-xs text-muted-foreground">
-                                By joining, you agree to our{" "}
-                                <Link href="/terms" className="underline hover:text-foreground">Terms of Service</Link>
-                                {" "}and{" "}
-                                <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.
-                            </p>
+                            {legal.required ? (
+                                <LegalAcceptanceField legal={legal} disabled={submitting} />
+                            ) : (
+                                <p className="text-xs text-muted-foreground">
+                                    By joining, you agree to our{" "}
+                                    <Link href="/terms" className="underline hover:text-foreground">Terms of Service</Link>
+                                    {" "}and{" "}
+                                    <Link href="/privacy" className="underline hover:text-foreground">Privacy Policy</Link>.
+                                </p>
+                            )}
                         </CardContent>
                         <CardFooter>
-                            <Button type="submit" className="w-full" disabled={submitting}>
+                            <Button type="submit" className="w-full" disabled={submitting || legal.blocked}>
                                 {submitting ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <UserPlus className="h-4 w-4" aria-hidden />}
                                 Join the workspace
                             </Button>

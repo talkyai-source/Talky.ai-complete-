@@ -131,6 +131,12 @@ class AccountTimezoneResponse(BaseModel):
     account_timezone: Optional[str] = None
 
 
+class LegalVersionsResponse(BaseModel):
+    required: bool
+    terms_version: Optional[str] = None
+    privacy_version: Optional[str] = None
+
+
 class LegalAcceptanceRequest(BaseModel):
     terms_version: str = Field(..., min_length=1, max_length=128)
     privacy_version: str = Field(..., min_length=1, max_length=128)

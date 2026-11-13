@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
 import { useTurnstile } from "@/components/auth/turnstile-widget";
+import { LegalAcceptanceField, useLegalAcceptance } from "@/components/auth/legal-acceptance";
 
 type Step = "form" | "otp" | "password";
 
@@ -37,6 +38,7 @@ export default function RegisterClientPage() {
     // Both the first send and "Resend" start a signup, and Cloudflare accepts
     // a Turnstile token once, so each gets its own (QA F4-12).
     const turnstile = useTurnstile("signup");
+    const legal = useLegalAcceptance();
     const nameInputRef = useRef<HTMLInputElement | null>(null);
     const otpInputRef = useRef<HTMLInputElement | null>(null);
     const passwordInputRef = useRef<HTMLInputElement | null>(null);
@@ -128,14 +130,19 @@ export default function RegisterClientPage() {
             return;
         }
 
+        if (legal.blocked) {
+            setError("Accept the Terms of Service and Privacy Policy to continue.");
+            return;
+        }
+
         setLoading(true);
         try {
-            const response = await api.signupComplete(
-                formData.email.trim(),
-                otpCode,
-                password,
-                confirmPassword,
-            );
+            // With acceptance off, the call is exactly what it was before (no
+            // fifth argument, no extra body fields).
+            const accepted = legal.fields();
+            const response = accepted.termsVersion && accepted.privacyVersion
+                ? await api.signupComplete(formData.email.trim(), otpCode, password, confirmPassword, accepted)
+                : await api.signupComplete(formData.email.trim(), otpCode, password, confirmPassword);
             api.setToken(response.access_token);
 
             // Account creation returns everything needed to seed the shared
@@ -174,6 +181,7 @@ export default function RegisterClientPage() {
                 router.push(destination);
             }
         } catch (err) {
+            if (legal.handleRefusal(err)) return;
             setError(extractError(err, "Could not create account. Please try again."));
         } finally {
             setLoading(false);
@@ -322,6 +330,8 @@ export default function RegisterClientPage() {
 
                                 {turnstile.widget}
 
+                                {legal.unavailable ? <LegalAcceptanceField legal={legal} /> : null}
+
                                 {error ? (
                                     <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
                                         {error}
@@ -330,7 +340,7 @@ export default function RegisterClientPage() {
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
-                                <Button type="submit" className="w-full" disabled={loading || turnstile.pending}>
+                                <Button type="submit" className="w-full" disabled={loading || turnstile.pending || legal.unavailable}>
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -489,6 +499,8 @@ export default function RegisterClientPage() {
                                     </div>
                                 </div>
 
+                                <LegalAcceptanceField legal={legal} disabled={loading} />
+
                                 {error ? (
                                     <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
                                         {error}
@@ -500,7 +512,7 @@ export default function RegisterClientPage() {
                                 <Button
                                     type="submit"
                                     className="w-full"
-                                    disabled={loading || password.length < MIN_PASSWORD_LENGTH || confirmPassword.length < MIN_PASSWORD_LENGTH}
+                                    disabled={loading || legal.blocked || password.length < MIN_PASSWORD_LENGTH || confirmPassword.length < MIN_PASSWORD_LENGTH}
                                 >
                                     {loading ? (
                                         <>
