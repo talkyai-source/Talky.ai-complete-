@@ -32,7 +32,7 @@ try {
 
 // Generous: the full suite runs many files in parallel on a loaded machine.
 const SLOW = 15_000;
-const START_DIALOG = "Who speaks first?";
+const START_DIALOG = "Start campaign";
 const requestAnimationFrame = window.requestAnimationFrame;
 const cancelAnimationFrame = window.cancelAnimationFrame;
 const realAlert = globalThis.alert;

@@ -97,8 +97,8 @@ test("FX3a: the Start window calls the person being called the callee everywhere
     const details = openDetails();
     await waitFor(() => assert.equal((details.getByRole("button", { name: "Resume" }) as HTMLButtonElement).disabled, false), { timeout: SLOW });
     fireEvent.click(details.getByRole("button", { name: "Resume" }));
-    await waitFor(() => assert.equal(screen.queryByRole("dialog", { name: "Who speaks first?" }) !== null, true), { timeout: SLOW });
-    const dialog = screen.getByRole("dialog", { name: "Who speaks first?" });
+    await waitFor(() => assert.equal(screen.queryByRole("dialog", { name: "Start campaign" }) !== null, true), { timeout: SLOW });
+    const dialog = screen.getByRole("dialog", { name: "Start campaign" });
     assert.equal(within(dialog).queryByRole("radio", { name: /Callee speaks first/ }) !== null, true);
     assert.equal(within(dialog).queryByRole("radio", { name: /Caller speaks first/ }) !== null, false);
     const text = dialog.textContent ?? "";
