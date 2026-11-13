@@ -46,6 +46,21 @@ describe("ContactSection", () => {
     assert.equal(classes.includes("text-sm"), false);
   });
 
+  it("marks the required fields and the optional one, and moves focus to the first problem", () => {
+    render(React.createElement(ContactSection));
+    for (const label of ["Full Name", "Email Address", "Message"]) {
+      const field = screen.getByLabelText(label);
+      assert.equal(field.getAttribute("aria-required"), "true");
+      assert.ok((document.querySelector(`label[for="${field.id}"]`) as HTMLElement).className.includes("after:content-['*']"));
+    }
+    assert.ok((document.querySelector('label[for="company"]') as HTMLElement).className.includes("after:content-['(optional)']"));
+    submit();
+    assert.equal(document.activeElement, screen.getByLabelText("Full Name"));
+    fireEvent.change(screen.getByLabelText("Full Name"), { target: { value: "Test Visitor" } });
+    submit();
+    assert.equal(document.activeElement, screen.getByLabelText("Email Address"));
+  });
+
   it("lets the browser fill the name, email and company", () => {
     render(React.createElement(ContactSection));
     for (const [label, name, ac] of [["Full Name", "name", "name"], ["Email Address", "email", "email"], ["Company", "company", "organization"]]) {

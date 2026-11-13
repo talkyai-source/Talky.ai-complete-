@@ -64,7 +64,11 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
     if (!payload) {
       const parsed = contactDraftSchema.safeParse(formData);
       if (!parsed.success) {
-        setErrors(Object.fromEntries(parsed.error.issues.map(issue => [String(issue.path[0]), issue.message])));
+        const found = Object.fromEntries(parsed.error.issues.map(issue => [String(issue.path[0]), issue.message]));
+        setErrors(found);
+        // On a long phone screen the first problem can be off screen.
+        const first = ["name", "email", "company", "message"].find(field => found[field]);
+        if (first) document.getElementById(first)?.focus();
         return;
       }
       payload = { ...parsed.data, request_id: crypto.randomUUID() };
@@ -130,10 +134,11 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
              >
                 <form onSubmit={handleSubmit} className="space-y-6" aria-busy={loading} noValidate>
                    <div className="space-y-2">
-                      <Label htmlFor="name" className="text-gray-900 dark:text-foreground font-semibold">Full Name</Label>
+                      <Label htmlFor="name" className="text-gray-900 dark:text-foreground font-semibold after:ml-0.5 after:text-red-500 after:content-['*']">Full Name</Label>
                       <Input 
                         id="name" 
                         name="name"
+                        aria-required="true"
                         autoComplete="name"
                         data-testid="name-input"
                         value={formData.name}
@@ -151,10 +156,11 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                    </div>
                    
                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-gray-900 dark:text-foreground font-semibold">Email Address</Label>
+                      <Label htmlFor="email" className="text-gray-900 dark:text-foreground font-semibold after:ml-0.5 after:text-red-500 after:content-['*']">Email Address</Label>
                       <Input 
                         id="email" 
                         name="email"
+                        aria-required="true"
                         autoComplete="email"
                         data-testid="email-input"
                         type="email"
@@ -173,7 +179,7 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                    </div>
 
                    <div className="space-y-2">
-                      <Label htmlFor="company" className="text-gray-900 dark:text-foreground font-semibold">Company</Label>
+                      <Label htmlFor="company" className="text-gray-900 dark:text-foreground font-semibold after:ml-1 after:font-normal after:text-gray-700 dark:after:text-muted-foreground after:content-['(optional)']">Company</Label>
                       <Input 
                         id="company" 
                         name="company"
@@ -191,9 +197,10 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
                    </div>
 
                    <div className="space-y-2">
-                      <Label htmlFor="message" className="text-gray-900 dark:text-foreground font-semibold">Message</Label>
+                      <Label htmlFor="message" className="text-gray-900 dark:text-foreground font-semibold after:ml-0.5 after:text-red-500 after:content-['*']">Message</Label>
                       <textarea
                         id="message"
+                        aria-required="true"
                         data-testid="message-input"
                         value={formData.message}
                         onChange={(e) => updateField("message", e.target.value)}
