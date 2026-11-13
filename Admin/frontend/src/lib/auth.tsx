@@ -24,7 +24,7 @@ interface AuthState {
 }
 interface AuthContextType extends AuthState {
     logoutRecoveryRequired: boolean;
-    login: (email: string, password: string) => Promise<boolean>;
+    login: (email: string, password: string, turnstileToken?: string) => Promise<boolean>;
     verifyMfa: (value: string, recovery: boolean) => Promise<boolean>;
     cancelMfa: () => void;
     logout: () => Promise<void>;
@@ -139,7 +139,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         broadcast('changed'); return true;
     };
 
-    const login = async (email: string, password: string): Promise<boolean> => {
+    const login = async (email: string, password: string, turnstileToken?: string): Promise<boolean> => {
         if (attemptPending.current) return false;
         if (!email.trim() || !password) { setState(anonymous('Please enter email and password')); return false; }
         attemptPending.current = true;
@@ -149,7 +149,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setState({ ...anonymous(), isLoading: true });
         try {
             if (USE_DUMMY_AUTH) { setState({ ...anonymous(), user: { ...DUMMY_ADMIN_USER, email }, isAuthenticated: true }); return true; }
-            const res = await api.login(email.trim(), password, owner.current);
+            const res = await api.login(email.trim(), password, owner.current, turnstileToken);
             if (!owner.current()) return false;
             if (res.error || !res.data) { setState(anonymous(res.error?.message ?? 'Sign-in could not be confirmed.')); return false; }
             if (res.data.mfa_required) {
