@@ -46,6 +46,8 @@ export default function RegisterClientPage() {
     const errorId = useId();
     const messageId = useId();
     const otpHelpId = useId();
+    const passwordHelpId = useId();
+    const mismatchId = useId();
 
     useEffect(() => {
         const t = window.setTimeout(() => {
@@ -486,9 +488,12 @@ export default function RegisterClientPage() {
                                             autoComplete="new-password"
                                             ref={passwordInputRef}
                                             aria-invalid={error ? true : undefined}
-                                            aria-describedby={error ? errorId : undefined}
+                                            aria-describedby={[passwordHelpId, error ? errorId : null].filter(Boolean).join(" ")}
                                         />
                                     </div>
+                                    <p id={passwordHelpId} className="text-xs text-muted-foreground">
+                                        At least {MIN_PASSWORD_LENGTH} characters, and not a common password.
+                                    </p>
                                 </div>
 
                                 <div className="space-y-2">
@@ -506,8 +511,14 @@ export default function RegisterClientPage() {
                                             minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                             autoComplete="new-password"
+                                            aria-describedby={confirmPassword && confirmPassword !== password ? mismatchId : undefined}
                                         />
                                     </div>
+                                    {confirmPassword && confirmPassword !== password ? (
+                                        <p id={mismatchId} role="status" className="text-xs text-red-600 dark:text-red-400">
+                                            Passwords do not match.
+                                        </p>
+                                    ) : null}
                                 </div>
 
                                 <LegalAcceptanceField legal={legal} disabled={loading} />
