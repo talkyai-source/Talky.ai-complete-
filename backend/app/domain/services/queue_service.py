@@ -23,6 +23,11 @@ from app.core.config import ConfigManager
 logger = logging.getLogger(__name__)
 
 
+class QueueUnavailableError(RuntimeError):
+    """The dialer queue could not be read (Redis error). Distinct from an
+    empty queue, which ``dequeue_job`` still reports as ``None``."""
+
+
 class DialerQueueService:
     """
     Redis-based job queue for the dialer engine.
@@ -267,6 +272,9 @@ class DialerQueueService:
             
         Returns:
             DialerJob or None if no jobs available
+
+        Raises:
+            QueueUnavailableError: Redis failed (not the same as an empty queue)
         """
         if not self._initialized:
             await self.initialize()
@@ -318,8 +326,10 @@ class DialerQueueService:
             return None
 
         except Exception as e:
+            # A Redis failure must NOT look like "queue empty": callers back
+            # off and retry instead of treating it as nothing-to-do.
             logger.error(f"Failed to dequeue job: {e}")
-            return None
+            raise QueueUnavailableError(f"dequeue failed: {e}") from e
 
     async def _pop_and_track(self, source_key: str) -> Optional[DialerJob]:
         """Crash-safe dequeue from one queue (BUG 1).
