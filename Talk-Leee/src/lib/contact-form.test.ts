@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { contactOptionalFieldProblem, contactPayload, contactTimezoneError, EMPTY_CONTACT_FORM } from "@/lib/contact-form";
+import { contactOptionalFieldProblem, contactPayload, contactTimezoneError, EMPTY_CONTACT_FORM, supportedTimeZones } from "@/lib/contact-form";
 
 test("manual contact payload carries every operational contact field", () => {
     const payload = contactPayload({
@@ -70,4 +70,13 @@ test("optional field problem names the invalid mobile, business number or timezo
     assert.match(contactOptionalFieldProblem({ ...base, business_number: "12345" }, "GB", zones) ?? "", /^Business number is not valid: /);
     assert.match(contactOptionalFieldProblem({ ...base, timezone: "Eastern" }, "GB", zones) ?? "", /^Timezone: "Eastern" is not a time zone/);
     assert.equal(contactOptionalFieldProblem({ ...base, timezone: "Europe/London" }, "GB", zones), null);
+});
+
+test("the zone list never offers a name the API would refuse (no bare UTC, no digits)", () => {
+    const zones = supportedTimeZones();
+    assert.ok(zones.includes("Europe/London"));
+    assert.ok(zones.includes("America/New_York"));
+    assert.equal(zones.includes("UTC"), false);
+    assert.equal(zones.every((zone) => /^[A-Za-z_]+\/[A-Za-z_+\-/]+$/.test(zone)), true);
+    assert.match(contactTimezoneError("UTC") ?? "", /not a time zone/);
 });

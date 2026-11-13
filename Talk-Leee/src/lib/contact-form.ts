@@ -50,9 +50,14 @@ export function optionalE164(raw: string, country: CountrySelection): string {
 
 /** Every IANA zone this browser knows; empty when the browser cannot list them
  *  (the API still checks, so an empty list only skips the early message). */
+// The API's shape rule for a zone name (contact_fields._IANA_RE): Area/Place,
+// letters only. A browser also lists names such as "UTC" that the API refuses,
+// so they are left out here rather than offered and then rejected on save.
+const API_ZONE_SHAPE = /^[A-Za-z_]+\/[A-Za-z_+\-/]+$/;
+
 export function supportedTimeZones(): string[] {
     try {
-        return Intl.supportedValuesOf("timeZone");
+        return Intl.supportedValuesOf("timeZone").filter((zone) => API_ZONE_SHAPE.test(zone));
     } catch {
         return [];
     }
