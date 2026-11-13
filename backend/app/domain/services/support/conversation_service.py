@@ -142,12 +142,19 @@ async def _offer_escalation(conn, conversation: dict, actor: SupportActor, reaso
 async def start_conversation(pool, actor: SupportActor, *, request_id: UUID, page_context: dict | None) -> WriteResult:
     tenant_id = actor.require_tenant()
     now = _now()
+    context = clean_page_context(page_context)
+    # What the chat was opened from, so a reused request_id for another page is refused instead of
+    # replaying the first conversation (QA F2-09). viewport and app_version are measured again on
+    # every attempt (the web client re-reads the window on a retry), so they are not content.
+    fingerprint = receipts.body_fingerprint(route=context.get("route"), campaign_id=context.get("campaign_id"),
+                                            call_id=context.get("call_id"))
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation="conversation.start")
+                                      actor_id=actor.user_id, operation="conversation.start",
+                                      fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
-        context = await _drop_foreign_ids(conn, clean_page_context(page_context), tenant_id)
+        context = await _drop_foreign_ids(conn, context, tenant_id)
         conversation = await store.insert_conversation(conn, tenant_id=tenant_id, user_id=actor.user_id,
                                                        page_context=context, request_id=request_id, now=now)
         await store.insert_message(conn, conversation_id=conversation["id"], tenant_id=tenant_id,
@@ -155,7 +162,7 @@ async def start_conversation(pool, actor: SupportActor, *, request_id: UUID, pag
         body = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                    operation="conversation.start", resource_id=conversation["id"], status_code=201,
                                    response={"conversation_id": conversation["id"], "greeting": GREETING,
-                                             "suggestions": list(SUGGESTIONS)})
+                                             "suggestions": list(SUGGESTIONS)}, fingerprint=fingerprint)
     return WriteResult(body, 201)
 
 
@@ -176,7 +183,8 @@ def _reply_diagnostics(turn: BotTurn) -> dict:
 
 
 async def _finish(conn, *, actor: SupportActor, conversation: dict, user_message: dict, request_id: UUID,
-                  content: str, turn: BotTurn | None, handover: str | None, now: datetime) -> dict:
+                  fingerprint: str, content: str, turn: BotTurn | None, handover: str | None,
+                  now: datetime) -> dict:
     """Store the reply (bot answer or fixed hand-over text), the decision and the receipt."""
     offer = None
     if handover:
@@ -194,7 +202,7 @@ async def _finish(conn, *, actor: SupportActor, conversation: dict, user_message
                 "escalation": offer}
     return await receipts.save(conn, tenant_id=actor.tenant_id, request_id=request_id, actor_id=actor.user_id,
                                operation="conversation.message", resource_id=reply["id"], status_code=200,
-                               response=response)
+                               response=response, fingerprint=fingerprint)
 
 
 async def post_message(pool, redis, actor: SupportActor, conversation_id: UUID, *, request_id: UUID,
@@ -202,10 +210,14 @@ async def post_message(pool, redis, actor: SupportActor, conversation_id: UUID, 
                        client_factory: Callable | None = None) -> WriteResult:
     tenant_id = actor.require_tenant()
     now = _now()
+    # The conversation and the text, so a reused request_id for another message or conversation is
+    # refused instead of replaying the first reply (QA F2-09).
+    fingerprint = receipts.body_fingerprint(conversation_id=conversation_id, content=content)
     # Step 1: store the customer's message, apply limits and the always-a-person topics.
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation="conversation.message")
+                                      actor_id=actor.user_id, operation="conversation.message",
+                                      fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         conversation = await _owned_conversation(conn, conversation_id, actor, for_update=True)
@@ -235,7 +247,8 @@ async def post_message(pool, redis, actor: SupportActor, conversation_id: UUID, 
                 text = HANDOVER_TEXT.get(limit or "", DEFAULT_HANDOVER) if (limit or topic) \
                     else HANDOVER_TEXT["bot_unavailable"]
                 body = await _finish(conn, actor=actor, conversation=conversation, user_message=user_message,
-                                     request_id=request_id, content=text, turn=None, handover=reason, now=now)
+                                     request_id=request_id, fingerprint=fingerprint, content=text, turn=None,
+                                     handover=reason, now=now)
                 return WriteResult(body, 200)
         history = tuple((m["role"], m["content"]) for m in await store.fetch_messages(conn, conversation_id, tenant_id)
                         if m["id"] != user_message["id"] and m["created_at"] <= history_cutoff)[-HISTORY_LIMIT:]
@@ -255,23 +268,28 @@ async def post_message(pool, redis, actor: SupportActor, conversation_id: UUID, 
     # Step 3: store the answer and decide whether to hand over.
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation="conversation.message")
+                                      actor_id=actor.user_id, operation="conversation.message",
+                                      fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         conversation = await _owned_conversation(conn, conversation_id, actor, for_update=True)
         handover = escalation.reason_for_turn(turn)
         text = HANDOVER_TEXT["bot_unavailable"] if turn.error else turn.answer
         body = await _finish(conn, actor=actor, conversation=conversation, user_message=user_message,
-                             request_id=request_id, content=text[:4000], turn=turn, handover=handover, now=_now())
+                             request_id=request_id, fingerprint=fingerprint, content=text[:4000], turn=turn,
+                             handover=handover, now=_now())
     return WriteResult(body, 200)
 
 
 async def feedback(pool, actor: SupportActor, conversation_id: UUID, *, request_id: UUID, solved: bool) -> WriteResult:
     tenant_id = actor.require_tenant()
     now = _now()
+    # The conversation and the answer, so a reused request_id with the opposite answer is refused (QA F2-09).
+    fingerprint = receipts.body_fingerprint(conversation_id=conversation_id, solved=solved)
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation="conversation.feedback")
+                                      actor_id=actor.user_id, operation="conversation.feedback",
+                                      fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         conversation = await _owned_conversation(conn, conversation_id, actor, for_update=True)
@@ -292,7 +310,8 @@ async def feedback(pool, actor: SupportActor, conversation_id: UUID, *, request_
             message = projection.bot_message(row)
         body = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                    operation="conversation.feedback", resource_id=conversation_id, status_code=200,
-                                   response={"status": status, "message": message, "escalation": offer})
+                                   response={"status": status, "message": message, "escalation": offer},
+                                   fingerprint=fingerprint)
     if solved:
         metrics.bot_resolved()
     return WriteResult(body, 200)
@@ -302,9 +321,12 @@ async def escalate(pool, actor: SupportActor, conversation_id: UUID, *, request_
     """The customer asks for a person: always allowed until a ticket exists."""
     tenant_id = actor.require_tenant()
     now = _now()
+    # The only content is which conversation, so another conversation is refused (QA F2-09).
+    fingerprint = receipts.body_fingerprint(conversation_id=conversation_id)
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation="conversation.escalate")
+                                      actor_id=actor.user_id, operation="conversation.escalate",
+                                      fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         conversation = await _owned_conversation(conn, conversation_id, actor, for_update=True)
@@ -314,5 +336,5 @@ async def escalate(pool, actor: SupportActor, conversation_id: UUID, *, request_
         offer = await _offer_escalation(conn, conversation, actor, "customer_requested", now)
         body = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                    operation="conversation.escalate", resource_id=conversation_id, status_code=200,
-                                   response={"escalation": offer})
+                                   response={"escalation": offer}, fingerprint=fingerprint)
     return WriteResult(body, 200)

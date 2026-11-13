@@ -3,9 +3,10 @@ import Module from "node:module";
 import { afterEach, beforeEach, test } from "node:test";
 import React from "react";
 import { act, cleanup, fireEvent } from "@testing-library/react";
+import { QueryClientProvider } from "@tanstack/react-query";
 import { renderWithQueryClient } from "@/test-utils/render";
 import { supportChatStore } from "@/lib/support-chat-store";
-import type { SupportConfig } from "@/lib/support-api";
+import type { PageContext, SupportConfig } from "@/lib/support-api";
 
 /*
  * The drawer's accessibility contract and the retry path, with the real
@@ -45,6 +46,10 @@ const uuid = "11111111-1111-4111-8111-111111111111";
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 
 let requests: Array<{ path: string; body: unknown }> = [];
+/** POST /support/conversations: the start of a conversation. */
+let startHandler: (body: { request_id: string; page_context: PageContext }) => Response | Promise<Response>;
+/** POST /support/tickets: the ticket form's submission. */
+let ticketHandler: ((body: Record<string, unknown>) => Response | Promise<Response>) | null;
 let messageHandler: (body: { request_id: string; content: string }) => Response | Promise<Response>;
 /** GET /support/conversations/{id}: what the server holds when a lost write is reconciled. */
 let conversationHandler: () => Response;
@@ -54,15 +59,18 @@ beforeEach(() => {
     requests = [];
     window.sessionStorage.clear();
     supportChatStore.resetForTests();
+    startHandler = () => json({ conversation_id: uuid, greeting: "Hi there", suggestions: ["Billing question"] }, 201);
+    ticketHandler = null;
     messageHandler = () => json({ message: { id: uuid, role: "assistant", content: "Try **Check again**.", sources: [{ slug: "s", title: "Readiness", url: "/docs/outbound-campaigns#readiness" }], created_at: "2026-10-30T10:00:00Z" }, resolution_prompt: true, escalation: null });
     conversationHandler = () => json({ error: { code: "not_found", message: "no", details: null, request_id: "r" } }, 404);
     globalThis.fetch = (async (url: RequestInfo | URL, init?: RequestInit) => {
         const path = String(url);
         const body = init?.body ? JSON.parse(String(init.body)) : null;
         requests.push({ path, body });
-        if (path.endsWith("/support/conversations")) return json({ conversation_id: uuid, greeting: "Hi there", suggestions: ["Billing question"] }, 201);
+        if (path.endsWith("/support/conversations")) return startHandler(body);
         if (path.endsWith(`/support/conversations/${uuid}`) && (init?.method ?? "GET") === "GET") return conversationHandler();
         if (path.endsWith("/messages")) return messageHandler(body);
+        if (path.endsWith("/support/tickets") && ticketHandler) return ticketHandler(body);
         return json({ error: { code: "not_found", message: "no", details: null, request_id: "r" } }, 404);
     }) as typeof fetch;
 });
@@ -72,12 +80,14 @@ async function settle() {
     for (let round = 0; round < 6; round += 1) await act(async () => { await new Promise((resolve) => setTimeout(resolve, 15)); });
 }
 
-function mountOpen() {
+const drawer = (pageContext: () => PageContext) => <SupportDrawer config={config} identity={identity} pageContext={pageContext} />;
+
+function mountOpen(pageContext: () => PageContext = () => ({ route: "/dashboard" })) {
     const opener = document.createElement("button");
     opener.textContent = "Help";
     document.body.appendChild(opener);
     opener.focus();
-    const view = renderWithQueryClient(<SupportDrawer config={config} identity={identity} pageContext={() => ({ route: "/dashboard" })} />);
+    const view = renderWithQueryClient(drawer(pageContext));
     act(() => supportChatStore.setOpen(true));
     return { ...view, opener };
 }
@@ -227,4 +237,80 @@ test("when the re-read holds no reply, Retry sends the same request_id and never
     assert.deepEqual(posts, ["/conversations", `/conversations/${uuid}/messages`, `/conversations/${uuid}/messages`], "no other write went out");
     assert.match(document.querySelector("[role='log']")?.textContent ?? "", new RegExp(`Replayed for ${sends[0]!.request_id}`));
     assert.equal(document.querySelector("[role='alert']"), null);
+});
+
+const campaignId = "22222222-2222-4222-8222-222222222222";
+const callId = "33333333-3333-4333-8333-333333333333";
+const startBodies = () => requests
+    .filter((request) => request.path.endsWith("/support/conversations") && request.body !== null)
+    .map((request) => request.body as { request_id: string; page_context: PageContext });
+
+test("QA F2-09: a failed start is retried with the page context it was started with, so another page cannot turn the retry into a request_id conflict", async () => {
+    // The backend's rule (F2-09): the same request_id with another route, campaign or call is a 409.
+    // The first response is lost; the server already holds the conversation, so only an identical retry is accepted.
+    let firstContent: string | null = null;
+    startHandler = (body) => {
+        const content = JSON.stringify([body.page_context.route, body.page_context.campaign_id, body.page_context.call_id]);
+        if (firstContent === null) {
+            firstContent = content;
+            return json({ error: { code: "support_unavailable", message: "Support is temporarily unavailable.", details: null, request_id: "r" } }, 503);
+        }
+        if (content !== firstContent) return json({ error: { code: "request_id_conflict", message: "This request_id was already used with different content. Generate a new one.", details: null, request_id: "r" } }, 409);
+        return json({ conversation_id: uuid, greeting: "Hi there", suggestions: [] }, 201);
+    };
+    const onCampaign: PageContext = { route: `/campaigns/${campaignId}`, campaign_id: campaignId };
+    const onCall: PageContext = { route: `/calls/${callId}`, call_id: callId };
+    const view = mountOpen(() => onCampaign);
+    await settle();
+    assert.match(document.querySelector("[role='alert']")?.textContent ?? "", /temporarily unavailable/, "the first start failed");
+    // The user opens another page: the launcher closes the drawer and hands it that page's context. Later the drawer is opened again.
+    act(() => supportChatStore.setOpen(false));
+    view.rerender(<QueryClientProvider client={view.qc}>{drawer(() => onCall)}</QueryClientProvider>);
+    act(() => supportChatStore.setOpen(true));
+    await settle();
+    const retry = Array.from(document.querySelectorAll("[role='alert'] button")).find((button) => button.textContent === "Retry")!;
+    assert.ok(retry, "Retry is offered for the failed start");
+    await act(async () => { fireEvent.click(retry); });
+    await settle();
+    const starts = startBodies();
+    assert.equal(starts.length, 2, "the retry sent exactly one more start");
+    assert.equal(starts[1]!.request_id, starts[0]!.request_id, "with the same request_id");
+    assert.deepEqual(starts[1]!.page_context, onCampaign, "and the page context the start was made with, not the page the user is on now");
+    assert.equal(document.querySelector("[role='alert']"), null, "the server accepted the retry as the same request");
+    assert.match(document.querySelector("[role='log']")?.textContent ?? "", /Hi there/);
+});
+
+test("a failed ticket submission is retried with the same body: the form is locked while the write is unconfirmed", async () => {
+    // create_ticket reads the draft from the store when it executes, so the draft must not be editable between attempts.
+    let attempts = 0;
+    ticketHandler = () => {
+        attempts += 1;
+        if (attempts === 1) return json({ error: { code: "support_unavailable", message: "Support is temporarily unavailable.", details: null, request_id: "r" } }, 503);
+        return json({
+            id: uuid, number: "SUP-000123", subject: "hello", category: "other", priority: "normal", status: "open",
+            created_at: "2026-10-30T10:00:00Z", updated_at: "2026-10-30T10:00:00Z",
+            requester: { id: null, name: null }, related: {}, messages: [], csat: null, allowed_actions: [],
+        }, 201);
+    };
+    messageHandler = () => json({ error: { code: "support_unavailable", message: "down", details: null, request_id: "r" } }, 503);
+    mountOpen();
+    await settle();
+    await sendHello();
+    const instead = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Create a ticket instead")!;
+    await act(async () => { fireEvent.click(instead); });
+    await settle();
+    const submit = Array.from(document.querySelectorAll("button")).find((button) => button.textContent === "Send to support")!;
+    await act(async () => { fireEvent.click(submit); });
+    await settle();
+    const form = document.querySelector<HTMLFormElement>("[data-support-ticket-form]")!;
+    assert.match(document.querySelector("[role='alert']")?.textContent ?? "", /temporarily unavailable/, "the first submission failed");
+    assert.equal(form.querySelector<HTMLInputElement>("input")?.disabled, true, "the subject is locked");
+    assert.equal(form.querySelector<HTMLTextAreaElement>("textarea")?.disabled, true, "the description is locked");
+    const retry = Array.from(document.querySelectorAll("[role='alert'] button")).find((button) => button.textContent === "Retry")!;
+    await act(async () => { fireEvent.click(retry); });
+    await settle();
+    const posts = requests.filter((request) => request.path.endsWith("/support/tickets")).map((request) => request.body as { request_id: string });
+    assert.equal(posts.length, 2);
+    assert.deepEqual(posts[1], posts[0], "the retry sent the same request_id and the same content");
+    assert.match(document.body.textContent ?? "", /Your ticket was created/);
 });

@@ -51,7 +51,8 @@ export function useSupportChat(input: { config: SupportConfig | null; identity: 
         const stored = readSupportConversation(identity);
         const startFresh = () => {
             writeSupportConversation(identity, null);
-            supportChatStore.dispatch({ type: "start", requestId: newRequestId() });
+            // The page context is read here, once; a retry of this request_id resends it unchanged.
+            supportChatStore.dispatch({ type: "start", requestId: newRequestId(), pageContext: pageContext() });
         };
         if (!stored) { startFresh(); return; }
         supportApi.getConversation(stored).then((conversation) => {
@@ -64,7 +65,7 @@ export function useSupportChat(input: { config: SupportConfig | null; identity: 
             else supportChatStore.dispatch({ type: "fail", message: describeSupportError(error) });
         });
         return () => { cancelled = true; };
-    }, [open, identity, config, chat.phase, chat.pending]);
+    }, [open, identity, config, chat.phase, chat.pending, pageContext]);
 
     // Execute the pending write once per request_id.
     useEffect(() => {
@@ -92,7 +93,7 @@ export function useSupportChat(input: { config: SupportConfig | null; identity: 
             try {
                 switch (write.kind) {
                     case "start": {
-                        const result = await supportApi.startConversation(write.requestId, pageContext());
+                        const result = await supportApi.startConversation(write.requestId, write.pageContext);
                         writeSupportConversation(identity!, result.data.conversation_id);
                         supportChatStore.dispatch({ type: "started", conversationId: result.data.conversation_id, greeting: result.data.greeting, suggestions: result.data.suggestions, at: new Date().toISOString() });
                         return;
@@ -144,7 +145,7 @@ export function useSupportChat(input: { config: SupportConfig | null; identity: 
             }
         }
         // The write runs to completion even if this layout unmounts mid-flight; the store outlives it.
-    }, [chat.pending, chat.phase, chat.conversationId, chat.messages.length, identity, config, pageContext, queryClient]);
+    }, [chat.pending, chat.phase, chat.conversationId, chat.messages.length, identity, config, queryClient]);
 
     const openDrawer = useCallback(() => supportChatStore.setOpen(true), []);
     const closeDrawer = useCallback(() => supportChatStore.setOpen(false), []);

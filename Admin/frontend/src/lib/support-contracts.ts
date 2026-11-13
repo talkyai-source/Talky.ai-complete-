@@ -147,3 +147,8 @@ export function validUploadReceipt(value: unknown): value is UploadReceipt {
 export function isVersionConflict(error: { code?: string; status?: number } | undefined): boolean {
     return Boolean(error && error.status === 409 && error.code === 'VERSION_CONFLICT');
 }
+
+/** The backend's 409 for a request_id reused with different content (the first request was stored); api.ts upper-cases envelope codes. */
+export function isRequestIdConflict(error: { code?: string; status?: number } | undefined): boolean {
+    return Boolean(error && error.status === 409 && error.code === 'REQUEST_ID_CONFLICT');
+}

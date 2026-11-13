@@ -47,18 +47,22 @@ async def list_articles(pool, actor: SupportActor, *, q: str | None, source: str
     return {"items": [_article(row) for row in rows]}
 
 
-async def _begin(conn, audit, actor: SupportActor, request_id: UUID, operation: str) -> dict | None:
+async def _begin(conn, audit, actor: SupportActor, request_id: UUID, operation: str,
+                 fingerprint: str) -> dict | None:
     await audit.lock_transaction(conn)
     await require_platform_admin_mutation(conn, actor.user_id)
     return await receipts.claim(conn, tenant_id=None, request_id=request_id, actor_id=actor.user_id,
-                                operation=operation)
+                                operation=operation, fingerprint=fingerprint)
 
 
 async def create_article(pool, audit, actor: SupportActor, *, request_id: UUID, slug: str, title: str,
                          body_md: str, category: str, published: bool) -> WriteResult:
     now = datetime.now(timezone.utc)
+    # The article's content, so a reused request_id with other text is refused, not replayed (QA F2-09).
+    fingerprint = receipts.body_fingerprint(slug=slug, title=title, body_md=body_md, category=category,
+                                            published=published)
     async with acquire_with_tenant(pool, None, user_id=actor.user_id) as conn:
-        replay = await _begin(conn, audit, actor, request_id, "staff.article.create")
+        replay = await _begin(conn, audit, actor, request_id, "staff.article.create", fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         try:
@@ -77,7 +81,7 @@ async def create_article(pool, audit, actor: SupportActor, *, request_id: UUID, 
             after_state={"slug": slug, "category": category, "published": published})
         body = await receipts.save(conn, tenant_id=None, request_id=request_id, actor_id=actor.user_id,
                                    operation="staff.article.create", resource_id=row["id"], status_code=201,
-                                   response=_article(row))
+                                   response=_article(row), fingerprint=fingerprint)
     return WriteResult(body, 201)
 
 
@@ -85,8 +89,11 @@ async def update_article(pool, audit, actor: SupportActor, article_id: UUID, *, 
                          changes: dict[str, Any]) -> WriteResult:
     now = datetime.now(timezone.utc)
     fields = {name: changes[name] for name in _EDITABLE if name in changes and changes[name] is not None}
+    # Which article and the fields to change (a null field is a field not sent), so a reused
+    # request_id for another article or other text is refused, not replayed (QA F2-09).
+    fingerprint = receipts.body_fingerprint(article_id=article_id, fields=fields)
     async with acquire_with_tenant(pool, None, user_id=actor.user_id) as conn:
-        replay = await _begin(conn, audit, actor, request_id, "staff.article.update")
+        replay = await _begin(conn, audit, actor, request_id, "staff.article.update", fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         current = await conn.fetchrow(f"SELECT {_COLUMNS} FROM support_kb_articles WHERE id = $1 FOR UPDATE",
@@ -113,5 +120,5 @@ async def update_article(pool, audit, actor: SupportActor, article_id: UUID, *, 
                 metadata={"body_changed": "body_md" in fields})
         body = await receipts.save(conn, tenant_id=None, request_id=request_id, actor_id=actor.user_id,
                                    operation="staff.article.update", resource_id=article_id, status_code=200,
-                                   response=_article(row))
+                                   response=_article(row), fingerprint=fingerprint)
     return WriteResult(body, 200)
