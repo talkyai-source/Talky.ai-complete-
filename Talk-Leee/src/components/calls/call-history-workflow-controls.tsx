@@ -233,7 +233,7 @@ export function CallHistoryFormButton({
                 open={open}
                 onOpenChange={setOpenState}
                 title="Post-call form"
-                description={`Capture the key details from the AI script for ${callLabel}.`}
+                description={`Capture the key details from the transcript for ${callLabel}.`}
                 size="sm"
                 footer={
                     <div className="flex items-center justify-end gap-2">

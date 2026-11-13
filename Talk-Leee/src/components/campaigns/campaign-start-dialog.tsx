@@ -164,7 +164,7 @@ export function CampaignStartDialog({ dialog }: { dialog: CampaignStartDialogSta
                 if (!next) dialog.close();
             }}
             title="Who speaks first?"
-            description="Pick who opens the conversation when the callee answers. The call pipeline pre-warms either way — this only controls whether the agent speaks an opening line or waits for the caller."
+            description="Pick who opens the conversation when the callee answers. The call pipeline pre-warms either way — this only controls whether the agent speaks an opening line or waits for the callee."
             size="sm"
             footer={
                 <div className="flex justify-end gap-2">
@@ -244,7 +244,7 @@ export function CampaignStartDialog({ dialog }: { dialog: CampaignStartDialogSta
                         className="mt-1"
                     />
                     <div>
-                        <div className="text-sm font-medium text-foreground">Caller speaks first</div>
+                        <div className="text-sm font-medium text-foreground">Callee speaks first</div>
                         <div className="text-xs text-muted-foreground">
                             Agent waits for the callee to say &ldquo;hello&rdquo; before responding. Feels more natural on warm lists.
                         </div>

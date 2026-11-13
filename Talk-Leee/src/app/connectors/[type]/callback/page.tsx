@@ -86,7 +86,7 @@ function ConnectorsTypedCallbackInner({ providerType }: { providerType: string }
                     <CardDescription>{parsed.ok ? "You can return to Connectors." : "Fix the issue and try again."}</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                    <div className={parsed.ok ? "text-sm text-emerald-700" : "text-sm text-red-600"}>{parsed.message}</div>
+                    <div role={parsed.ok ? "status" : "alert"} className={parsed.ok ? "text-sm text-emerald-700" : "text-sm text-red-600"}>{parsed.message}</div>
                     <div className="flex flex-wrap items-center justify-between gap-2">
                         <Button asChild>
                             <Link href="/connectors">Back to Connectors</Link>

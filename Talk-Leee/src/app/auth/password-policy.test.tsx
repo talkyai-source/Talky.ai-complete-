@@ -87,7 +87,7 @@ const flows: Flow[] = [
         name: "registration",
         passwordLabel: "Password",
         confirmationLabel: "Confirm Password",
-        button: "Create Account",
+        button: "Create account",
         async open(calls) {
             mock.method(api, "signupStart", async () => ({ email, message: "Verification code sent!", expires_in_minutes: 10 }));
             mock.method(api, "signupVerifyCode", async () => ({ email, message: "Verified" }));
@@ -99,9 +99,9 @@ const flows: Flow[] = [
             input("Your Name", "Person");
             input("Business Name", "Example Company");
             input("Work Email", email);
-            fireEvent.click(screen.getByRole("button", { name: "Get Started" }));
-            await screen.findByLabelText("Verification Code");
-            input("Verification Code", code);
+            fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+            await screen.findByLabelText("Verification code");
+            input("Verification code", code);
             fireEvent.click(screen.getByRole("button", { name: "Next" }));
             await screen.findByLabelText("Password");
         },
@@ -111,7 +111,7 @@ const flows: Flow[] = [
         name: "password reset",
         passwordLabel: "New password",
         confirmationLabel: "Confirm new password",
-        button: "Reset Password",
+        button: "Reset password",
         async open(calls) {
             mock.method(api, "request", async (options: { path: string; method: string; body: unknown }) => {
                 if (options.path === "/auth/forgot-password") return { message: "Reset code requested." };
@@ -120,7 +120,7 @@ const flows: Flow[] = [
                 throw new Error(commonPasswordError);
             });
             draw(<ForgotPasswordPage />, `email=${encodeURIComponent(email)}`);
-            fireEvent.click(screen.getByRole("button", { name: "Send Reset Code" }));
+            fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
             await screen.findByLabelText("Code");
             input("Code", code);
         },

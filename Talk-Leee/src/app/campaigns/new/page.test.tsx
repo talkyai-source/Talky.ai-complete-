@@ -156,11 +156,11 @@ test("creating the campaign removes its draft", async () => {
 test("the classic form keeps its own draft through a reload", async () => {
     mountPage(ACCOUNT_A);
     fireEvent.click(await screen.findByRole("button", { name: /Prefer the detailed form/ }, { timeout: SLOW }));
-    const input = await screen.findByLabelText("Campaign Name", {}, { timeout: SLOW });
+    const input = await screen.findByLabelText("Campaign name", {}, { timeout: SLOW });
     fireEvent.change(input, { target: { value: "Classic draft" } });
     await reload(ACCOUNT_A);
     fireEvent.click(screen.getByRole("button", { name: /Prefer the detailed form/ }));
-    assert.equal((await screen.findByLabelText("Campaign Name", {}, { timeout: SLOW }) as HTMLInputElement).value, "Classic draft");
+    assert.equal((await screen.findByLabelText("Campaign name", {}, { timeout: SLOW }) as HTMLInputElement).value, "Classic draft");
     assert.ok(keptNotice());
 });
 

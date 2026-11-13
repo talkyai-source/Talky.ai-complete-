@@ -120,15 +120,25 @@ test("the first page is requested in cursor mode, never with a page number", asy
 });
 
 test("Next loads the following page with the cursor the server returned, and Previous returns", async () => {
+    // jsdom has no animation frames; a card of 10 or more rows measures itself with one.
+    Object.defineProperty(window, "requestAnimationFrame", { configurable: true, writable: true,
+        value: (callback: FrameRequestCallback) => window.setTimeout(() => callback(performance.now()), 0) });
+    Object.defineProperty(window, "cancelAnimationFrame", { configurable: true, writable: true,
+        value: (id: number) => window.clearTimeout(id) });
+    // Pages are 50 rows of the filtered result: 59 calls give Next a second page (with 3 calls it is disabled).
+    respond = (params) => params.cursor === "cursor-page-2"
+        ? { items: Array.from({ length: 9 }, (_, index) => item(51 + index)), total: null, next_cursor: null }
+        : { items: Array.from({ length: 50 }, (_, index) => item(1 + index)), total: null, next_cursor: "cursor-page-2" };
     renderWithQueryClient(<CallsPage />);
     await screen.findAllByText(phone(1));
     assert.equal(button("Previous").disabled, true);
-    assert.equal(button("Next").disabled, false);
-    // The server sends no total in cursor mode; the page must not invent one.
-    assert.equal(screen.queryByText(/ of \d+ calls/), null);
+    await waitFor(() => assert.equal(button("Next").disabled, false));
+    // The server sends no total in cursor mode; the page must not invent one:
+    // "of N" is the count of the rows read, shown once every page has been read.
+    assert.ok(await screen.findByText("Showing 1 to 50 of 59 calls"));
 
     fireEvent.click(button("Next"));
-    await screen.findAllByText(phone(3));
+    await screen.findAllByText(phone(51));
 
     const continued = listRequests.find((params) => params.cursor !== undefined);
     assert.ok(continued, "loading the next page must send a cursor");
@@ -143,6 +153,19 @@ test("Next loads the following page with the cursor the server returned, and Pre
     await screen.findAllByText(phone(1));
     assert.equal(button("Previous").disabled, true);
     assert.ok(listRequests.every((params) => params.page === undefined), "no request may fall back to offset paging");
+
+    // When the 5,000-call limit stops the reading the count is not exact: no total is shown.
+    cleanup();
+    listRequests = [];
+    respond = (params) => {
+        const pageNumber = Number(params.cursor ?? 1);
+        return { items: Array.from({ length: 50 }, (_, index) => ({ ...item(1), id: `limit-${pageNumber}-${index}` })), total: null, next_cursor: String(pageNumber + 1) };
+    };
+    renderWithQueryClient(<CallsPage />);
+    await waitFor(() => assert.equal(listRequests.length, 100), { timeout: 30_000 });
+    assert.ok(await screen.findByText("Showing 1 to 50 calls", undefined, { timeout: 30_000 }));
+    assert.equal(screen.queryByText(/ of \d+ calls/), null);
+    assert.equal(listRequests.length, 100, "reading stops at 5,000 calls");
 });
 
 test("the filters are sent on the first request and replayed on every continuation, and a changed filter starts a new cursor chain", async () => {
@@ -153,9 +176,10 @@ test("the filters are sent on the first request and replayed on every continuati
 
     // Direction is a server-side filter: switching it must drop the outbound
     // cursor (the server rejects a cursor under different filters) and restart.
+    const sentBeforeFilter = listRequests.length;
     fireEvent.click(button("inbound"));
     await screen.findAllByText(phone(5));
-    const restarted = listRequests.at(-1)!;
+    const restarted = listRequests[sentBeforeFilter]!;
     assert.equal(restarted.direction, "inbound");
     assert.equal(restarted.pagination, "cursor");
     assert.equal(restarted.cursor, undefined, "a new filter must start from the first page");

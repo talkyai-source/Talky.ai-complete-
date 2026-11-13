@@ -160,7 +160,7 @@ export function VoiceFeedbackRecorder({ callId }: { callId: string }) {
         return () => clearTimeout(t);
     }, [note?.transcript_status, note?.updated_at]);
 
-    const tooShort = (recorder.clip?.seconds ?? 0) < FEEDBACK_MIN_SECONDS;
+    const tooShort = Boolean(recorder.clip && recorder.clip.seconds < FEEDBACK_MIN_SECONDS);
     const tooBig = (recorder.clip?.blob.size ?? 0) > FEEDBACK_MAX_BYTES;
     const badContainer = Boolean(
         recorder.clip && !isSupportedFeedbackMimeType(recorder.clip.mimeType),

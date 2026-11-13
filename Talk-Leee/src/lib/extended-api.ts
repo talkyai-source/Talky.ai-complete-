@@ -487,7 +487,10 @@ class ExtendedApi {
 
     /** Every review on this call — several teammates may have rated it. */
     async listCallReviews(callId: string): Promise<ConversationReview[]> {
-        return this.client.request({ path: `/calls/${callId}/reviews`, method: "GET" });
+        const reviews = await this.client.request<ConversationReview[]>({ path: `/calls/${callId}/reviews`, method: "GET" });
+        // An answer that is not a list is a failed read.
+        if (!Array.isArray(reviews)) throw new Error();
+        return reviews;
     }
 
     /**

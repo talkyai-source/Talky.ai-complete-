@@ -111,7 +111,7 @@ function mountEditPage(knowledgeDriven: boolean) {
 }
 
 const EDITORS = [
-    { label: "classic form", knowledgeDriven: false, save: /^Save Campaign$/ },
+    { label: "classic form", knowledgeDriven: false, save: /^Save campaign$/ },
     { label: "knowledge-driven editor", knowledgeDriven: true, save: /^Save changes$/ },
 ];
 
@@ -169,7 +169,7 @@ test("a failed campaign update in the classic form is not reported as saved", as
         throw new ApiClientError({ status: 500, code: "server_error", message: "Failed to update campaign", url: "http://example.test/campaigns/campaign-1", method: "PUT" });
     };
     mountEditPage(false);
-    await save(/^Save Campaign$/);
+    await save(/^Save campaign$/);
     await waitFor(() => assert.ok(document.body.textContent?.includes("Failed to update campaign")), { timeout: SLOW });
     assert.equal(document.body.textContent?.includes("Campaign details were saved"), false);
     assert.equal(fieldSaves, 0);
@@ -271,6 +271,6 @@ test("a role that may not change campaigns is told so instead of shown an editor
     permissionsQuery = { isSuccess: true, data: { permissions: ["campaigns:read", "calls:read"] } };
     mountEditPage(false);
     await screen.findByText("Your role can't change campaigns", undefined, { timeout: SLOW });
-    assert.equal(screen.queryByRole("button", { name: /^Save Campaign$/ }) === null, true, "editor shown");
+    assert.equal(screen.queryByRole("button", { name: /^Save campaign$/ }) === null, true, "editor shown");
     assert.equal(screen.getByRole("link", { name: "View campaign" }).getAttribute("href"), "/campaigns/campaign-1");
 });

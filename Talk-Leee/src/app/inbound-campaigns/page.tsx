@@ -7,6 +7,7 @@ import { ArrowRight, PhoneIncoming, Plus, Search, ShieldAlert } from "lucide-rea
 import { InboundEmptyState, InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
 import { InboundStatusBadge, ReadinessBadge } from "@/components/inbound/inbound-status";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
@@ -31,6 +32,10 @@ export default function InboundCampaignsPage() {
     const tenantControls = useTenantInboundControls(permissions.isSuccess && capabilities.canChangeControls);
     const setTenantControls = useSetTenantInboundControls();
     const nextInboundEnabled = !(tenantControls.data?.inbound_enabled ?? false);
+    // While the account's inbound switch is not confirmed on, no card may say
+    // "Ready": no new call is answered. Only roles with inbound:controls can
+    // read the switch (GET /inbound-campaigns/controls).
+    const inboundSwitchOff = capabilities.canChangeControls && tenantControls.data?.inbound_enabled !== true;
 
     const visible = useMemo(() => {
         const needle = search.trim().toLowerCase();
@@ -46,7 +51,7 @@ export default function InboundCampaignsPage() {
         <DashboardLayout title="Inbound Campaigns" description="Verified number routing, AI behavior, readiness, and lifecycle control">
             {permissions.isLoading ? <InboundLoadingState label="Checking inbound permissions…" /> : permissions.isError ? (
                 <InboundErrorState title="Permissions could not be verified" message="Inbound data and routing controls remain unavailable until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
-            ) : !capabilities.canView ? <InboundPermissionState /> : (
+            ) : !capabilities.canView ? <InboundPermissionState onRetry={() => void permissions.refetch()} /> : (
                 <div className="space-y-5">
                     <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                         <div className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
@@ -59,11 +64,11 @@ export default function InboundCampaignsPage() {
                     {capabilities.canChangeControls ? (
                         <section className="content-card" aria-labelledby="tenant-inbound-control-heading">
                             <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                                <div className="flex min-w-0 items-start gap-3">
+                                <div className="flex min-w-0 flex-1 items-start gap-3">
                                     <span className={cn("mt-0.5 rounded-lg p-2", tenantControls.data?.inbound_enabled ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300" : "bg-amber-500/10 text-amber-700 dark:text-amber-300")}><ShieldAlert className="h-4 w-4" aria-hidden /></span>
-                                    <div className="min-w-0">
+                                    <div className="min-w-0 flex-1">
                                         <h2 id="tenant-inbound-control-heading" className="text-sm font-semibold text-foreground">Tenant inbound admission</h2>
-                                        {tenantControls.isLoading ? <p className="mt-1 text-sm text-muted-foreground">Loading the authoritative switch…</p> : tenantControls.isError ? <p className="mt-1 text-sm text-destructive" role="alert">The switch could not be verified, so it cannot be changed.</p> : (
+                                        {tenantControls.isLoading ? <div className="mt-2"><LoadingState title="Loading the authoritative switch…" /></div> : tenantControls.isError ? <div className="mt-2"><ErrorState message="The switch could not be verified, so it cannot be changed." onRetry={() => void tenantControls.refetch()} /></div> : (
                                             <>
                                                 <p className="mt-1 text-sm text-muted-foreground">{tenantControls.data?.inbound_enabled ? "Enabled. Campaign readiness still applies to every new call." : "Disabled. New inbound calls fail closed before answer."}</p>
                                                 {tenantControls.data?.reason ? <p className="mt-1 text-xs text-muted-foreground [overflow-wrap:anywhere]">Last reason: {tenantControls.data.reason}</p> : null}
@@ -79,17 +84,17 @@ export default function InboundCampaignsPage() {
                     ) : null}
 
                     <div className="content-card flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-                        <div className="relative w-full md:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" type="search" aria-label="Search inbound campaigns" placeholder="Search campaign, number, or trunk" /></div>
+                        <div className="relative w-full md:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9 max-sm:placeholder:text-[13px]" type="search" aria-label="Search inbound campaigns" placeholder="Search campaign, number, or SIP trunk" /></div>
                         <div className="flex max-w-full gap-1 overflow-x-auto pb-1" role="group" aria-label="Filter by lifecycle status">
                             {(["all", "draft", "active", "paused", "archived"] as const).map((item) => <button key={item} type="button" onClick={() => setStatus(item)} aria-pressed={status === item} className={cn("rounded-lg px-3 py-2 text-xs font-medium capitalize focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", status === item ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:text-foreground")}>{item}</button>)}
                         </div>
                     </div>
 
-                    {query.isLoading ? <InboundLoadingState label="Loading inbound campaigns…" /> : query.isError ? <InboundErrorState message={query.error instanceof Error ? query.error.message : "The campaign list could not be loaded."} onRetry={() => void query.refetch()} /> : (query.data ?? []).length === 0 ? <InboundEmptyState onCreate={capabilities.canCreate ? <Button asChild><Link href="/inbound-campaigns/new">Create the first draft</Link></Button> : undefined} /> : visible.length === 0 ? (
-                        <div className="content-card py-14 text-center"><h2 className="text-base font-semibold text-foreground">No campaigns match</h2><p className="mt-1 text-sm text-muted-foreground">Clear the search or choose a different status.</p><Button type="button" variant="outline" className="mt-4" onClick={() => { setSearch(""); setStatus("all"); }}>Clear filters</Button></div>
+                    {query.isLoading ? <InboundLoadingState label="Loading inbound campaigns…" /> : query.isError ? <InboundErrorState message={failedReadMessage(query.error, "The campaign list could not be loaded.")} onRetry={() => void query.refetch()} /> : (query.data ?? []).length === 0 ? <InboundEmptyState createHref={capabilities.canCreate ? "/inbound-campaigns/new" : undefined} /> : visible.length === 0 ? (
+                        <EmptyState title="No campaigns match" message="Clear the search or choose a different status." actionLabel="Clear filters" onAction={() => { setSearch(""); setStatus("all"); }} />
                     ) : (
                         <div className="grid gap-4 lg:grid-cols-2">
-                            {visible.map((campaign) => <CampaignCard key={campaign.id} campaign={campaign} canEdit={capabilities.canEdit} />)}
+                            {visible.map((campaign) => <CampaignCard key={campaign.id} campaign={campaign} canEdit={capabilities.canEdit} inboundSwitchOff={inboundSwitchOff} />)}
                         </div>
                     )}
                 </div>
@@ -120,15 +125,18 @@ export default function InboundCampaignsPage() {
     );
 }
 
-function CampaignCard({ campaign, canEdit }: { campaign: InboundCampaign; canEdit: boolean }) {
+function CampaignCard({ campaign, canEdit, inboundSwitchOff }: { campaign: InboundCampaign; canEdit: boolean; inboundSwitchOff: boolean }) {
+    // "Ready" is never shown for an archived campaign or while the account's
+    // inbound switch is off; a blocker count is still shown.
+    const showReadiness = campaign.status !== "archived" && !(campaign.readiness.ready && inboundSwitchOff);
     return (
         <article className="content-card flex min-w-0 flex-col gap-4">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0"><h2 className="truncate text-lg font-semibold text-foreground">{campaign.name}</h2><p className="mt-1 font-mono text-sm text-muted-foreground">{campaign.phone_number?.masked_number ?? "No verified number assigned"}</p></div>
                 <InboundStatusBadge status={campaign.status} />
             </div>
-            <div className="flex flex-wrap items-center gap-2"><ReadinessBadge readiness={campaign.readiness} /><span className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs text-muted-foreground">Config v{campaign.config_version}</span></div>
-            <dl className="grid gap-3 text-sm sm:grid-cols-2"><Info label="AI campaign" value={campaign.campaign_name || campaign.campaign_id || "Not selected"} /><Info label="Inbound trunk" value={campaign.sip_trunk_name || campaign.sip_trunk_id || "Not selected"} /><Info label="Timezone" value={campaign.timezone} /><Info label="Last call" value={formatDate(campaign.last_call_at)} /></dl>
+            <div className="flex flex-wrap items-center gap-2">{showReadiness ? <ReadinessBadge readiness={campaign.readiness} /> : null}<span className="rounded-full border border-border bg-muted/30 px-2.5 py-1 text-xs text-muted-foreground">Config v{campaign.config_version}</span></div>
+            <dl className="grid gap-3 text-sm sm:grid-cols-2"><Info label="AI campaign" value={campaign.campaign_name || campaign.campaign_id || "Not selected"} /><Info label="SIP trunk" value={campaign.sip_trunk_name || campaign.sip_trunk_id || "Not selected"} /><Info label="Timezone" value={campaign.timezone} /><Info label="Last call" value={formatDate(campaign.last_call_at)} /></dl>
             {campaign.last_error ? <p className="rounded-lg border border-red-500/20 bg-red-500/5 px-3 py-2 text-xs text-destructive [overflow-wrap:anywhere]" role="status">{campaign.last_error}</p> : null}
             <div className="mt-auto flex flex-wrap items-center gap-2 border-t border-border pt-4">
                 <Button asChild size="sm" variant="outline"><Link href={`/inbound-campaigns/${campaign.id}`}>Open <ArrowRight className="h-4 w-4" aria-hidden /></Link></Button>

@@ -1,9 +1,11 @@
 "use client";
 
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useState } from "react";
 import { Loader2, LogOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Device, getActiveSessions, logoutSession, logoutAllOtherSessions, formatSessionTime, getDeviceIcon } from "@/lib/session-utils";
 
 interface DeviceListProps {
@@ -16,27 +18,33 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
   const [loading, setLoading] = useState(true);
   const [loggingOutId, setLoggingOutId] = useState<string | null>(null);
   const [error, setError] = useState("");
+  // A failed read is its own state: the list is unknown, not empty.
+  const [loadError, setLoadError] = useState("");
+  // The "Sign out from all other devices" dialog is open.
+  const [confirmAllOpen, setConfirmAllOpen] = useState(false);
   const errorId = useId();
 
   // Fetch active sessions
-  useEffect(() => {
-    async function fetchDevices() {
-      try {
-        setLoading(true);
-        const sessions = await getActiveSessions(token);
-        setDevices(sessions);
-        setError("");
-      } catch (err) {
-        const errorMsg = err instanceof Error ? err.message : "Failed to fetch devices";
-        setError(errorMsg);
-        onError?.(errorMsg);
-      } finally {
-        setLoading(false);
-      }
+  const fetchDevices = useCallback(async () => {
+    try {
+      setLoading(true);
+      const sessions = await getActiveSessions(token);
+      setDevices(sessions);
+      setError("");
+      setLoadError("");
+    } catch (err) {
+      const errorMsg = failedReadMessage(err, "Failed to fetch devices");
+      setLoadError(errorMsg);
+      onError?.(errorMsg);
+    } finally {
+      setLoading(false);
     }
-
-    fetchDevices();
   }, [token, onError]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; fetchDevices sets loading/devices/error as it resolves
+    void fetchDevices();
+  }, [fetchDevices]);
 
   async function handleLogoutDevice(deviceId: string) {
     setLoggingOutId(deviceId);
@@ -52,11 +60,9 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
     }
   }
 
+  // Runs from the dialog's confirm button. A failure is shown in the card's
+  // own error line, so the dialog always closes.
   async function handleLogoutAllOthers() {
-    if (!confirm("Are you sure you want to sign out from all other devices?")) {
-      return;
-    }
-
     setLoggingOutId("all");
 
     try {
@@ -72,17 +78,11 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
   }
 
   if (loading) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Active Devices</CardTitle>
-          <CardDescription>Manage your active sessions and devices</CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
-        </CardContent>
-      </Card>
-    );
+    return <LoadingState />;
+  }
+
+  if (loadError) {
+    return <ErrorState message={loadError} onRetry={fetchDevices} />;
   }
 
   return (
@@ -104,9 +104,7 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
         )}
 
         {devices.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-muted-foreground">No active devices</p>
-          </div>
+          <EmptyState title="No active devices" />
         ) : (
           <>
             <div className="space-y-2">
@@ -164,7 +162,7 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
                   type="button"
                   variant="destructive"
                   className="w-full"
-                  onClick={handleLogoutAllOthers}
+                  onClick={() => setConfirmAllOpen(true)}
                   disabled={loggingOutId === "all"}
                 >
                   {loggingOutId === "all" ? (
@@ -179,6 +177,16 @@ export default function DeviceList({ token, onError }: DeviceListProps) {
           </>
         )}
       </CardContent>
+      <ConfirmDialog
+        open={confirmAllOpen}
+        onOpenChange={setConfirmAllOpen}
+        intent="cancel"
+        title="Sign out from all other devices"
+        description=""
+        warningText="Are you sure you want to sign out from all other devices?"
+        confirmLabel="Sign out from all other devices"
+        onConfirm={handleLogoutAllOthers}
+      />
     </Card>
   );
 }

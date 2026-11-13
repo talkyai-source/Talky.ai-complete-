@@ -65,8 +65,9 @@ test("standalone audit keeps category filtering page-local and caps raw lookahea
 test("standalone audit rejects malformed200 and retains a working explicit retry", async () => {
     rows = [auditRow(1, { event_id: "bad-id" })]; draw();
     await screen.findByText("The audit log could not be loaded, so none of it is shown.");
-    assert.equal(screen.queryByText("No audit events were returned for the current scope."), null);
-    rows = [auditRow()]; fireEvent.click(screen.getByRole("button", { name: "Try again" })); await screen.findByText(auditRow().action);
+    assert.equal(screen.queryByText("No audit events were returned for the current scope.") === null, true);
+    // FX2a: the retry after a failed read is labelled "Retry".
+    rows = [auditRow()]; fireEvent.click(screen.getByRole("button", { name: "Retry" })); await screen.findByText(auditRow().action);
 });
 
 test("standalone audit same-client replacement cannot reuse A rows before B403", async () => {
@@ -91,4 +92,16 @@ test("checking identity masks standalone cached audit while current profile is p
     }
     finally { await act(async () => { pending.resolve(MeResponseSchema.parse(profile)); }); }
     await waitFor(() => assert.equal(Boolean(screen.queryByText(auditRow().action)), true));
+});
+
+// ── FX3a Task 5.7: one name for the page, one label per category ─────────────
+test("FX3a: the table is titled Audit Logs and a row's category reads as its filter does", async () => {
+    draw(); await screen.findByText(auditRow().action);
+    const body = document.body.textContent ?? "";
+    assert.equal(body.includes("Audit Logs"), true);
+    assert.equal(body.includes("Audit Trail"), false);
+    const row = screen.getByText(auditRow().action).closest("tr")!;
+    assert.equal((row.textContent ?? "").includes("user management"), true);
+    assert.equal((row.textContent ?? "").includes("USER_MANAGEMENT"), false);
+    assert.equal(screen.queryByRole("button", { name: "user management" }) !== null, true);
 });

@@ -169,7 +169,7 @@ test("Start opens the shared dialog and sends nothing until it is confirmed, the
     const dialog = startDialog()!;
     assert.equal(state.starts.length, 0, "opening the dialog starts nothing");
     const agent = dialog.getByRole("radio", { name: /AI agent speaks first/ }) as HTMLInputElement;
-    const caller = dialog.getByRole("radio", { name: /Caller speaks first/ }) as HTMLInputElement;
+    const caller = dialog.getByRole("radio", { name: /Callee speaks first/ }) as HTMLInputElement;
     assert.equal(agent.checked, true, "the choice starts on agent");
     fireEvent.click(caller);
     await waitFor(() => assert.equal((dialog.getByRole("button", { name: "Start campaign" }) as HTMLButtonElement).disabled, false), { timeout: SLOW });
@@ -182,7 +182,7 @@ test("the first-speaker choice goes back to agent every time the dialog opens", 
     wire("draft");
     await mount();
     fireEvent.click(await readyButton("Start"));
-    fireEvent.click(startDialog()!.getByRole("radio", { name: /Caller speaks first/ }));
+    fireEvent.click(startDialog()!.getByRole("radio", { name: /Callee speaks first/ }));
     fireEvent.click(startDialog()!.getByRole("button", { name: "Cancel" }));
     await waitFor(() => assert.equal(startDialog() === null, true), { timeout: SLOW });
     fireEvent.click(await readyButton("Start"));

@@ -24,12 +24,12 @@ export function timezoneLabel(zone: string): string {
 }
 
 /**
- * "Mar 1" for a UTC day bucket ("2026-03-01", an ISO timestamp, or its ms),
+ * The date ("3/1/2026" in en-US) for a UTC day bucket ("2026-03-01", an ISO timestamp, or its ms),
  * printed as the UTC date in every browser zone. Without the UTC option a
  * browser behind UTC printed the previous day for the same bucket.
  */
 export function formatUtcDateLabel(value: string | number | Date): string {
     const date = value instanceof Date ? value : new Date(value);
     if (Number.isNaN(date.getTime())) return "";
-    return date.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "UTC" });
+    return date.toLocaleDateString(undefined, { timeZone: "UTC" });
 }

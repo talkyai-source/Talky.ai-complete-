@@ -101,6 +101,7 @@ export function RecordingMediaControls({
 
     const releasePlayback = useCallback(() => {
         audioRef.current?.pause();
+        audioRef.current?.removeAttribute("src");
         playbackAbortRef.current?.abort();
         playbackAbortRef.current = null;
         playbackPromiseRef.current = null;
@@ -274,7 +275,7 @@ export function RecordingMediaControls({
             <audio
                 ref={audioRef}
                 hidden
-                src={playbackUrl ?? undefined}
+                onError={() => setMediaError((current) => current ?? "Couldn't play this recording.")}
                 onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime ?? 0)}
                 onLoadedMetadata={() => {
                     const nextDuration = audioRef.current?.duration ?? 0;

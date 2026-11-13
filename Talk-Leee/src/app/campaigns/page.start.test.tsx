@@ -157,8 +157,12 @@ function openDetails(name: string) {
 }
 
 async function closeDialogs() {
-    fireEvent.keyDown(window, { key: "Escape" });
-    await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true), { timeout: SLOW });
+    // One Escape closes only the top dialog, so press once per open dialog.
+    while (screen.queryAllByRole("dialog").length > 0) {
+        const open = screen.queryAllByRole("dialog").length;
+        fireEvent.keyDown(window, { key: "Escape" });
+        await waitFor(() => assert.equal(screen.queryAllByRole("dialog").length < open, true), { timeout: SLOW });
+    }
 }
 
 function startDialog() {
@@ -241,7 +245,7 @@ test("every resume entry point opens the same dialog, and none of them starts a 
 
     // The choice made in the dialog is the one that is sent, to every campaign.
     assert.equal((startDialog()!.getByRole("radio", { name: /AI agent speaks first/ }) as HTMLInputElement).checked, true);
-    fireEvent.click(startDialog()!.getByRole("radio", { name: /Caller speaks first/ }));
+    fireEvent.click(startDialog()!.getByRole("radio", { name: /Callee speaks first/ }));
     fireEvent.click(await confirmButton());
     await waitFor(() => assert.equal(state.starts.length, 2), { timeout: SLOW });
     assert.deepEqual(state.starts, [

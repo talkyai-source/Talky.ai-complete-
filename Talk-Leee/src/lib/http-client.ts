@@ -274,6 +274,21 @@ export function invalidateRequestIdentity() {
     releaseIdentityWaiters(false);
 }
 
+// The first sign-in check after a page load. A request made while it is
+// pending waits for the answer instead of failing with identity_unverified:
+// it belongs to the same session the check is reading. Account switches and
+// logout never open this window, so they still refuse pending work.
+let _signInCheck: Promise<void> | null = null;
+export function beginRequestIdentityCheck(): () => void {
+    let settle!: () => void;
+    const pending = new Promise<void>(resolve => { settle = resolve; });
+    _signInCheck = pending;
+    return () => {
+        if (_signInCheck === pending) _signInCheck = null;
+        settle();
+    };
+}
+
 export function setTokenProvider(fn: (() => string | null) | null, writer?: (token: string | null) => void) {
     _externalTokenProvider = fn;
     _externalTokenWriter = fn ? writer ?? null : null;

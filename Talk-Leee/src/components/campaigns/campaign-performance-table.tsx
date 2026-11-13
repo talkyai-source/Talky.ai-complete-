@@ -5,8 +5,8 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Modal } from "@/components/ui/modal";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { Select } from "@/components/ui/select";
-import { ReadError } from "@/components/ui/read-error";
 import type { Campaign } from "@/lib/dashboard-api";
 import {
     applyCampaignFilters,
@@ -363,8 +363,9 @@ export function CampaignPerformanceTable({
     campaigns: Campaign[];
     loading: boolean;
     error: string;
+    /** Reads the list again after a failed read. */
+    onRetry?: () => void | Promise<void>;
     errorRequestId?: string;
-    onRetry?: () => void;
     /** Pauses one campaign (details modal). */
     onPause: (id: string) => Promise<void>;
     /** Stops one campaign (details modal). */
@@ -403,6 +404,8 @@ export function CampaignPerformanceTable({
     const inFlight = useCampaignsInFlight();
     const [bulkPausing, setBulkPausing] = useState(false);
     const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+    // Why the last delete was refused, shown in the delete dialog.
+    const [deleteError, setDeleteError] = useState("");
     const [exportOpenLocal, setExportOpenLocal] = useState(false);
     const exportOpen = exportOpenProp ?? exportOpenLocal;
     const setExportOpen = onExportOpenChange ?? setExportOpenLocal;
@@ -992,7 +995,7 @@ export function CampaignPerformanceTable({
                                 className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
                             >
                                 <Link href="/campaigns/new" className="shrink-0">
-                                    New Campaign
+                                    Create campaign
                                 </Link>
                             </Button>
                         ) : null}
@@ -1101,16 +1104,22 @@ export function CampaignPerformanceTable({
                     </div>
                 </div>
 
-                {error ? <ReadError resource="campaigns" requestId={errorRequestId} onRetry={onRetry}
-                    hasData={campaigns.length > 0} busy={loading} /> : null}
-                {loading ? (
-                    <div className="flex items-center justify-center py-16">
-                        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+                {error ? (
+                    <div className="p-4">
+                        <ErrorState message={error} requestId={errorRequestId} staleData={campaigns.length > 0} busy={loading} onRetry={onRetry} />
                     </div>
-                ) : error && sorted.length === 0 ? null : sorted.length === 0 ? (
-                    <div className="p-10 text-center">
-                        <div className="text-sm font-semibold text-foreground">No campaigns match your filters</div>
-                        <div className="mt-1 text-sm text-muted-foreground">Try adjusting status or success rate.</div>
+                ) : null}
+                {loading ? (
+                    <div className="p-4">
+                        <LoadingState />
+                    </div>
+                ) : error && sorted.length === 0 ? null : campaigns.length === 0 ? (
+                    <div className="p-4">
+                        <EmptyState title="No campaigns yet" />
+                    </div>
+                ) : sorted.length === 0 ? (
+                    <div className="p-4">
+                        <EmptyState kind="search" title="No campaigns match your filters" message="Try adjusting status or success rate." />
                     </div>
                 ) : (
                     <div
@@ -1396,7 +1405,7 @@ export function CampaignPerformanceTable({
                         <div className="flex flex-wrap items-center gap-2">
                             <Button asChild variant="secondary">
                                 <Link href={`/campaigns/${detailsCampaign.id}`}>
-                                    Open Page
+                                    Open page
                                 </Link>
                             </Button>
                             {!allowed.update ? null : detailsCanResume ? (
@@ -1439,7 +1448,7 @@ export function CampaignPerformanceTable({
                                         router.push(`/campaigns/${detailsCampaign.id}/edit`);
                                     }}
                                 >
-                                    Edit Campaign
+                                    Edit
                                 </Button>
                             ) : null}
                             <Button
@@ -1470,13 +1479,16 @@ export function CampaignPerformanceTable({
 
             <Modal
                 open={confirmDeleteId !== null}
-                onOpenChange={(next) => setConfirmDeleteId(next ? confirmDeleteId : null)}
+                onOpenChange={(next) => {
+                    setDeleteError("");
+                    setConfirmDeleteId(next ? confirmDeleteId : null);
+                }}
                 title="Confirm delete"
                 description={confirmDeleteId === "__bulk__" ? "Delete all selected campaigns?" : "Delete this campaign?"}
                 size="sm"
                 footer={
                     <div className="flex items-center justify-end gap-2">
-                        <Button type="button" variant="outline" onClick={() => setConfirmDeleteId(null)}>
+                        <Button type="button" variant="outline" onClick={() => { setDeleteError(""); setConfirmDeleteId(null); }}>
                             Cancel
                         </Button>
                         <Button
@@ -1484,9 +1496,15 @@ export function CampaignPerformanceTable({
                             variant="destructive"
                             onClick={async () => {
                                 if (!confirmDeleteId) return;
-                                if (confirmDeleteId === "__bulk__") await bulkDelete();
-                                else await onDelete(confirmDeleteId);
-                                setConfirmDeleteId(null);
+                                setDeleteError("");
+                                try {
+                                    if (confirmDeleteId === "__bulk__") await bulkDelete();
+                                    else await onDelete(confirmDeleteId);
+                                    setConfirmDeleteId(null);
+                                } catch (err) {
+                                    // A refused delete stays in the dialog, in the server's words.
+                                    setDeleteError(err instanceof Error ? err.message : "Could not delete the campaign.");
+                                }
                             }}
                         >
                             Delete
@@ -1497,6 +1515,11 @@ export function CampaignPerformanceTable({
                 <div className="text-sm text-muted-foreground">
                     This action cannot be undone.
                 </div>
+                {deleteError ? (
+                    <div role="alert" className="mt-3 text-sm font-semibold text-destructive">
+                        {deleteError}
+                    </div>
+                ) : null}
             </Modal>
         </div>
     );

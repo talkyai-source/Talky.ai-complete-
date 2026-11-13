@@ -16,6 +16,7 @@ import {
   Zap,
 } from "lucide-react";
 import { isApiClientError } from "@/lib/http-client";
+import { failedReadMessage } from "@/components/states/page-states";
 import { approvedCheckoutUrl } from "@/lib/billing-purchase";
 import { useAuth } from "@/lib/auth-context";
 import { queryKeys } from "@/lib/api-hooks";
@@ -46,7 +47,7 @@ function formatTopupError(err: unknown): string {
     if (err.status === 401) return "Your session has expired.";
     return err.message;
   }
-  return err instanceof Error ? err.message : "The request did not complete.";
+  return failedReadMessage(err, "The request did not complete.");
 }
 
 /** A refusal made before any order or payment existed, in the server's words. */

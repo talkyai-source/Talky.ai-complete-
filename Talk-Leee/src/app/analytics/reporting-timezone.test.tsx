@@ -120,12 +120,12 @@ test("changing the analytics range uses the returned zone's calendar day at a UT
     render(<AnalyticsPage />);
     await waitFor(() => assert.match(document.body.textContent ?? "", /Asia\/Karachi/));
     fireEvent.change(screen.getByRole("combobox", { name: "Select date range" }), { target: { value: "7" } });
-    await waitFor(() => assert.ok(calls.some((call) => call.method === "calls" && call.args[0] === "2026-10-25")));
+    await waitFor(() => assert.ok(calls.some((call) => call.method === "calls" && call.args[0] === "2026-10-26")));
     const latest = calls.filter((call) => call.method === "calls").at(-1)!;
-    assert.deepEqual(latest.args.slice(0, 2), ["2026-10-25", "2026-11-01"]);
+    assert.deepEqual(latest.args.slice(0, 2), ["2026-10-26", "2026-11-01"]);
     assert.equal(latest.args[5], zone);
-    assert.match(document.body.textContent ?? "", /Nov 1/);
-    assert.doesNotMatch(document.body.textContent ?? "", /Oct 31/);
+    assert.match(document.body.textContent ?? "", /11\/1\/2026/);
+    assert.doesNotMatch(document.body.textContent ?? "", /10\/31\/2026/);
 });
 
 test("dialer insights honors the stored zone instead of silently sending the browser's zone", async () => {
@@ -158,6 +158,7 @@ test("dashboard waits for the effective account zone before issuing local-month 
 test("unavailable account-zone bootstrap does not silently draw UTC charts", async () => {
     summary = async () => { throw new Error("Reporting timezone unavailable"); };
     render(<DashboardPage />);
-    await waitFor(() => assert.match(screen.getByRole("alert").textContent ?? "", /Reporting timezone unavailable/));
+    // FX1a: each card that needs the failed read shows it, not one page-wide error.
+    await waitFor(() => { for (const alert of screen.getAllByRole("alert")) assert.match(alert.textContent ?? "", /Reporting timezone unavailable/); });
     assert.equal(calls.filter((call) => ["calls", "campaigns"].includes(call.method)).length, 0);
 });

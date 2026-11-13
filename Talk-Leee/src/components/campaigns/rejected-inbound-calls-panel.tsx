@@ -1,26 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Clock3, PhoneIncoming, RefreshCw, ShieldAlert } from "lucide-react";
+import { Clock3, RefreshCw, ShieldAlert } from "lucide-react";
 
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { api, type RejectedInboundCallItem } from "@/lib/api";
+import { REASON_LABELS } from "@/lib/inbound-reason-labels";
 
 const POLL_INTERVAL_MS = 15_000;
 const PAGE_SIZE = 25;
-
-const REASON_LABELS: Record<string, string> = {
-    after_hours_closed: "After hours",
-    unknown_did: "Unknown number",
-    tenant_conflict: "Number routing conflict",
-    did_not_verified: "Number not verified",
-    trunk_not_ready: "Phone trunk unavailable",
-    concurrency_policy_missing: "Capacity policy unavailable",
-    admission_timeout: "Admission timed out",
-    max_active_calls_reached: "All lines in use",
-    subscription_inactive: "Subscription inactive",
-    tenant_inbound_disabled: "Inbound disabled",
-    insufficient_minutes: "Insufficient minutes",
-};
 
 function reasonLabel(reason: string): string {
     return REASON_LABELS[reason] ?? reason.replaceAll("_", " ");
@@ -59,12 +47,14 @@ function RejectedInboundCallsPanelScope({ campaignId }: RejectedInboundCallsPane
                 pageSize: PAGE_SIZE,
             });
             if (generation !== requestGeneration.current) return;
+            // An answer without its list is a failed read, not an empty one.
+            if (!Array.isArray(response?.items)) throw new Error();
             setItems(response.items);
             setTotal(response.total);
             setError(null);
         } catch (err) {
             if (generation !== requestGeneration.current) return;
-            setError(err instanceof Error ? err.message : "Failed to load rejected inbound calls");
+            setError(failedReadMessage(err, "Failed to load rejected inbound calls"));
         } finally {
             if (generation === requestGeneration.current) {
                 setLoading(false);
@@ -118,15 +108,11 @@ function RejectedInboundCallsPanelScope({ campaignId }: RejectedInboundCallsPane
             </header>
 
             {error ? (
-                <div className="px-5 py-4 text-sm text-red-600 dark:text-red-400" role="alert">{error}</div>
+                <div className="p-4"><ErrorState message={error} onRetry={() => void load()} /></div>
             ) : loading ? (
-                <div className="px-5 py-8 text-center text-sm text-muted-foreground">Loading rejected calls…</div>
+                <div className="p-4"><LoadingState title="Loading rejected calls…" /></div>
             ) : items.length === 0 ? (
-                <div className="px-5 py-8 text-center">
-                    <PhoneIncoming className="mx-auto mb-2 h-5 w-5 text-emerald-500" aria-hidden />
-                    <p className="text-sm font-medium text-gray-900 dark:text-zinc-100">No rejected inbound calls</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Denied and after-hours attempts will appear here.</p>
-                </div>
+                <div className="p-4"><EmptyState title="No rejected inbound calls" message="Denied and after-hours attempts will appear here." /></div>
             ) : (
                 <div className="overflow-x-auto">
                     <table className="w-full text-left text-sm">

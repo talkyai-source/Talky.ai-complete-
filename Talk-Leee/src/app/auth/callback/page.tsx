@@ -47,13 +47,13 @@ function AuthCallbackInner() {
                             <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
                                 <span className="text-2xl text-red-500">!</span>
                             </div>
-                            <h2 className="text-xl font-semibold text-gray-900 mb-2">Authentication Failed</h2>
+                            <h2 className="text-xl font-semibold text-gray-900 mb-2">Authentication failed</h2>
                             <p className="text-gray-500 mb-6">{error}</p>
                             <button
                                 onClick={() => router.push("/auth/login")}
                                 className="px-4 py-2 bg-gray-900 text-white rounded-lg hover:bg-gray-800"
                             >
-                                Try Again
+                                Try again
                             </button>
                         </>
                     ) : (

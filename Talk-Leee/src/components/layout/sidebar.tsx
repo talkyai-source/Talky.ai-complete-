@@ -71,7 +71,7 @@ const navigation: NavItem[] = [
     // so they collided as duplicate React keys. The duplicate `PhoneIncoming`
     // import that came with it broke `tsc` and `next build` outright.
     // Inbound call history is a direction filter on /calls, not a nav row.
-    { name: "Inbound", href: "/inbound-campaigns", icon: PhoneIncoming, permission: "inbound:read" },
+    { name: "Inbound Campaigns", href: "/inbound-campaigns", icon: PhoneIncoming, permission: "inbound:read" },
     { name: "Call History", href: "/calls", icon: Phone, permission: "calls:read" },
     { name: "Contacts", href: "/contacts", icon: Users, permission: "campaigns:read" },
     { name: "Analytics", href: "/analytics", icon: BarChart2, permission: "analytics:read" },

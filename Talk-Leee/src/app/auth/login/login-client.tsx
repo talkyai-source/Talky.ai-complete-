@@ -28,6 +28,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { failedReadMessage } from "@/components/states/page-states";
 import { useAuth } from "@/lib/auth-context";
 import { getRequestIdentityGeneration, markFreshLogin, subscribeRequestIdentityGeneration } from "@/lib/http-client";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
@@ -301,7 +302,7 @@ export default function LoginClientPage() {
             if (msg.includes("rate limit") || msg.includes("429")) {
                 return "Too many requests. Please wait a moment before trying again.";
             }
-            return err.message;
+            return failedReadMessage(err, err.message);
         }
         if (typeof err === "object" && err !== null) {
             return (err as { detail?: string }).detail || "An error occurred";
@@ -375,6 +376,7 @@ export default function LoginClientPage() {
 
     // ─── Step description ────────────────────────────────────────────
     function getStepDescription(): string {
+        if (showPasskey) return "Sign in with a passkey";
         if (step === "email") return "Sign in with your email and password";
         if (step === "password") return "Enter your password to continue";
         if (step === "mfa") return "Verify with two-factor authentication";
@@ -527,7 +529,7 @@ export default function LoginClientPage() {
                                                 </>
                                             ) : (
                                                 <>
-                                                    Continue with Password
+                                                    Continue with password
                                                     <ArrowRight
                                                         className="h-4 w-4"
                                                         aria-hidden
@@ -543,7 +545,7 @@ export default function LoginClientPage() {
                                                 onClick={() => setShowPasskey(true)}
                                                 className="text-sm text-muted-foreground hover:text-foreground hover:underline"
                                             >
-                                                Sign in with Passkey
+                                                Sign in with passkey
                                             </button>
                                         </div>
 
@@ -696,7 +698,7 @@ export default function LoginClientPage() {
                                                 </>
                                             ) : (
                                                 <>
-                                                    Sign In
+                                                    Sign in
                                                     <ArrowRight
                                                         className="h-4 w-4"
                                                         aria-hidden

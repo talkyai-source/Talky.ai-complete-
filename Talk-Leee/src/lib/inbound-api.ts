@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { UnexpectedAnswerError } from "@/lib/unexpected-answer";
 import { sharedHttpClient } from "@/lib/api";
 
 export type InboundLifecycleStatus = "draft" | "active" | "paused" | "archived";
@@ -280,7 +281,7 @@ export function parseInboundCampaign(value: unknown): InboundCampaign {
     const transfer = asRecord(raw.transfer_policy ?? config.transfer_policy);
     const recording = asRecord(raw.recording ?? raw.recording_policy ?? config.recording);
     const id = textValue(raw.id);
-    if (!id) throw new Error("Inbound campaign response is missing an id.");
+    if (!id) throw new UnexpectedAnswerError("Inbound campaign response is missing an id.");
     const action = textValue(raw.after_hours_action ?? schedule.after_hours_action);
     return {
         id,
@@ -345,7 +346,7 @@ export function parseInboundCampaignList(value: unknown): InboundCampaign[] {
                 : Array.isArray(raw.campaigns)
                     ? raw.campaigns
                     : null;
-    if (!items) throw new Error("Inbound campaign list response has an invalid format.");
+    if (!items) throw new UnexpectedAnswerError("Inbound campaign list response has an invalid format.");
     return items.map(parseInboundCampaign);
 }
 
@@ -592,6 +593,9 @@ class InboundApi {
 
     async readiness(id: string, signal?: AbortSignal): Promise<InboundReadiness> {
         const data = await this.client.request({ path: `/inbound-campaigns/${id}/readiness`, method: "GET", signal });
+        // An answer without the readiness flag is a failed read, not "not ready".
+        const raw = asRecord(data);
+        if ((raw.ready ?? raw.is_ready) === undefined) throw new Error();
         return normalizeReadiness(data);
     }
 

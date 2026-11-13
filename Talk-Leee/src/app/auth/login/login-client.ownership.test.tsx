@@ -94,7 +94,7 @@ test("identity replacement prevents a late password response from opening its MF
   await act(async () => { invalidateRequestIdentity(); });
   f.pending.resolve({ ...response, access_token: "", mfa_required: true, mfa_challenge_token: "old-challenge" });
   await settle();
-  assert.equal(screen.queryByRole("heading", { name: "Two-Factor Authentication" }), null);
+  assert.equal(screen.queryByRole("heading", { name: "Two-factor authentication" }) !== null, false);
   assert.deepEqual(f.seen.destinations, []); assert.equal(getBrowserAuthToken(), null);
 });
 
@@ -122,7 +122,7 @@ test("password MFA response opens exactly the current challenge without token ad
   const f = await setup(); await submit();
   f.pending.resolve({ ...response, access_token: "", mfa_required: true, mfa_challenge_token: "current-challenge" });
   await settle();
-  await screen.findByRole("heading", { name: "Two-Factor Authentication" });
+  await screen.findByRole("heading", { name: "Two-factor authentication" });
   assert.equal(getBrowserAuthToken(), null); assert.deepEqual(f.seen.destinations, []);
 });
 
@@ -154,4 +154,53 @@ test("post-confirmation navigation failure is visible and offers read recovery w
   assert.match(screen.getByRole("alert").textContent ?? "", /server confirmed sign-in/i);
   fireEvent.click(screen.getByRole("button", { name: "Reload to check sign-in" }));
   assert.equal(f.seen.reloads, 1); await submit(); assert.equal(f.seen.requests, 1);
+});
+
+// ── FX3a Task 1: Login text ──────────────────────────────────────────────────
+test("FX3a login: the password button reads Sign in", async () => {
+  await setup();
+  assert.equal(screen.queryByRole("button", { name: "Sign in" }) !== null, true);
+  assert.equal(screen.queryByRole("button", { name: "Sign In" }) !== null, false);
+});
+
+test("FX3a login: the second step heading is sentence case", async () => {
+  const f = await setup(); await submit();
+  f.pending.resolve({ ...response, access_token: "", mfa_required: true, mfa_challenge_token: "current-challenge" });
+  await settle();
+  assert.equal((await screen.findByRole("heading", { name: "Two-factor authentication" })) !== null, true);
+  assert.equal(screen.queryByRole("heading", { name: "Two-Factor Authentication" }) !== null, false);
+});
+
+test("FX3a login: a browser error reads Please retry.", async () => {
+  const f = await setup(); await submit();
+  f.pending.reject(new ApiClientError({ code: "network_error", message: "Failed to fetch", url: "/auth/login", method: "POST" }));
+  await settle();
+  await waitFor(() => assert.equal(screen.queryByText("Please retry.") !== null, true));
+  assert.equal(screen.queryByText(/Failed to fetch/) !== null, false);
+});
+
+test("FX3a login: a server message is shown as is", async () => {
+  const f = await setup(); await submit();
+  f.pending.reject(new ApiClientError({ status: 403, code: "forbidden", message: "Please verify your email before logging in.", url: "/auth/login", method: "POST" }));
+  await settle();
+  await waitFor(() => assert.equal(screen.queryByText("Please verify your email before logging in.") !== null, true));
+});
+
+test("FX3a login: the passkey step says Sign in with a passkey", async () => {
+  await setup();
+  fireEvent.click(screen.getByRole("button", { name: /Change email/ }));
+  await waitFor(() => assert.equal(screen.queryByText("Sign in with your email and password") !== null, true));
+  fireEvent.click(await screen.findByRole("button", { name: "Sign in with passkey" }));
+  await waitFor(() => assert.equal(screen.queryByText("Sign in with a passkey") !== null, true));
+  assert.equal(screen.queryByText("Sign in with your email and password") !== null, false);
+});
+
+// ── FX3a2 Task 2: the email step's buttons are sentence case ─────────────────
+test("FX3a2 login: Continue with password and Sign in with passkey", async () => {
+  await setup();
+  fireEvent.click(screen.getByRole("button", { name: /Change email/ }));
+  await waitFor(() => assert.equal(screen.queryByRole("button", { name: "Continue with password" }) !== null, true));
+  assert.equal(screen.queryByRole("button", { name: "Continue with Password" }) !== null, false);
+  assert.equal(screen.queryByRole("button", { name: "Sign in with passkey" }) !== null, true);
+  assert.equal(screen.queryByRole("button", { name: "Sign in with Passkey" }) !== null, false);
 });

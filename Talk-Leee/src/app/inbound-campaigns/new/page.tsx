@@ -140,7 +140,7 @@ function NewInboundCampaignPageInner() {
             {permissions.isLoading ? <InboundLoadingState label="Checking create and assignment permissions…" /> : permissions.isError ? (
                 <InboundErrorState title="Permissions could not be verified" message="Creating or assigning a public number is disabled until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
             ) : !capabilities.canCreate || !capabilities.canAssignNumber ? (
-                <InboundPermissionState action="create and assign an inbound campaign" />
+                <InboundPermissionState action="create and assign an inbound campaign" onRetry={() => void permissions.refetch()} />
             ) : campaignId ? (
                 <>
                     <StepIndicator step={2} />

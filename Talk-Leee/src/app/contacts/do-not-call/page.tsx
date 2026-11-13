@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ReadError } from "@/components/ui/read-error";
+import { ErrorState } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { dncApi, DNC_LIST_LIMIT, type DncBulkResult, type DncEntry } from "@/lib/dnc-api";
 import { isApiClientError } from "@/lib/http-client";
@@ -203,8 +203,8 @@ export default function DoNotCallPage() {
                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading the Do-Not-Call list…
                         </p>
                     ) : entries.isError ? (
-                        <ReadError
-                            resource="the Do-Not-Call list"
+                        <ErrorState
+                            message="Could not load the Do-Not-Call list."
                             requestId={isApiClientError(entries.error) ? entries.error.requestId : undefined}
                             onRetry={() => { void entries.refetch(); }}
                             busy={entries.isFetching}

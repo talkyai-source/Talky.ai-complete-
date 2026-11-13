@@ -55,7 +55,7 @@ test("a failed call-history load offers a retry that re-runs the request", () =>
 
     assert.ok(screen.getByRole("alert"));
     assert.ok(screen.getByText("Failed to load calls"));
-    screen.getByRole("button", { name: "Try again" }).click();
+    screen.getByRole("button", { name: "Retry" }).click();
     assert.equal(retried, 1);
 });
 
@@ -63,7 +63,7 @@ test("a failed call-history load offers no retry when the caller cannot re-run i
     render(<CallsLoadError message="Failed to load calls" />);
 
     assert.ok(screen.getByText("Failed to load calls"));
-    assert.equal(screen.queryByRole("button", { name: "Try again" }), null);
+    assert.equal(screen.queryByRole("button", { name: "Retry" }) === null, true);
 });
 
 // ── DID and campaign filter options — client-side over the loaded page,

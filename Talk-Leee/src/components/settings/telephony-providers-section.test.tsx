@@ -23,6 +23,7 @@ function mount(data: unknown, mutation: (options: Parameters<typeof api.request>
         if (options.method && options.method !== "GET") { writes.push(options); return await mutation(options) as T; }
         if (options.path === "/telephony/providers") return data as T;
         if (options.path.endsWith("/pool-assignment")) return {} as T;
+        if (options.path.endsWith("/outbound-route")) return { ready: true, reason_code: "sip_not_required" } as T;
         return [] as T;
     };
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false, gcTime: 0 } } });

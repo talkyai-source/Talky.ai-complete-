@@ -364,7 +364,12 @@ export function useSipTrunks() {
         // The backend returns a BARE array (response_model=list[SIPTrunkResponse]).
         // Tolerate both a bare array and a {trunks:[]} wrapper so the card renders
         // regardless — the .trunks-on-a-bare-array bug hid EVERY trunk before.
-        queryFn: () => api<SipTrunkRow[] | { trunks: SipTrunkRow[] }>("/telephony/sip/trunks"),
+        queryFn: async () => {
+            const d = await api<SipTrunkRow[] | { trunks: SipTrunkRow[] }>("/telephony/sip/trunks");
+            // An answer that holds no list is a failed read, not "no PBX".
+            if (!Array.isArray(d) && !Array.isArray(d?.trunks)) throw new Error();
+            return d;
+        },
         select: (d) => (Array.isArray(d) ? d : (d?.trunks ?? [])),
         refetchInterval: 10000,
     });
@@ -441,7 +446,12 @@ export interface OutboundRoute {
 export function useOutboundRoute() {
     return useQuery({
         queryKey: [...telephonyKeys.sipTrunks, "outbound-route"] as const,
-        queryFn: () => api<OutboundRoute>("/telephony/sip/trunks/outbound-route"),
+        queryFn: async () => {
+            const route = await api<OutboundRoute>("/telephony/sip/trunks/outbound-route");
+            // An answer without the ready flag is a failed read.
+            if (typeof route?.ready !== "boolean") throw new Error();
+            return route;
+        },
         refetchInterval: 10000,
     });
 }
@@ -466,7 +476,12 @@ export interface PoolAssignment {
 export function usePoolTrunks() {
     return useQuery({
         queryKey: ["telephony", "pool-trunks"] as const,
-        queryFn: () => api<PoolTrunkItem[]>("/telephony/sip/trunks/pool"),
+        queryFn: async () => {
+            const pool = await api<PoolTrunkItem[]>("/telephony/sip/trunks/pool");
+            // An answer that is not a list is a failed read.
+            if (!Array.isArray(pool)) throw new Error();
+            return pool;
+        },
         refetchInterval: 15000,
     });
 }

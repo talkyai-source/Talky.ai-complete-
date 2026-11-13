@@ -28,7 +28,7 @@ function arcPath(cx: number, cy: number, r: number, from: number, to: number) {
 
 export function RadialKnob({
     label, value, min, max, step, onChange,
-    color = ACCENT, format, hint, size = 112, tip,
+    color = ACCENT, format, hint, size = 112, tip, disabled = false,
 }: {
     label: string; value: number; min: number; max: number; step: number;
     onChange: (v: number) => void; color?: string;
@@ -40,6 +40,8 @@ export function RadialKnob({
      * here: it changes what every future call sounds like.
      */
     tip?: React.ReactNode;
+    /** A read-only dial: shows its value, takes no pointer or key input. */
+    disabled?: boolean;
 }) {
     const ref = useRef<SVGSVGElement | null>(null);
     const cx = 50, cy = 50, r = 38, START = -135, END = 135;
@@ -63,14 +65,16 @@ export function RadialKnob({
     }, [onChange, clampSnap, min, max, START, END]);
 
     const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+        if (disabled) return;
         (e.target as Element).setPointerCapture?.(e.pointerId);
         setFromPoint(e.clientX, e.clientY);
     };
     const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
-        if (e.buttons !== 1) return;
+        if (disabled || e.buttons !== 1) return;
         setFromPoint(e.clientX, e.clientY);
     };
     const onKeyDown = (e: React.KeyboardEvent) => {
+        if (disabled) return;
         if (e.key === "ArrowUp" || e.key === "ArrowRight") { e.preventDefault(); onChange(clampSnap(value + step)); }
         else if (e.key === "ArrowDown" || e.key === "ArrowLeft") { e.preventDefault(); onChange(clampSnap(value - step)); }
     };
@@ -83,10 +87,10 @@ export function RadialKnob({
         <div className="flex w-full min-w-0 flex-col items-center gap-1 select-none text-foreground">
             <svg
                 ref={ref} width={size} height={size} viewBox="0 0 100 100"
-                role="slider" tabIndex={0} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value}
+                role="slider" tabIndex={disabled ? -1 : 0} aria-disabled={disabled || undefined} aria-valuemin={min} aria-valuemax={max} aria-valuenow={value}
                 aria-valuetext={hint ? `${display} (${hint})` : display} aria-label={label}
                 onPointerDown={onPointerDown} onPointerMove={onPointerMove} onKeyDown={onKeyDown}
-                className="aspect-square h-auto w-full cursor-pointer touch-none rounded-full text-foreground outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className={`aspect-square h-auto w-full touch-none rounded-full ${disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer"} text-foreground outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 focus-visible:ring-offset-background`}
                 style={{ maxWidth: size }}
             >
                 <defs>

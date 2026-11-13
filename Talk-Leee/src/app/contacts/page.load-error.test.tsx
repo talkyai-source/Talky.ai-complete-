@@ -46,7 +46,7 @@ test("a failed campaigns read is a load error with a retry, never 'Create a camp
     assert.equal(screen.queryByText(/Failed to list campaigns/), null, "the raw server message is not shown");
 
     fail = false;
-    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => assert.equal(reads.mock.callCount(), 2));
     await waitFor(() => assert.equal(screen.queryByText("Could not load your campaigns."), null), { timeout: SLOW });
     assert.equal(screen.queryByText("Create a campaign first"), null);

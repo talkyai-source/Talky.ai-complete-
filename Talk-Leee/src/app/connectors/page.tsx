@@ -9,17 +9,12 @@ import { ConnectorCard } from "@/components/connectors/connector-card";
 import { SalesforceSettingsPanel } from "@/components/connectors/salesforce-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
-import { isApiClientError } from "@/lib/http-client";
+import { ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { permits, useKnownPermissions } from "@/lib/permissions";
 import type { ConnectorProviderStatus } from "@/lib/models";
 import { CONNECTOR_RETURN_FAILED_TEXT, type ConnectorOAuthReturn, type ConnectorProviderType } from "@/lib/connectors-utils";
 import { cn } from "@/lib/utils";
 import { CalendarDays, Cloud, Mail, UsersRound, HardDrive } from "lucide-react";
-
-function formatError(err: unknown) {
-    if (isApiClientError(err)) return err.message;
-    return err instanceof Error ? err.message : "Request failed";
-}
 
 type ProviderType = ConnectorProviderType;
 
@@ -229,7 +224,7 @@ export default function ConnectorsPage() {
                                     {requirementsMet ? "Connectors ready" : "Connectors required"}
                                 </div>
                                 <div className={cn("mt-1 text-sm", requirementsMet ? "text-emerald-100/80" : "text-amber-100/80")}>
-                                    Required for this feature: {required.join(", ")}.
+                                    Required for this feature: {required.map((t) => PROVIDERS.find((p) => p.type === t)?.name ?? t).join(", ")}.
                                 </div>
                             </div>
                             {next ? (
@@ -249,7 +244,7 @@ export default function ConnectorsPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {q.isError ? (
-                            <div className="rounded-2xl border border-red-500/30 bg-background/70 p-4 text-sm text-red-500">{formatError(q.error)}</div>
+                            <ErrorState requestId={failedReadRequestId(q.error)} message={failedReadMessage(q.error, "Request failed")} onRetry={() => { void q.refetch(); }} />
                         ) : null}
 
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

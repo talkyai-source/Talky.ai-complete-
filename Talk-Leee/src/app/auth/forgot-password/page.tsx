@@ -25,6 +25,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { failedReadMessage } from "@/components/states/page-states";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { useTurnstile } from "@/components/auth/turnstile-widget";
 
@@ -84,7 +85,7 @@ function ForgotPasswordInner() {
             setMessage("If this email is registered, check your inbox and spam folder for a reset code. Delivery may take a few minutes.");
             setStep("reset");
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+            setError(failedReadMessage(err, "Something went wrong. Please try again."));
         } finally {
             setLoading(false);
         }
@@ -119,7 +120,7 @@ function ForgotPasswordInner() {
             });
             setStep("done");
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+            setError(failedReadMessage(err, "Something went wrong. Please try again."));
         } finally {
             setLoading(false);
         }
@@ -292,7 +293,7 @@ function ForgotPasswordInner() {
                                         </>
                                     ) : (
                                         <>
-                                            Reset Password
+                                            Reset password
                                             <ArrowRight className="h-4 w-4" aria-hidden />
                                         </>
                                     )}
@@ -384,7 +385,7 @@ function ForgotPasswordInner() {
                                         </>
                                     ) : (
                                         <>
-                                            Send Reset Code
+                                            Send reset code
                                             <ArrowRight className="h-4 w-4" aria-hidden />
                                         </>
                                     )}

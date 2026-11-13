@@ -27,11 +27,11 @@ test('resume all calls: cancel keeps the pause, confirm sends one resume', async
     };
     await render(el(C.LiveCalls)); await settle();
     assert.match(text(), /New outbound calls are paused/);
-    await click('Resume Calls');
+    await click('Resume calls');
     assert.ok(modal()); assert.match(modal().textContent, /Resume Calls/);
     await cancelModal();
     noModal(); assert.equal(writes().length, 0); assert.match(text(), /New outbound calls are paused/);
-    await click('Resume Calls'); await click('Confirm'); await settle();
+    await click('Resume calls'); await click('Confirm'); await settle();
     noModal();
     assert.equal(writes().length, 1); assert.deepEqual(writes()[0].body, { paused: false });
     assert.doesNotMatch(text(), /New outbound calls are paused/);
@@ -109,7 +109,7 @@ test('incident acknowledge: cancel sends nothing, confirm sends one acknowledgem
     await act(async () => find('[aria-label="View incident Incident one"]').click()); await settle();
     await click('Acknowledge'); assert.ok(modal()); assert.match(modal().textContent, /Acknowledge “Incident one”\?/);
     await cancelModal(); noModal(); assert.equal(writes().length, 0);
-    assert.match(find('.incidents-dialog').textContent, /Operator statusopen/);
+    assert.match(find('.incidents-dialog').textContent, /Operator statusOpen/);
     await click('Acknowledge'); await click('Confirm'); await settle();
     noModal(); assert.equal(writes().length, 1); assert.match(writes()[0].path, /\/admin\/incidents\/one\/acknowledge$/);
     assert.match(find('[role="status"]').textContent, /server confirmed/);

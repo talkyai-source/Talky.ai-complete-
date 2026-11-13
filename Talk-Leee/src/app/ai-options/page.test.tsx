@@ -217,7 +217,7 @@ for (const [voiceAvailable, engine, language, fluxActive] of [
             assert.equal(posted.tts_model, stored.tts_model);
             assert.equal(posted.tts_sample_rate, stored.tts_sample_rate);
             assert.deepEqual(posted.voice_tuning, stored.voice_tuning);
-            if (!voiceAvailable) assert.match(screen.getByRole("status").textContent || "", /saved-voice.*unavailable/i);
+            if (!voiceAvailable) assert.equal(screen.getAllByRole("status").some((node) => /saved-voice.*unavailable/i.test(node.textContent || "")), true);
         } finally { cleanup(); qc.clear(); }
     });
 }

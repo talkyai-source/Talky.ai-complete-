@@ -21,6 +21,9 @@ interface AuthState {
     isAuthenticated: boolean;
     error: string | null;
     mfaChallenge: string | null;
+    // True while `error` is the server's refusal of the email or password
+    // (401 from /auth/login). There is no session to re-check in that case.
+    signInRefused?: boolean;
 }
 interface AuthContextType extends AuthState {
     logoutRecoveryRequired: boolean;
@@ -151,7 +154,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             if (USE_DUMMY_AUTH) { setState({ ...anonymous(), user: { ...DUMMY_ADMIN_USER, email }, isAuthenticated: true }); return true; }
             const res = await api.login(email.trim(), password, owner.current, turnstileToken);
             if (!owner.current()) return false;
-            if (res.error || !res.data) { setState(anonymous(res.error?.message ?? 'Sign-in could not be confirmed.')); return false; }
+            if (res.error || !res.data) {
+                setState({ ...anonymous(res.error?.message ?? 'Sign-in could not be confirmed.'), signInRefused: res.error?.status === 401 });
+                return false;
+            }
             if (res.data.mfa_required) {
                 if (!res.data.mfa_challenge_token) { setState(anonymous('The MFA challenge is missing. Please start sign-in again.')); return false; }
                 challengeRef.current = res.data.mfa_challenge_token;

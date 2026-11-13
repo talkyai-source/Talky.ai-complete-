@@ -26,7 +26,7 @@ test("duplicate signup shows sign-in guidance and leaves the email editable", as
     fireEvent.change(screen.getByLabelText("Your Name"), { target: { value: "Example Owner" } });
     fireEvent.change(screen.getByLabelText("Business Name"), { target: { value: "Example" } });
     fireEvent.change(screen.getByLabelText("Work Email"), { target: { value: "owner@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Get Started" }));
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
     assert.equal((await screen.findByRole("alert")).textContent, message);
     assert.equal((screen.getByLabelText("Work Email") as HTMLInputElement).disabled, false);
     assert.equal(screen.getByRole("link", { name: "Sign in" }).getAttribute("href"), "/auth/login");
@@ -37,7 +37,7 @@ test("wrong login password remains an invalid-credentials error, not duplicate s
     api.login = async () => { throw new ApiClientError({ status: 401, code: "invalid_credentials", message: "Invalid email or password", url: "/auth/login", method: "POST" }); };
     mount(<LoginClientPage />);
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: "owner@example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Continue with Password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Continue with password" }));
     const password = await screen.findByLabelText("Password");
     fireEvent.change(password, { target: { value: "wrong-password" } });
     fireEvent.submit(password.closest("form")!);

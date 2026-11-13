@@ -375,7 +375,7 @@ test("purchased_minutes 0 leaves the plan tile and Inactive badge unchanged and 
 test("billing cycle and period-end dates share one format that includes the year", async () => {
     const start = "2026-10-01T00:00:00Z";
     const end = "2026-11-01T00:00:00Z";
-    const fmt = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+    const fmt = (iso: string) => new Date(iso).toLocaleDateString();
     globalThis.fetch = routeFetch({ ...ALL_EMPTY_OK, "/billing/subscription": () => json({
         ...EMPTY_SUBSCRIPTION, status: "active", plan_id: "starter", plan_name: "Starter", current_period_start: start, current_period_end: end,
     }) }) as typeof fetch;

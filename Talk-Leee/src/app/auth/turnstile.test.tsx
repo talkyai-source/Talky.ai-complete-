@@ -103,7 +103,7 @@ const withoutKey = () => { delete process.env.NEXT_PUBLIC_TURNSTILE_SITE_KEY; in
 async function reachPasswordStep() {
     fireEvent.change(screen.getByLabelText("Email"), { target: { value: email } });
     await solveChallenge("token-1"); // wherever the page asks for it before the password step
-    fireEvent.click(button("Continue with Password"));
+    fireEvent.click(button("Continue with password"));
     return screen.findByLabelText("Password", {}, { timeout: 3000 });
 }
 
@@ -119,9 +119,9 @@ test("sign-in sends the token the widget produced, and a spent token is never re
     assert.deepEqual(bodies("/auth/login"), [{ email, password: "wrong-password", turnstile_token: "token-1" }]);
 
     // Cloudflare accepts a token once, so the retry needs a new challenge.
-    assert.equal(button("Sign In").disabled, true);
+    assert.equal(button("Sign in").disabled, true);
     await solveChallenge("token-2");
-    assert.equal(button("Sign In").disabled, false);
+    assert.equal(button("Sign in").disabled, false);
     fireEvent.submit(form);
     await waitFor(() => assert.equal(bodies("/auth/login").length, 2));
     assert.equal(bodies("/auth/login")[1].turnstile_token, "token-2");
@@ -133,7 +133,7 @@ test("sign-in without a site key is unchanged: no widget, no script, no token in
     draw(<LoginClientPage />);
     const password = await reachPasswordStep();
     fireEvent.change(password, { target: { value: "wrong-password" } });
-    assert.equal(button("Sign In").disabled, false);
+    assert.equal(button("Sign in").disabled, false);
     fireEvent.submit(password.closest("form")!);
     assert.equal((await screen.findByRole("alert")).textContent, "Invalid email or password");
     assert.deepEqual(bodies("/auth/login"), [{ email, password: "wrong-password" }]);
@@ -155,8 +155,8 @@ test("sign-up sends the token the widget produced, and resending the code needs 
     draw(<RegisterClientPage />);
     fillSignupForm();
     await solveChallenge("token-1");
-    fireEvent.click(button("Get Started"));
-    await screen.findByLabelText("Verification Code");
+    fireEvent.click(button("Get started"));
+    await screen.findByLabelText("Verification code");
     assert.deepEqual(bodies("/auth/signup/start"), [{ ...signup, turnstile_token: "token-1" }]);
 
     assert.equal(button(/Resend/).disabled, true);
@@ -171,16 +171,16 @@ test("sign-up sends the token the widget produced, and resending the code needs 
 test("sign-up waits for the challenge before it can be submitted", () => {
     withKey();
     draw(<RegisterClientPage />);
-    assert.equal(button("Get Started").disabled, true);
+    assert.equal(button("Get started").disabled, true);
 });
 
 test("sign-up without a site key is unchanged: no widget, no script, no token in the request", async () => {
     withoutKey();
     draw(<RegisterClientPage />);
     fillSignupForm();
-    assert.equal(button("Get Started").disabled, false);
-    fireEvent.click(button("Get Started"));
-    await screen.findByLabelText("Verification Code");
+    assert.equal(button("Get started").disabled, false);
+    fireEvent.click(button("Get started"));
+    await screen.findByLabelText("Verification code");
     assert.deepEqual(bodies("/auth/signup/start"), [signup]);
     assert.equal(button(/Resend/).disabled, false);
     assert.deepEqual(challenges, []);
@@ -195,7 +195,7 @@ test("forgot-password sends the token the widget produced, and a new code needs 
     withKey();
     draw(<ForgotPasswordPage />, forgotQuery);
     await solveChallenge("token-1");
-    fireEvent.click(button("Send Reset Code"));
+    fireEvent.click(button("Send reset code"));
     await screen.findByLabelText("Code");
     assert.deepEqual(bodies("/auth/forgot-password"), [{ email, turnstile_token: "token-1" }]);
 
@@ -211,14 +211,14 @@ test("forgot-password sends the token the widget produced, and a new code needs 
 test("forgot-password waits for the challenge before it can be submitted", () => {
     withKey();
     draw(<ForgotPasswordPage />, forgotQuery);
-    assert.equal(button("Send Reset Code").disabled, true);
+    assert.equal(button("Send reset code").disabled, true);
 });
 
 test("forgot-password without a site key is unchanged: no widget, no script, no token in the request", async () => {
     withoutKey();
     draw(<ForgotPasswordPage />, forgotQuery);
-    assert.equal(button("Send Reset Code").disabled, false);
-    fireEvent.click(button("Send Reset Code"));
+    assert.equal(button("Send reset code").disabled, false);
+    fireEvent.click(button("Send reset code"));
     await screen.findByLabelText("Code");
     assert.deepEqual(bodies("/auth/forgot-password"), [{ email }]);
     assert.equal(button("Request a new code").disabled, false);

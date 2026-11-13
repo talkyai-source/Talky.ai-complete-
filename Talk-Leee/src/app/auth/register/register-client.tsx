@@ -6,6 +6,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
 import { api } from "@/lib/api";
+import { failedReadMessage } from "@/components/states/page-states";
 import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { useAuth } from "@/lib/auth-context";
 import { markFreshLogin } from "@/lib/http-client";
@@ -63,7 +64,7 @@ export default function RegisterClientPage() {
     }
 
     function extractError(err: unknown, fallback: string): string {
-        if (err instanceof Error) return err.message;
+        if (err instanceof Error) return failedReadMessage(err, fallback);
         if (typeof err === "object" && err !== null) {
             const detail = (err as { detail?: unknown }).detail;
             if (typeof detail === "string") return detail;
@@ -348,7 +349,7 @@ export default function RegisterClientPage() {
                                         </>
                                     ) : (
                                         <>
-                                            Get Started
+                                            Get started
                                             <ArrowRight className="h-4 w-4" aria-hidden />
                                         </>
                                     )}
@@ -372,7 +373,7 @@ export default function RegisterClientPage() {
                         >
                             <CardContent className="space-y-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="otp">Verification Code</Label>
+                                    <Label htmlFor="otp">Verification code</Label>
                                     <div className="relative">
                                         <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
                                         <Input
@@ -521,7 +522,7 @@ export default function RegisterClientPage() {
                                         </>
                                     ) : (
                                         <>
-                                            Create Account
+                                            Create account
                                             <ArrowRight className="h-4 w-4" aria-hidden />
                                         </>
                                     )}

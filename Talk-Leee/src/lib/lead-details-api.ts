@@ -118,7 +118,10 @@ export const leadDetailsApi = {
         fields: ContactFieldSpec[];
         csv_template_headers: string[];
     }> {
-        return sharedHttpClient().request({ path: "/contacts/fields", method: "GET" });
+        const spec = await sharedHttpClient().request<{ fields: ContactFieldSpec[]; csv_template_headers: string[] }>({ path: "/contacts/fields", method: "GET" });
+        // An answer without its field list is a failed read.
+        if (!Array.isArray(spec?.fields)) throw new Error();
+        return spec;
     },
 
     /** Parse a CSV and report what WOULD happen. Writes nothing. */
