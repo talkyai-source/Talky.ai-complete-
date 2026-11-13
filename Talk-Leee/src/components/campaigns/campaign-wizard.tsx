@@ -273,6 +273,18 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
     });
     const briefError = campaignBriefValidation(briefDraft);
     const guidance = guidanceBudgetStatus(campaignBriefGuidanceText(goal, campaignBrief));
+    const hasVoice = Boolean(isRealtime ? voiceSelection.realtime_voice : voiceId);
+    // What is still missing on step 1, in plain words (shown under the disabled Next).
+    const basicsMissing = [
+        !name.trim() && "a campaign name",
+        !companyName.trim() && "a brand / company name",
+        agentNames.length < 1 && "at least one representative name",
+        agentNames.length >= 1 && representativeNameTooLong(agentNames) && "a shorter first representative name (120 characters at most)",
+        !hasVoice && "a voice",
+        !isRealtime && briefError && "the campaign brief (see the red message above)",
+        !isRealtime && !guidance.valid && "valid campaign guidance (see the counter above)",
+        !inbound && callingHoursInverted(schedule) && "calling hours that end after they start",
+    ].filter((item): item is string => typeof item === "string");
     const basicsValid = Boolean(
         name.trim()
         && companyName.trim()
@@ -497,11 +509,11 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                     <div className="space-y-5">
                         <div className="grid gap-4 sm:grid-cols-2">
                             <div>
-                                <Label htmlFor="cw-name">Campaign name</Label>
+                                <Label htmlFor="cw-name">Campaign name <span className="text-destructive" aria-hidden="true">*</span></Label>
                                 <Input id="cw-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Q3 Web Dev Outreach" className="mt-1" />
                             </div>
                             <div>
-                                <Label htmlFor="cw-company">Brand / company name</Label>
+                                <Label htmlFor="cw-company">Brand / company name <span className="text-destructive" aria-hidden="true">*</span></Label>
                                 <Input id="cw-company" value={companyName} maxLength={MAX_BRIEF_NAME_LENGTH} onChange={(e) => setCompanyName(e.target.value)} placeholder="Talk-Lee" className="mt-1" />
                             </div>
                         </div>
@@ -527,7 +539,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                         </div>
 
                         <div>
-                            <Label htmlFor="cw-agents">Representative names</Label>
+                            <Label htmlFor="cw-agents">Representative names <span className="text-destructive" aria-hidden="true">*</span></Label>
                             <Input id="cw-agents" value={agentNamesRaw} onChange={(e) => setAgentNamesRaw(e.target.value)} placeholder="Alex, Jordan, Sam" className="mt-1" />
                             <p className="mt-1 text-xs text-muted-foreground">
                                 1–3 names, comma-separated. The agent introduces itself with one (rotated per call).
@@ -582,10 +594,15 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                             </div>
                         )}
 
-                        <div className="flex justify-end pt-1">
+                        <div className="flex flex-col items-end gap-1 pt-1">
                             <Button onClick={() => { setError(null); goToStep(1); }} disabled={!basicsValid}>
                                 Next: Knowledge <ArrowRight className="h-4 w-4" />
                             </Button>
+                            {!basicsValid && basicsMissing.length > 0 && (
+                                <p className="text-xs text-muted-foreground" data-testid="cw-next-missing">
+                                    To continue, add {basicsMissing.join(", ")}.
+                                </p>
+                            )}
                         </div>
                     </div>
                 )}
