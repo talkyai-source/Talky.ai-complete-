@@ -12,6 +12,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { api } from "@/lib/api";
 import { dashboardApi, type Campaign } from "@/lib/dashboard-api";
+import { ApiClientError } from "@/lib/http-client";
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
@@ -94,9 +95,9 @@ test("a failed list read shows the server's message in the shared error state, a
         return { campaigns: [campaign] };
     });
     mountPage();
-    await waitFor(() => assert.equal(shown("Campaign store is unavailable"), true), { timeout: SLOW });
+    await waitFor(() => assert.equal(shown("Could not load campaigns."), true), { timeout: SLOW });
     assert.equal(shown("Something went wrong"), true, "the shared ErrorState");
-    assert.equal(screen.getByText("Campaign store is unavailable").getAttribute("role"), "alert");
+    assert.equal(screen.getByText("Could not load campaigns.").getAttribute("role"), "alert");
     assert.equal(shown("No campaigns match your filters"), false);
     assert.equal(shown("No campaigns yet"), false);
 
@@ -105,13 +106,13 @@ test("a failed list read shows the server's message in the shared error state, a
     fireEvent.click(screen.getByRole("button", { name: "Retry" }));
     await waitFor(() => assert.equal(screen.queryAllByRole("checkbox", { name: "Select Spring push" }).length, 1), { timeout: SLOW });
     assert.equal(read.mock.callCount() > before, true, "Retry sent the request again");
-    assert.equal(shown("Campaign store is unavailable"), false);
+    assert.equal(shown("Could not load campaigns."), false);
 });
 
 test("an answer without a campaigns list is a failed read: the error state, not an empty list and not a crash", async () => {
     mock.method(dashboardApi, "listCampaigns", async () => ({}) as unknown as { campaigns: Campaign[] });
     mountPage();
-    await waitFor(() => assert.equal(shown("Failed to load campaigns"), true), { timeout: SLOW });
+    await waitFor(() => assert.equal(shown("Could not load campaigns."), true), { timeout: SLOW });
     assert.equal(screen.queryByRole("button", { name: "Retry" }) !== null, true);
     assert.equal(shown("No campaigns yet"), false);
     assert.equal(shown("No campaigns match your filters"), false);
@@ -166,4 +167,30 @@ test("a refused delete shows the server's message in the delete dialog and leave
     // Cancel closes the dialog and clears the refusal.
     fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
     await waitFor(() => assert.equal(screen.queryByRole("dialog") === null, true), { timeout: SLOW });
+});
+
+// MERGE2 Task 2: the campaign table uses the shared ErrorState, with their
+// sentence, the request reference and the last loaded list kept on screen.
+test("a failed refresh keeps the last loaded campaigns under the shared error state with the request reference", async () => {
+    let fail = false;
+    mock.method(dashboardApi, "listCampaigns", async () => {
+        if (fail) throw new ApiClientError({ status: 500, code: "internal_error", message: "boom", requestId: "req-campaigns-1", url: "http://example.test/campaigns", method: "GET" });
+        return { campaigns: [campaign] };
+    });
+    mountPage();
+    await waitFor(() => assert.equal(screen.queryAllByRole("checkbox", { name: "Select Spring push" }).length, 1), { timeout: SLOW });
+
+    fail = true;
+    await act(async () => { await clients.at(-1)!.invalidateQueries(); });
+    await waitFor(() => assert.equal(shown("Could not load campaigns."), true), { timeout: SLOW });
+    assert.equal(shown("Something went wrong"), true, "the shared ErrorState");
+    assert.equal(shown("Request reference: req-campaigns-1"), true);
+    assert.equal(shown("boom"), false, "the server's raw message is not the sentence shown");
+    assert.equal(screen.queryByRole("button", { name: "Try again" }), null);
+    assert.equal(screen.queryAllByRole("checkbox", { name: "Select Spring push" }).length, 1, "the last loaded list stays on screen");
+
+    fail = false;
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    await waitFor(() => assert.equal(shown("Could not load campaigns."), false), { timeout: SLOW });
+    assert.equal(screen.queryAllByRole("checkbox", { name: "Select Spring push" }).length, 1);
 });

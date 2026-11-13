@@ -238,9 +238,10 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                 className="heroContentWrap relative z-10 flex w-full items-center justify-center px-4 py-20 md:px-16"
             >
                 <div className="w-full max-w-4xl text-center">
-                    <div className="heroHeadlineContainer flex flex-col items-center gap-0 mb-6">
-                        <h1
-                            className="heroMobileTitle md:hidden w-full text-center"
+                    {/* QA F1-10: one level-1 heading; its mobile and desktop forms are shown by width. */}
+                    <h1 className="heroHeadlineContainer flex flex-col items-center gap-0 mb-6">
+                        <span
+                            className="heroMobileTitle block md:hidden w-full text-center"
                             style={{ fontFamily: "var(--font-orbitron)", fontSize: mobileTitleFontSize, lineHeight: 1.02 }}
                         >
                             <span
@@ -253,8 +254,8 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                             >
                                 {headlineB}
                             </span>
-                        </h1>
-                        <h1 className="heroDesktopTitle mt-0 hidden md:block">
+                        </span>
+                        <span className="heroDesktopTitle mt-0 hidden md:block">
                             <span className="heroTitleGlow block" style={{ fontFamily: "var(--font-orbitron)" }}>
                                 <MagneticText
                                     text={headlineA}
@@ -273,8 +274,8 @@ export const Hero: React.FC<HeroProps> = ({ title, description, stats, adjustFor
                                     hoverTextSpanClassName="!text-4xl lg:!text-5xl font-extrabold tracking-tighter text-primary-foreground dark:text-background"
                                 />
                             </span>
-                        </h1>
-                    </div>
+                        </span>
+                    </h1>
 
                     <div className="heroDescWrap mb-8 max-w-2xl mx-auto max-[420px]:mb-6 [@media(max-height:700px)]:mb-6">
                         <div>

@@ -16,8 +16,8 @@ auto-attached by browsers, so they're not forgeable via CSRF. This
 preserves backward-compat for any clients still on the legacy header
 path during the migration window.
 
-Endpoints that establish or refresh auth state (``/auth/login*``,
-``/auth/signup*``, ``/auth/refresh``) are also exempt: pre-login there
+Endpoints that establish or refresh auth state (``/auth/login``,
+the explicit signup steps, ``/auth/refresh``) are also exempt: pre-login there
 is no auth state to forge, and ``/auth/refresh`` is itself protected by
 SameSite=Strict on the refresh cookie's restricted path.
 
@@ -34,28 +34,43 @@ is unset, no token is ever accepted.
 from __future__ import annotations
 
 import os
+import re
 import secrets
 from typing import Iterable
+from fastapi import HTTPException
 
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, Response
+from starlette.responses import Response
 from starlette.types import ASGIApp
 
 from app.core.config import get_settings
+from app.core.error_handlers import http_exception_handler
 
 _INTERNAL_TOKEN_HEADER = "x-internal-service-token"
 
 _UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
-_EXEMPT_PATH_PREFIXES = (
+_EXEMPT_POST_PATHS = frozenset({
     "/api/v1/auth/login",
-    "/api/v1/auth/signup",
+    "/api/v1/auth/signup/start",
+    "/api/v1/auth/signup/verify-code",
+    "/api/v1/auth/signup/complete",
     "/api/v1/auth/register",
     "/api/v1/auth/refresh",
     "/api/v1/auth/forgot-password",
     "/api/v1/auth/reset-password",
-    "/api/v1/auth/verify-email",
-    "/api/v1/auth/passkey",
+    "/api/v1/auth/passkey-check",
+    "/api/v1/auth/passkeys/login/begin",
+    "/api/v1/auth/passkeys/login/complete",
+    # Only signature-verified callbacks, never webhook administration routes.
+    "/api/v1/billing/webhooks",
+    "/api/v1/webhooks/call/goal-achieved",
+    "/api/v1/webhooks/call/mark-spam",
+    "/api/v1/webhooks/secure/call/goal-achieved",
+    "/api/v1/webhooks/secure/call/mark-spam",
+    "/api/v1/webhooks/secure/idempotent-example",
+})
+_EXEMPT_POST_PATTERNS = (
     # Internal C++ voice-gateway audio callback (Asterisk path). The gateway
     # POSTs ~50 PCMU frames/sec/call to /sip/telephony/audio/{session_id} as a
     # same-host service — no browser, no cookie auth, so CSRF (which defends
@@ -63,13 +78,13 @@ _EXEMPT_PATH_PREFIXES = (
     # this exemption every frame 403s ("Missing Origin") and the agent is
     # silent on every call. Hardening follow-up: have the gateway present
     # X-Internal-Service-Token so this can be authenticated rather than exempt.
-    "/api/v1/sip/telephony/audio",
+    re.compile(r"/api/v1/sip/telephony/audio/[^/]+"),
     # Salesforce -> Talky webhooks (Flow HTTP callout / Outbound Message).
     # Server-to-server POSTs: no browser, no cookie, no Origin header. They
     # authenticate with a per-tenant secret token in the URL (SHA-256 compared
     # in constant time by the endpoint), so CSRF protection adds nothing here.
-    "/api/v1/connectors/salesforce/callback-requests/",
-    "/api/v1/connectors/salesforce/outbound-message/",
+    re.compile(r"/api/v1/connectors/salesforce/callback-requests/[^/]+/[^/]+"),
+    re.compile(r"/api/v1/connectors/salesforce/outbound-message/[^/]+/[^/]+"),
 )
 
 
@@ -101,12 +116,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         path = request.url.path
-        # Stripe is a server-to-server sender without a browser Origin. Only
-        # this exact route is exempt; its handler verifies the raw-body Stripe
-        # signature before processing. Other billing writes keep CSRF checks.
-        if request.method == "POST" and path == "/api/v1/billing/webhooks":
-            return await call_next(request)
-        if any(path.startswith(prefix) for prefix in _EXEMPT_PATH_PREFIXES):
+        # Exempt only the actual POST routes, not neighboring paths, passkey
+        # management operations, or future routes that share an auth prefix.
+        if request.method == "POST" and (
+            path in _EXEMPT_POST_PATHS
+            or any(pattern.fullmatch(path) for pattern in _EXEMPT_POST_PATTERNS)
+        ):
             return await call_next(request)
 
         # Legacy Bearer clients (mobile, CLI, server-to-server) bypass CSRF —
@@ -123,14 +138,12 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         origin = request.headers.get("origin")
         if origin is None:
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Missing Origin header for state-changing request."},
-            )
+            return await http_exception_handler(request, HTTPException(
+                status_code=403, detail="Missing Origin header for state-changing request.",
+            ))
         if origin not in self._allowed:
-            return JSONResponse(
-                status_code=403,
-                content={"detail": "Origin not permitted."},
-            )
+            return await http_exception_handler(request, HTTPException(
+                status_code=403, detail="Origin not permitted.",
+            ))
 
         return await call_next(request)

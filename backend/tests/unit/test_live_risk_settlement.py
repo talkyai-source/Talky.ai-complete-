@@ -368,15 +368,26 @@ class _FakeSfDB:
         db = self
 
         class Q:
+            def __init__(self):
+                self.filters = []
             def select(self, *_a): return self
-            def eq(self, *_a): return self
+            def eq(self, column, value):
+                self.filters.append((column, value))
+                return self
             def neq(self, *_a): return self
             def limit(self, *_a): return self
             def update(self, payload):
                 db.writes.append(payload)
                 return self
             def execute(self):
-                return SimpleNamespace(data=[db.lead], error=None)
+                if name == "tenants":
+                    assert self.filters == [("id", "t-1")]
+                    return SimpleNamespace(data=[{"calling_rules": {"default_country": "US"}}], error=None)
+                assert name == "leads"
+                assert ("tenant_id", "t-1") in self.filters
+                assert ("campaign_id", "c1") in self.filters
+                assert ("phone_number", "+14155550100") in self.filters
+                return SimpleNamespace(data=[db.lead] if db.lead else [], error=None)
 
         return Q()
 
@@ -401,7 +412,7 @@ async def test_salesforce_callback_refuses_an_opted_out_lead(lead, monkeypatch):
     with pytest.raises(sf._CallbackConflict) as exc:
         await sf._enqueue_callback(
             db, tenant_id="t-1", config={"callback_campaign_id": "c1"},
-            payload=sf.CallbackRequest(phone="+15550100100"),
+            payload=sf.CallbackRequest(phone="+14155550100"),
         )
     assert exc.value.status_code == 409 and exc.value.detail["error"] == "do_not_call"
     assert db.writes == []  # never promoted back to 'pending'
@@ -417,7 +428,7 @@ async def test_salesforce_callback_refuses_a_number_on_the_dnc_list(monkeypatch)
     class DNC:
         def __init__(self, pool): pass
         async def is_on_dnc(self, *, tenant_id, e164):
-            assert e164 == "+15550100100"
+            assert tenant_id == "t-1" and e164 == "+14155550100"
             return True
 
     monkeypatch.setattr("app.domain.services.dnc_service.DNCService", DNC)
@@ -426,9 +437,10 @@ async def test_salesforce_callback_refuses_a_number_on_the_dnc_list(monkeypatch)
     with pytest.raises(sf._CallbackConflict) as exc:
         await sf._enqueue_callback(
             db, tenant_id="t-1", config={"callback_campaign_id": "c1"},
-            payload=sf.CallbackRequest(phone="+15550100100"),
+            payload=sf.CallbackRequest(phone="+14155550100"),
         )
     assert exc.value.status_code == 409 and exc.value.detail["error"] == "do_not_call"
+    assert db.writes == []
 
 
 @pytest.mark.asyncio
@@ -440,7 +452,9 @@ async def test_salesforce_callback_fails_closed_when_the_dnc_lookup_errors(monke
 
     class DNC:
         def __init__(self, pool): pass
-        async def is_on_dnc(self, **_kw): raise RuntimeError("db down")
+        async def is_on_dnc(self, *, tenant_id, e164):
+            assert tenant_id == "t-1" and e164 == "+14155550100"
+            raise RuntimeError("db down")
 
     monkeypatch.setattr("app.domain.services.dnc_service.DNCService", DNC)
     db = _FakeSfDB(None)
@@ -448,9 +462,11 @@ async def test_salesforce_callback_fails_closed_when_the_dnc_lookup_errors(monke
     with pytest.raises(sf._CallbackConflict) as exc:
         await sf._enqueue_callback(
             db, tenant_id="t-1", config={"callback_campaign_id": "c1"},
-            payload=sf.CallbackRequest(phone="+15550100100"),
+            payload=sf.CallbackRequest(phone="+14155550100"),
         )
     assert exc.value.status_code == 503
+    assert exc.value.detail["error"] == "dnc_check_unavailable"
+    assert db.writes == []
 
 
 # ── compliance-5 ────────────────────────────────────────────────────

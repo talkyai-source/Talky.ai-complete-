@@ -1,13 +1,17 @@
 "use client";
 
+import { formatTimestamp } from "@/lib/timestamps";
+
 import { useMemo, useState, useRef, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
+import { PrintButton } from "@/components/ui/print-support";
 import { ArrowLeft, PhoneIncoming, PhoneOutgoing, Clock, FileText, Play, Download, Pause, Loader2 } from "lucide-react";
 import { motion } from "framer-motion";
 import { LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { useCall, useCallTranscript } from "@/lib/api-hooks";
+import { useAuth } from "@/lib/auth-context";
 import { extendedApi } from "@/lib/extended-api";
 import { callStatusLabel, statusPillClass } from "@/lib/status-colors";
 import { humanizeOutcome } from "@/lib/call-outcome-label";
@@ -55,6 +59,7 @@ const TRANSCRIPT_ROW_GAP_PX = 12;
 const CARD_SLOT = "mb-6 break-inside-avoid empty:hidden";
 
 export default function CallDetailPage() {
+    const { user } = useAuth();
     const params = useParams();
     const router = useRouter();
     const callId = params.id as string;
@@ -256,12 +261,14 @@ export default function CallDetailPage() {
             <motion.div
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
-                className="mb-6"
+                className="mb-6 flex items-center justify-between gap-2 print:hidden"
             >
                 <Button variant="ghost" size="sm" onClick={() => router.back()} className="gap-2 px-2">
                     <ArrowLeft className="h-4 w-4" />
                     Back to Call History
                 </Button>
+                {/* QA F1-24: print this call's details. */}
+                {call ? <PrintButton /> : null}
             </motion.div>
 
             {callQuery.isLoading ? (
@@ -269,7 +276,7 @@ export default function CallDetailPage() {
             ) : error ? (
                 <CallLoadError message={error} onRetry={() => void callQuery.refetch()} />
             ) : call ? (
-                <div className="call-detail-page columns-1 xl:columns-2 gap-6">
+                <div className="call-detail-page columns-1 xl:columns-2 gap-6 print:columns-1">
                     {/* Call Info */}
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
@@ -309,7 +316,7 @@ export default function CallDetailPage() {
 
                             <div className="group rounded-2xl border border-border bg-muted/60 p-3 shadow-sm transition-[transform,background-color,border-color,box-shadow] duration-150 ease-out hover:bg-background">
                                 <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Date</div>
-                                <div className="mt-1 text-sm font-semibold text-foreground">{new Date(call.created_at).toLocaleString()}</div>
+                                <time dateTime={call.created_at} title={formatTimestamp(call.created_at, user?.account_timezone).utc} className="mt-1 block text-sm font-semibold text-foreground">{formatTimestamp(call.created_at, user?.account_timezone).label}</time>
                             </div>
                         </div>
                     </motion.div>

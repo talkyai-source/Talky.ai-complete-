@@ -18,7 +18,18 @@ SUPPLIER_ALLOWANCE = "0080_supplier_allowance_merge"
 PAYMENT = "0073_payment_test_plan"
 PAYMENT_MERGE = "0081_admin_payment_merge"
 SUPPORT = "0082_support_system"
-HEAD = "0083_pay_as_you_go"
+PAYG = "0083_pay_as_you_go"
+CALL_SIGNALS = "0084_call_failure_lead_signals"
+LEGAL = "0085_legal_acceptance"
+WORKFLOWS = "0086_call_workflows"
+PARITY = "0087_bootstrap_manual_parity"
+CONSTRAINTS = "0088_qa_data_constraints"
+KEY_VALIDATION = "0089_provider_key_validation"
+ALERTS = "0090_campaign_alerts"
+CURSOR = "0091_call_history_cursor"
+TRIGGERS = "0092_drop_broken_touch_triggers"
+ABUSE = "0093_abuse_event_columns"
+HEAD = "0094_harden_legacy_db_objects"
 
 
 def test_release_exposes_one_head_containing_both_existing_histories():
@@ -28,9 +39,21 @@ def test_release_exposes_one_head_containing_both_existing_histories():
     # line soft delete) remain common ancestors. Published paid billing and
     # connector/Admin histories now join through a metadata-only merge.
     assert SCRIPTS.get_heads() == [HEAD]
-    # 0083 (pay as you go) sits on 0082 (support system), which sits on the
-    # payment merge that joins both histories.
-    assert SCRIPTS.get_revision(HEAD).down_revision == SUPPORT
+    # 0084 (hand-run call-failure/lead-signal columns, QA F14-02) sits on 0083
+    # (pay as you go), on 0082 (support system), which sits on the payment
+    # merge that joins both histories.
+    assert SCRIPTS.get_revision(HEAD).down_revision == ABUSE
+    assert SCRIPTS.get_revision(ABUSE).down_revision == TRIGGERS
+    assert SCRIPTS.get_revision(TRIGGERS).down_revision == CURSOR
+    assert SCRIPTS.get_revision(CURSOR).down_revision == ALERTS
+    assert SCRIPTS.get_revision(ALERTS).down_revision == KEY_VALIDATION
+    assert SCRIPTS.get_revision(KEY_VALIDATION).down_revision == CONSTRAINTS
+    assert SCRIPTS.get_revision(CONSTRAINTS).down_revision == PARITY
+    assert SCRIPTS.get_revision(PARITY).down_revision == WORKFLOWS
+    assert SCRIPTS.get_revision(WORKFLOWS).down_revision == LEGAL
+    assert SCRIPTS.get_revision(LEGAL).down_revision == CALL_SIGNALS
+    assert SCRIPTS.get_revision(CALL_SIGNALS).down_revision == PAYG
+    assert SCRIPTS.get_revision(PAYG).down_revision == SUPPORT
     assert SCRIPTS.get_revision(SUPPORT).down_revision == PAYMENT_MERGE
     assert set(SCRIPTS.get_revision(PAYMENT_MERGE).down_revision) == {SUPPLIER_ALLOWANCE, PAYMENT}
     assert set(SCRIPTS.get_revision(SUPPLIER_ALLOWANCE).down_revision) == {SUPPLIER, ALLOWANCE}
@@ -165,6 +188,7 @@ def test_payment_merge_has_no_business_sql_and_refuses_history_split():
         migration.downgrade()
 
 
-def test_upgrade_after_the_payment_merge_runs_only_support_then_pay_as_you_go():
+def test_upgrade_after_the_payment_merge_runs_only_support_pay_as_you_go_then_the_fold():
     revisions = [step.revision.revision for step in SCRIPTS._upgrade_revs("head", PAYMENT_MERGE)]
-    assert revisions == [SUPPORT, HEAD]
+    assert revisions == [SUPPORT, PAYG, CALL_SIGNALS, LEGAL, WORKFLOWS,
+                         PARITY, CONSTRAINTS, KEY_VALIDATION, ALERTS, CURSOR, TRIGGERS, ABUSE, HEAD]

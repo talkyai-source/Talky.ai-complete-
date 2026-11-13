@@ -22,6 +22,7 @@
 # Do not restart this unit outside the documented freeze + zero-call procedure.
 
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky.ai Voice Media Gateway (C++)
 After=network.target
 

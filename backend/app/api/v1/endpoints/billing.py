@@ -2,6 +2,7 @@
 Billing API Endpoints
 Handles Stripe subscription management and payment operations
 """
+from app.core.error_handlers import safe_exception_message
 
 import logging
 import os
@@ -109,7 +110,7 @@ class UsageSummaryResponse(BaseModel):
     remaining: int
     overage: int
     unlimited: bool
-    metering_period: Literal["calendar_month"]
+    metering_period: Literal["calendar_month", "anchored_month"]
 
 
 # ============================================
@@ -136,6 +137,23 @@ def _is_platform_admin(current_user) -> bool:
         return False
 
 
+def _cancel_at_period_end(subscription) -> bool:
+    """Stripe's own flag, synced into subscriptions.metadata (G9).
+
+    Rows synced before the flag was stored have no key; for those the old
+    reading (a scheduled cancel_at) is kept.
+    """
+    metadata = subscription.get("metadata")
+    if isinstance(metadata, str):
+        try:
+            metadata = json.loads(metadata)
+        except ValueError:
+            metadata = None
+    if isinstance(metadata, dict) and isinstance(metadata.get("cancel_at_period_end"), bool):
+        return metadata["cancel_at_period_end"]
+    return bool(subscription.get("cancel_at"))
+
+
 def _is_billing_team(current_user) -> bool:
     """Who may see and buy team-only plans (billing_mode.is_billing_team)."""
     from app.domain.services.billing_mode import is_billing_team
@@ -150,7 +168,7 @@ def _is_billing_team(current_user) -> bool:
 
 def _require_checkout_permitted_in_test_mode(current_user) -> None:
     """Stripe TEST mode in production sells only to the team (billing_mode)."""
-    from app.domain.services.billing_mode import checkout_permitted_in_test_mode
+    from app.domain.services.billing_mode import TEST_MODE_TEAM_ONLY_MESSAGE, checkout_permitted_in_test_mode
 
     is_platform_admin = _is_platform_admin(current_user)
     if not checkout_permitted_in_test_mode(is_platform_admin=is_platform_admin, email=current_user.email):
@@ -158,7 +176,7 @@ def _require_checkout_permitted_in_test_mode(current_user) -> None:
             status_code=status.HTTP_403_FORBIDDEN,
             detail={
                 "code": "test_billing_team_only",
-                "message": "Payments are not open yet. Billing is in test mode for the Talk-Lee team.",
+                "message": TEST_MODE_TEAM_ONLY_MESSAGE,
                 "request_not_started": True,
             },
         )
@@ -256,7 +274,7 @@ async def get_checkout_attempt(
         )
     except CheckoutError as exc:
         raise HTTPException(
-            exc.status_code, detail={"code": exc.code, "message": str(exc)}
+            exc.status_code, detail={"code": exc.code, "message": safe_exception_message(exc, 'The request could not be completed.')}
         ) from exc
     except Exception as exc:
         raise HTTPException(
@@ -307,7 +325,7 @@ async def stripe_webhook(
             headers={"Retry-After": "30"},
         ) from exc
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:
         logger.error("Webhook handling failed error_type=%s", type(e).__name__)
         raise HTTPException(
@@ -371,7 +389,7 @@ async def get_subscription(
                 if subscription.get("current_period_end")
                 else None
             ),
-            cancel_at_period_end=bool(subscription.get("cancel_at")),
+            cancel_at_period_end=_cancel_at_period_end(subscription),
             minutes_allocated=allocated,
             minutes_used=minutes_used,
             minutes_remaining=minutes_remaining,
@@ -432,7 +450,7 @@ async def create_portal_session(
         return PortalResponse(**result)
 
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:
         logger.error("Failed to create portal session: %s", type(e).__name__)
         raise HTTPException(
@@ -476,7 +494,7 @@ async def cancel_subscription(
         return CancelResponse(**result)
 
     except ValueError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
     except Exception as e:
         logger.error("Failed to cancel subscription: %s", type(e).__name__)
         raise HTTPException(
@@ -872,30 +890,60 @@ async def list_billing_plans(
     """
     try:
         from app.domain.services.billing_catalog import list_plan_catalog
+        from app.domain.services.billing_mode import checkout_availability
 
-        return await list_plan_catalog(
+        plans = await list_plan_catalog(
             db_client.pool, include_team_only=_is_billing_team(current_user)
         )
     except Exception as e:
         logger.error(f"Failed to list plans: {e}")
         raise HTTPException(status_code=500, detail="Failed to list plans")
+    # A checkout this caller would be refused is unavailable before the click
+    # (G7). A provider's own reason on an option is kept.
+    open_, reason = checkout_availability(
+        is_platform_admin=_is_platform_admin(current_user) if current_user else False,
+        email=getattr(current_user, "email", None),
+    )
+    if not open_:
+        for plan in plans:
+            for option in plan.get("price_options") or []:
+                if option.get("checkout_available"):
+                    option.update(checkout_available=False, unavailable_reason=reason)
+    return plans
 
 
 @router.get("/config")
-async def get_billing_config():
+async def get_billing_config(
+    current_user: Optional[CurrentUser] = Depends(get_optional_user),
+):
     """
     Get billing configuration status.
 
-    Useful for frontend to determine if billing is in mock mode.
+    Useful for frontend to determine if billing is in mock mode, and whether
+    this caller's plan checkout and minute top-ups would be refused (G7).
     """
-    from app.domain.services.billing_mode import get_billing_mode
+    from app.api.v1.endpoints.billing_topups import _live_topups_enabled
+    from app.domain.services.billing_mode import (
+        checkout_availability, get_billing_mode, topup_availability,
+    )
 
     mode = get_billing_mode()
     stripe_configured = mode in {"live", "test"}
+    caller = dict(
+        is_platform_admin=_is_platform_admin(current_user) if current_user else False,
+        email=getattr(current_user, "email", None),
+    )
+    checkout_open, checkout_reason = checkout_availability(**caller)
+    topups_open, topups_reason = topup_availability(
+        **caller, live_topups_enabled=_live_topups_enabled())
 
     return {
         "stripe_configured": stripe_configured,
         "mock_mode": mode == "mock",
         "billing_mode": mode,
         "publishable_key": os.getenv("STRIPE_PUBLISHABLE_KEY") if stripe_configured else None,
+        "checkout_open": checkout_open,
+        "checkout_unavailable_reason": checkout_reason,
+        "topups_open": topups_open,
+        "topups_unavailable_reason": topups_reason,
     }

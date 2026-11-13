@@ -56,6 +56,9 @@ class _Query:
     def lte(self, column, value):
         return self._add("lte", column, value)
 
+    def lt(self, column, value):
+        return self._add("lt", column, value)
+
     def ilike(self, column, value):
         return self._add("ilike", column, value)
 
@@ -79,6 +82,8 @@ class _Query:
             if op == "gte" and not (have is not None and str(have) >= str(value)):
                 return False
             if op == "lte" and not (have is not None and str(have) <= str(value)):
+                return False
+            if op == "lt" and not (have is not None and str(have) < str(value)):
                 return False
             if op == "in" and str(have) not in {str(v) for v in value}:
                 return False

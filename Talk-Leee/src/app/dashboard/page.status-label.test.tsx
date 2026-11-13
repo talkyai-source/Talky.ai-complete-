@@ -60,8 +60,10 @@ test("the dashboard shows each campaign's status with the shared label", async (
         id: `c${index}`, name, status, direction: "outbound", system_prompt: "", voice_id: "v", max_concurrent_calls: 1,
         total_leads: 10, calls_completed: 3, calls_failed: 1, created_at: "2026-01-01T00:00:00Z",
     })) as unknown as Campaign[];
+    // The page loads nothing without the account's reporting zone (QA F1-30/F1-32).
     mock.method(dashboardApi, "getDashboardSummary", async () => ({
         total_calls: 0, answered_calls: 0, failed_calls: 0, minutes_used: 0, minutes_remaining: 100, active_campaigns: 1,
+        timezone: "UTC",
     }));
     mock.method(dashboardApi, "listCampaigns", async () => ({ campaigns }));
     mock.method(extendedApi, "getCallAnalytics", async () => ({ series: [] }));

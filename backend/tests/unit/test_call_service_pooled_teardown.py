@@ -53,7 +53,10 @@ class _FakeConn:
         self.calls_row = calls_row
         if self.calls_row is not None:
             self.calls_row.setdefault("tenant_id", "20000000-0000-4000-8000-000000000017")
-            self.calls_row.setdefault("phone_number", "+15555550107")
+            self.calls_row.setdefault("phone_number", "+14155552671")
+            self.calls_row.setdefault("direction", "outbound")
+            self.calls_row.setdefault("is_test", False)
+            self.calls_row.setdefault("campaign_alert_processed_at", None)
             self.calls_row.setdefault("outcome", None)
             self.calls_row.setdefault("ended_at", None)
             self.calls_row.setdefault("duration_seconds", None)
@@ -63,6 +66,7 @@ class _FakeConn:
         self.leads_row = leads_row
         self.dialer_jobs_row = dialer_jobs_row
         self.campaigns_row = {"calls_completed": 0, "calls_failed": 0}
+        self.alert_state = {"failure_count": 0, "failure_episode": None}
         self.executed: list[tuple[str, tuple[Any, ...]]] = []
         self._tx_lock = asyncio.Lock()
         self._tx_owner = None
@@ -98,6 +102,20 @@ class _FakeConn:
         self.executed.append((q, args))
 
         if q.startswith("SET LOCAL"):
+            return
+
+        # The durable alert port shares the settlement transaction. These
+        # legacy tests never reach five failures; model only its exact claim
+        # and streak statements, not unknown notification SQL. The separate
+        # campaign-alert SQL/PG tests cover enqueue, rollback and delivery.
+        if q.startswith("INSERT INTO campaign_alert_state(tenant_id,campaign_id)"):
+            assert args == (self.calls_row["tenant_id"], self.calls_row["campaign_id"])
+            assert "ON CONFLICT(tenant_id,campaign_id) DO NOTHING" in q
+            return
+        if q.startswith("UPDATE campaign_alert_state SET failure_count=$3"):
+            assert "WHERE tenant_id=$1::uuid AND campaign_id=$2" in q
+            assert args[:2] == (self.calls_row["tenant_id"], self.calls_row["campaign_id"])
+            self.alert_state.update(failure_count=args[2], failure_episode=args[3])
             return
 
         if "UPDATE calls" in q and "status = 'completed'" in q:
@@ -139,6 +157,22 @@ class _FakeConn:
     async def fetchrow(self, query: str, *args: Any):
         q = " ".join(query.split())
         self.executed.append((q, args))
+
+        if q.startswith("UPDATE calls SET campaign_alert_processed_at=now()"):
+            assert "id=$1 AND tenant_id=$2::uuid" in q
+            assert "p.id=calls.campaign_id AND p.tenant_id=$2::uuid" in q
+            row = self.calls_row
+            if (row is None or row["id"] != args[0] or row["tenant_id"] != args[1]
+                    or row["campaign_alert_processed_at"] is not None
+                    or row["status"] != "completed" or row["direction"] != "outbound"
+                    or row["is_test"] or row.get("campaign_id") is None):
+                return None
+            row["campaign_alert_processed_at"] = "NOW"
+            return {"campaign_id": row["campaign_id"], "outcome": row["outcome"]}
+        if q.startswith("SELECT failure_count,failure_episode FROM campaign_alert_state"):
+            assert "WHERE tenant_id=$1::uuid AND campaign_id=$2 FOR UPDATE" in q
+            assert args == (self.calls_row["tenant_id"], self.calls_row["campaign_id"])
+            return dict(self.alert_state)
 
         if q.startswith("UPDATE calls"):
             if not self.calls_row or self.calls_row["id"] != args[0]:
@@ -297,7 +331,7 @@ async def test_pooled_teardown_finalizes_lead_and_job_on_happy_path(job_status):
         },
         dialer_jobs_row={
             "id": "job-1", "status": job_status, "attempt_number": 1,
-            "tenant_id": "tenant-1", "priority": 5, "phone_number": "+15550001111",
+            "tenant_id": "tenant-1", "priority": 5, "phone_number": "+14155552672",
         },
     )
     service = _service(conn)

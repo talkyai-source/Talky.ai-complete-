@@ -1,63 +1,15 @@
-"""Phone number normalization helpers -- the ONE home for E.164 handling.
+"""Shared phone normalization contracts.
 
-This module is the single place phone/E.164 normalisation lives.  Everything
-else in the codebase (contacts import, tenant DID registration, CallGuard,
-the DNC list) delegates here through a thin wrapper that keeps its own public
-name.
+Dial destinations require libphonenumber validity in the selected country.
+Campaign/import selection falls back to tenants.calling_rules.default_country
+and never guesses US (D2-5); only DNC keys keep an explicit US default.
+Extensions never become part of a dial destination or DNC key.
+DNC writes and CallGuard reads use the same strict parser; malformed guard
+inputs become an empty, undialable key. Existing canonical E.164 keys remain
+unchanged. Historical malformed DNC rows still require owner reconciliation.
 
-There is deliberately more than one function, because the call sites genuinely
-want different things and pretending otherwise is how the DNC/billing
-divergence happened in the first place.  Pick by contract:
-
-===========================  ================================================
-Function                     Contract
-===========================  ================================================
-``normalize_phone_number``   CANONICAL.  libphonenumber-backed, region-aware
-                             (``default_country``), passes 4-5 digit SIP
-                             extensions through, rejects junk with
-                             ``ValueError``.  Use this for anything new.
-``normalize_phone_for_``     Strict libphonenumber validity; accepts ``+``
-``capture``                  E.164 input without a region, but a
-                             national-format number requires explicit region
-                             context and is never guessed as US.
-``normalize_phone_as_said``  VOICE CAPTURE. The caller's number exactly as
-                             said: formatting removed, nothing added, no
-                             country inferred or required (6-15 digits, a
-                             leading ``+`` only if they said one).
-``normalize_phone_number_``  Same, but never rejects on length/format --
-``lenient``                  digits passthrough fallback.  Only for accounts
-                             with relaxed phone validation.
-``normalize_phone_number_``  DEPRECATED shape kept for ``contacts.py``'s
-``legacy``                   legacy exported symbol: min 3 digits, SIP
-                             passthrough up to 6 digits, no libphonenumber.
-``normalize_e164_digits``    Never raises.  Digits-only + leading ``+``,
-                             bare-10-digit means US.  CallGuard's contract --
-                             a guard must not explode on a malformed number.
-                             ALSO the DNC list's stored form: the write and
-                             the guard's read MUST be the same function.
-``normalize_e164_``          Never raises.  libphonenumber when it can parse,
-``libphonenumber``           else digits + forced leading ``+``, ``""`` for
-                             empty.  No longer on any DNC path -- kept for its
-                             vanity-number handling and pinned by the
-                             equivalence baseline.
-``is_strict_e164``           Predicate for ``+[1-9]`` then 6-14 more digits.
-                             Use it to REJECT a never-raising normaliser's junk
-                             output before it reaches the database.
-``validate_e164_strict``     Not a normaliser: whitespace-strip + assert
-                             strict ``+[1-9]\\d{6,14}``.  Registration of a
-                             tenant DID, where guessing would be wrong.
-===========================  ================================================
-
-Known divergences between these are catalogued (and pinned) in
-``tests/unit/test_phone_normalizer_equivalence.py``.
-
-DNC INVARIANT: ``dnc_entries.normalized_number`` is written and read with
-``normalize_e164_digits`` and nothing else.  Until 2026-08-27 the write path
-used ``normalize_e164_libphonenumber``, which stores a bare 10-digit US number
-as ``+4155551234`` while CallGuard looks it up as ``+14155551234`` -- so the
-row never matched and a number the customer had put on Do-Not-Call stayed
-dialable.  Rows written before the fix need
-``scripts/backfill_dnc_normalized_numbers.py``.
+Voice capture-as-said, DID registration and legacy digits/lock keys retain
+separate contracts. There is no lenient intake path (D2-6).
 """
 from __future__ import annotations
 
@@ -66,62 +18,77 @@ import re
 _STRICT_E164_RE = re.compile(r"^\+[1-9]\d{6,14}$")
 
 
-def normalize_phone_number(phone: str, default_country: str = "US") -> str:
+def normalize_phone_number(phone: str, default_country: str | None = "US") -> str:
+    """Return a valid dial destination, excluding any extension; never guess.
+
+    ``default_country=None`` means no country is known: a number written with
+    its ``+`` country code still normalises, a national one is refused (D2-5).
     """
-    Normalize phone number to E.164 format.
+    country = validate_country(default_country) if default_country else None
+    return normalize_phone_for_capture(phone, region=country)
 
-    Uses libphonenumber when available so non-US numbers normalize correctly.
-    Short SIP extensions (4-5 digits) are passed through.
+
+def phone_number_error(raw: str, country: str | None) -> str:
+    """The row-level message for a refused number: what the customer must fix."""
+    if not country and not str(raw or "").strip().startswith("+"):
+        return "Add the country code (for example +44) or choose a country for this number"
+    return "Invalid phone number for the selected country"
+
+
+def validate_country(value: str) -> str:
+    """Validate an explicit ISO alpha-2 libphonenumber region."""
+    import phonenumbers
+
+    country = str(value or "").strip().upper()
+    if len(country) != 2 or country not in phonenumbers.SUPPORTED_REGIONS:
+        raise ValueError("default_country must be a supported ISO alpha-2 country")
+    return country
+
+
+def campaign_country(campaign=None, account_rules=None, requested=None, *, fallback=None) -> str | None:
+    """Explicit import override, campaign country, account calling rules.
+
+    No country is guessed (D2-5): with none of those set the result is
+    ``fallback``, which is ``None`` for contact intake. Only callers that must
+    stay consistent with an existing US-default key (DNC writes, the legacy
+    repair tool) name ``fallback="US"`` explicitly.
     """
-    has_plus = phone.strip().startswith("+")
-    cleaned = re.sub(r"[^\d]", "", phone)
+    config = (campaign or {}).get("script_config") or {}
+    if not isinstance(config, dict):
+        config = {}
+    slots = config.get("campaign_slots") or {}
+    if not isinstance(slots, dict):
+        slots = {}
+    rules = account_rules if isinstance(account_rules, dict) else {}
+    chosen = (
+        requested or config.get("default_country_code")
+        or slots.get("default_country_code") or rules.get("default_country") or fallback
+    )
+    return validate_country(chosen) if chosen else None
 
-    if not cleaned:
-        raise ValueError("Invalid phone number")
 
-    if len(cleaned) <= 5:
-        if len(cleaned) < 4:
-            raise ValueError("Phone number too short (minimum 4 digits for SIP extensions)")
-        return cleaned
+def resolve_default_country(db_client, tenant_id, campaign=None, requested=None) -> str | None:
+    """Read the existing account JSON only when no explicit/campaign choice exists."""
+    config = (campaign or {}).get("script_config") or {}
+    slots = config.get("campaign_slots") if isinstance(config, dict) else None
+    if requested or (isinstance(config, dict) and config.get("default_country_code")) or (
+        isinstance(slots, dict) and slots.get("default_country_code")
+    ):
+        return campaign_country(campaign, requested=requested)
+    # tenants.id IS the tenant boundary (there is no tenants.tenant_id column).
+    response = db_client.table("tenants").select("calling_rules").eq("id", str(tenant_id)).execute()
+    if getattr(response, "error", None):
+        raise RuntimeError("Unable to load account country")
+    rows = response.data or []
+    return campaign_country(campaign, account_rules=rows[0].get("calling_rules") if rows else None)
 
-    if len(cleaned) == 6:
-        raise ValueError("Phone number too short (minimum 7 digits for phone numbers)")
 
-    if len(cleaned) > 15:
-        raise ValueError("Phone number too long (maximum 15 digits)")
-
+def normalize_suppression_key(raw: str, default_country: str = "US") -> str:
+    """The shared DNC write/read key; invalid destinations remain undialable."""
     try:
-        import phonenumbers
-
-        region = None if has_plus else (default_country or "US").upper()
-        parsed = phonenumbers.parse(phone, region)
-        if phonenumbers.is_valid_number(parsed):
-            return phonenumbers.format_number(
-                parsed,
-                phonenumbers.PhoneNumberFormat.E164,
-            )
-    except Exception:
-        pass
-
-    fallback_country_codes = {
-        "GB": "44",
-        "DE": "49",
-        "AU": "61",
-    }
-    country = (default_country or "US").upper()
-    if country in fallback_country_codes and cleaned.startswith("0"):
-        return f"+{fallback_country_codes[country]}{cleaned[1:]}"
-
-    if has_plus:
-        return f"+{cleaned}"
-
-    if len(cleaned) == 10:
-        return f"+1{cleaned}"
-
-    if len(cleaned) == 11 and cleaned.startswith("1"):
-        return f"+{cleaned}"
-
-    return f"+{cleaned}"
+        return normalize_phone_number(raw, default_country)
+    except ValueError:
+        return ""
 
 
 def normalize_phone_for_capture(phone: str, region: str | None = None) -> str:
@@ -195,79 +162,6 @@ def region_of_e164(number: str | None) -> str | None:
     if not phonenumbers.is_valid_number(parsed):
         return None
     return phonenumbers.region_code_for_number(parsed) or None
-
-
-def normalize_phone_number_lenient(phone: str) -> str:
-    """Lenient normalization that NEVER rejects on length/format.
-
-    For accounts whose phone validation is temporarily relaxed (e.g. adding
-    short or odd test numbers). It tries the strict normalizer first, so a
-    normal number still comes out as proper E.164; only when the strict path
-    rejects the number does it fall back to a digits passthrough (preserving a
-    leading +). The single hard rule that remains is "must contain a digit".
-    """
-    try:
-        return normalize_phone_number(phone)
-    except ValueError:
-        pass  # fall through to the lenient passthrough below
-
-    has_plus = (phone or "").strip().startswith("+")
-    digits = re.sub(r"[^\d]", "", phone or "")
-    if not digits:
-        raise ValueError("Phone number contains no digits")
-    return f"+{digits}" if has_plus else digits
-
-
-def normalize_phone_number_legacy(phone: str) -> str:
-    """The pre-consolidation ``contacts.normalize_phone_number`` contract.
-
-    DEPRECATED -- do not add callers; use :func:`normalize_phone_number`.
-    It is kept verbatim because ``app.api.v1.endpoints.contacts`` still
-    exports the symbol.
-
-    Differs from the canonical normalizer in three ways:
-      * minimum is 3 digits, not 4;
-      * SIP-extension passthrough runs to 6 digits, not 5 (so ``"123456"``
-        is accepted here and rejected canonically);
-      * no libphonenumber at all -- so extensions are not stripped
-        (``"+1 415 555 1234 ext 22"`` keeps the ``22``) and ``default_country``
-        has no equivalent.
-
-    Raises ValueError for empty/None and for digitless input.
-    """
-    if not phone:
-        raise ValueError("Phone number is empty")
-
-    # Remove all non-digit characters except leading +
-    has_plus = phone.strip().startswith("+")
-    cleaned = re.sub(r"[^\d]", "", phone)
-
-    if not cleaned:
-        raise ValueError("Phone number contains no digits")
-
-    # Allow short SIP extensions (3-6 digits) to pass through as-is
-    if len(cleaned) <= 6:
-        if len(cleaned) < 3:
-            raise ValueError("Phone number too short (minimum 3 digits for SIP extensions)")
-        return cleaned  # Return raw SIP extension - no E.164 normalization
-
-    if len(cleaned) > 15:
-        raise ValueError("Phone number too long (maximum 15 digits)")
-
-    # If already has + and country code, use as-is
-    if has_plus:
-        return f"+{cleaned}"
-
-    # If 10 digits (US/Canada without country code), add +1
-    if len(cleaned) == 10:
-        return f"+1{cleaned}"
-
-    # If 11 digits starting with 1 (US/Canada with country code), add +
-    if len(cleaned) == 11 and cleaned.startswith("1"):
-        return f"+{cleaned}"
-
-    # Otherwise, return with + prefix
-    return f"+{cleaned}"
 
 
 def normalize_e164_digits(phone_number: str) -> str:

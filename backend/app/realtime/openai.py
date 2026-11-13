@@ -676,7 +676,7 @@ class OpenAIRealtimeSession:
         """Continue from current session state without rewriting delivered history."""
         await self._create_response()
 
-    async def _create_response(self) -> None:
+    async def _create_response(self, response: Optional[dict] = None) -> None:
         """Send response.create, tolerating the benign 'active response' race
         (in case the flag lagged a concurrent server-side response)."""
         if self._ws is None or self._closed.is_set():
@@ -686,7 +686,8 @@ class OpenAIRealtimeSession:
             return
         try:
             self._response_active = True  # Claim before awaiting the socket ACK.
-            await self._ws.send(json.dumps({"type": "response.create"}))
+            await self._ws.send(json.dumps(
+                {"type": "response.create", **({"response": response} if response else {})}))
         except websockets.exceptions.ConnectionClosed:
             self._closed.set()
         except Exception as exc:  # noqa: BLE001
@@ -736,13 +737,20 @@ class OpenAIRealtimeSession:
         if len(self._truncated_items) > 256:
             self._truncated_items = set(list(self._truncated_items)[-128:])
 
-    async def trigger_greeting(self) -> None:
+    async def trigger_greeting(self, opening_line: Optional[str] = None) -> None:
         """Make the agent speak first (agent-first outbound): request an
         initial response so the model greets per its instructions, without any
-        caller input. No-op if a response is already active."""
+        caller input. No-op if a response is already active.
+
+        With ``opening_line`` the model is told to say exactly that line, the
+        identity opener every outbound call starts with (owner decision
+        2026-11-05, QA F12-03). The model still speaks it, so this is the
+        strongest instruction available here, not a byte-for-byte guarantee."""
         if self._response_active:
             return
-        await self._create_response()
+        await self._create_response({"instructions": (
+            self._instructions + "\nOPEN THE CALL: say exactly the following text, "
+            "with no additions and no tool calls: " + opening_line)} if opening_line else None)
 
     async def send_text(self, text: str, *, create_response: bool = True) -> None:
         """Inject a user *text* turn (used by the text-in test harness and any

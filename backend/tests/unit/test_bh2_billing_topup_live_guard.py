@@ -49,7 +49,7 @@ class _Topups:
         self.created.append(order)
         return order
 
-    async def attach_session(self, order_id, session_id):
+    async def attach_session(self, order_id, session_id, *, tenant_id):
         self.attached.append((order_id, session_id))
 
 

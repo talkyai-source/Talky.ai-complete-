@@ -4,6 +4,8 @@ OAuth flows and connector management.
 
 Day 24: Unified Connector System
 """
+from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID
 import asyncio
 import os
 import logging
@@ -360,6 +362,36 @@ class ConnectorTypeStatus(BaseModel):
     provider: Optional[str] = None
     last_sync: Optional[str] = None
     error_message: Optional[str] = None
+    # Whether this server can run the card's OAuth sign-in at all (D3-1).
+    available: bool = True
+    unavailable_reason: Optional[str] = None
+
+
+# The OAuth app settings each provider reads when a sign-in starts (the
+# connector classes read the same names). Salesforce has its own check.
+_OAUTH_SETTINGS = {
+    "google_calendar": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+    "gmail": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+    "google_drive": ("GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET"),
+    "outlook_calendar": ("MICROSOFT_CLIENT_ID", "MICROSOFT_CLIENT_SECRET"),
+    "hubspot": ("HUBSPOT_CLIENT_ID", "HUBSPOT_CLIENT_SECRET"),
+}
+_CONNECTOR_UNAVAILABLE = "This connector isn't available yet. Contact support to turn it on."
+
+
+def _oauth_availability(provider: str) -> tuple[bool, Optional[str]]:
+    """Can this server start the provider's OAuth sign-in? (D3-1)
+
+    The reason never names a server setting; the operator sees those in the
+    authorize log line when a sign-in is refused.
+    """
+    if not ConnectorFactory.is_registered(provider):
+        return False, _CONNECTOR_UNAVAILABLE
+    if provider == "salesforce":
+        configured = SalesforceConnector.is_configured()
+    else:
+        configured = all(os.getenv(name, "").strip() for name in _OAUTH_SETTINGS.get(provider, ()))
+    return (True, None) if configured else (False, _CONNECTOR_UNAVAILABLE)
 
 
 class ConnectorStatusListResponse(BaseModel):
@@ -410,15 +442,20 @@ async def list_connector_statuses(
     items: List[ConnectorTypeStatus] = []
     for type_name in card_keys:
         candidates = connectors_by_type[type_name]
+        available, unavailable_reason = _oauth_availability(CARD_PROVIDERS[type_name][1])
         if not candidates:
-            items.append(ConnectorTypeStatus(type=type_name, status="disconnected", provider=None))
+            items.append(ConnectorTypeStatus(type=type_name, status="disconnected", provider=None,
+                                             available=available, unavailable_reason=unavailable_reason))
             continue
 
         # The newest active connector is authoritative. Do not fall back across
         # connector IDs: an older row may be a different Gmail account and
         # silently selecting it could expose the wrong mailbox.
         active_candidates = [row for row in candidates if row.get("status") == "active"]
-        conn = candidates[0]
+        # A newer pending row (a reconnect started and abandoned) never hides
+        # the real state of an older expired/error row (D3-2).
+        settled = [row for row in candidates if row.get("status") != "pending"]
+        conn = (settled or candidates)[0]
         last_sync: Optional[str] = None
         status = _ui_status(conn.get("status"))
         error_message: Optional[str] = None
@@ -488,6 +525,8 @@ async def list_connector_statuses(
             provider=conn.get("provider"),
             last_sync=last_sync,
             error_message=error_message,
+            available=available,
+            unavailable_reason=unavailable_reason,
         ))
 
     return ConnectorStatusListResponse(items=items)
@@ -502,7 +541,7 @@ async def _start_connector_authorization(*, connector_type, provider, name,
             current_user, "tenant_oauth_start", request=http_request))
         pending = await lifecycle.create_pending(current_user.tenant_id, connector_type, provider, name)
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Connector authorization could not be confirmed. Check connection status before starting again.") from exc
 
@@ -554,7 +593,11 @@ async def _start_connector_authorization(*, connector_type, provider, name,
 async def authorize_connector_by_type(
     type: str,
     http_request: Request,
-    redirect_uri: str = Query(..., description="Frontend OAuth callback URL"),
+    redirect_uri: Optional[str] = Query(
+        None,
+        description="Ignored: the server always returns to its own /connectors/callback page. "
+                    "Accepted only so older clients keep working (D3-6).",
+    ),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -566,9 +609,12 @@ async def authorize_connector_by_type(
     if not ConnectorFactory.is_registered(provider):
         raise HTTPException(status_code=503, detail=f"Provider not configured: {provider}")
     if provider == "salesforce" and not SalesforceConnector.is_configured():
+        # The operator reads the cause in the log; the customer gets a plain
+        # sentence with no server setting names (D3-7).
+        logger.warning("Salesforce authorize refused: SALESFORCE_CLIENT_ID/SECRET are not set")
         raise HTTPException(
             status_code=503,
-            detail="Salesforce is not enabled on this server (SALESFORCE_CLIENT_ID/SECRET missing)",
+            detail="Salesforce isn't available yet. Contact support to turn it on.",
         )
 
     prepared = await _start_connector_authorization(
@@ -597,7 +643,7 @@ async def _disconnect_connector(db_client: Client, tenant_id: str, connector_id:
             tenant_id, connector_id, revoke_token=_revoke_token_at_provider
         )
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not confirm connector disconnect. Check its current status before trying again.") from exc
 
@@ -716,15 +762,35 @@ async def oauth_callback(
     Note: This endpoint does NOT require authentication - it's a redirect from OAuth provider.
     """
     frontend_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    
-    if error:
-        logger.warning(f"OAuth error: {error}")
-        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error=error))
-    
-    if not code:
-        logger.warning("OAuth callback missing code parameter")
-        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="missing_code"))
-    
+    provider: Optional[str] = None
+
+    def fail(problem: str) -> RedirectResponse:
+        # Every error return names its card once the state told us the
+        # provider (D3-3); before that there is nothing to guess from.
+        return RedirectResponse(_frontend_callback_url(
+            frontend_url, status="error", provider=provider, error=problem))
+
+    if error or not code:
+        problem = error or "missing_code"
+        logger.warning("OAuth callback refused before code exchange: %s", problem)
+        # A denied or cancelled sign-in ends this single-use state anyway: read
+        # it to name the card and to retire the attempt's pending row (D3-6).
+        try:
+            state_data = await get_oauth_state_manager().validate_state(state)
+        except Exception:  # noqa: BLE001 - an unreadable state still gets its error
+            state_data = None
+        if state_data:
+            provider = state_data.get("provider")
+            if state_data.get("connector_id") and state_data.get("tenant_id"):
+                try:
+                    lifecycle = ConnectorLifecycle(
+                        db_client, actor=ConnectorActor.oauth(state_data.get("user_id")))
+                    await asyncio.wait_for(lifecycle.reject_pending(
+                        state_data["tenant_id"], state_data["connector_id"]), timeout=5.0)
+                except Exception:  # noqa: BLE001 - cleanup never hides the refusal
+                    logger.warning("OAuth cancel cleanup failed connector=%s", state_data.get("connector_id"))
+        return fail(problem)
+
     try:
         # Validate state
         oauth_manager = get_oauth_state_manager()
@@ -762,16 +828,12 @@ async def oauth_callback(
         )
         if getattr(connector_row, "error", None) or not connector_row.data:
             logger.error("OAuth callback: connector lookup failed for %s", connector_id)
-            return RedirectResponse(
-                _frontend_callback_url(frontend_url, status="error", error="connector_not_found")
-            )
+            return fail("connector_not_found")
         if connector_row.data.get("provider") != provider:
             logger.error("OAuth callback: provider mismatch for %s", connector_id)
-            return RedirectResponse(
-                _frontend_callback_url(frontend_url, status="error", error="connector_mismatch")
-            )
+            return fail("connector_mismatch")
         if connector_row.data.get("status") != "pending":
-            return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="authorization_changed"))
+            return fail("authorization_changed")
         conn_type = connector_row.data.get("type")
         expected_type = PROVIDER_METADATA.get(provider, {}).get("type")
         if conn_type != expected_type:
@@ -781,9 +843,7 @@ async def oauth_callback(
                 conn_type,
                 provider,
             )
-            return RedirectResponse(
-                _frontend_callback_url(frontend_url, status="error", error="connector_mismatch")
-            )
+            return fail("connector_mismatch")
 
         # Create connector instance
         connector = ConnectorFactory.create(
@@ -798,9 +858,7 @@ async def oauth_callback(
                 conn_type,
                 connector.connector_type,
             )
-            return RedirectResponse(
-                _frontend_callback_url(frontend_url, status="error", error="connector_mismatch")
-            )
+            return fail("connector_mismatch")
         
         # Commit attributable intent and current authority before provider I/O.
         await lifecycle.begin_oauth(tenant_id, connector_id)
@@ -830,9 +888,7 @@ async def oauth_callback(
                 sorted(missing_scopes),
             )
             await lifecycle.reject_pending(tenant_id, connector_id)
-            return RedirectResponse(
-                _frontend_callback_url(frontend_url, status="error", error="insufficient_scope")
-            )
+            return fail("insufficient_scope")
 
         # A new Gmail authorization without an offline refresh token will look
         # healthy for about an hour and then fail permanently.  Do not activate
@@ -842,9 +898,7 @@ async def oauth_callback(
                 "OAuth callback: Gmail returned no refresh token connector=%s", connector_id
             )
             await lifecycle.reject_pending(tenant_id, connector_id)
-            return RedirectResponse(
-                _frontend_callback_url(frontend_url, status="error", error="missing_refresh_token")
-            )
+            return fail("missing_refresh_token")
 
         # Verify the token against the actual Gmail resource before showing a
         # green connection.  This catches disabled APIs and denied scopes even
@@ -864,11 +918,7 @@ async def oauth_callback(
                     type(exc).__name__,
                 )
                 await lifecycle.reject_pending(tenant_id, connector_id)
-                return RedirectResponse(
-                    _frontend_callback_url(
-                        frontend_url, status="error", error="capability_check_failed"
-                    )
-                )
+                return fail("capability_check_failed")
         else:
             # Providers that carry state beyond the tokens (Salesforce's
             # instance_url) and/or offer an identity probe. A failed probe is
@@ -894,11 +944,7 @@ async def oauth_callback(
                     type(exc).__name__,
                 )
                 await lifecycle.reject_pending(tenant_id, connector_id)
-                return RedirectResponse(
-                    _frontend_callback_url(
-                        frontend_url, status="error", error="capability_check_failed"
-                    )
-                )
+                return fail("capability_check_failed")
 
         # Encrypt tokens
         encryption = get_encryption_service()
@@ -928,10 +974,10 @@ async def oauth_callback(
             )
         except ConnectorLifecycleError as exc:
             logger.warning("OAuth activation refused connector=%s reason=%s", connector_id, str(exc))
-            return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="authorization_changed"))
+            return fail("authorization_changed")
         except Exception:
             logger.exception("OAuth activation could not be confirmed connector=%s", connector_id)
-            return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="token_store_failed"))
+            return fail("token_store_failed")
 
         logger.info(f"OAuth completed for {provider}, connector {connector_id}")
 
@@ -939,10 +985,10 @@ async def oauth_callback(
         
     except OAuthStateError as e:
         logger.warning(f"OAuth state error: {e}")
-        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="invalid_state"))
+        return fail("invalid_state")
     except Exception as e:
         logger.error("OAuth callback failed type=%s", type(e).__name__)
-        return RedirectResponse(_frontend_callback_url(frontend_url, status="error", error="callback_failed"))
+        return fail("callback_failed")
 
 
 # Registered AFTER /callback (and every other static single-segment route) so the
@@ -950,7 +996,7 @@ async def oauth_callback(
 # route is declared above.
 @router.get("/{connector_id}", response_model=ConnectorResponse)
 async def get_connector(
-    connector_id: str,
+    connector_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ):
@@ -987,7 +1033,7 @@ async def get_connector(
 
 @router.delete("/{connector_id}", dependencies=[Depends(require_permission(Permission.CONNECTORS_DELETE))])
 async def delete_connector(
-    connector_id: str,
+    connector_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     *,
@@ -1017,7 +1063,7 @@ async def delete_connector(
 
 @router.post("/{connector_id}/refresh", dependencies=[Depends(require_permission(Permission.CONNECTORS_UPDATE))])
 async def refresh_connector_tokens(
-    connector_id: str,
+    connector_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
     *,
@@ -1032,7 +1078,7 @@ async def refresh_connector_tokens(
         _, account = await ConnectorLifecycle(db_client, actor=ConnectorActor.human(
             current_user, "tenant_refresh", request=request)).refresh(str(current_user.tenant_id), connector_id)
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Refresh could not be confirmed. Check connection status; reauthorize if its outcome is unknown.") from exc
     return {"success": True, "message": "Tokens refreshed", "audit_event_id": account["audit_event_id"],

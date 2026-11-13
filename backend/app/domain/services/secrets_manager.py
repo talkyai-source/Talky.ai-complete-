@@ -381,17 +381,16 @@ class SecretsManager:
                 return None
 
             # Decrypt
-            encrypted_dek = row["encrypted_dek"]
-            dek = self._decrypt_dek(encrypted_dek)
-
             try:
+                dek = self._decrypt_dek(row["encrypted_dek"])
                 value = self._decrypt_value(
                     row["encrypted_value"],
                     row["iv"],
                     dek
                 )
-            except Exception as e:
-                # Log decryption failure
+            except Exception:
+                # Refuse unreadable envelopes without persisting sensitive
+                # exception details (key material, ciphertext or plaintext).
                 await conn.execute(
                     """
                     INSERT INTO secret_access_log (
@@ -400,7 +399,7 @@ class SecretsManager:
                     ) VALUES ($1, $2, $3, $4, $5, $6, $7)
                     """,
                     secret_uuid, row["tenant_id"], accessor_uuid, access_type.value,
-                    access_reason, False, f"Decryption failed: {str(e)}"
+                    access_reason, False, "Decryption failed"
                 )
                 return None
 

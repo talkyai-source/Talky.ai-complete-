@@ -42,7 +42,7 @@ const inbound = {
     id: "call-2", campaign_id: "camp-1", campaign_name: "Main campaign", lead_id: "", phone_number: "+447400000002", from_number: "+447400000002",
     status: "completed", duration_seconds: 30, created_at: "2026-01-01T00:00:00Z", direction: "inbound",
 } as Call;
-type Listing = Awaited<ReturnType<typeof dashboardApi.listCalls>>;
+type Listing = Awaited<ReturnType<typeof dashboardApi.listCallsCursor>>;
 type Transcript = Awaited<ReturnType<typeof dashboardApi.getCallTranscript>>;
 const pageText = () => document.body.textContent ?? "";
 
@@ -68,7 +68,7 @@ afterEach(() => {
 });
 
 async function mount() {
-    mock.method(dashboardApi, "listCalls", async () => ({ calls: [outbound, inbound], total: 2 } as Listing));
+    mock.method(dashboardApi, "listCallsCursor", async () => ({ calls: [outbound, inbound], nextCursor: null } as Listing));
     mock.method(dashboardApi, "getCallTranscript", async () => ({
         turns: [{ role: "assistant", content: "Hello there" }, { role: "user", content: "Hi" }],
     } as unknown as Transcript));

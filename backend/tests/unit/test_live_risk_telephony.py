@@ -77,6 +77,8 @@ async def test_failed_delete_db_work_restores_removed_pjsip_file(env, monkeypatc
         await delete(trunk)
     env.remove.assert_awaited_once()
     restore.assert_awaited_once()
+    assert env.db.privileged_audit == []
+    assert env.db.trunks[trunk]["deleted_at"] is None and env.db.active_connection is None
 
 
 @pytest.mark.asyncio
@@ -90,6 +92,8 @@ async def test_failed_delete_of_inactive_line_does_not_write_a_file(env, monkeyp
     with pytest.raises(RuntimeError):
         await delete(trunk)
     restore.assert_not_awaited()
+    assert env.db.privileged_audit == []
+    assert env.db.trunks[trunk]["deleted_at"] is None and env.db.active_connection is None
 
 
 # ---------------------------------------------------------------- telephony-2

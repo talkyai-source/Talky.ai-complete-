@@ -12,6 +12,7 @@ import os
 import json
 import logging
 import asyncio
+import math
 import re
 import uuid
 import asyncpg
@@ -73,15 +74,30 @@ async def _apply_rls_context(conn: asyncpg.Connection, tenant_id, bypass_rls: bo
 # holding every connection, or the DB itself wedged) hangs every caller
 # indefinitely instead of failing fast. Configurable so ops can tune it;
 # 10s is a guess-but-reasonable default for interactive request paths.
-_ACQUIRE_TIMEOUT_S = float(os.getenv("PG_POOL_ACQUIRE_TIMEOUT", "10"))
+try:
+    _ACQUIRE_TIMEOUT_S = float(os.getenv("PG_POOL_ACQUIRE_TIMEOUT", "10"))
+except ValueError as exc:
+    raise ValueError("PG_POOL_ACQUIRE_TIMEOUT must be positive finite seconds") from exc
+if not math.isfinite(_ACQUIRE_TIMEOUT_S) or _ACQUIRE_TIMEOUT_S <= 0:
+    raise ValueError("PG_POOL_ACQUIRE_TIMEOUT must be positive finite seconds")
 
 
-class DatabasePoolTimeoutError(RuntimeError):
+class DatabasePoolTimeoutError(asyncio.TimeoutError, RuntimeError):
     """Raised when no pooled connection became available within the acquire timeout.
 
     Callers (error handlers) should map this to HTTP 503 — it signals
-    the DB/pool is saturated, not a client error.
+    the DB/pool is saturated, not a client error. Retain both TimeoutError
+    catches on short-budget callers and the existing RuntimeError contract.
     """
+
+
+# Preserve these types across the legacy adapter and HTTP error boundary.
+# Deliberately exclude broad OSError: missing local files are not DB outages.
+DATABASE_RETRYABLE_ERRORS = (
+    DatabasePoolTimeoutError, asyncpg.QueryCanceledError, asyncpg.LockNotAvailableError,
+    asyncpg.ConnectionDoesNotExistError, asyncpg.CannotConnectNowError,
+    asyncpg.TooManyConnectionsError, ConnectionRefusedError, ConnectionResetError,
+)
 
 
 _pool: Optional[asyncpg.Pool] = None
@@ -89,6 +105,33 @@ _pool: Optional[asyncpg.Pool] = None
 # READ_DATABASE_URL is set; falls back to the primary pool when unset
 # so single-DB deploys behave exactly as before.
 _read_pool: Optional[asyncpg.Pool] = None
+
+
+def _transaction_timeout_settings() -> tuple[int, int]:
+    """Positive PostgreSQL millisecond limits; zero must not disable protection."""
+    values = []
+    for name, default in (("PG_STATEMENT_TIMEOUT_MS", "60000"), ("PG_LOCK_TIMEOUT_MS", "10000")):
+        try:
+            value = int(os.getenv(name, default))
+        except ValueError as exc:
+            raise ValueError(f"{name} must be an integer from 1 to 2147483647") from exc
+        if not 1 <= value <= 2147483647:
+            raise ValueError(f"{name} must be an integer from 1 to 2147483647")
+        values.append(value)
+    return values[0], values[1]
+
+
+async def _apply_transaction_timeouts(conn: asyncpg.Connection, limits: tuple[int, int]) -> None:
+    """Reapply limits per transaction, including through PgBouncer/reset/reuse.
+
+    Startup parameters are not supported by the transaction-pooler config.
+    Utility SET LOCAL also preserves callers' subsequent SET TRANSACTION;
+    SELECT set_config would establish a query before that isolation choice.
+    Only validated integers are interpolated, never environment text.
+    """
+    statement_ms, lock_ms = limits
+    await conn.execute(f"SET LOCAL statement_timeout = '{statement_ms}ms'")
+    await conn.execute(f"SET LOCAL lock_timeout = '{lock_ms}ms'")
 
 
 def _pool_kwargs() -> dict:
@@ -166,6 +209,9 @@ async def init_db_pool() -> asyncpg.Pool:
     callers don't branch on availability.
     """
     global _pool, _read_pool
+    # Reject invalid protection settings before opening either pool. The
+    # settings are applied within each transaction, not at connection startup.
+    _transaction_timeout_settings()
     dsn = os.getenv(
         "DATABASE_URL",
         "postgresql://talkyai:talkyai_secret@localhost:5432/talkyai"
@@ -254,6 +300,7 @@ async def get_read_db():
         async with get_read_db() as conn:
             rows = await conn.fetch("SELECT * FROM campaigns WHERE ...")
     """
+    limits = _transaction_timeout_settings()
     pool = get_read_pool()
     try:
         conn = await pool.acquire(timeout=_ACQUIRE_TIMEOUT_S)
@@ -283,6 +330,7 @@ async def get_read_db():
         # statement, so committing on the way out is equivalent to the
         # previous un-transacted single-statement behavior.
         async with conn.transaction(readonly=True):
+            await _apply_transaction_timeouts(conn, limits)
             await _apply_rls_context(conn, tenant_id, bypass_rls)
             yield conn
     finally:
@@ -299,6 +347,7 @@ async def get_db():
         async with get_db() as conn:
             result = await conn.fetch("SELECT * FROM plans")
     """
+    limits = _transaction_timeout_settings()
     pool = get_pool()
     try:
         conn = await pool.acquire(timeout=_ACQUIRE_TIMEOUT_S)
@@ -325,6 +374,7 @@ async def get_db():
         # behavior — no caller relies on a partial multi-statement write
         # surviving an error.
         async with conn.transaction():
+            await _apply_transaction_timeouts(conn, limits)
             await _apply_rls_context(conn, tenant_id, bypass_rls)
             yield conn
     finally:

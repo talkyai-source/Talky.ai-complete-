@@ -13,7 +13,7 @@ const originalLoad = loader._load;
 const nothing = () => null;
 const router = { push() {}, replace() {} };
 loader._load = function (id, ...args) {
-    if (id === "next/navigation") return { useParams: () => ({ id: "camp-1" }), useRouter: () => router };
+    if (id === "next/navigation") return { useParams: () => ({ id: "camp-1" }), useRouter: () => router, useSearchParams: () => new URLSearchParams() };
     if (id.includes("components/layout/dashboard-layout")) return {
         DashboardLayout: ({ children, breadcrumbLabels }: { children: React.ReactNode; breadcrumbLabels?: Record<string, string> }) => (
             <><output data-testid="breadcrumb-labels">{JSON.stringify(breadcrumbLabels ?? null)}</output>{children}</>

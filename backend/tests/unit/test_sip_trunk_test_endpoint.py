@@ -24,6 +24,7 @@ import pytest
 from starlette.requests import Request
 
 from app.api.v1.endpoints.telephony_sip import trunk_probe, trunks
+from app.domain.services.audit_logger import AuditEvent
 
 TENANT = str(uuid4())
 LINE_PW = "plain-text-secret-for-test"
@@ -44,24 +45,90 @@ def register(outcome, code=None, **extra):
     return {"outcome": outcome, "sip_code": code, "reason": None, "latency_ms": 30, "detail": outcome, **extra}
 
 
+class Audit:
+    def __init__(self, conn):
+        self.conn = conn
+        self.events = []
+        self.log_attempts = 0
+        self.error = None
+
+    async def lock_transaction(self, conn):
+        assert conn is self.conn and conn.transaction_depth == 1
+        assert conn.tenant_id == TENANT and conn.actor_id
+        assert not conn.audit_locked
+        conn.audit_locked = True
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.conn and conn.transaction_depth == 1 and conn.audit_locked
+        sql, args = conn.writes[-1]
+        assert "UPDATE tenant_sip_trunks" in sql and "tenant_id = $4" in sql
+        assert event["event_type"] == AuditEvent.CONFIG_CHANGED
+        assert event["action"] == "sip.trunk.check"
+        assert event["actor_id"] == conn.actor_id and event["actor_role"] == "tenant_admin"
+        assert event["tenant_id"] == conn.tenant_id == args[3] == TENANT
+        assert event["resource_type"] == "sip_trunk" and event["resource_id"] == args[2] == conn.trunk_id
+        assert event["before_state"] == conn.before_check
+        after = event["after_state"]
+        assert after["last_tested_at"] == args[0]
+        for field in ("ok", "status", "detail", "verdict"):
+            assert after["last_test_result"][field] == args[1][field]
+        assert after["last_test_result"]["steps"] == [
+            {**step, "key": "[configured]"} for step in args[1]["steps"]
+        ]
+        assert after["last_test_result"]["error"] == ("[configured]" if args[1]["error"] else None)
+        assert LINE_PW not in json.dumps(event, default=str)
+        self.log_attempts += 1
+        if self.error:
+            raise self.error
+        self.events.append(event)
+
+
 class Conn:
     def __init__(self, row):
         self.row, self.writes, self.reads = row, [], []
+        self.transaction_depth = 0
+        self.tenant_id = self.actor_id = self.trunk_id = None
+        self.audit_locked = False
+        self.before_check = None
+        self.audit = Audit(self)
 
     @asynccontextmanager
     async def transaction(self):
-        yield self
+        assert self.transaction_depth == 0
+        writes_before, events_before = list(self.writes), list(self.audit.events)
+        self.transaction_depth = 1
+        try:
+            yield self
+        except BaseException:
+            self.writes[:], self.audit.events[:] = writes_before, events_before
+            raise
+        finally:
+            self.transaction_depth = 0
+            self.audit_locked = False
 
     async def fetchrow(self, sql, *args):
         sql = " ".join(sql.split())
         self.reads.append((sql, args))
+        assert self.transaction_depth == 1
         assert "tenant_id" in sql and "deleted_at IS NULL" in sql, sql
+        if "FOR UPDATE" in sql:
+            assert self.audit_locked and args == (TENANT, self.trunk_id)
+            self.before_check = ({"last_tested_at": self.row["last_tested_at"],
+                                  "last_test_result": self.row["last_test_result"]} if self.row else None)
+            return self.before_check
+        assert args[1] == TENANT and "tenant_id = $2" in sql
+        self.trunk_id = args[0]
         return self.row
 
     async def execute(self, sql, *args):
+        assert self.transaction_depth == 1
         if "set_config" in sql:
             return "SELECT 1"
-        self.writes.append((" ".join(sql.split()), args))
+        normalized = " ".join(sql.split())
+        assert self.audit_locked and "UPDATE tenant_sip_trunks" in normalized
+        assert "deleted_at IS NULL" in normalized and "tenant_id = $4" in normalized
+        assert args[2:] == (self.trunk_id, TENANT)
+        self.writes.append((normalized, args))
         return "UPDATE 1"
 
 
@@ -71,7 +138,7 @@ def trunk_row(**overrides):
         "auth_username": "150001", "auth_password_encrypted": "enc:" + LINE_PW,
         "metadata": {"register": True}, "is_active": False,
         "live_registration_status": "inactive", "live_status_detail": None,
-        "live_status_checked_at": None, "last_tested_at": None,
+        "live_status_checked_at": None, "last_tested_at": None, "last_test_result": None,
     }
     row.update(overrides)
     return row
@@ -81,13 +148,20 @@ def trunk_row(**overrides):
 def env(monkeypatch):
     trunks._test_history.clear()
     state = SimpleNamespace(conn=Conn(trunk_row()), register=AsyncMock(), options=AsyncMock(), trunk_id=uuid4())
+    state.audit = state.conn.audit
     state.register.return_value = register("accepted", 200)
     state.options.return_value = options()
 
     @asynccontextmanager
     async def acquire(_pool, tenant_id, **_kwargs):
         assert str(tenant_id) == TENANT
-        yield state.conn
+        assert state.conn.transaction_depth == 0 and state.conn.tenant_id is None
+        state.conn.tenant_id, state.conn.actor_id = str(tenant_id), _kwargs["user_id"]
+        try:
+            async with state.conn.transaction():
+                yield state.conn
+        finally:
+            state.conn.tenant_id = state.conn.actor_id = None
 
     async def resolve(*, host, port, socktype):
         assert host in {HOST, "proxy.provider.test"}
@@ -106,8 +180,8 @@ def env(monkeypatch):
 async def run_test(env, **overrides):
     env.conn.row = trunk_row(**overrides)
     request = Request({"type": "http", "method": "POST", "path": "/trunks/x/test", "headers": []})
-    user = SimpleNamespace(tenant_id=TENANT, id=str(uuid4()))
-    return await trunks.test_sip_trunk(env.trunk_id, request, user, object())
+    user = SimpleNamespace(tenant_id=TENANT, id=str(uuid4()), role="tenant_admin")
+    return await trunks.test_sip_trunk(env.trunk_id, request, user, object(), audit_logger=env.audit)
 
 
 def steps_by_key(result):
@@ -131,6 +205,8 @@ async def test_a_registered_line_is_connected_and_never_re_registered(env):
     env.register.assert_not_awaited()
     assert steps["credentials"].ok is True and steps["credentials"].detail == "Signed in — the line is registered"
     assert steps["registration"].ok is True
+    assert len(env.audit.events) == 1 and env.audit.events[0]["resource_id"] == env.trunk_id
+    assert env.conn.transaction_depth == 0 and env.conn.tenant_id is None
     assert steps["reachability"].detail == "Server reachable (42 ms)" and steps["reachability"].ok is True
     assert steps["address"].ok is True and "203.0.113.9" in steps["address"].detail
     assert "connected" in result.verdict.lower() or "registered" in result.verdict.lower()
@@ -402,7 +478,7 @@ async def test_the_password_is_never_in_the_response_or_the_saved_result(env):
 async def test_a_missing_or_deleted_line_is_404_and_nothing_is_probed(env):
     env.conn.row = None
     request = Request({"type": "http", "method": "POST", "path": "/trunks/x/test", "headers": []})
-    response = await trunks.test_sip_trunk(uuid4(), request, SimpleNamespace(tenant_id=TENANT, id="u"), object())
+    response = await trunks.test_sip_trunk(uuid4(), request, SimpleNamespace(tenant_id=TENANT, id="u", role="tenant_admin"), object(), audit_logger=env.audit)
     assert response.status_code == 404
     env.options.assert_not_awaited()
     assert not env.conn.writes
@@ -439,7 +515,7 @@ async def test_the_fifteen_minute_window_slides(env, monkeypatch):
     async def one():
         env.conn.row = trunk_row()
         request = Request({"type": "http", "method": "POST", "path": "/t", "headers": []})
-        return await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u"), object())
+        return await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u", role="tenant_admin"), object(), audit_logger=env.audit)
 
     for _ in range(10):
         clock["now"] += 20
@@ -456,7 +532,7 @@ async def test_the_limit_is_per_line_not_shared(env):
         await run_test(env)
     request = Request({"type": "http", "method": "POST", "path": "/t", "headers": []})
     env.conn.row = trunk_row()
-    other = await trunks.test_sip_trunk(uuid4(), request, SimpleNamespace(tenant_id=TENANT, id="u"), object())
+    other = await trunks.test_sip_trunk(uuid4(), request, SimpleNamespace(tenant_id=TENANT, id="u", role="tenant_admin"), object(), audit_logger=env.audit)
     assert getattr(other, "status", None)
 
 
@@ -471,7 +547,7 @@ async def test_redis_backs_the_counter_when_it_is_available(env, monkeypatch):
     async def one():
         env.conn.row = trunk_row()
         request = Request({"type": "http", "method": "POST", "path": "/t", "headers": []})
-        return await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u"), object())
+        return await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u", role="tenant_admin"), object(), audit_logger=env.audit)
 
     for _ in range(10):
         assert getattr(await one(), "status", None)
@@ -494,7 +570,18 @@ async def test_a_redis_outage_falls_back_to_the_in_memory_counter(env, monkeypat
     for _ in range(10):
         env.conn.row = trunk_row()
         request = Request({"type": "http", "method": "POST", "path": "/t", "headers": []})
-        assert getattr(await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u"), object()), "status", None)
+        assert getattr(await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u", role="tenant_admin"), object(), audit_logger=env.audit), "status", None)
     env.conn.row = trunk_row()
-    refused = await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u"), object())
+    refused = await trunks.test_sip_trunk(trunk, request, SimpleNamespace(tenant_id=TENANT, id="u", role="tenant_admin"), object(), audit_logger=env.audit)
     assert refused.status_code == 429
+
+
+@pytest.mark.asyncio
+async def test_audit_failure_rolls_back_the_saved_probe_result(env):
+    env.audit.error = RuntimeError("synthetic audit unavailable")
+    with pytest.raises(RuntimeError, match="synthetic audit unavailable"):
+        await run_test(env)
+    assert env.audit.log_attempts == 1
+    assert env.conn.writes == [] and env.audit.events == []
+    assert env.conn.transaction_depth == 0 and env.conn.tenant_id is None
+    env.options.assert_awaited_once()

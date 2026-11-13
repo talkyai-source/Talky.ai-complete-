@@ -246,7 +246,13 @@ async def record_call_state_by_provider_id(
         async with acquire_with_tenant(db_pool, None) as conn:
             row = await conn.fetchrow(
                 """
-                SELECT id, tenant_id, campaign_id
+                SELECT id, tenant_id, campaign_id,
+                       (SELECT COUNT(DISTINCT owner.tenant_id)
+                          FROM calls owner
+                         WHERE (
+                             owner.provider_call_id = $1
+                             AND ($2::text IS NULL OR owner.provider = $2)
+                         ) OR owner.external_call_uuid = $1) AS tenant_count
                 FROM calls
                 WHERE (
                     provider_call_id = $1
@@ -277,6 +283,14 @@ async def record_call_state_by_provider_id(
             "call_status.no_call_for_provider provider_id=%s state=%s",
             provider_call_id, new_state,
         )
+        return
+
+    # Provider/external channel IDs are not unique across tenant accounts.
+    # Discover ownership in one snapshot, but never choose the newest tenant
+    # when more than one owns the presented identity.
+    tenant_count = row.get("tenant_count")
+    if type(tenant_count) is not int or tenant_count != 1:
+        logger.warning("call_status.ambiguous_provider_identity tenant_count=%s", tenant_count)
         return
 
     await record_call_state(

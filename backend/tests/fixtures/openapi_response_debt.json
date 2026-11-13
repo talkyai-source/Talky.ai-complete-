@@ -1,0 +1,778 @@
+{
+  "maximum": 193,
+  "scope": "Exact inherited mounted HTTP operations with missing successful response schemas. F2-11 remains partial; five round-three operations are documented separately.",
+  "operations": {
+    "DELETE /api/v1/admin/emergency/{request_id}/session": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.terminate_emergency_session",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/admin/secrets/tenants/{tenant_id}/secrets/{secret_id}": {
+      "endpoint": "app.api.v1.endpoints.secrets.revoke_secret",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/ai-options/voices/cloned/{clone_id}": {
+      "endpoint": "app.api.v1.endpoints.ai_options.clone.delete_cloned_voice",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/assistant/conversations/{conversation_id}": {
+      "endpoint": "app.api.v1.endpoints.assistant_ws.delete_conversation",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/campaigns/{campaign_id}": {
+      "endpoint": "app.api.v1.endpoints.campaigns.delete_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/campaigns/{campaign_id}/contacts/{contact_id}": {
+      "endpoint": "app.api.v1.endpoints.campaigns.remove_contact_from_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/campaigns/{campaign_id}/knowledge/sources/{source_id}": {
+      "endpoint": "app.api.v1.endpoints.campaign_knowledge.delete_source",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/clients/{client_id}": {
+      "endpoint": "app.api.v1.endpoints.clients.delete_client",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/connectors/{connector_id}": {
+      "endpoint": "app.api.v1.endpoints.connectors.delete_connector",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/meetings/{meeting_id}": {
+      "endpoint": "app.api.v1.endpoints.meetings.cancel_meeting",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/telephony/providers/{provider}": {
+      "endpoint": "app.api.v1.endpoints.telephony_providers.delete_provider",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "DELETE /api/v1/telephony/sip/trunks/{trunk_id}": {
+      "endpoint": "app.api.v1.endpoints.telephony_sip.trunks.delete_sip_trunk",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /": {
+      "endpoint": "app.api.operational.root",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/abuse/alerts": {
+      "endpoint": "app.api.v1.endpoints.abuse_monitoring.get_abuse_alerts",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/audit/stats/events-by-type": {
+      "endpoint": "app.api.v1.endpoints.audit_logs.get_event_stats",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/audit/stats/failed-logins": {
+      "endpoint": "app.api.v1.endpoints.audit_logs.get_failed_login_stats",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/audit/verify-integrity": {
+      "endpoint": "app.api.v1.endpoints.audit_logs.verify_audit_integrity",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/billing/packages": {
+      "endpoint": "app.api.v1.endpoints.admin.billing_packages.list_packages",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/billing/reconciliation": {
+      "endpoint": "app.api.v1.endpoints.billing_topups.reconciliation",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/emergency/requests": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.list_emergency_requests",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/emergency/{request_id}": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.get_emergency_request",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/feedback/{feedback_id}/audio": {
+      "endpoint": "app.api.v1.endpoints.admin.media.get_admin_feedback_audio",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/recordings/{recording_id}/audio": {
+      "endpoint": "app.api.v1.endpoints.admin.media.get_admin_recording_audio",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/secrets/expiring": {
+      "endpoint": "app.api.v1.endpoints.secrets.get_expiring_secrets",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/secrets/platform/secrets": {
+      "endpoint": "app.api.v1.endpoints.secrets.list_platform_secrets",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/secrets/tenants/{tenant_id}/secrets": {
+      "endpoint": "app.api.v1.endpoints.secrets.list_secrets",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/secrets/tenants/{tenant_id}/secrets/{secret_id}": {
+      "endpoint": "app.api.v1.endpoints.secrets.get_secret",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/security-events/alerts/open": {
+      "endpoint": "app.api.v1.endpoints.security_events.get_open_alerts",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/security-events/alerts/overdue": {
+      "endpoint": "app.api.v1.endpoints.security_events.get_overdue_alerts",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/support/articles": {
+      "endpoint": "app.api.v1.endpoints.support.admin.list_articles",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/support/metrics": {
+      "endpoint": "app.api.v1.endpoints.support.admin.metrics",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/support/tickets": {
+      "endpoint": "app.api.v1.endpoints.support.admin.list_tickets",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/support/tickets/{ticket_id}": {
+      "endpoint": "app.api.v1.endpoints.support.admin.get_ticket",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/suspensions/propagation-status/{suspension_id}": {
+      "endpoint": "app.api.v1.endpoints.suspensions.get_propagation_status",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/suspensions/users/{user_id}/history": {
+      "endpoint": "app.api.v1.endpoints.suspensions.get_user_suspension_history",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/usage/breakdown": {
+      "endpoint": "app.api.v1.endpoints.admin.usage.get_admin_usage_breakdown",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/usage/statements": {
+      "endpoint": "app.api.v1.endpoints.admin.supplier_evidence.list_statements",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/usage/statements/imports/{request_id}": {
+      "endpoint": "app.api.v1.endpoints.admin.supplier_evidence.get_import",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/usage/statements/{statement_id}": {
+      "endpoint": "app.api.v1.endpoints.admin.supplier_evidence.get_statement",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/admin/usage/statements/{statement_id}/source": {
+      "endpoint": "app.api.v1.endpoints.admin.supplier_evidence.download_source",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/ai-options/voices": {
+      "endpoint": "app.api.v1.endpoints.ai_options.providers.list_voices",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/ai-options/voices/cloned": {
+      "endpoint": "app.api.v1.endpoints.ai_options.clone.list_cloned_voices",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/ai-options/voices/prefetch-status": {
+      "endpoint": "app.api.v1.endpoints.ai_options.preview.get_prefetch_status",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/ai-options/voices/{voice_id}/sample": {
+      "endpoint": "app.api.v1.endpoints.ai_options.providers.get_voice_sample",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/ask-ai/greeting": {
+      "endpoint": "app.api.v1.endpoints.ask_ai_ws.get_greeting_audio",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/assistant/actions": {
+      "endpoint": "app.api.v1.endpoints.assistant_ws.list_actions",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/assistant/actions/{action_id}": {
+      "endpoint": "app.api.v1.endpoints.assistant_ws.get_action_receipt",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/assistant/conversations": {
+      "endpoint": "app.api.v1.endpoints.assistant_ws.list_conversations",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/assistant/conversations/{conversation_id}": {
+      "endpoint": "app.api.v1.endpoints.assistant_ws.get_conversation",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/assistant/model": {
+      "endpoint": "app.api.v1.endpoints.assistant_config.get_assistant_model",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/assistant/ws-token": {
+      "endpoint": "app.api.v1.endpoints.assistant_config.assistant_ws_token",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/adjustments": {
+      "endpoint": "app.api.v1.endpoints.billing.get_adjustments",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/config": {
+      "endpoint": "app.api.v1.endpoints.billing.get_billing_config",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/invoices": {
+      "endpoint": "app.api.v1.endpoints.billing.list_invoices",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/invoices/{invoice_id}": {
+      "endpoint": "app.api.v1.endpoints.billing.get_invoice",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/overage-alerts": {
+      "endpoint": "app.api.v1.endpoints.billing.get_overage_alerts",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/plans": {
+      "endpoint": "app.api.v1.endpoints.billing.list_billing_plans",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/topups/ledger": {
+      "endpoint": "app.api.v1.endpoints.billing_topups.list_ledger",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/topups/orders": {
+      "endpoint": "app.api.v1.endpoints.billing_topups.list_orders",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/billing/usage/daily": {
+      "endpoint": "app.api.v1.endpoints.billing.get_daily_usage",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/calls/reviews/rewards/balance": {
+      "endpoint": "app.api.v1.endpoints.conversation_reviews.get_reward_balance",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/calls/{call_id}/events": {
+      "endpoint": "app.api.v1.endpoints.calls.get_call_events",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/calls/{call_id}/feedback/audio": {
+      "endpoint": "app.api.v1.endpoints.call_feedback.get_call_feedback_audio",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/calls/{call_id}/lead-details": {
+      "endpoint": "app.api.v1.endpoints.lead_details.get_lead_details",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/calls/{call_id}/legs": {
+      "endpoint": "app.api.v1.endpoints.calls.get_call_legs",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/calls/{call_id}/summary": {
+      "endpoint": "app.api.v1.endpoints.calls.get_call_summary",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/calls/{call_id}/transcript": {
+      "endpoint": "app.api.v1.endpoints.calls.get_call_transcript",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/": {
+      "endpoint": "app.api.v1.endpoints.campaigns.list_campaigns",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/minutes/status": {
+      "endpoint": "app.api.v1.endpoints.campaigns.get_minutes_status",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}": {
+      "endpoint": "app.api.v1.endpoints.campaigns.get_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}/calls": {
+      "endpoint": "app.api.v1.endpoints.campaigns.list_campaign_calls_with_transcripts",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}/contacts": {
+      "endpoint": "app.api.v1.endpoints.campaigns.list_campaign_contacts",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}/jobs": {
+      "endpoint": "app.api.v1.endpoints.campaigns.get_campaign_jobs",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}/knowledge": {
+      "endpoint": "app.api.v1.endpoints.campaign_knowledge.get_knowledge",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}/lead-fields": {
+      "endpoint": "app.api.v1.endpoints.lead_details.get_lead_fields",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}/readiness": {
+      "endpoint": "app.api.v1.endpoints.campaigns.get_campaign_readiness",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/campaigns/{campaign_id}/stats": {
+      "endpoint": "app.api.v1.endpoints.campaigns.get_campaign_stats",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/connectors/callback": {
+      "endpoint": "app.api.v1.endpoints.connectors.oauth_callback",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/contacts/import-template": {
+      "endpoint": "app.api.v1.endpoints.contacts.download_import_template",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/contacts/{lead_id}/lead-details": {
+      "endpoint": "app.api.v1.endpoints.lead_details.get_contact_lead_details",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/plans/": {
+      "endpoint": "app.api.v1.endpoints.plans.list_plans",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/plans/payg": {
+      "endpoint": "app.api.v1.endpoints.plans.pay_as_you_go",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/recordings/{recording_id}/download": {
+      "endpoint": "app.api.v1.endpoints.recordings.download_recording",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/recordings/{recording_id}/stream": {
+      "endpoint": "app.api.v1.endpoints.recordings.stream_recording",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/reviews/summary": {
+      "endpoint": "app.api.v1.endpoints.conversation_reviews.summarise_reviews",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/sip/telephony/status": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.telephony_status",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/sip/telephony/transfer/attempts/{attempt_id}": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.get_transfer_attempt",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/articles/search": {
+      "endpoint": "app.api.v1.endpoints.support.conversations.search_help",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/attachments/{attachment_id}": {
+      "endpoint": "app.api.v1.endpoints.support.attachments.download_attachment",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/attachments/{attachment_id}/content": {
+      "endpoint": "app.api.v1.endpoints.support.attachments.signed_content",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/config": {
+      "endpoint": "app.api.v1.endpoints.support.conversations.support_config",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/conversations/{conversation_id}": {
+      "endpoint": "app.api.v1.endpoints.support.conversations.get_conversation",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/tickets": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.list_tickets",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/tickets/{ticket_id}": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.get_ticket",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /api/v1/support/unread": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.unread",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /health": {
+      "endpoint": "app.api.operational.health_check",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "GET /metrics": {
+      "endpoint": "app.api.operational.prometheus_metrics",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PATCH /api/v1/admin/billing/packages/{code}": {
+      "endpoint": "app.api.v1.endpoints.admin.billing_packages.update_package",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PATCH /api/v1/admin/security-events/events/{event_id}": {
+      "endpoint": "app.api.v1.endpoints.security_events.update_security_event",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PATCH /api/v1/admin/support/articles/{article_id}": {
+      "endpoint": "app.api.v1.endpoints.support.admin.update_article",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PATCH /api/v1/admin/support/tickets/{ticket_id}": {
+      "endpoint": "app.api.v1.endpoints.support.admin.patch_ticket",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PATCH /api/v1/admin/tenants/{tenant_id}/quota": {
+      "endpoint": "app.api.v1.endpoints.admin.tenants.update_tenant_quota",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PATCH /api/v1/campaigns/{campaign_id}/contacts/{contact_id}": {
+      "endpoint": "app.api.v1.endpoints.campaigns.update_contact_in_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PATCH /api/v1/campaigns/{campaign_id}/knowledge/nodes/{node_id}": {
+      "endpoint": "app.api.v1.endpoints.campaign_knowledge.update_node",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/actions/{action_id}/cancel": {
+      "endpoint": "app.api.v1.endpoints.admin.actions.cancel_action",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/actions/{action_id}/recover-acknowledgement": {
+      "endpoint": "app.api.v1.endpoints.admin.actions.recover_saved_acknowledgement",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/actions/{action_id}/retry": {
+      "endpoint": "app.api.v1.endpoints.admin.actions.retry_action",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/audit/logs/export": {
+      "endpoint": "app.api.v1.endpoints.audit_logs.export_audit_logs",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/billing/packages": {
+      "endpoint": "app.api.v1.endpoints.admin.billing_packages.create_package",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/calls/{call_id}/terminate": {
+      "endpoint": "app.api.v1.endpoints.admin.calls.terminate_call",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/connectors/{connector_id}/reconnect": {
+      "endpoint": "app.api.v1.endpoints.admin.connectors.force_reconnect_connector",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/connectors/{connector_id}/revoke": {
+      "endpoint": "app.api.v1.endpoints.admin.connectors.revoke_connector",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/emergency/request": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.request_emergency_access",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/emergency/{request_id}/approve": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.approve_emergency_request",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/emergency/{request_id}/deny": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.deny_emergency_request",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/emergency/{request_id}/review": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.complete_emergency_review",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/emergency/{request_id}/session": {
+      "endpoint": "app.api.v1.endpoints.emergency_access.create_emergency_session",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/incidents/{incident_id}/acknowledge": {
+      "endpoint": "app.api.v1.endpoints.admin.health.incidents.acknowledge_incident",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/incidents/{incident_id}/resolve": {
+      "endpoint": "app.api.v1.endpoints.admin.health.incidents.resolve_incident",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/secrets/platform/secrets": {
+      "endpoint": "app.api.v1.endpoints.secrets.create_platform_secret",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/secrets/platform/secrets/{secret_id}/rotate": {
+      "endpoint": "app.api.v1.endpoints.secrets.rotate_platform_secret",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/secrets/tenants/{tenant_id}/secrets/{secret_id}/compromise": {
+      "endpoint": "app.api.v1.endpoints.secrets.mark_secret_compromised",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/secrets/tenants/{tenant_id}/secrets/{secret_id}/rotate": {
+      "endpoint": "app.api.v1.endpoints.secrets.rotate_secret",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/secrets/validate-api-key": {
+      "endpoint": "app.api.v1.endpoints.secrets.validate_api_key",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/security-events/events": {
+      "endpoint": "app.api.v1.endpoints.security_events.create_security_event",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/security-events/events/{event_id}/escalate": {
+      "endpoint": "app.api.v1.endpoints.security_events.escalate_event",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/security-events/events/{event_id}/resolve": {
+      "endpoint": "app.api.v1.endpoints.security_events.resolve_security_event",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/support/articles": {
+      "endpoint": "app.api.v1.endpoints.support.admin.create_article",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/support/tickets/{ticket_id}/messages": {
+      "endpoint": "app.api.v1.endpoints.support.admin.staff_message",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/suspensions/bulk-suspend": {
+      "endpoint": "app.api.v1.endpoints.suspensions.bulk_suspend",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/suspensions/partners/{partner_id}/restore": {
+      "endpoint": "app.api.v1.endpoints.suspensions.restore_partner",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/suspensions/tenants/{tenant_id}/restore": {
+      "endpoint": "app.api.v1.endpoints.suspensions.restore_tenant",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/suspensions/users/{user_id}/restore": {
+      "endpoint": "app.api.v1.endpoints.suspensions.restore_user",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/suspensions/{suspension_id}/appeal": {
+      "endpoint": "app.api.v1.endpoints.suspensions.submit_appeal",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/suspensions/{suspension_id}/appeal/review": {
+      "endpoint": "app.api.v1.endpoints.suspensions.review_appeal",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/tenants/{tenant_id}/archive": {
+      "endpoint": "app.api.v1.endpoints.admin.tenants.archive_tenant",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/tenants/{tenant_id}/resume": {
+      "endpoint": "app.api.v1.endpoints.admin.tenants.resume_tenant",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/tenants/{tenant_id}/suspend": {
+      "endpoint": "app.api.v1.endpoints.admin.tenants.suspend_tenant",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/usage/statements": {
+      "endpoint": "app.api.v1.endpoints.admin.supplier_evidence.import_statement",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/admin/usage/statements/{statement_id}/reviews": {
+      "endpoint": "app.api.v1.endpoints.admin.supplier_evidence.review_statement",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/ai-options/voices/clone": {
+      "endpoint": "app.api.v1.endpoints.ai_options.clone.clone_voice",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/ai-options/voices/prefetch": {
+      "endpoint": "app.api.v1.endpoints.ai_options.preview.prefetch_all_voice_samples",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/auth/legal-acceptance": {
+      "endpoint": "app.api.v1.endpoints.auth.profile.accept_legal_versions",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/auth/login": {
+      "endpoint": "app.api.v1.endpoints.auth.login.login",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/auth/refresh": {
+      "endpoint": "app.api.v1.endpoints.auth.refresh.refresh",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/auth/register": {
+      "endpoint": "app.api.v1.endpoints.auth.registration.register",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/billing/webhooks": {
+      "endpoint": "app.api.v1.endpoints.billing.stripe_webhook",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/calls/{call_id}/hangup": {
+      "endpoint": "app.api.v1.endpoints.calls.hangup_live_call",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/": {
+      "endpoint": "app.api.v1.endpoints.campaigns.create_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/apply-tts-config": {
+      "endpoint": "app.api.v1.endpoints.campaigns.apply_tts_config",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/{campaign_id}/contacts": {
+      "endpoint": "app.api.v1.endpoints.campaigns.add_contact_to_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/{campaign_id}/knowledge": {
+      "endpoint": "app.api.v1.endpoints.campaign_knowledge.upload_knowledge",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/{campaign_id}/knowledge/test": {
+      "endpoint": "app.api.v1.endpoints.campaign_knowledge.test_retrieval",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/{campaign_id}/pause": {
+      "endpoint": "app.api.v1.endpoints.campaigns.pause_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/{campaign_id}/start": {
+      "endpoint": "app.api.v1.endpoints.campaigns.start_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/campaigns/{campaign_id}/stop": {
+      "endpoint": "app.api.v1.endpoints.campaigns.stop_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/connectors/salesforce/outbound-message/{tenant_id}/{token}": {
+      "endpoint": "app.api.v1.endpoints.salesforce.salesforce_outbound_message",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/connectors/{connector_id}/refresh": {
+      "endpoint": "app.api.v1.endpoints.connectors.refresh_connector_tokens",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/connectors/{type}/disconnect": {
+      "endpoint": "app.api.v1.endpoints.connectors.disconnect_connector_by_type",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/audio/{session_id}": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.receive_gateway_audio",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/call": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.make_call",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/hangup/{call_id}": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.hangup_call",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/start": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.start_telephony",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/stop": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.stop_telephony",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/transfer/attended": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.transfer_attended",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/transfer/blind": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.transfer_blind",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/sip/telephony/transfer/deflect": {
+      "endpoint": "app.api.v1.endpoints.telephony_bridge.transfer_deflect",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/attachments": {
+      "endpoint": "app.api.v1.endpoints.support.attachments.upload_attachment",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/conversations": {
+      "endpoint": "app.api.v1.endpoints.support.conversations.start_conversation",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/conversations/{conversation_id}/escalate": {
+      "endpoint": "app.api.v1.endpoints.support.conversations.escalate",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/conversations/{conversation_id}/feedback": {
+      "endpoint": "app.api.v1.endpoints.support.conversations.send_feedback",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/conversations/{conversation_id}/messages": {
+      "endpoint": "app.api.v1.endpoints.support.conversations.send_message",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/tickets": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.create_ticket",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/tickets/{ticket_id}/csat": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.rate",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/tickets/{ticket_id}/messages": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.reply",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/tickets/{ticket_id}/reopen": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.reopen",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/support/tickets/{ticket_id}/resolve": {
+      "endpoint": "app.api.v1.endpoints.support.tickets.resolve",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/telephony/providers/activate": {
+      "endpoint": "app.api.v1.endpoints.telephony_providers.activate_provider",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/twilio/answer": {
+      "endpoint": "app.api.v1.endpoints.twilio_bridge.twilio_answer",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/twilio/event": {
+      "endpoint": "app.api.v1.endpoints.twilio_bridge.twilio_event",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/vonage/answer": {
+      "endpoint": "app.api.v1.endpoints.vonage_bridge.vonage_answer",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/vonage/event": {
+      "endpoint": "app.api.v1.endpoints.vonage_bridge.vonage_event",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/webhooks/call/goal-achieved": {
+      "endpoint": "app.api.v1.endpoints.webhooks.mark_goal_achieved",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/webhooks/call/mark-spam": {
+      "endpoint": "app.api.v1.endpoints.webhooks.mark_as_spam",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/webhooks/secure/call/goal-achieved": {
+      "endpoint": "app.api.v1.endpoints.webhooks_secure.mark_goal_achieved_secured",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/webhooks/secure/call/mark-spam": {
+      "endpoint": "app.api.v1.endpoints.webhooks_secure.mark_as_spam_secured",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "POST /api/v1/webhooks/secure/idempotent-example": {
+      "endpoint": "app.api.v1.endpoints.webhooks_secure.idempotent_webhook_example",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PUT /api/v1/admin/alerts/settings": {
+      "endpoint": "app.api.v1.endpoints.admin.health.alerts.update_alert_settings",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PUT /api/v1/assistant/model": {
+      "endpoint": "app.api.v1.endpoints.assistant_config.set_assistant_model",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PUT /api/v1/calls/{call_id}/lead-details/{field_key}": {
+      "endpoint": "app.api.v1.endpoints.lead_details.correct_lead_detail",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PUT /api/v1/campaigns/{campaign_id}": {
+      "endpoint": "app.api.v1.endpoints.campaigns.update_campaign",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PUT /api/v1/campaigns/{campaign_id}/lead-fields": {
+      "endpoint": "app.api.v1.endpoints.lead_details.set_lead_fields",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    },
+    "PUT /api/v1/meetings/{meeting_id}": {
+      "endpoint": "app.api.v1.endpoints.meetings.update_meeting",
+      "reason": "Existing successful response lacks a declared body schema; F2-11 response-model follow-up remains open."
+    }
+  }
+}

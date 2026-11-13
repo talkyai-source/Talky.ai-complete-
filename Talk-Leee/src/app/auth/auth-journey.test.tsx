@@ -1,7 +1,7 @@
 import React from "react";
 import assert from "node:assert/strict";
 import { afterEach, beforeEach, mock, test } from "node:test";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { AppRouterContext, type AppRouterInstance } from "next/dist/shared/lib/app-router-context.shared-runtime";
 import { SearchParamsContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime";
 import RegisterPage from "./register/register-client";
@@ -150,7 +150,9 @@ test("callback type alone cannot confirm an account or create a profile", async 
     assert.equal(window.location.search, "");
 });
 
-test("callback rejection verifies exact token without persisting it or claiming success", async () => {
+// QA F4-09 (QA-SEC-042): a token in the URL is never verified or applied, in
+// any mode (login CSRF). These two used to pin the old verification path.
+test("callback never verifies or persists a token from the URL", async () => {
     window.history.replaceState({}, "", "/auth/callback#access_token=invalid-token");
     const me = mock.method(api, "getMe", async (token?: string) => {
         if (token === undefined) throw anonymousSession;
@@ -158,32 +160,29 @@ test("callback rejection verifies exact token without persisting it or claiming 
     });
     const setToken = mock.method(api, "setToken", () => {});
     renderPage(<CallbackPage />);
-    await screen.findByText("This token is expired.");
-    assert.deepEqual(me.mock.calls.map(call => call.arguments), [[], ["invalid-token"]]);
+    await screen.findByText(/Please sign in with your email and password to continue/);
+    assert.deepEqual(me.mock.calls.map(call => call.arguments), [[]]); // only the provider's own bootstrap
     assert.equal(setToken.mock.callCount(), 0);
     assert.equal(localStorage.getItem("talklee.auth.token"), null);
     assert.equal(window.location.hash, "");
 });
 
-test("callback result cannot replace an identity established while verification was pending", async () => {
+test("a callback link can never replace an identity established meanwhile", async () => {
     window.history.replaceState({}, "", "/auth/callback#access_token=old-link");
-    let resolve!: (value: MeResponse) => void;
     const me = mock.method(api, "getMe", async (token?: string) => {
         if (token === undefined) throw anonymousSession;
-        assert.equal(token, "old-link");
-        return new Promise<MeResponse>((done) => { resolve = done; });
+        throw new Error("the URL token must never be checked");
     });
     function OtherSignIn() {
         const auth = useAuth();
         return <><button onClick={() => auth.applyLoginResult({ user_id: "new-user", email: "new@example.test", role: "user", access_token: "new-session" })}>Other sign in</button><output>{auth.user?.id}</output></>;
     }
     renderPage(<><CallbackPage /><OtherSignIn /></>);
-    await waitFor(() => assert.deepEqual(me.mock.calls.map(call => call.arguments), [[], ["old-link"]]));
+    await screen.findByText(/Please sign in with your email and password to continue/);
     fireEvent.click(screen.getByRole("button", { name: "Other sign in" }));
-    await act(async () => resolve({ id: "old-user", email: "old@example.test", role: "user", minutes_remaining: 0 } as MeResponse));
-    await screen.findByText(/Your sign-in changed/);
-    assert.equal(screen.getByRole("status").textContent, "new-user");
+    await waitFor(() => assert.equal(screen.getByRole("status").textContent, "new-user"));
     assert.equal(localStorage.getItem("talklee.auth.token"), "new-session");
+    assert.ok(me.mock.calls.every(call => call.arguments.length === 0), "the URL token was checked");
 });
 
 test("cookie-only callback requires normal sign-in and preserves the existing account", async () => {

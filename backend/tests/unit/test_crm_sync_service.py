@@ -242,14 +242,14 @@ def test_build_call_body_carries_outcome_campaign_summary_recording_and_excerpt(
     call = _call_row(recording_url="https://rec/1.wav", transcript="x" * 2000)
     body = build_call_body(call, {"headline": "Qualified - demo Tue", "outcome": "qualified | wants a demo", "next_step": "Send deck", "follow_up_tips": ["Call at 10"]},
                            campaign_name="Spring promo")
-    assert body.startswith("Talky.ai outbound call - Qualified")
+    assert body.startswith("Talk-Lee outbound call - Qualified")
     assert "Campaign: Spring promo" in body
     assert "Duration: 1m 35s" in body
     assert "Summary: Qualified - demo Tue" in body and "Next step: Send deck" in body and "- Call at 10" in body
     assert "Recording: https://rec/1.wav" in body
     assert "Transcript excerpt:" in body
     assert ("x" * 1500 + " ...") in body and ("x" * 1501) not in body  # excerpt is capped
-    assert f"Talky.ai call id: {CALL}" in body
+    assert f"Call ID: {CALL}" in body
 
 
 def test_result_and_warning_shapes_are_stable():
@@ -297,7 +297,7 @@ def test_unknown_callee_is_searched_then_created_and_remembered(harness):
     create = conn.calls[1]
     assert create[2] == "Pat" and create[3] == "Lee" and create[4] == "+15550100100"
     assert create[5]["company"] == "ACME" and create[5]["Title"] == "CTO"
-    assert "Created by Talky.ai" in create[5]["description"]
+    assert "Created by Talk-Lee" in create[5]["description"]
     assert harness["remembered"] == [(LEAD, "salesforce", "00Qcreated")]
 
 
@@ -355,11 +355,19 @@ def test_summary_pass_amends_only_its_provider_receipt(harness):
 
 
 def test_summary_pass_creates_the_log_when_settlement_never_ran(harness):
-    """Inbound calls settle inside the inbound lifecycle (no CRM hook); the
+    """Verified inbound calls settle inside the inbound lifecycle (no CRM hook); the
     summary hook must therefore create, not amend."""
     conn = FakeConnector(found={"id": "003c"})
     harness["connectors"]["salesforce"] = conn
-    harness["call"] = _call_row(direction="inbound", crm_call_id=None, summary_json={"headline": "Booked", "outcome": "qualified"})
+    harness["call"] = _call_row(
+        direction="inbound", crm_call_id=None,
+        summary_json={"headline": "Booked", "outcome": "qualified"},
+        caller_ani_private=False,
+        route_snapshot={"caller_identity": {
+            "version": 1, "caller_id_verified": True, "attestation": "A",
+            "verstat": "TN-Validation-Passed", "source": "trusted_carrier",
+        }},
+    )
     out = _run(harness["service"].sync_call(TENANT, CALL, reason="summary"))
     assert out.success and out.crm_call_id == "00Ttask"
     log = [c for c in conn.calls if c[0] == "log"][0]

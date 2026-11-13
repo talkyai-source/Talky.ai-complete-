@@ -1,9 +1,10 @@
 [Unit]
-Description=Run Talky.ai Worker Health Watch every 2 minutes
+OnFailure=talky-notify@%n.service
+Description=Run Talky.ai operational health checks every minute
 
 [Timer]
 OnBootSec=2min
-OnUnitActiveSec=2min
+OnUnitActiveSec=1min
 Persistent=true
 
 [Install]

@@ -52,12 +52,16 @@ async def test_refresh_receipts_bind_actor_account_generation_without_secret_mat
     assert not any(secret in stored for secret in ("old-access", "old-refresh", "rotated-access", "rotated-refresh", "token_encrypted"))
 
 
-@pytest.mark.parametrize("phase", ["refresh_intent", "refresh_installed"])
-async def test_refresh_audit_failure_never_replays_provider_effect(connector_db, phase):
+# QA F15-01: an unknown refresh outcome allows one fenced recovery, and only for a
+# reusable Google/HubSpot grant (gmail); a rotating grant (salesforce) never replays.
+@pytest.mark.parametrize("phase,provider_name", [
+    ("refresh_intent", "gmail"), ("refresh_installed", "salesforce"), ("refresh_installed", "gmail")])
+async def test_refresh_audit_failure_replays_a_provider_effect_only_in_the_one_safe_recovery(
+        connector_db, phase, provider_name):
     db = connector_db
-    cid, _ = await db.new_connector()
+    cid, _ = await db.new_connector(provider=provider_name)
     await db.trigger_failure("audit_logs", cid, f"NEW.action='connector.{phase}'")
-    remote = provider()
+    remote = provider(name=provider_name)
     with pytest.raises(asyncpg.RaiseError):
         await db.service.refresh(db.tenant, cid, connector=remote)
     parent, accounts = await db.state(cid)
@@ -69,11 +73,17 @@ async def test_refresh_audit_failure_never_replays_provider_effect(connector_db,
     else:
         remote.refresh_tokens.assert_awaited_once()
         assert accounts[0]["refresh_state"] == "uncertain"
+        reusable = provider_name in lifecycle._REUSABLE_REFRESH_PROVIDERS
+        if reusable:
+            # The one recovery reaches the provider again and fails at the same audit.
+            with pytest.raises(asyncpg.RaiseError):
+                await db.service.refresh(db.tenant, cid, connector=remote)
+            assert remote.refresh_tokens.await_count == 2
         with pytest.raises(lifecycle.ConnectorLifecycleError):
             await db.service.refresh(db.tenant, cid, connector=remote)
-        remote.refresh_tokens.assert_awaited_once()
+        assert remote.refresh_tokens.await_count == (2 if reusable else 1)
         assert [row["action"] for row in await receipts(db, cid)] == [
-            "connector.refresh_intent", "connector.refresh_uncertain"]
+            "connector.refresh_intent", "connector.refresh_uncertain"] * (2 if reusable else 1)
 
 
 @pytest.mark.parametrize("phase", ["disabled_locally", "provider_revocation_result"])

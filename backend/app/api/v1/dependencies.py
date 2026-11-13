@@ -189,7 +189,7 @@ def _clear_current_user_scope(request: Request) -> None:
     clear_tenant_context()
     for name in (
         "tenant_id", "user_id", "user_role", "authenticated_session_id",
-        "authenticated_user_id", "target_tenant_id",
+        "authenticated_user_id", "target_tenant_id", "session_mfa_verified",
     ):
         setattr(request.state, name, None)
     request.state.cross_tenant_access = False
@@ -298,6 +298,21 @@ async def get_current_user(
         async with acquire_with_tenant(client.pool, None) as conn:
             row = await load_current_principal(conn, user_id,
                 tenant_id=payload.get("tenant_id") if payload else None)
+        from app.core.security.platform_admin_mfa import (
+            denial_detail, policy_enabled, requires_verified_mfa,
+        )
+        mfa_required = policy_enabled()
+        if mfa_required and normalize_role(row["role"]) == UserRole.PLATFORM_ADMIN:
+            if payload is None:
+                # Legacy middleware/cookie validation does not carry factor
+                # evidence. Reload this exact active user/session, never trust
+                # an enrollment flag or a cached request-state MFA hint.
+                async with acquire_with_tenant(client.pool, None) as conn:
+                    session = await get_session_by_id(conn, str(session["id"]), user_id=user_id)
+                if not session:
+                    raise HTTPException(status_code=401, detail="Your login session has ended. Please sign in again.")
+            if requires_verified_mfa(row, session, enabled=mfa_required):
+                raise HTTPException(status_code=403, detail=denial_detail())
     except HTTPException:
         raise
     except PrincipalUnavailable as exc:
@@ -328,6 +343,11 @@ async def get_current_user(
         **meter.allowance(),
     )
     _publish_current_user_scope(request, user, str(session["id"]))
+    # This session's own server-recorded factor evidence, for /auth/me (G2).
+    # Unknown (None), never False, when a legacy cookie session lacks the column.
+    request.state.session_mfa_verified = (
+        session["mfa_verified"] is True if "mfa_verified" in session else None
+    )
     return user
 
 

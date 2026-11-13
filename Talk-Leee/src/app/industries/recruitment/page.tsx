@@ -227,7 +227,7 @@ export default function RecruitmentIndustryPage() {
   const plans = [
     {
       name: "Starter",
-      price: "Free / 14-Day Trial",
+      price: "See pricing",
       blurb: "Perfect for small businesses and growing hiring teams.",
       features: [
         "1 Active Hiring Workspace",
@@ -236,7 +236,7 @@ export default function RecruitmentIndustryPage() {
         "Candidate Communication",
         "Email Support",
       ],
-      ctaLabel: "Start Free",
+      ctaLabel: "Get Started",
       ctaHref: "/auth/register",
       ctaVariant: "primary" as const,
     },

@@ -42,6 +42,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import socket
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -142,6 +143,26 @@ class DialerStreamsQueueService:
             logger.error("streams_enqueue_failed job=%s err=%s", job.job_id, exc)
             return False
         return True
+
+    async def enqueue_jobs(self, jobs: list[DialerJob]) -> list[bool]:
+        """Publish a bounded batch with explicit per-XADD acknowledgements."""
+        if len(jobs) > 100:
+            raise ValueError("dialer enqueue batch exceeds 100 jobs")
+        if not jobs:
+            return []
+        payloads = [json.dumps(job.to_redis_dict()) for job in jobs]
+        async with self._redis.pipeline(transaction=False) as pipeline:
+            for job, payload in zip(jobs, payloads):
+                stream = STREAM_PRIORITY if job.priority >= HIGH_PRIORITY_THRESHOLD else STREAM_NORMAL
+                pipeline.xadd(stream, {"job": payload})
+            replies = await pipeline.execute(raise_on_error=False)
+        if len(replies) != len(jobs):
+            raise RuntimeError("dialer batch acceptance was not exact")
+        return [
+            bool(re.fullmatch(r"[0-9]+-[0-9]+", reply)) if isinstance(reply, str)
+            else bool(re.fullmatch(rb"[0-9]+-[0-9]+", reply)) if isinstance(reply, bytes)
+            else False for reply in replies
+        ]
 
     # ──────────────────────────────────────────────────────────────────
     # Dequeue

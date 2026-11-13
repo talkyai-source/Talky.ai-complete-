@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from urllib.parse import urlencode
 import httpx
 
-from app.infrastructure.connectors.base import ConnectorFactory, OAuthTokens
+from app.infrastructure.connectors.base import ConnectorFactory, ConnectorProviderError, OAuthTokens
 from app.infrastructure.connectors.drive.base import DriveProvider, DriveFile
 from app.infrastructure.connectors.google_errors import google_api_error_from_response
 
@@ -159,7 +159,11 @@ class GoogleDriveConnector(DriveProvider):
                     response.status_code,
                     error.category,
                 )
-                raise error
+                raise ConnectorProviderError(
+                    provider="google_drive", operation="refresh_tokens", category=error.category,
+                    message=f"Google Drive refresh returned HTTP {response.status_code}",
+                    status_code=response.status_code, retry_after=error.retry_after,
+                )
             
             token_data = response.json()
             

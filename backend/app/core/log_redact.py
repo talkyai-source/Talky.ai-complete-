@@ -41,7 +41,15 @@ What survives, so operators can still debug
   to correlate the same turn across log lines.
 * Free text elsewhere keeps its shape: emails keep their domain
   (``***@example.com``), phone/card-shaped digit runs keep their digit count
-  and last two digits (``[redacted digits=16 ..11]``).
+  and last two digits (``[redacted digits=16 ..11]``). UK national numbers
+  (``07700 900123``, ``020 7946 0958``) are masked like any other phone number.
+* Credentials are masked wherever they appear in a line: ``Bearer`` tokens,
+  JWTs, Stripe-style keys (``sk_live_``, ``sk_test_``, ``rk_live_``,
+  ``rk_test_``, ``whsec_``) and the value of a ``password`` / ``passwd`` /
+  ``secret`` / ``token`` / ``api_key`` / ``apikey`` / ``authorization`` field
+  written ``key=value``, ``key: value`` or JSON ``"key": "value"``. They become
+  ``[redacted secret]`` — no length and no hash, because a short hash of a weak
+  password is a way to confirm a guess.
 * Everything else — call ids, turn ids, timings, latency numbers, state
   names — is untouched.
 
@@ -76,6 +84,7 @@ import hashlib
 import logging
 import os
 import re
+import secrets
 from functools import lru_cache
 from typing import Any, Optional
 
@@ -118,6 +127,10 @@ REDACTED_PREFIX = "[redacted"
 
 #: Emitted when the redactor itself blows up (fail-safe path).
 REDACTION_FAILED = "[redacted: log redaction failed]"
+
+#: What a credential collapses to. Starts with REDACTED_PREFIX, so a value that
+#: is already masked is never processed twice.
+REDACTED_SECRET = "[redacted secret]"
 
 #: Field / keyword names whose *entire* value is caller speech (or model
 #: speech derived from it) and must never be logged verbatim. Matched against
@@ -171,11 +184,88 @@ _STANDARD_RECORD_ATTRS = frozenset(
 
 # --- patterns (all precompiled; this runs on every log line of every turn) --
 
-# Cheap gate. Nothing below can match without an "@", a "+<digit>", or two
-# adjacent digits — which rules out the overwhelming majority of log lines
-# (`"turn_complete call=%s turn_id=%d latency_ms=%.1f"` included) in a single
-# C-level scan, so the real pattern never runs on them.
+# Credentials come first, so that a JWT or "password=<digits>" collapses as a
+# secret instead of being nibbled into digit runs by the PII pass below. Each
+# rule has its own cheap trigger (see _scrub_secrets), so a line with no
+# credential in it pays a lowercase copy and a few substring tests.
+#
+# These rules only see text. The template of a %-style call is never rewritten,
+# so ``logger.info("password=%s", pw)`` still logs a bare ``pw`` that has no
+# shape to match: a secret must not be handed to a log call at all.
+
+# A field name that ENDS in a secret word: ``access_token``, ``DB_PASSWORD``,
+# ``X-API-Key``. A name that only contains one (``max_tokens``, ``token_count``,
+# ``password_length``) is not followed by ``=`` or ``:`` straight after the
+# word, so it never matches and ordinary usage numbers stay readable.
+_SECRET_NAME = r"(?:password|passwd|secret(?:[_-]?key)?|token|api[_-]?key|authorization)"
+_AUTH_SCHEME = r"(?:bearer|basic|digest)"
+
+# The key/value rule's trigger: the same name and separator, tested on the
+# lowercased text with no flags (a plain-literal regex scans much faster than an
+# ignore-case one). ``prompt_tokens=812`` never reaches the real rule.
+_SECRET_KEY_HINT_RE = re.compile(_SECRET_NAME + r"[\"']?[ \t]*[:=]")
+
+_SECRET_KV_RE = re.compile(
+    r"(?P<key>" + _SECRET_NAME + r")"
+    r"(?P<sep>[\"']?[ \t]*[:=][ \t]*)"
+    r"(?:"
+    # "quoted value" or 'quoted value' (never empty); an unterminated quote runs
+    # to the end of the line, so a message cut off mid-value still hides it.
+    # The body is the unrolled form of (?:[^"\\]|\\.)+, one class scan per run.
+    r"(?P<dq>\"(?!\")[^\"\\\r\n]*(?:\\.[^\"\\\r\n]*)*(?:\"|(?=[\r\n])|$))"
+    r"|(?P<sq>'(?!')[^'\\\r\n]*(?:\\.[^'\\\r\n]*)*(?:'|(?=[\r\n])|$))"
+    # Authorization: Bearer <credential>; the scheme stays visible
+    r"|(?P<scheme>" + _AUTH_SCHEME + r"[ \t]+)(?![\[{])(?P<cred>[^\s\"'&]+)"
+    # a bare value, up to whitespace, a quote or "&". Not a value that is
+    # already masked, and not None/null/true/false when that word is the whole
+    # value (they say "unset", which is worth reading). Anything else is hidden,
+    # including a value that starts with "[" or "{" or with one of those words.
+    r"|(?!" + _AUTH_SCHEME + r"[ \t]|\[redacted|(?:none|null|true|false)(?=[\s,;)\]}&\"']|$))"
+    r"(?P<raw>[^\s\"'&]+)"
+    r")",
+    re.IGNORECASE,
+)
+
+#: Punctuation that closes a sentence or a bracket rather than ending a secret:
+#: ``(token=abc)`` and ``token=abc, user=bob`` keep their punctuation.
+_SECRET_TRAILING_PUNCT = ",;.)]}"
+
+# ``Bearer <token>`` anywhere, with or without a key in front of it: everything
+# up to the next whitespace, quote, comma or semicolon is hidden, "=" included.
+# This errs toward hiding: ``Bearer realm="api"`` and ``token_type=Bearer
+# expires_in=3600`` lose the word after "Bearer", which is harmless, while a
+# token is never left in clear because of its shape.
+_BEARER_RE = re.compile(r"\b(bearer)([ \t]+)(?!\[redacted)[^\s\"',;]+", re.IGNORECASE)
+
+# A JWT: three base64url segments, the first a JSON header (``{"`` encodes to
+# ``eyJ``). An unsecured token has an empty signature. The lookbehind stops a
+# run of ``eyJeyJeyJ...`` being retried at every offset.
+_JWT_RE = re.compile(r"(?<![A-Za-z0-9_\-])eyJ[A-Za-z0-9_\-]*\.[A-Za-z0-9_\-]+\.[A-Za-z0-9_\-]*")
+
+# Stripe secret and restricted keys and webhook signing secrets. The prefix
+# stays, so a live key can still be told from a test key in the log.
+_STRIPE_RE = re.compile(r"(?<![A-Za-z0-9])((?:sk|rk)_(?:live|test)_|whsec_)[A-Za-z0-9_\-+/=]+")
+
+# Cheap gate for the PII pass. Nothing below can match without an "@", a
+# "+<digit>", or two adjacent digits — which rules out the overwhelming
+# majority of log lines (`"turn_complete call=%s turn_id=%d latency_ms=%.1f"`
+# included) in a single C-level scan, so the real pattern never runs on them.
 _QUICK_SCAN_RE = re.compile(r"@|\+\d|\d\d")
+
+
+def _uk_rest(close: str) -> str:
+    """Everything after ``0[1-9]`` in a UK national number.
+
+    The rest of the area code, ``close`` (the bracket after it), then the
+    subscriber number: 3-4-4, 4-3-4 and 5-3-3 digit layouts, 10 or 11 digits.
+    """
+    return (
+        r"(?:\d" + close + r"[ \-]?\d{4}[ \-]?\d{4}"  # 020 7946 0958
+        r"|\d{2}" + close + r"[ \-]?\d{3}[ \-]?\d{3,4}"  # 0161 496 0000, 0800 123 4567
+        r"|\d{3}" + close + r"[ \-]?\d{3}[ \-]?\d{2,3})"  # 07700 900 123, 01632 960983
+        r"(?!\d|\.\d)"
+    )
+
 
 # ONE combined pattern, one pass per string (four separate .sub() calls cost
 # four full scans of every log line — measurably worse on the voice hot path).
@@ -185,8 +275,14 @@ _QUICK_SCAN_RE = re.compile(r"@|\+\d|\d\d")
 # debuggability. Each alternative is anchored on a shape real phone numbers,
 # cards and account numbers actually take.
 _PII_RE = re.compile(
-    # email — local part is dropped, domain kept
-    r"(?P<email>[A-Za-z0-9._%+\-]+@(?P<domain>[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}))"
+    # email — local part is dropped, domain kept. The lookbehind is for speed:
+    # without it every offset inside a long run of local-part characters (a
+    # base64 blob, 100 KB of digits) rescans the whole run looking for an "@",
+    # which is quadratic (54 s for 100 KB of zeros). An address cannot start 64
+    # characters deep into a run, because a local part is at most 64 long; that
+    # would be the tail of one already matched from the start of the run.
+    r"(?P<email>(?<![A-Za-z0-9._%+\-]{64})[A-Za-z0-9._%+\-]+@"
+    r"(?P<domain>[A-Za-z0-9\-]+(?:\.[A-Za-z0-9\-]+)*\.[A-Za-z]{2,}))"
     # international / E.164-ish number
     r"|(?P<intl>\+\d[\d ().\-]{6,18}\d)"
     # US SSN shape (078-05-1120). 3-2-4 is unambiguous — an ISO date is 4-2-2.
@@ -200,6 +296,19 @@ _PII_RE = re.compile(
     # keeps cards (13-19), IBANs and long account numbers while leaving
     # ordinary counters, ports and millisecond durations alone.
     r"|(?P<longrun>(?<![\d.])\d{11,24}(?![\d.]))"
+    # UK national format: a leading 0, an area code of 3-5 digits and the
+    # subscriber number, 10 or 11 digits in all, grouped as they are printed
+    # (020 7946 0958, 0161 496 0000, 01632 960983, 07700 900123), with or
+    # without the separators, and with the area code bracketed or not. Fixed
+    # layouts only, so a date, a duration or a counter cannot match. A trailing
+    # "." ends a sentence and is allowed; ".5" would make it a decimal.
+    #
+    # Both alternatives open with a plain literal, which sre skips without
+    # entering the alternative; opening with the capture group instead cost
+    # about 10 us on every digit-bearing line (the lookbehind after the "0" is
+    # the "not preceded by a digit or dot" check).
+    r"|0(?<![\d.]0)(?P<uk>[1-9]" + _uk_rest(r"\)?") + r")"
+    r"|\(0(?P<ukp>[1-9]" + _uk_rest(r"\)") + r")"
 )
 
 # printf-style conversion specifier, so `transcript=%r` can be mapped back to
@@ -254,6 +363,12 @@ _NON_PII_CONTEXT_RE = re.compile(
     r"(?i)\b(?P<name>" + "|".join(sorted(_NON_PII_VALUE_FIELDS)) + r")\s*[=:]\s*['\"]?$"
 )
 
+#: How far back from a match the field name is looked for. The longest name is
+#: 11 characters, so name + "=" + quote + some spaces fits with room to spare.
+#: Searching the whole prefix of the line for every match made a line with many
+#: matches quadratic: 100 KB of phone numbers took minutes.
+_NON_PII_CONTEXT_WINDOW = 32
+
 # Runtime profiles are JSON strings, and a SHA256 may contain a phone-shaped
 # digit run in its middle. Exempt only complete 64-hex values in these exact
 # provenance fields; a phone/email under the same key is still redacted.
@@ -263,6 +378,31 @@ _PROFILE_DIGEST_RE = re.compile(
     r'''request_envelope_sha256|sources_sha256)["']?\s*[=:]\s*["']?'''
     r'''(?P<digest>[a-fA-F0-9]{64})(?![a-zA-Z0-9])'''
 )
+
+# Request ids, call ids and every other UUID are opaque identifiers, never a
+# phone or card number, yet about 1 in 280 random UUIDs ends in an all-digit
+# group, which `longrun` ate (observed in the unit suite, 2026-11-10):
+#
+#     HTTP operation failed request_id=7a08427a-4d5f-4aa2-b54f-[redacted digits=12 ..11]
+#
+# so the "Request reference" a customer reads no longer matched the server
+# log. A digit run wholly inside a complete 8-4-4-4-12 hex token is left
+# alone; one that only borders a UUID, or sits in a partial one, is masked.
+_UUID_RE = re.compile(
+    r"(?<![0-9A-Fa-f])[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}(?![0-9A-Fa-f])"
+)
+
+
+def _inside_uuid(match: "re.Match[str]") -> bool:
+    text, start, end = match.string, match.start(), match.end()
+    lo, hi = max(0, start - 36), min(len(text), end + 36)
+    if text.count("-", lo, hi) < 4:  # a UUID has four dashes; most matches have none nearby
+        return False
+    for uuid in _UUID_RE.finditer(text, lo, hi):
+        if uuid.start() <= start and end <= uuid.end():
+            return True
+    return False
+
 
 #: Values that cannot carry speech — never rewritten, even in a sensitive slot.
 _NON_TEXT_TYPES = (bool, int, float, complex, type(None))
@@ -326,15 +466,27 @@ def _mask_match(match: "re.Match[str]") -> str:
     raw = match.group(0)
 
     # Precision guard: a bare digit run directly after a hash/hex field name is
-    # a debug value, not an identifier. Restricted to the two rules that can
-    # actually collide with hex — `grouped` and `longrun`. `email` is handled
+    # a debug value, not an identifier. Restricted to the rules that can
+    # actually collide with hex — `grouped`, `longrun` and `uk` (a run of
+    # digits that happens to be laid out like a UK number). `email` is handled
     # above and `intl` requires a leading "+", neither of which appears in a
     # hex dump, and `ssn` is a 3-2-4 shape that hex never takes. See
     # _NON_PII_VALUE_FIELDS for why a miss here is harmless.
     if match.lastgroup in ("grouped", "longrun") or (
-        match.group("grouped") is not None or match.group("longrun") is not None
+        match.group("grouped") is not None
+        or match.group("longrun") is not None
+        or match.group("uk") is not None
+        or match.group("ukp") is not None
     ):
-        if _NON_PII_CONTEXT_RE.search(match.string, 0, match.start()):
+        text, start = match.string, match.start()
+        lo = max(0, start - _NON_PII_CONTEXT_WINDOW)
+        # The field name must be followed by "=" or ":", so most matches never
+        # need the regex.
+        after_hash_field = (
+            (text.find("=", lo, start) >= 0 or text.find(":", lo, start) >= 0)
+            and _NON_PII_CONTEXT_RE.search(text, lo, start)
+        )
+        if after_hash_field or _inside_uuid(match):
             return raw
 
     digits = [c for c in raw if c.isdigit()]
@@ -343,13 +495,48 @@ def _mask_match(match: "re.Match[str]") -> str:
     return f"[redacted digits={len(digits)} ..{''.join(digits[-2:])}]"
 
 
+def _mask_secret_kv(match: "re.Match[str]") -> str:
+    head = match.group("key") + match.group("sep")
+    if match.group("dq") is not None:
+        return f'{head}"{REDACTED_SECRET}"'
+    if match.group("sq") is not None:
+        return f"{head}'{REDACTED_SECRET}'"
+    value = match.group("cred") or match.group("raw")
+    core = value.rstrip(_SECRET_TRAILING_PUNCT)
+    if not core:
+        return match.group(0)  # nothing but punctuation: no value to hide
+    return f"{head}{match.group('scheme') or ''}{REDACTED_SECRET}{value[len(core):]}"
+
+
+def _scrub_secrets(value: str) -> str:
+    # Each rule runs only if its trigger is in the text. ``low`` is taken once,
+    # before any rule rewrites ``value``; a rule can only remove text, so a stale
+    # ``low`` makes a later rule run needlessly, never skip.
+    low = value.lower()
+    # Key/value first: it understands ``Authorization: Bearer <token>`` as a
+    # pair and keeps the scheme. The shape rules then catch the same tokens
+    # when there is no key in front of them.
+    if _SECRET_KEY_HINT_RE.search(low):
+        value = _SECRET_KV_RE.sub(_mask_secret_kv, value)
+    if "bearer" in low:
+        value = _BEARER_RE.sub(r"\g<1>\g<2>" + REDACTED_SECRET, value)
+    if "eyj" in low:
+        value = _JWT_RE.sub(REDACTED_SECRET, value)
+    if "_live_" in low or "_test_" in low or "whsec_" in low:
+        value = _STRIPE_RE.sub(r"\g<1>" + REDACTED_SECRET, value)
+    return value
+
+
 def scrub_text(value: str) -> str:
-    """Mask emails / phone numbers / long digit runs inside free text.
+    """Mask credentials / emails / phone numbers / long digit runs in free text.
 
     Everything that is not one of those shapes is returned untouched, so
     ordinary log lines keep their debuggability.
     """
-    if not value or not _QUICK_SCAN_RE.search(value):
+    if not value:
+        return value
+    value = _scrub_secrets(value)
+    if not _QUICK_SCAN_RE.search(value):
         return value
     pieces = []
     end = 0
@@ -360,6 +547,20 @@ def scrub_text(value: str) -> str:
         end = stop
     pieces.append(_PII_RE.sub(_mask_match, value[end:]))
     return "".join(pieces)
+
+
+_REFERENCE_LETTERS = "abcdefghjkmnpqrstuvwxyz"  # no i, l, o: easy to read back
+
+
+def error_reference() -> str:
+    """A short reference a user can quote for an error logged in full.
+
+    Letters only. A hex id with 11+ digits in a row (about 1 in 140 of them)
+    is a `longrun` above and gets masked, so the logged reference no longer
+    matched the one the user was shown (CI flake, 12 Nov 2026). 12 letters
+    from 23 is about 54 bits.
+    """
+    return "".join(secrets.choice(_REFERENCE_LETTERS) for _ in range(12))
 
 
 def summarize_sensitive(value: str) -> str:
@@ -417,6 +618,19 @@ def _sensitive_arg_slots(msg: str) -> "tuple[frozenset, frozenset]":
     return frozenset(positional), frozenset(mapping)
 
 
+# Arguments whose rendered text can carry personal data: an exception's message
+# (a database error quotes the offending value) and a container's repr.
+_RENDERED_AS_TEXT = (BaseException, dict, list, tuple, set, frozenset)
+
+
+def _scrub_rendered(value: Any) -> Any:
+    """The masked text of ``value`` when masking changes it, else ``value``
+    itself, so a line with nothing to hide renders exactly as before."""
+    text = str(value)
+    scrubbed = scrub_text(text)
+    return value if scrubbed == text else scrubbed
+
+
 def _redact_record_inplace(record: logging.LogRecord) -> None:
     positional: frozenset = frozenset()
     mapping: frozenset = frozenset()
@@ -445,6 +659,10 @@ def _redact_record_inplace(record: logging.LogRecord) -> None:
                 )
                 changed = changed or new_value is not value
                 redacted_map[key] = new_value
+            elif isinstance(value, _RENDERED_AS_TEXT):
+                new_value = _scrub_rendered(value)
+                changed = changed or new_value is not value
+                redacted_map[key] = new_value
             else:
                 redacted_map[key] = value
         if changed:
@@ -461,6 +679,8 @@ def _redact_record_inplace(record: logging.LogRecord) -> None:
                 # Numbers/bools/None can't carry speech, and mangling them
                 # (``partial=%s`` -> ``partial=[redacted...]``) is pure damage.
                 new_value = summarize_sensitive(str(value))
+            elif isinstance(value, _RENDERED_AS_TEXT):
+                new_value = _scrub_rendered(value)
             else:
                 continue
             if new_value is not value:
@@ -468,6 +688,16 @@ def _redact_record_inplace(record: logging.LogRecord) -> None:
                 changed = True
         if changed:
             record.args = tuple(redacted_args)
+
+    # The handler's Formatter renders a traceback from exc_info after this
+    # filter ran. Render it here once and keep the masked text, which the
+    # standard Formatter reuses instead of rendering it again (QA F2-10).
+    exc_info = record.exc_info
+    if exc_info and exc_info[0] is not None and not record.exc_text:
+        text = logging.Formatter().formatException(exc_info)
+        scrubbed = scrub_text(text)
+        if scrubbed != text:
+            record.exc_text = scrubbed
 
     # extra={...} fields — where the full untruncated utterance lives.
     record_dict = record.__dict__

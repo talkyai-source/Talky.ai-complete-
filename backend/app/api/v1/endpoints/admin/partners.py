@@ -8,6 +8,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.api.v1.dependencies import CurrentUser, get_db_client, require_platform_admin
+from app.api.v1.validation import pagination_offset
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
@@ -37,7 +38,7 @@ class PartnerListResponse(AdminResponseModel):
 
 @router.get("/partners", response_model=PartnerListResponse)
 async def list_partners(
-    page: int = Query(default=1, ge=1, le=2_147_483_647),
+    page: int = Query(default=1, ge=1, le=10001),
     page_size: int = Query(default=20, ge=1, le=100),
     q: str | None = Query(default=None, max_length=255),
     status: PartnerStatus | None = None,
@@ -49,6 +50,7 @@ async def list_partners(
     Count and page share one read-only snapshot. Paging across requests remains
     live. This route does not grant ordinary partner mutation authority.
     """
+    offset = pagination_offset(page, page_size)
     values: list = []
     predicates: list[str] = []
     if q and q.strip():
@@ -73,7 +75,7 @@ async def list_partners(
                               (SELECT count(*) FROM tenants t WHERE t.white_label_partner_id=p.id) AS tenant_count
                        FROM white_label_partners p""" + where
                     + f" ORDER BY p.company_name,p.id LIMIT ${len(values)+1} OFFSET ${len(values)+2}",
-                    *values, page_size, (page - 1) * page_size,
+                    *values, page_size, offset,
                 )
         return PartnerListResponse(
             items=[PartnerListItem.model_validate(dict(row)) for row in rows],

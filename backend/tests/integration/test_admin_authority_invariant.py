@@ -587,6 +587,9 @@ async def test_post_commit_delivery_failure_returns_committed_user_receipt(autho
     else:
         assert result["propagation_pending"]==["assistant_session_check"]
         assert result["propagation_failed"]==(["suspension_events"] if failure in {"notification","timeout"} else [])
-    assert await db.owner.fetchval("SELECT to_regclass('public.suspension_propagation_queue')") is None
+    # 0087 (QA F14-02) adopts the bootstrap queue table; delivery still never depends on it.
+    queue = await db.owner.fetchval("SELECT to_regclass('public.suspension_propagation_queue')")
+    assert queue is None or not await db.owner.fetchval(
+        "SELECT EXISTS (SELECT 1 FROM public.suspension_propagation_queue)")
     if operation=="appeal":
         assert await db.owner.fetchval("SELECT appeal_decision FROM suspension_events WHERE suspension_id=$1",original.suspension_id)=="granted"

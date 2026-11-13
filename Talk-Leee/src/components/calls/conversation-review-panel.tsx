@@ -40,7 +40,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertCircle, Check, Loader2, MessageSquare, RotateCcw, Star } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { ErrorState, failedReadMessage } from "@/components/states/page-states";
+import { ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import {
     extendedApi,
     type ConversationReview,
@@ -158,7 +158,7 @@ export function ConversationReviewPanel({ callId }: { callId: string }) {
     const othersSection = othersQuery.isError ? (
         // A failed read of the other reviews is shown, never as "no other reviews".
         <div className="mt-5 border-t border-border pt-4">
-            <ErrorState message={failedReadMessage(othersQuery.error)} onRetry={() => void othersQuery.refetch()} />
+            <ErrorState requestId={failedReadRequestId(othersQuery.error)} message={failedReadMessage(othersQuery.error)} onRetry={() => void othersQuery.refetch()} />
         </div>
     ) : others.length > 0 ? (
         <div className="mt-5 border-t border-border pt-4">

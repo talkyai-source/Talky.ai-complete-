@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Import the public docs (Talk-Leee docs markdown) as support help articles.
+"""Import backend-shipped public docs as support help articles.
 
-    DATABASE_URL=postgresql://... python scripts/import_support_articles.py
-    python scripts/import_support_articles.py --dry-run     # parse only, no database
+    python scripts/import_support_articles.py               # parse only, no database
+    python scripts/import_support_articles.py --apply       # operator-approved database write
     python scripts/import_support_articles.py --git-ref HEAD # read the docs from git objects
 
 Idempotent and safe on every deploy: unchanged sections are not touched, staff
 articles are never overwritten, and docs sections that disappeared are
 unpublished (never deleted).
 
-The production checkout is sparse and has no Talk-Leee/ working tree, so when
-the docs folder is absent the docs are read from the repository's git objects
-at HEAD (the deployed commit). ``--docs-dir`` and ``--git-ref`` force a source.
+The default source ships under backend/support_articles and needs neither a
+Talk-Leee/ working tree nor Git. ``--docs-dir`` and ``--git-ref`` explicitly
+select another source. Database changes require --apply.
 """
 from __future__ import annotations
 
@@ -30,7 +30,7 @@ from app.domain.services.support import articles as kb  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DOCS_PATH = "Talk-Leee/src/app/docs/_content"
-DEFAULT_DOCS_DIR = REPO_ROOT / "Talk-Leee" / "src" / "app" / "docs" / "_content"
+DEFAULT_DOCS_DIR = Path(__file__).resolve().parents[1] / "support_articles"
 _PAGE_FILE = re.compile(r"^[a-z0-9][a-z0-9-]*\.md$")
 _GIT_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$")
 
@@ -106,9 +106,7 @@ def pick_source(docs_dir: Path | None, git_ref: str | None):
         return GitSource(REPO_ROOT, git_ref)
     if docs_dir is not None:
         return DirSource(docs_dir)
-    if (DEFAULT_DOCS_DIR / "registry.ts").is_file():
-        return DirSource(DEFAULT_DOCS_DIR)
-    return GitSource(REPO_ROOT, "HEAD")
+    return DirSource(DEFAULT_DOCS_DIR)
 
 
 async def run(sections: list[kb.ArticleSection], dsn: str) -> kb.ImportSummary:
@@ -124,12 +122,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--docs-dir", type=Path, default=None, help="read the docs from this folder")
     parser.add_argument("--git-ref", default=None, help="read the docs from git objects at this ref")
-    parser.add_argument("--dry-run", action="store_true", help="parse and print counts only; no database")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--dry-run", action="store_true", help="parse and print counts only; no database (default)")
+    mode.add_argument("--apply", action="store_true", help="explicitly approve the idempotent database import")
     args = parser.parse_args(argv)
 
     source = pick_source(args.docs_dir, args.git_ref)
     sections = load_sections(source)
-    if args.dry_run:
+    if not args.apply:
         print(f"support articles dry-run: {len(sections)} sections parsed from {source.describe()}, "
               "database not touched")
         return 0

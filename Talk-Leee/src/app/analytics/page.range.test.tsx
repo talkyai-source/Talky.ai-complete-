@@ -45,8 +45,9 @@ test("each range asks for exactly as many UTC dates as its label says, ending to
     const user = userEvent.setup({ document: globalThis.document });
     const asked: Array<{ from: string; to: string }> = [];
     mock.method(extendedApi, "getCallAnalytics", async (from: string, to: string) => {
-        asked.push({ from, to });
-        return { series: [{ date: to, total_calls: 4, answered: 3, failed: 1 }] };
+        // The first request carries no dates: it only asks the server which zone the account reports in.
+        if (from !== undefined) asked.push({ from, to });
+        return { timezone: "UTC", series: [{ date: to, total_calls: 4, answered: 3, failed: 1 }] };
     });
 
     render(<Page />);

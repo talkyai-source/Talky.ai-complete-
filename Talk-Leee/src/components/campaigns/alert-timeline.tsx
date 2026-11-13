@@ -17,6 +17,9 @@ import { cn } from "@/lib/utils";
 
 type AlertTab = "Impact Analysis" | "Root Cause" | "Timeline Visualization" | "Recommended Actions" | "Related Incidents";
 
+// Rules have no server persistence/evaluator; do not offer a local-only action.
+const ALERT_RULES_AVAILABLE = false;
+
 function toLocalStorage<T>(key: string, value: T) {
     try {
         window.localStorage.setItem(key, JSON.stringify(value));
@@ -209,14 +212,14 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                 >
                     Snooze
                 </Button>
-                <Button
+                {ALERT_RULES_AVAILABLE && <Button
                     type="button"
                     variant="secondary"
                     size="sm"
                     onClick={() => setRuleOpen(true)}
                 >
                     Create Rule
-                </Button>
+                </Button>}
             </div>
             <Button
                 type="button"
@@ -363,7 +366,7 @@ export function AlertTimeline({ campaigns }: { campaigns: Campaign[] }) {
                 ) : null}
             </Modal>
 
-            <Modal open={ruleOpen} onOpenChange={setRuleOpen} title="Rule builder" description="Create an alert rule (prototype mode)." size="lg">
+            <Modal open={ALERT_RULES_AVAILABLE && ruleOpen} onOpenChange={setRuleOpen} title="Rule builder" description="Create an alert rule (prototype mode)." size="lg">
                 <RuleBuilder onDone={() => setRuleOpen(false)} />
             </Modal>
         </div>

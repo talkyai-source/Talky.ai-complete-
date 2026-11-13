@@ -121,7 +121,20 @@ def assert_response_wrappers(response, *, allowed_origin=True, request_id=REQUES
 async def test_early_security_denials_are_readable_without_reaching_endpoint(configured_app, extra, method, status, detail):
     response = await request(configured_app, method, headers={"Origin": ORIGIN, "X-Request-ID": REQUEST_ID, **extra})
     assert response.status_code == status
-    assert detail in response.json()["detail"]
+    body = response.json()
+    if status in {401, 415}:
+        # Tenant-auth and media-type denials now use the canonical envelope.
+        assert set(body) == {"error"}
+        error = body["error"]
+        assert set(error) == {"code", "message", "details", "request_id"}
+        assert error["code"] == {401: "unauthorized", 415: "unsupported_media_type"}[status]
+        assert detail in error["message"]
+        assert error["details"] is None and error["request_id"] == REQUEST_ID
+        if status == 401:
+            assert response.headers["www-authenticate"] == "Bearer"
+    else:
+        # These two guards retain their existing explicit detail contract.
+        assert detail in body["detail"]
     assert configured_app.state.endpoint_calls == 0
     assert_response_wrappers(response)
 

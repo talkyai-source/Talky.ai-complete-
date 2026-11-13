@@ -80,7 +80,7 @@ const fillCreate = async () => {
 const perform = async kind => {
     if (kind === 'create') { await fillCreate(); await submit(); }
     else if (kind === 'edit') await edit();
-    else if (kind === 'block') await ariaClick('Block ' + target.email);
+    else if (kind === 'block') { await ariaClick('Block ' + target.email); await click('Confirm'); }
     else { await ariaClick('Delete ' + target.email); await click('Delete'); }
 };
 const writeRequests = () => state.requests.filter(mutation);
@@ -152,7 +152,7 @@ test('closing deletion recovery before preparation finishes retires that delete 
 test('a newer directory read retires a block review still waiting for preparation', async () => {
     const wait = deferred(); let draft;
     intercept = r => { if (r.path.endsWith('/users/operations') && r.method === 'POST') { draft = r.body; return wait.promise; } };
-    await draw(); await ariaClick('Block ' + target.email); await click('Refresh'); await settle();
+    await draw(); await ariaClick('Block ' + target.email); await click('Confirm'); await click('Refresh'); await settle();
     await act(async () => wait.resolve(response(remember(prepared(draft)), 201)));
     assert.equal(writeRequests().length, 0); assert.match(text(), /prepared action was not dispatched/);
 });
@@ -317,6 +317,7 @@ test('a retained old edit submit after unmount cannot prepare or mutate', async 
 test('a retained block callback after directory refresh cannot dispatch the old review', async () => {
     await draw(); const control = find('[aria-label="Block ' + target.email + '"]'), props = Object.keys(control).find(key => key.startsWith('__reactProps')), old = control[props].onClick;
     await click('Refresh'); await settle(); await act(async () => old());
+    assert.equal(find('.modal-backdrop') === null, true, 'a stale click must not even open a confirmation');
     assert.equal(state.requests.filter(r => r.method !== 'GET').length, 0);
 });
 

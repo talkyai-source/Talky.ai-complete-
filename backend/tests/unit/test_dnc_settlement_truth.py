@@ -8,7 +8,7 @@ from app.domain.models.dialer_job import CallOutcome
 from tests.unit.test_call_service_pooled_teardown import _FakeConn, _service
 
 TENANT = "20000000-0000-4000-8000-000000000017"
-PHONE = "+15555550107"
+PHONE = "+14155552671"
 
 
 class SuppressionConn(_FakeConn):

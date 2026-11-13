@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { Plus, Loader2, ServerCog } from "lucide-react";
 import {
     useSipTrunks,
@@ -42,7 +42,7 @@ function PoolAccountSelector() {
 
     // A failed read is shown with Retry, never as "no pool accounts".
     if (poolFailed && !poolQuery.data) {
-        return <ErrorState className="mb-4" message={failedReadMessage(poolQuery.error)} onRetry={() => void poolQuery.refetch()} />;
+        return <ErrorState className="mb-4" requestId={failedReadRequestId(poolQuery.error)} message={failedReadMessage(poolQuery.error)} onRetry={() => void poolQuery.refetch()} />;
     }
 
     // Nothing to show until the platform actually has pool accounts.
@@ -278,7 +278,7 @@ export function SipTrunksList() {
             </CardHeader>
             <CardContent>
                 {routeFailed && !outboundRoute ? (
-                    <ErrorState className="mb-4" message={failedReadMessage(routeQuery.error)} onRetry={() => void routeQuery.refetch()} />
+                    <ErrorState className="mb-4" requestId={failedReadRequestId(routeQuery.error)} message={failedReadMessage(routeQuery.error)} onRetry={() => void routeQuery.refetch()} />
                 ) : (
                     <OutboundRouteSummary route={outboundRoute} />
                 )}

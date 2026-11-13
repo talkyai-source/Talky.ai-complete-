@@ -133,7 +133,7 @@ def test_classic_system_override_payload_is_neutralised() -> None:
     assert len(_lines(block)) == CLEAN_LINES
     # The poisoned first name is dropped; the clean last name still greets.
     assert "PERSON YOU'RE CALLING: Doe, from Acme Roofing." in block
-    assert 'is this Doe?' in block
+    assert 'speaking with Doe?' in block
 
 
 def test_all_fields_poisoned_degrades_to_blind_dial() -> None:
@@ -208,8 +208,8 @@ LEGIT_NAMES = [
 def test_legit_names_pass_through_unchanged(first: str, last: str) -> None:
     block = build_call_target_block(first, last, None)
     assert f"PERSON YOU'RE CALLING: {first} {last}." in block, block
-    # …and the agent still says the FIRST name naturally.
-    assert f'"Hi, is this {first}?"' in block, block
+    # …and the opening line still asks for the FIRST name, intact.
+    assert f'"Am I speaking with {first}?"' in block, block
     assert len(_lines(block)) == CLEAN_LINES
 
 
@@ -251,7 +251,7 @@ def test_sentence_is_natural_and_block_shape_preserved() -> None:
     block = build_call_target_block("Jane", "Doe", "Acme Roofing")
     sentence = _sentence_line(block)
     assert sentence.startswith("PERSON YOU'RE CALLING: Jane Doe, from Acme Roofing.")
-    assert 'Hi, is this Jane?' in sentence
+    assert 'Am I speaking with Jane?' in sentence
     assert "not a confirmed fact" in sentence
     # The separator now OPENS the block rather than closing it: this is
     # trailing content appended after the cacheable static prompt, so the rule

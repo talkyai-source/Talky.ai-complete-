@@ -102,6 +102,18 @@ printf '%s  %s\n' "$digest" "$dump" > "${checksum_file}"
 sha256sum --check --quiet "${checksum_file}"
 trap - EXIT INT TERM HUP
 
+# Preserve snapshot/principal verification and the flat artifacts. A configured
+# encrypted off-host DB+recordings copy must verify before local retention.
+if [[ -n "${TALKY_OFFHOST_ROOT:-}" ]]; then
+    python3 "${script_dir}/../../scripts/database/offhost.py" publish --dump "${dump}"
+fi
+# An encrypted copy on the owner's FTP server (TLS required), proved to decrypt
+# to this dump and size-checked on the server before local retention runs.
+# Settings live in /etc/talky/db-backup.env (root only); see offsite_ftp.py.
+if [[ -n "${TALKY_FTP_BACKUP_URL:-}" ]]; then
+    python3 "${script_dir}/../../scripts/database/offsite_ftp.py" publish --dump "${dump}"
+fi
+
 # --- retention ----------------------------------------------------------------
 find "${backup_dir}" -maxdepth 1 -type f \( -name 'talky-*.dump' -o -name 'talky-*.dump.sha256' \) \
     -mtime "+${keep_days}" -delete

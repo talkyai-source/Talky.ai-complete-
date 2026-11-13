@@ -38,7 +38,7 @@ function SupportArticlesContent({ generation }: { generation: number }) {
     const load = useCallback(() => api.getSupportArticles({ q, source, published }), [q, source, published]);
     const { data, error, loading, refresh } = useAdminRead(load, 60000, validArticles);
 
-    /** The same decision keeps its request_id across retries. */
+    /** The same decision keeps its request_id across retries; the key carries the content, because the server refuses an id reused with other content. */
     const requestIdFor = (key: string) => {
         if (pending.current?.key !== key) pending.current = { key, request_id: crypto.randomUUID() };
         return pending.current.request_id;
@@ -70,7 +70,7 @@ function SupportArticlesContent({ generation }: { generation: number }) {
 
     const save = (draft: ArticleDraft) => {
         if (editing.mode === 'create') {
-            void run(`create:${draft.slug}`, (request_id) => api.createSupportArticle({ request_id, ...draft }), `Article "${draft.title}" created.`);
+            void run(`create:${JSON.stringify(draft)}`, (request_id) => api.createSupportArticle({ request_id, ...draft }), `Article "${draft.title}" created.`);
         } else if (editing.mode === 'edit') {
             const id = editing.article.id;
             void run(`edit:${id}:${JSON.stringify(draft)}`, (request_id) => api.updateSupportArticle(id, {

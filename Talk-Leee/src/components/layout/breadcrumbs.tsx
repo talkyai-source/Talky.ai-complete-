@@ -17,6 +17,7 @@ const LABELS: Record<string, string> = {
     "inbound-campaigns": "Inbound Campaigns",
     calls: "Call History",
     contacts: "Contacts",
+    "do-not-call": "Do-Not-Call list",
     analytics: "Analytics",
     billing: "Billing",
     recordings: "Recordings",
@@ -45,7 +46,7 @@ export function Breadcrumbs({ className, labels }: { className?: string; labels?
     });
 
     return (
-        <nav aria-label="Breadcrumb" className={cn("flex flex-wrap items-center gap-1 text-xs text-muted-foreground", className)}>
+        <nav aria-label="Breadcrumb" className={cn("flex flex-wrap items-center gap-x-1 gap-y-2 text-xs text-muted-foreground", className)}>
             {crumbs.map((c) => (
                 <span key={c.href} className="flex items-center gap-1">
                     {c.isLast ? (

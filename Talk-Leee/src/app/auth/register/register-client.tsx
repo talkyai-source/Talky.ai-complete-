@@ -7,6 +7,7 @@ import { flushSync } from "react-dom";
 import { ArrowLeft, ArrowRight, Building2, KeyRound, Loader2, Lock, Mail, PhoneCall, ShieldCheck, User } from "lucide-react";
 import { api } from "@/lib/api";
 import { failedReadMessage } from "@/components/states/page-states";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import { useAuth } from "@/lib/auth-context";
 import { markFreshLogin } from "@/lib/http-client";
 import { postAuthDashboard } from "@/lib/post-auth-navigation";
@@ -15,6 +16,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
+import { useTurnstile } from "@/components/auth/turnstile-widget";
 
 type Step = "form" | "otp" | "password";
 
@@ -33,6 +35,9 @@ export default function RegisterClientPage() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
+    // Both the first send and "Resend" start a signup, and Cloudflare accepts
+    // a Turnstile token once, so each gets its own (QA F4-12).
+    const turnstile = useTurnstile("signup");
     const nameInputRef = useRef<HTMLInputElement | null>(null);
     const otpInputRef = useRef<HTMLInputElement | null>(null);
     const passwordInputRef = useRef<HTMLInputElement | null>(null);
@@ -73,11 +78,12 @@ export default function RegisterClientPage() {
         setMessage("");
 
         try {
-            const response = await api.signupStart(
+            const response = await turnstile.run((token) => api.signupStart(
                 formData.name.trim(),
                 formData.businessName.trim(),
                 formData.email.trim(),
-            );
+                token,
+            ));
             setFormData((current) => ({ ...current, email: response.email }));
             setOtpCode("");
             setMessage(response.message || "Verification code sent! Check your email.");
@@ -114,6 +120,10 @@ export default function RegisterClientPage() {
         setError("");
         setMessage("");
 
+        if (password.length < MIN_PASSWORD_LENGTH) {
+            setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+            return;
+        }
         if (password !== confirmPassword) {
             setError("Passwords do not match.");
             return;
@@ -194,11 +204,12 @@ export default function RegisterClientPage() {
         setMessage("");
 
         try {
-            const response = await api.signupStart(
+            const response = await turnstile.run((token) => api.signupStart(
                 formData.name.trim(),
                 formData.businessName.trim(),
                 formData.email.trim(),
-            );
+                token,
+            ));
             setFormData((current) => ({ ...current, email: response.email }));
             setOtpCode("");
             setMessage(response.message || "New verification code sent!");
@@ -310,6 +321,8 @@ export default function RegisterClientPage() {
                                     </div>
                                 </div>
 
+                                {turnstile.widget}
+
                                 {error ? (
                                     <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
                                         {error}
@@ -318,7 +331,7 @@ export default function RegisterClientPage() {
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
-                                <Button type="submit" className="w-full" disabled={loading}>
+                                <Button type="submit" className="w-full" disabled={loading || turnstile.pending}>
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -387,6 +400,8 @@ export default function RegisterClientPage() {
                                         {message}
                                     </div>
                                 ) : null}
+
+                                {turnstile.widget}
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
@@ -418,7 +433,7 @@ export default function RegisterClientPage() {
                                         type="button"
                                         onClick={handleResend}
                                         className="text-sm text-foreground font-medium hover:underline"
-                                        disabled={loading}
+                                        disabled={loading || turnstile.pending}
                                     >
                                         Didn&apos;t receive it? Resend
                                     </button>
@@ -441,12 +456,12 @@ export default function RegisterClientPage() {
                                         <Input
                                             id="password"
                                             type="password"
-                                            placeholder="At least 8 characters"
+                                            placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                                             value={password}
                                             onChange={(e) => setPassword(e.target.value)}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                             autoComplete="new-password"
                                             ref={passwordInputRef}
@@ -468,7 +483,7 @@ export default function RegisterClientPage() {
                                             onChange={(e) => setConfirmPassword(e.target.value)}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                             autoComplete="new-password"
                                         />
@@ -486,7 +501,7 @@ export default function RegisterClientPage() {
                                 <Button
                                     type="submit"
                                     className="w-full"
-                                    disabled={loading || password.length < 8 || confirmPassword.length < 8}
+                                    disabled={loading || password.length < MIN_PASSWORD_LENGTH || confirmPassword.length < MIN_PASSWORD_LENGTH}
                                 >
                                     {loading ? (
                                         <>

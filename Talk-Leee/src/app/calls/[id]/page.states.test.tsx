@@ -25,6 +25,8 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const nothing = () => null;
 loader._load = function (id, ...args) {
+    // Their side reads the signed-in user for the account timezone.
+    if (id.includes("lib/auth-context")) return { useAuth: () => ({ user: { id: "user-1", tenant_id: "tenant-1" } }) };
     if (id === "next/navigation") return { useParams: () => ({ id: "call-1" }), useRouter: () => ({ push: () => {}, back: () => {} }) };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("components/calls/voice-feedback-recorder")) return { VoiceFeedbackRecorder: nothing };

@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { emailAuditStore, resetEmailAuditStoreForTests } from "@/lib/email-audit";
+import { emailAuditStorageKey, emailAuditStore, resetEmailAuditStoreForTests } from "@/lib/email-audit";
+
+const identity = { tenantId: "test-tenant", userId: "test-user" };
+const storageKey = emailAuditStorageKey(identity);
 
 function getGlobalWindow() {
     return (globalThis as unknown as { window?: unknown }).window;
@@ -33,6 +36,7 @@ test("createAttempt records pending entry and persists to storage", () => {
     resetEmailAuditStoreForTests();
 
     emailAuditStore.hydrateIfNeeded();
+    emailAuditStore.setIdentity(identity);
     const id = emailAuditStore.createAttempt({ to: ["a@x.com"], templateId: "tpl-1", subject: "Hello" });
     const snap = emailAuditStore.getSnapshot();
 
@@ -45,7 +49,7 @@ test("createAttempt records pending entry and persists to storage", () => {
     assert.equal(snap.items[0]!.templateId, "tpl-1");
     assert.equal(snap.items[0]!.subject, "Hello");
 
-    const saved = mockWindow.localStorage.getItem("talklee.email.audit.v1");
+    const saved = mockWindow.localStorage.getItem(storageKey);
     assert.ok(saved);
     const parsed = JSON.parse(saved!) as unknown;
     assert.ok(Array.isArray(parsed));
@@ -60,6 +64,7 @@ test("markSuccess and markFailed update the audit entry", () => {
     resetEmailAuditStoreForTests();
 
     emailAuditStore.hydrateIfNeeded();
+    emailAuditStore.setIdentity(identity);
     const id = emailAuditStore.createAttempt({ to: ["a@x.com"], templateId: "tpl-1" });
     emailAuditStore.markSuccess(id, { messageId: "msg-1", providerStatus: "queued" });
     let snap = emailAuditStore.getSnapshot();
@@ -83,6 +88,7 @@ test("exportHistoryJson includes exportedAt and items", () => {
     resetEmailAuditStoreForTests();
 
     emailAuditStore.hydrateIfNeeded();
+    emailAuditStore.setIdentity(identity);
     emailAuditStore.createAttempt({ to: ["a@x.com"], templateId: "tpl-1" });
 
     const json = emailAuditStore.exportHistoryJson();
@@ -101,13 +107,14 @@ test("clearAll removes items and clears storage", () => {
     resetEmailAuditStoreForTests();
 
     emailAuditStore.hydrateIfNeeded();
+    emailAuditStore.setIdentity(identity);
     emailAuditStore.createAttempt({ to: ["a@x.com"], templateId: "tpl-1" });
-    assert.ok(mockWindow.localStorage.getItem("talklee.email.audit.v1"));
+    assert.ok(mockWindow.localStorage.getItem(storageKey));
 
     emailAuditStore.clearAll();
     const snap = emailAuditStore.getSnapshot();
     assert.equal(snap.items.length, 0);
-    assert.equal(mockWindow.localStorage.getItem("talklee.email.audit.v1"), null);
+    assert.equal(mockWindow.localStorage.getItem(storageKey), null);
 
     setGlobalWindow(prevWindow);
 });

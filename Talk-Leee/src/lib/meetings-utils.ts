@@ -116,6 +116,22 @@ export function formatMeetingDateTime(iso: string | undefined) {
     return new Date(ms).toLocaleString();
 }
 
+// QA F4-09: an allowlist, not a deny-list. Browsers drop tabs, newlines and
+// other control characters inside a URL before following it, so
+// "java&#9;script:" slipped past a startsWith("javascript:") check.
+const SAFE_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:"]);
+
+function isSafeLink(value: string) {
+    const compact = value.replace(/[\u0000- \u007f]+/g, "");
+    if (!compact) return false;
+    try {
+        // Relative links resolve against an https base and stay allowed.
+        return SAFE_LINK_PROTOCOLS.has(new URL(compact, "https://notes.invalid/").protocol);
+    } catch {
+        return false;
+    }
+}
+
 export function sanitizeMeetingNotesHtml(html: string) {
     const trimmed = html.trim();
     if (trimmed.length === 0) return "";
@@ -142,8 +158,7 @@ export function sanitizeMeetingNotesHtml(html: string) {
                 continue;
             }
             if (name === "href" || name === "src") {
-                const v = value.trim().toLowerCase();
-                if (v.startsWith("javascript:") || v.startsWith("data:")) {
+                if (!isSafeLink(value)) {
                     el.removeAttribute(a.name);
                     continue;
                 }

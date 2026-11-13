@@ -135,6 +135,8 @@ class ReminderWorker:
         callback_task = asyncio.create_task(self._voice_callback_loop())
         billing_task = asyncio.create_task(self._billing_delivery_loop())
         topup_usage_task = asyncio.create_task(self._topup_usage_loop())
+        connector_refresh_task = asyncio.create_task(self._connector_refresh_loop())
+        campaign_alert_task = asyncio.create_task(self._campaign_alert_loop())
 
         try:
             while self.running:
@@ -171,6 +173,16 @@ class ReminderWorker:
 
                     await asyncio.sleep(min(5 * consecutive_errors, 60))
         finally:
+            campaign_alert_task.cancel()
+            try:
+                await campaign_alert_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            connector_refresh_task.cancel()
+            try:
+                await connector_refresh_task
+            except (asyncio.CancelledError, Exception):
+                pass
             topup_usage_task.cancel()
             try:
                 await topup_usage_task
@@ -198,6 +210,29 @@ class ReminderWorker:
                 pass
 
         await self.shutdown()
+
+    async def _campaign_alert_loop(self):
+        """Deliver durable alerts while browsers are closed; never replay unknown sends."""
+        from app.domain.services.campaign_alerts import process_alert_tick
+        cursor = None
+        while self.running:
+            try:
+                cursor = await asyncio.wait_for(
+                    process_alert_tick(self._db_pool, after_tenant=cursor, limit=20), timeout=60,
+                )
+            except Exception as exc:
+                logger.warning("Campaign alert tick deferred: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
+
+    async def _connector_refresh_loop(self):
+        """Retire abandoned refresh claims without delaying reminder delivery."""
+        from app.services.connector_lifecycle import sweep_stale_refresh_claims
+        while self.running:
+            try:
+                await sweep_stale_refresh_claims(self._db_pool, limit=100)
+            except Exception as exc:
+                logger.warning("Connector refresh sweep failed: %s", type(exc).__name__)
+            await asyncio.sleep(self.POLL_INTERVAL)
 
     async def _billing_delivery_loop(self):
         """Billing email delivery is independent of financial webhook retries."""
@@ -762,6 +797,12 @@ class ReminderWorker:
 
 async def main():
     """Entry point for running reminder worker as separate process."""
+    from app.core.sentry_init import init_sentry
+    init_sentry()
+    # Workers never ran app_bootstrap.configure_logging, so contact details
+    # reached the journal in clear (QA F2-10). Idempotent.
+    from app.core.log_redact import install_pii_log_redaction
+    install_pii_log_redaction()
     logging.basicConfig(level=logging.INFO)
 
     worker = ReminderWorker()

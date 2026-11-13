@@ -102,7 +102,8 @@ def test_storage_failure_is_http_503_because_note_is_not_durable():
     )
 
     assert response.status_code == 503
-    assert response.json() == {"detail": "Could not store feedback audio"}
+    assert response.json() == {"detail": "The request could not be completed."}
+    assert "Could not store feedback audio" not in response.text
 
 
 def test_unsupported_media_type_is_rejected_before_service_call():

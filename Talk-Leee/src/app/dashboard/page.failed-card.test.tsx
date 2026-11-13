@@ -44,7 +44,7 @@ const campaigns = [{
     id: "c0", name: "Running one", status: "running", direction: "outbound", system_prompt: "", voice_id: "v", max_concurrent_calls: 1,
     total_leads: 10, calls_completed: 3, calls_failed: 1, created_at: "2026-01-01T00:00:00Z",
 }] as unknown as Campaign[];
-const summary = { total_calls: 0, answered_calls: 0, failed_calls: 0, minutes_used: 0, minutes_remaining: 100, active_campaigns: 1 };
+const summary = { timezone: "UTC", total_calls: 0, answered_calls: 0, failed_calls: 0, minutes_used: 0, minutes_remaining: 100, active_campaigns: 1 };
 type Source = "summary" | "campaigns" | "daily" | "hourly" | "byCampaign";
 const MESSAGE: Record<Source, string> = {
     summary: "Summary is unavailable.", campaigns: "Campaigns are unavailable.", daily: "Daily analytics are unavailable.",
@@ -100,7 +100,7 @@ test("a failed hourly request replaces only the Heatmap with the shared ErrorSta
 });
 
 const CASES: Array<{ source: Source; gone: string[]; kept: string[] }> = [
-    { source: "summary", gone: ["Success Rate", "Minutes Usage", "Real-Time Call Statistics"], kept: ["Heatmap", "Stacked Area Chart", "Recent Outbound Campaigns", "Event Stream"] },
+    { source: "summary", gone: ["Success Rate", "Minutes Usage", "Real-Time Call Statistics", "Heatmap", "Stacked Area Chart", "Error & Alert Timeline"], kept: ["Recent Outbound Campaigns", "Event Stream"] },
     { source: "campaigns", gone: ["Event Stream", "Recent Outbound Campaigns"], kept: ["Success Rate", "Heatmap", "Stacked Area Chart", "Real-Time Call Statistics"] },
     { source: "daily", gone: ["Stacked Area Chart", "Error & Alert Timeline"], kept: ["Success Rate", "Heatmap", "Recent Outbound Campaigns", "Real-Time Call Statistics"] },
     { source: "byCampaign", gone: ["Real-Time Call Statistics"], kept: ["Success Rate", "Heatmap", "Stacked Area Chart", "Recent Outbound Campaigns"] },

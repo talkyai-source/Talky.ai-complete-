@@ -162,10 +162,13 @@ async def test_partial_error_discards_unsubmitted_end_token_before_aggregate_par
     assert create.await_count == 1
 
 
+# The streamer has no sentence quota: every sentence is submitted, and a buffer of >= 80 characters
+# is split at its first clause (turn_streamer.py:638-640, 714-720). The long question below
+# therefore plays as two chunks, so the three cases submit 4, 4 and 5 chunks.
 @pytest.mark.parametrize("tail,expected_chunks", [
-    ("There is more detail available.", 3),
+    ("There is more detail available.", 4),
     ("Would you like more detail?", 4),
-    ("Would you like us to work through the information together, and check which details are relevant?", 4),
+    ("Would you like us to work through the information together, and check which details are relevant?", 5),
 ])
 async def test_normal_clause_chunk_cap_history_matches_only_completed_submissions(monkeypatch, tail, expected_chunks):
     from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session
@@ -189,7 +192,7 @@ async def test_normal_clause_chunk_cap_history_matches_only_completed_submission
     assert len(submitted) == expected_chunks
     assert submitted[0].endswith(",")
     assert response == " ".join(submitted)
-    assert (tail in response) == (expected_chunks == 4)  # Existing one-question grace still works.
+    assert tail in response  # no sentence quota any more (test_complete_model_answer_is_not_cut_at_a_sentence_quota)
     assert create.await_count == 1
     assert not getattr(session, "_tts_playout_completed", False)
     assert not getattr(session, "_voice_action_delivered_text", "")
@@ -201,7 +204,8 @@ async def test_normal_clause_chunk_cap_history_matches_only_completed_submission
         3,
         "Sorry for the mix-up. I don't have information about why your number was called, and I won't assume you're a customer.",
     ),
-    ("First answer. Second detail. Extra material.", 2, "First answer. Second detail."),
+    # All three sentences are spoken: there is no sentence quota (turn_streamer.py:634-720).
+    ("First answer. Second detail. Extra material.", 3, "First answer. Second detail. Extra material."),
 ])
 async def test_cap_counts_complete_sentences_instead_of_playback_chunks(monkeypatch, paragraph, expected_chunks, expected):
     from tests.unit.test_voice_pipeline_service import _make_service_for_disposition, _make_session

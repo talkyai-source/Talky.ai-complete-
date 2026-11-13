@@ -377,6 +377,11 @@ class LeadCaptureService:
         from app.core.db_utils import acquire_with_tenant
 
         async with acquire_with_tenant(self._pool, str(tenant_id)) as conn:
+            if source != "manual_edit" and (is_contact or identity):
+                from app.domain.services.caller_identity import automatic_identity_change_allowed, load_call_identity
+                call = await load_call_identity(conn, tenant_id, call_id)
+                if not automatic_identity_change_allowed(call):
+                    return False
             row = await conn.fetchrow(
                 """
                 INSERT INTO call_lead_details
@@ -587,10 +592,10 @@ class LeadCaptureService:
                        d.validation_status, d.confirmed_at, d.evidence, d.updated_at,
                        c.transcript_json AS _source_transcript
                   FROM call_lead_details d JOIN calls c ON c.id=d.call_id AND c.tenant_id=d.tenant_id
-                 WHERE d.call_id = $1::uuid
+                 WHERE d.call_id = $1::uuid AND d.tenant_id = $2::uuid
                  ORDER BY is_required DESC, field_key
                 """,
-                str(call_id),
+                str(call_id), str(tenant_id),
             )
         return [self._detail_row(r) for r in rows]
 

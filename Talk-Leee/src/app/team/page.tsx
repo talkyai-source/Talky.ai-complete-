@@ -3,17 +3,17 @@
 import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { focusInviteForm, TeamInvites } from "@/components/team/team-invites";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/select";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { backendApi } from "@/lib/backend-api";
 import { isApiClientError } from "@/lib/http-client";
 import type { TenantMember } from "@/lib/models";
 import {
-    TEAM_INVITE_UNAVAILABLE_TEXT,
     canManageTeam,
     selectableTeamRoles,
     teamMemberDisplayName,
@@ -39,16 +39,41 @@ function statusClassName(status: string) {
 
 type RowResult = { ok: true } | { ok: false; message: string };
 
+// A role change and a removal are both asked about first (QA F1-15).
+type PendingChange =
+    | { kind: "role"; member: TenantMember; role: string }
+    | { kind: "remove"; member: TenantMember };
+
+function confirmCopy(pending: PendingChange | null) {
+    if (!pending) return { title: "Remove", description: undefined, warningText: "", confirmLabel: "Remove" };
+    const who = teamMemberDisplayName(pending.member);
+    if (pending.kind === "role") {
+        return {
+            title: "Change this person's role?",
+            description: `${who} will become ${teamRoleLabel(pending.role)}.`,
+            warningText: "The change applies at once, on every device they are signed in on.",
+            confirmLabel: "Change role",
+        };
+    }
+    return {
+        title: `Remove ${who}?`,
+        description: `${who} will lose access to this workspace.`,
+        warningText: `${who} (${pending.member.email})`,
+        confirmLabel: "Remove",
+    };
+}
+
 export default function TeamPage() {
     const qc = useQueryClient();
     const { user } = useAuth();
     const canManage = canManageTeam(user?.role);
+    const ownEmail = (user?.email ?? "").toLowerCase();
     const membersQuery = useTeamMembers(canManage);
     const rolesQuery = useTeamRoles({ enabled: canManage });
 
     const [busyId, setBusyId] = useState<string | null>(null);
     const [rowErrors, setRowErrors] = useState<Record<string, string>>({});
-    const [removing, setRemoving] = useState<TenantMember | null>(null);
+    const [pending, setPending] = useState<PendingChange | null>(null);
 
     const roleOptions = useMemo(() => selectableTeamRoles(rolesQuery.data, user?.role), [rolesQuery.data, user?.role]);
 
@@ -74,6 +99,7 @@ export default function TeamPage() {
     };
 
     const members = membersQuery.data ?? [];
+    const copy = confirmCopy(pending);
 
     return (
         <DashboardLayout title="Team">
@@ -82,14 +108,12 @@ export default function TeamPage() {
                     <CardHeader>
                         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                             <CardTitle>Team</CardTitle>
-                            <div className="flex flex-col items-start gap-1 sm:items-end">
-                                <Button type="button" disabled aria-describedby="team-invite-unavailable" data-testid="team-invite-button">
+                            {/* Inviting by email (QA F1-15, D4-2): the form is further down this page. */}
+                            {canManage ? (
+                                <Button type="button" onClick={() => focusInviteForm()} data-testid="team-invite-button">
                                     Invite teammate
                                 </Button>
-                                <p id="team-invite-unavailable" className="text-xs text-muted-foreground" data-testid="team-invite-unavailable">
-                                    {TEAM_INVITE_UNAVAILABLE_TEXT}
-                                </p>
-                            </div>
+                            ) : null}
                         </div>
                     </CardHeader>
                     <CardContent className="space-y-4">
@@ -102,7 +126,7 @@ export default function TeamPage() {
                         {membersQuery.isPending ? (
                             <LoadingState />
                         ) : membersQuery.isError ? (
-                            <ErrorState message={failedReadMessage(membersQuery.error, "Request failed")} onRetry={() => { void membersQuery.refetch(); }} />
+                            <ErrorState requestId={failedReadRequestId(membersQuery.error)} message={failedReadMessage(membersQuery.error, "Request failed")} onRetry={() => { void membersQuery.refetch(); }} />
                         ) : members.length === 0 ? (
                             <EmptyState title="Try refreshing the page." message="" />
                         ) : (
@@ -110,12 +134,18 @@ export default function TeamPage() {
                                 {members.map((member) => {
                                     const busy = busyId === member.id;
                                     const rowError = rowErrors[member.id];
-                                    const roleSelectable = canManage && roleOptions.some((r) => r.name === member.role);
+                                    // Your own row is never changed from here; the server refuses it too.
+                                    const isSelf = member.email.toLowerCase() === ownEmail;
+                                    const changeable = canManage && !isSelf;
+                                    const roleSelectable = changeable && roleOptions.some((r) => r.name === member.role);
                                     return (
                                         <li key={member.id} className="p-4" data-testid="team-member-row" data-member-id={member.id}>
                                             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                                                 <div className="min-w-0">
-                                                    <div className="truncate text-sm font-semibold text-foreground" data-testid="team-member-name">{teamMemberDisplayName(member)}</div>
+                                                    <div className="flex min-w-0 items-center gap-2">
+                                                        <div className="min-w-0 truncate text-sm font-semibold text-foreground" data-testid="team-member-name">{teamMemberDisplayName(member)}</div>
+                                                        {isSelf ? <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-semibold text-muted-foreground">You</span> : null}
+                                                    </div>
                                                     <div className="truncate text-xs text-muted-foreground" data-testid="team-member-email">{member.email}</div>
                                                 </div>
                                                 <div className="flex min-w-0 flex-wrap items-center gap-2 md:justify-end">
@@ -130,7 +160,7 @@ export default function TeamPage() {
                                                             value={member.role}
                                                             onChange={(next) => {
                                                                 if (next === member.role) return;
-                                                                void run(member, () => backendApi.team.updateMember({ id: member.id, role_name: next }));
+                                                                setPending({ kind: "role", member, role: next });
                                                             }}
                                                             ariaLabel={`Role: ${member.email}`}
                                                             disabled={busy}
@@ -143,7 +173,7 @@ export default function TeamPage() {
                                                     ) : (
                                                         <span className="text-sm text-foreground" data-testid="team-member-role">{teamRoleLabel(member.role)}</span>
                                                     )}
-                                                    {canManage ? (
+                                                    {changeable ? (
                                                         <>
                                                             <Button
                                                                 type="button"
@@ -159,7 +189,7 @@ export default function TeamPage() {
                                                                 variant="destructive"
                                                                 size="sm"
                                                                 disabled={busy}
-                                                                onClick={() => setRemoving(member)}
+                                                                onClick={() => setPending({ kind: "remove", member })}
                                                             >
                                                                 Remove
                                                             </Button>
@@ -180,16 +210,24 @@ export default function TeamPage() {
                     </CardContent>
                 </Card>
 
+                {canManage ? <TeamInvites timeZone={user?.account_timezone} /> : null}
+
                 <ConfirmDialog
-                    open={removing !== null}
-                    onOpenChange={(open) => { if (!open) setRemoving(null); }}
-                    intent="delete"
-                    title={removing ? `Remove ${teamMemberDisplayName(removing)}?` : "Remove"}
-                    warningText={removing ? `${teamMemberDisplayName(removing)} (${removing.email})` : ""}
-                    confirmLabel="Remove"
+                    open={pending !== null}
+                    onOpenChange={(open) => { if (!open) setPending(null); }}
+                    intent={pending?.kind === "role" ? "suspend" : "delete"}
+                    title={copy.title}
+                    description={copy.description}
+                    warningText={copy.warningText}
+                    confirmLabel={copy.confirmLabel}
                     onConfirm={async () => {
-                        if (!removing) return;
-                        const result = await run(removing, () => backendApi.team.removeMember({ id: removing.id }));
+                        if (!pending) return;
+                        const { member } = pending;
+                        const result = await run(member, () => (
+                            pending.kind === "role"
+                                ? backendApi.team.updateMember({ id: member.id, role_name: pending.role })
+                                : backendApi.team.removeMember({ id: member.id })
+                        ));
                         if (!result.ok) throw new Error(result.message);
                     }}
                 />

@@ -104,6 +104,7 @@ class RealtimeBridge:
         knowledge_snapshot_nodes: Optional[list[dict]] = None,
         session_active: Optional[Any] = None,
         greet_on_start: bool = True,
+        opening_line: Optional[str] = None,
         barge_in_event: Optional[asyncio.Event] = None,
         transcript_service: Optional[Any] = None,
         talklee_call_id: Optional[str] = None,
@@ -193,6 +194,7 @@ class RealtimeBridge:
         # for caller-speaks-first campaigns (let semantic VAD wait for the
         # caller). Defaults True — outbound telephony is agent-first.
         self._greet_on_start = greet_on_start
+        self._opening_line = opening_line
 
         # Fix 14 — mid-call connection-loss fallback hook. When the realtime
         # socket dies while the call is still up, run() invokes this exactly
@@ -284,7 +286,10 @@ class RealtimeBridge:
             # bridge.
             if self._greet_on_start:
                 try:
-                    await self._rt.trigger_greeting()
+                    if self._opening_line:
+                        await self._rt.trigger_greeting(opening_line=self._opening_line)
+                    else:
+                        await self._rt.trigger_greeting()
                 except Exception as exc:  # noqa: BLE001
                     logger.debug("realtime_bridge greeting trigger err: %s", exc)
             # Whichever finishes first (call end, socket close, or error) ends

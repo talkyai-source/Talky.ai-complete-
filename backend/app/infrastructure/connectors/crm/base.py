@@ -14,8 +14,10 @@ from app.infrastructure.connectors.base import BaseConnector, ConnectorCapabilit
 
 
 def call_reference(body: str) -> Optional[str]:
-    match = re.search(r"^Talky\.ai call id: ([0-9a-fA-F-]{36})$", body or "", re.MULTILINE)
-    return match.group(1) if match else None
+    # Old remote records retain their original marker; new output is brand-neutral.
+    # The generated footer follows untrusted campaign/transcript content.
+    matches = re.findall(r"^(?:Call ID:|Talky\.ai call id:) ([0-9a-fA-F-]{36})$", body or "", re.MULTILINE)
+    return matches[-1] if matches else None
 
 
 class AmbiguousCRMCallReference(ValueError):

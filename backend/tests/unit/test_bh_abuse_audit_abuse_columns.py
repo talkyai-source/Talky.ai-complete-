@@ -222,8 +222,9 @@ async def test_resolve_attributes_to_the_authenticated_admin_and_audits(pool):
         )
     assert str(stored) == me.id
 
-    audit.log.assert_awaited_once()
-    kwargs = audit.log.await_args.kwargs
+    # The receipt commits with the resolution itself (QA F12-10).
+    audit.log_in_transaction.assert_awaited_once()
+    kwargs = audit.log_in_transaction.await_args.kwargs
     assert kwargs["event_type"] == AuditEvent.SUSPICIOUS_ACTIVITY
     assert kwargs["action"] == "abuse_event_marked_false_positive"
     assert kwargs["actor_id"] == me.id
@@ -252,7 +253,7 @@ async def test_resolving_twice_is_404_and_writes_no_second_audit_row(pool):
         await am.resolve_abuse_event(**kwargs)
 
     assert exc.value.status_code == 404
-    assert audit.log.await_count == 1
+    assert audit.log_in_transaction.await_count == 1
 
 
 async def test_partner_limits_render_the_partner_business_name(pool):

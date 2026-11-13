@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 class StartCampaignInput(BaseModel):
     """Input for start_campaign tool"""
     campaign_id: str
+    confirm: bool = Field(False, description="Preview the start; the authenticated user applies it to dial.")
 
 
 def _get_campaign_service(db_client: Client) -> CampaignService:
@@ -82,10 +83,12 @@ async def start_campaign(
     tenant_id: str,
     db_client: Client,
     campaign_id: str,
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = None,
+    confirm: bool = False,
 ) -> Dict[str, Any]:
     """
-    Start or resume a campaign.
+    Start or resume a campaign. Without ``confirm`` this only previews: starting
+    dials real people, so it runs only from an applied proposal or plan.
     """
     try:
         service = _get_campaign_service(db_client)
@@ -95,6 +98,17 @@ async def start_campaign(
             return refusal
 
         current_status = campaign.get("status")
+        if not confirm:
+            return {
+                "success": True, "status": "preview", "confirmation_allowed": False,
+                "message": f"Start campaign '{campaign.get('name')}'? It will begin calling its contacts.",
+                "preview": True,
+                "changes": [
+                    {"field": "Campaign", "before": None, "after": campaign.get("name") or campaign_id},
+                    {"field": "Status", "before": current_status, "after": "running"},
+                ],
+                "_apply_args": {"campaign_id": campaign_id},
+            }
         started = await service.start_campaign(campaign_id, tenant_id=tenant_id)
         if not started.success:
             return {

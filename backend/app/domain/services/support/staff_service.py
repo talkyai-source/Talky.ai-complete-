@@ -155,14 +155,14 @@ async def get_ticket(pool, actor: SupportActor, ticket_id: UUID) -> dict:
 
 
 async def _begin_staff_write(conn, audit, actor: SupportActor, ticket_id: UUID, request_id: UUID,
-                             operation: str) -> tuple[str, dict | None]:
+                             operation: str, fingerprint: str) -> tuple[str, dict | None]:
     await audit.lock_transaction(conn)
     await require_platform_admin_mutation(conn, actor.user_id)
     tenant_id = await store.fetch_ticket_tenant(conn, ticket_id)
     if tenant_id is None:
         raise SupportNotFound("Ticket not found.")
     replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                  actor_id=actor.user_id, operation=operation)
+                                  actor_id=actor.user_id, operation=operation, fingerprint=fingerprint)
     return tenant_id, replay
 
 
@@ -176,8 +176,12 @@ async def patch_ticket(pool, audit, actor: SupportActor, ticket_id: UUID, *, req
                        changes: dict[str, Any], settings: SupportSettings) -> WriteResult:
     """``changes`` holds only the fields the client sent (status, priority, category, assignee_user_id)."""
     now = _now()
+    # Which ticket, the version the client saw and the fields it sent, so a reused request_id with
+    # another decision is refused instead of replaying the first one (QA F2-09).
+    fingerprint = receipts.body_fingerprint(ticket_id=ticket_id, version=version, changes=changes)
     async with acquire_with_tenant(pool, None, user_id=actor.user_id) as conn:
-        tenant_id, replay = await _begin_staff_write(conn, audit, actor, ticket_id, request_id, "staff.ticket.patch")
+        tenant_id, replay = await _begin_staff_write(conn, audit, actor, ticket_id, request_id,
+                                                     "staff.ticket.patch", fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         ticket = await store.fetch_ticket(conn, ticket_id, tenant_id, for_update=True)
@@ -229,7 +233,7 @@ async def patch_ticket(pool, audit, actor: SupportActor, ticket_id: UUID, *, req
         ticket = await store.fetch_ticket(conn, ticket_id, tenant_id)
         body = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                    operation="staff.ticket.patch", resource_id=ticket_id, status_code=200,
-                                   response=await _detail(conn, ticket, now))
+                                   response=await _detail(conn, ticket, now), fingerprint=fingerprint)
     return WriteResult(body, 200, effects={"ticket_id": ticket_id, "tenant_id": tenant_id,
                                             "resolved": update.get("status") == "resolved"})
 
@@ -237,8 +241,14 @@ async def patch_ticket(pool, audit, actor: SupportActor, ticket_id: UUID, *, req
 async def add_staff_message(pool, audit, actor: SupportActor, ticket_id: UUID, *, request_id: UUID, body: str,
                             internal: bool, attachment_ids: Sequence[UUID]) -> WriteResult:
     now = _now()
+    # Which ticket, the text, the note flag and the attachments (a set: attach_files drops order and
+    # repeats), so a reused request_id with another message is refused (QA F2-09).
+    fingerprint = receipts.body_fingerprint(
+        ticket_id=ticket_id, body=body, internal=internal,
+        attachment_ids=sorted({str(attachment_id) for attachment_id in attachment_ids}))
     async with acquire_with_tenant(pool, None, user_id=actor.user_id) as conn:
-        tenant_id, replay = await _begin_staff_write(conn, audit, actor, ticket_id, request_id, "staff.ticket.message")
+        tenant_id, replay = await _begin_staff_write(conn, audit, actor, ticket_id, request_id,
+                                                     "staff.ticket.message", fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         ticket = await store.fetch_ticket(conn, ticket_id, tenant_id, for_update=True)
@@ -266,7 +276,7 @@ async def add_staff_message(pool, audit, actor: SupportActor, ticket_id: UUID, *
             message, projection.attachments_by_message(attachments).get(message["id"], []))
         saved = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                     operation="staff.ticket.message", resource_id=message["id"], status_code=201,
-                                    response=response)
+                                    response=response, fingerprint=fingerprint)
     return WriteResult(saved, 201, effects={"ticket_id": ticket_id, "tenant_id": tenant_id,
                                              "message_id": message["id"], "public": not internal})
 

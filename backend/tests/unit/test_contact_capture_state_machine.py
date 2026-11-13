@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import asyncio
 import inspect
 from types import SimpleNamespace
+from uuid import UUID
 
 import pytest
 
@@ -131,6 +132,7 @@ class _AsyncContext:
 class _AuditConn:
     def __init__(self):
         self.statements: list[tuple[str, tuple]] = []
+        self.identity_reads = []
 
     def transaction(self):
         return _AsyncContext(None)
@@ -140,8 +142,19 @@ class _AuditConn:
 
     async def fetchrow(self, sql, *args):
         self.statements.append((sql, args))
-        if "FROM calls" in sql:
+        if sql == (
+            "SELECT direction, route_snapshot, caller_ani_private FROM calls "
+            "WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE"
+        ):
+            assert len(args) == 2
+            assert all(isinstance(value, str) and str(UUID(value)) == value for value in args)
+            self.identity_reads.append(args)
+            return {"direction": "outbound", "route_snapshot": {}, "caller_ani_private": False}
+        if "SELECT is_test" in sql:
             return {"is_test": False}
+        if sql.lstrip().startswith("INSERT INTO call_lead_details"):
+            assert self.identity_reads, "Automatic contact writes require saved call authority"
+            assert args[:2] == self.identity_reads[-1]
         return {"id": "written"}
 
 

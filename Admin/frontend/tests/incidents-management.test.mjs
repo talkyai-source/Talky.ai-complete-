@@ -45,6 +45,31 @@ test('valid empty incident response remains an empty list with accurate zero cou
     assert.equal(find('[role="alert"]'), null);
 });
 
+// QA F1-33: an empty list used to give no reason. Incidents are only ever recorded when a monitoring
+// alert is delivered, so say that; and never say it where the read failed or rows exist.
+const whyEmpty = /incidents appear here when a monitoring alert fires/;
+
+test('an empty incident list says why it is empty', async () => {
+    state.route = r => r.path.includes('/admin/incidents?')
+        ? response(list([], { open_count: 0, critical_count: 0 })) : normal(r);
+    await draw();
+    assert.match(text(), whyEmpty);
+    assert.match(text(), /No incidents match these filters/);
+});
+
+test('the empty-list explanation is not shown when incidents exist', async () => {
+    await draw();
+    assert.match(text(), /Incident one/);
+    assert.doesNotMatch(text(), whyEmpty);
+});
+
+test('the empty-list explanation is not shown when the incident read failed', async () => {
+    state.route = (r) => r.path.includes('/admin/incidents') ? response({ detail: 'Incident records could not be read' }, 503) : normal(r);
+    await draw();
+    assert.match(find('[role="alert"]').textContent, /could not be read/);
+    assert.doesNotMatch(text(), whyEmpty);
+});
+
 for (const [name, body] of [
     ['null', null], ['missing fields', {}], ['non-array rows', { ...list(), items: null }],
     ['invalid page size', list([], { page_size: 0 })],

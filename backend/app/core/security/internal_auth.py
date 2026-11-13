@@ -66,7 +66,11 @@ def _valid_internal_token(request: Request) -> bool:
     presented = request.headers.get(_INTERNAL_TOKEN_HEADER, "")
     if not presented:
         return False
-    return secrets.compare_digest(presented, configured)
+    try:
+        return secrets.compare_digest(presented, configured)
+    except TypeError:
+        # HTTP headers can contain non-ASCII bytes; these are not valid tokens.
+        return False
 
 
 def is_internal_service_request(request: Request) -> bool:
@@ -169,7 +173,12 @@ async def require_active_session(request: Request, ctx: CallerContext, *, db_poo
             session = await get_session_by_id(conn, session_id, user_id=user_id)
             if not session:
                 raise HTTPException(status_code=401, detail="Your login session has ended. Please sign in again.")
-            await load_current_principal(conn, user_id, tenant_id=payload.get("tenant_id"))
+            principal = await load_current_principal(conn, user_id, tenant_id=payload.get("tenant_id"))
+            from app.core.security.platform_admin_mfa import (
+                denial_detail, policy_enabled, requires_verified_mfa,
+            )
+            if requires_verified_mfa(principal, session, enabled=policy_enabled()):
+                raise HTTPException(status_code=403, detail=denial_detail())
     except HTTPException:
         raise
     except PrincipalUnavailable as exc:

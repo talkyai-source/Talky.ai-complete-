@@ -1,5 +1,7 @@
 "use client";
 
+import { formatTimestamp } from "@/lib/timestamps";
+
 /**
  * Security — a main sidebar destination, not a tab inside Settings (goals.md §4).
  *
@@ -35,7 +37,6 @@ import {
     ChevronRight,
     Clock,
     Fingerprint,
-    Key,
     Loader2,
     Lock,
     Monitor,
@@ -51,6 +52,7 @@ import { useAccessToken } from "@/lib/auth-hooks";
 import { isPlatformAdminRole } from "@/lib/admin-access";
 import { getMfaStatus, disableMfa, regenerateRecoveryCodes, validateTotpCode } from "@/lib/mfa-utils";
 import { api } from "@/lib/api";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
 import MFASetup from "@/components/auth/mfa-setup";
 import PasskeyRegistration from "@/components/auth/passkey-registration";
 import PasskeyList from "@/components/auth/passkey-list";
@@ -130,6 +132,10 @@ function ChangePasswordForm() {
             e.preventDefault();
             setError(null);
             setDone(false);
+            if (next.length < MIN_PASSWORD_LENGTH) {
+                setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+                return;
+            }
             if (next !== confirm) {
                 setError("The new passwords do not match.");
                 return;
@@ -176,7 +182,8 @@ function ChangePasswordForm() {
                         value={next}
                         onChange={(e) => setNext(e.target.value)}
                         required
-                        minLength={8}
+                        minLength={MIN_PASSWORD_LENGTH}
+                        placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                         className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-ring"
                     />
                 </label>
@@ -190,6 +197,7 @@ function ChangePasswordForm() {
                         value={confirm}
                         onChange={(e) => setConfirm(e.target.value)}
                         required
+                        minLength={MIN_PASSWORD_LENGTH}
                         aria-invalid={mismatch}
                         className={`w-full rounded-lg border bg-background px-3 py-2 text-sm outline-none focus:border-ring ${mismatch ? "border-red-500/60" : "border-border"
                             }`}
@@ -197,17 +205,10 @@ function ChangePasswordForm() {
                 </label>
             </div>
 
-            {/* Not a footnote: changing your password signs out every other
-                session, which is the point of doing it after a scare.
-
-                The 15 minutes is not padding. auth/password.py:131 revokes
-                every refresh token, but a device that already holds an access
-                token keeps using it until it expires — 15 minutes at most.
-                "Signs out all of your other sessions" on its own reads as
-                instant, and someone acting on a compromise needs the real
-                number. */}
+            {/* Describe observable sign-out without assuming that this
+                deployment has activated the legacy-token lifetime cutover. */}
             <p className="text-xs text-muted-foreground">
-                Changing your password signs out all of your other sessions, each within 15 minutes.
+                Changing your password signs out your other sessions when they next refresh or make a request.
             </p>
 
             <div className="flex items-center gap-3">
@@ -377,7 +378,7 @@ export default function SecurityPage() {
                             </p>
                             {mfaVerifiedAt && (
                                 <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
-                                    Verified {new Date(mfaVerifiedAt).toLocaleString()}
+                                    Verified <time dateTime={mfaVerifiedAt} title={formatTimestamp(mfaVerifiedAt, user?.account_timezone).utc}>{formatTimestamp(mfaVerifiedAt, user?.account_timezone).label}</time>
                                 </p>
                             )}
                             <p className="mt-1 text-xs text-emerald-700/80 dark:text-emerald-300/80">
@@ -483,33 +484,14 @@ export default function SecurityPage() {
                 </Section>
 
                 {/* ── 3. Active sessions ───────────────────────────────────── */}
-                {/* WHAT REVOKING ACTUALLY DOES.
-
-                    This used to say "Revoking ends that session immediately",
-                    which is not what happens. DELETE /sessions/{id} removes the
-                    row in `security_sessions` and the legacy `talky_sid`
-                    session, and stops there: there is no column linking
-                    `refresh_tokens` to `security_sessions`, so the device's
-                    refresh token survives and it can keep minting access tokens
-                    on a rolling 7-day window
-                    (backend/app/api/v1/endpoints/sessions.py:213-249,
-                    refresh_tokens.py REFRESH_TOKEN_LIFETIME_DAYS = 7).
-
-                    The consequence — "the device you just revoked still works"
-                    — is the whole reason someone opens this section after a
-                    scare, so it goes in the always-visible description and not
-                    only in the tip (goals.md §8: do not hide essential warnings
-                    inside a tooltip).
-
-                    The password route is real, not a consolation:
-                    auth/password.py:131 calls revoke_all_user_refresh_tokens,
-                    so every device is forced to re-authenticate once its
-                    15-minute access token expires. */}
+                {/* Refresh tokens carry their login session, and authenticated
+                    requests check that session. Keep the consequence visible;
+                    do not promise an instantaneous browser-page transition. */}
                 <Section
                     icon={Monitor}
                     title="Active sessions"
-                    description="Everywhere your account is currently signed in. Revoking an entry does not sign that device out — to do that, change your password."
-                    tip="Revoking removes the entry from this list and ends its server-side session. It cannot invalidate that device's sign-in token: the two are not linked in the database. So the device keeps access, and each time it checks in it renews that access for another 7 days. Changing your password revokes the tokens instead, and every other device is signed out within 15 minutes."
+                    description="Everywhere your account is currently signed in. Revoking signs that device out at its next token refresh. New requests from that session are rejected."
+                    tip="Revoked sessions cannot refresh their sign-in tokens. New requests require that device to sign in again. You do not need to change your password to revoke one device."
                 >
                     <DeviceList token={token} />
                 </Section>
@@ -539,18 +521,6 @@ export default function SecurityPage() {
                                 icon={Shield}
                                 title="Audit and access"
                                 description="Security events and access review"
-                            />
-                            <AdminLinkCard
-                                href="/admin/api-keys"
-                                icon={Key}
-                                title="API keys and tokens"
-                                description="Not available here — no key management API is served"
-                            />
-                            <AdminLinkCard
-                                href="/admin/voice-security"
-                                icon={ShieldCheck}
-                                title="Voice security"
-                                description="Not available here — call guards are not served"
                             />
                         </div>
                     </Section>

@@ -258,9 +258,12 @@ export async function proxy(req: NextRequest) {
         .filter(Boolean)
         .join(" ");
 
+    // QA F4-12: the Cloudflare Turnstile widget is a script plus an iframe, both
+    // from challenges.cloudflare.com. That is the only addition it needs:
+    // connect-src already allows https:.
     const cspParts = [
         "default-src 'self'",
-        `script-src 'self' 'unsafe-inline'${isDev ? " 'unsafe-eval'" : ""}`,
+        `script-src 'self' 'unsafe-inline' https://challenges.cloudflare.com${isDev ? " 'unsafe-eval'" : ""}`,
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "font-src 'self' data:",
@@ -281,7 +284,7 @@ export async function proxy(req: NextRequest) {
         "base-uri 'self'",
         "form-action 'self'",
         "frame-ancestors 'none'",
-        "frame-src https://calendar.google.com",
+        "frame-src https://calendar.google.com https://challenges.cloudflare.com",
         ...(https ? ["upgrade-insecure-requests", "block-all-mixed-content"] : []),
     ];
     const csp = cspParts.join("; ");

@@ -1,5 +1,6 @@
 """POST /benchmark — full LLM+TTS pipeline latency probe."""
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import logging
 import os
@@ -221,5 +222,5 @@ async def run_benchmark(config: AIProviderConfig, current_user=Depends(get_curre
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Benchmark failed: {str(e)}"
+            detail=safe_exception_message(e, 'Benchmark failed.')
         )

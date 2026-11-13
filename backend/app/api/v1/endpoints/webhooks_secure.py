@@ -20,7 +20,6 @@ from fastapi import APIRouter, Request, HTTPException, Depends, Header, status
 
 from app.core.security.webhook_verification import (
     verify_webhook_request,
-    create_webhook_signature_headers,
     generate_webhook_secret,
     encrypt_webhook_secret,
     WebhookSecretEncryptionUnavailable,
@@ -35,7 +34,8 @@ from app.core.security.idempotency import (
 from app.core.security.api_security import rate_limit_dependency
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
-from app.api.v1.dependencies import get_db_client
+from app.api.v1.dependencies import get_audit_logger, get_db_client
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 logger = logging.getLogger(__name__)
 
@@ -349,6 +349,7 @@ async def configure_webhook(
     tenant_id: str,
     db_client: Client = Depends(get_db_client),
     _admin: None = Depends(require_internal_service),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """
     Configure a new webhook for a tenant.
@@ -389,6 +390,12 @@ async def configure_webhook(
         # PostgresClient has no execute(); write through the pool with the
         # tenant context.
         async with acquire_with_tenant(db_client.pool, tenant_id) as conn:
+            await audit_logger.lock_transaction(conn)
+            previous = await conn.fetchrow(
+                "SELECT webhook_name, is_active FROM webhook_configs "
+                "WHERE tenant_id = $1 AND webhook_name = $2 FOR UPDATE",
+                tenant_uuid, webhook_name,
+            )
             await conn.execute(
                 """
                 INSERT INTO webhook_configs (tenant_id, webhook_name, secret_key)
@@ -397,6 +404,14 @@ async def configure_webhook(
                 DO UPDATE SET secret_key = $3, is_active = TRUE, updated_at = NOW()
                 """,
                 tenant_uuid, webhook_name, stored_secret
+            )
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="webhook.configure",
+                actor_type="system", actor_role="internal_service", tenant_id=tenant_uuid,
+                resource_type="webhook_config",
+                before_state=({**dict(previous), "secret_key": "[REDACTED]"} if previous else None),
+                after_state={"webhook_name": webhook_name, "is_active": True,
+                             "secret_key": "[REDACTED]"},
             )
 
         # The verifier caches secrets for a TTL; drop any stale entry so the
@@ -417,38 +432,3 @@ async def configure_webhook(
         raise HTTPException(status_code=500, detail="Failed to configure webhook")
 
 
-# =============================================================================
-# Utility Endpoints
-# =============================================================================
-
-@router.get(
-    "/verify-test",
-    summary="Test webhook signature verification",
-    description="Endpoint to test webhook signature generation/verification",
-)
-async def verify_test(request: Request):
-    """
-    Test endpoint for webhook signature verification.
-
-    Returns instructions for testing signature verification.
-    """
-    import json
-
-    test_secret = "whsec_test_secret_for_development_only"
-    test_payload = b'{"test": "data", "timestamp": 1234567890}'
-
-    # Generate test signature
-    headers = create_webhook_signature_headers(test_payload, test_secret)
-
-    return {
-        "message": "Webhook signature test",
-        "test_secret": test_secret,
-        "test_payload": test_payload.decode(),
-        "generated_headers": headers,
-        "instructions": {
-            "1": "Send POST request to this endpoint with the test payload",
-            "2": f"Include header X-Webhook-Signature: {headers['X-Webhook-Signature']}",
-            "3": f"Include header X-Webhook-Timestamp: {headers['X-Webhook-Timestamp']}",
-            "4": "The endpoint will verify the signature and return success",
-        }
-    }

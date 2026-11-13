@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { useAuth } from "@/lib/auth-context";
 import { isPublicRoute } from "@/lib/public-routes";
 
 // One timer for the whole page load. It starts when the root layout mounts
@@ -12,23 +13,37 @@ import { isPublicRoute } from "@/lib/public-routes";
 // layout and so starts it again.
 const SHOW_DELAY_MS = 10_000;
 
-const REGISTER_PATH = "/auth/register";
+const DEMO_PATH = "/book-a-demo";
+
+// The page the popup links to never shows it. Read with or without the
+// canonical trailing slash, as isPublicRoute does.
+function isDemoPage(pathname: string): boolean {
+    const route = pathname.length > 1 && pathname.endsWith("/") ? pathname.slice(0, -1) : pathname;
+    return route === DEMO_PATH;
+}
 
 /**
- * Bottom-right invitation to create an account. Mounted once in the root
- * layout (layout.tsx), so its state lives for the life of the page load and
- * nothing is persisted: no storage, no cookie, no server state.
+ * Bottom-right invitation to book a demo. Mounted once in the root layout
+ * (layout.tsx), inside AppProviders, so its state lives for the life of the
+ * page load and nothing is persisted: no storage, no cookie, no server state.
  *
  * - Hidden until SHOW_DELAY_MS after first load; then shown on every page.
  * - Cancel hides it for the current page only. Any other page shows it at
  *   once; coming back to a cancelled page shows it SHOW_DELAY_MS after
  *   arrival. A page cancelled once keeps that wait for the rest of the load.
  * - Shown only on the public routes in src/lib/public-routes.ts (exact
- *   match), so signed-in pages, auth pages and anything new get nothing.
- * - Cancel is the only way to close it: no Escape, no outside click.
+ *   match), so signed-in pages, auth pages and anything new get nothing,
+ *   and never on /book-a-demo, the page it links to.
+ * - Shown only to anonymous visitors. While the sign-in check is unresolved
+ *   it renders nothing, so a signed-in customer never sees it, not even for
+ *   a moment; the timer still runs, so it appears as soon as the visitor is
+ *   known to be anonymous, with no extra wait.
+ * - Cancel or Escape closes it (QA F1-03: a dialog must close from the
+ *   keyboard); an outside click does not.
  */
 export function SignupPopup() {
     const pathname = usePathname();
+    const { status } = useAuth();
     const labelId = useId();
     const [armed, setArmed] = useState(false);
     // The pathname the popup is currently cleared to show on. Derived
@@ -48,7 +63,7 @@ export function SignupPopup() {
     }, []);
 
     useEffect(() => {
-        if (!armed || !isPublicRoute(pathname)) return;
+        if (!armed || !isPublicRoute(pathname) || isDemoPage(pathname)) return;
         // 0 for a page never cancelled (shows on arrival), the full wait for
         // one cancelled earlier. The timer is cleared if the visitor leaves
         // before it fires, so the wait is always counted from arrival.
@@ -62,7 +77,19 @@ export function SignupPopup() {
         setShownFor(null);
     }, [pathname]);
 
-    if (!armed || !isPublicRoute(pathname) || shownFor !== pathname) return null;
+    const visible = armed && status === "anonymous" && isPublicRoute(pathname)
+        && !isDemoPage(pathname) && shownFor === pathname;
+
+    useEffect(() => {
+        if (!visible) return;
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape") cancel();
+        };
+        window.addEventListener("keydown", onKeyDown);
+        return () => window.removeEventListener("keydown", onKeyDown);
+    }, [visible, cancel]);
+
+    if (!visible) return null;
 
     return (
         <Card
@@ -72,16 +99,16 @@ export function SignupPopup() {
             className="fixed bottom-4 right-4 z-[400] w-[min(calc(100%-2rem),24rem)] p-4"
         >
             <p id={labelId} className="text-sm leading-relaxed">
-                Ready to make your first call? Create an account to configure your AI voice agent.
+                Want to see it handle a real call? Book a short demo and we&apos;ll walk you through it.
             </p>
             <div className="mt-3 flex flex-row flex-nowrap items-center justify-center gap-3">
                 <Button
                     asChild
                     className="bg-indigo-600 text-white hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-400"
                 >
-                    <Link href={REGISTER_PATH}>Signup</Link>
+                    <Link href={DEMO_PATH}>Book a Demo</Link>
                 </Button>
-                <Button type="button" variant="destructive" onClick={cancel}>
+                <Button type="button" variant="outline" onClick={cancel}>
                     Cancel
                 </Button>
             </div>

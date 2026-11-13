@@ -258,9 +258,11 @@ async def test_actual_global_terminal_index_blocks_second_cancel_or_commit_even_
         async with acquire_with_tenant(db.pool, None) as conn:
             with pytest.raises(asyncpg.UniqueViolationError) as duplicate:
                 async with conn.transaction():
+                    # entry_hash and retention_until are NOT NULL, as in production (QA F14-02).
                     await conn.execute("""INSERT INTO audit_logs(event_id,event_time,event_type,event_category,severity,
-                        actor_id,actor_type,resource_type,resource_id,action,metadata)
-                        VALUES($1,clock_timestamp(),$2,$3,$4,$5,'user','user',$6,'user_updated',$7::jsonb)""",
+                        actor_id,actor_type,resource_type,resource_id,action,metadata,entry_hash,retention_until)
+                        VALUES($1,clock_timestamp(),$2,$3,$4,$5,'user','user',$6,'user_updated',$7::jsonb,
+                               repeat('0',64),CURRENT_DATE + 30)""",
                         uuid4(), row["event_type"], row["event_category"], row["severity"], db.users[1], db.users[1], row["metadata"])
             assert duplicate.value.constraint_name == "audit_user_operation_terminal_unique"
         assert await db.owner.fetchval("SELECT count(*) FROM audit_logs WHERE metadata->>'user_operation_id'=$1", body["operation_id"]) == 1

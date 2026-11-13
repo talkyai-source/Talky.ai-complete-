@@ -1,0 +1,25 @@
+[Unit]
+OnFailure=talky-notify@%n.service
+Description=Talky.ai saved model availability report
+After=network.target
+# Item 16 supplies the notification template and OnFailure integration.
+
+[Service]
+Type=oneshot
+User=talky
+Group=talky
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/opt/talky/backend/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/talky/backend/venv/bin/python scripts/check_saved_models.py
+TimeoutStartSec=6min
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-model-catalog
+

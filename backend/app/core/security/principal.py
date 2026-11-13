@@ -9,9 +9,29 @@ from uuid import UUID
 
 
 class PrincipalUnavailable(ValueError):
-    def __init__(self, code):
+    def __init__(self, code, reason=None):
         self.code = code
+        # Only ``account_restricted`` carries one: the call-authority reason.
+        self.reason = reason
         super().__init__(code)
+
+
+ACCOUNT_HOLD_CODE = "tenant_suspended"
+
+
+def account_hold_refusal(exc: PrincipalUnavailable):
+    """Coded sign-in refusal for a formal account hold (D4-5), else ``None``.
+
+    Callers use it only after the password or passkey proof succeeded, where a
+    generic "access unavailable" refusal was already returned.
+    """
+    if exc.code != "account_restricted":
+        return None
+    return {
+        "code": ACCOUNT_HOLD_CODE,
+        "reason": exc.reason or "account_restricted",
+        "message": "This account is on hold, so sign-in is paused. Contact support.",
+    }
 
 
 async def _require_formal_account_access(conn, tenant_id):
@@ -33,7 +53,7 @@ async def _require_formal_account_access(conn, tenant_id):
             authority = await read_formal_account_authority(conn, tenant_id)
             await conn.execute("SELECT set_config('app.bypass_rls', $1, TRUE)", previous or "")
     if not authority.allowed:
-        raise PrincipalUnavailable("account_restricted")
+        raise PrincipalUnavailable("account_restricted", reason=authority.reason)
 
 
 async def load_current_principal(conn, user_id, *, tenant_id=None):
@@ -60,6 +80,11 @@ async def load_current_principal(conn, user_id, *, tenant_id=None):
         effective_role = "platform_admin"
     else:
         if not actual_tenant or row["membership_status"] != "active":
+            if actual_tenant and row["membership_status"] == "suspended":
+                # A formal hold suspends every membership of the held account.
+                # Name the hold rather than a generic missing membership (D4-5);
+                # a teammate suspended inside a healthy account falls through.
+                await _require_formal_account_access(conn, actual_tenant)
             raise PrincipalUnavailable("membership_required")
         effective_role = row["membership_role"]
         # A tenant membership cannot create a global platform administrator.
@@ -102,9 +127,16 @@ async def load_session_principal(conn, claims):
         session_id = str(UUID(str(claims.get("sid"))))
     except (TypeError, ValueError, AttributeError) as exc:
         raise PrincipalUnavailable("session_required") from exc
-    if not await get_session_by_id(conn, session_id, user_id=user_id):
+    session = await get_session_by_id(conn, session_id, user_id=user_id)
+    if not session:
         raise PrincipalUnavailable("session_ended")
-    return await load_current_principal(conn, user_id, tenant_id=claims.get("tenant_id"))
+    principal = await load_current_principal(conn, user_id, tenant_id=claims.get("tenant_id"))
+    from app.core.security.platform_admin_mfa import (
+        MFA_REQUIRED_CODE, policy_enabled, requires_verified_mfa,
+    )
+    if requires_verified_mfa(principal, session, enabled=policy_enabled()):
+        raise PrincipalUnavailable(MFA_REQUIRED_CODE)
+    return principal
 
 
 # Server-only context propagated to existing assistant tool tasks. No model or

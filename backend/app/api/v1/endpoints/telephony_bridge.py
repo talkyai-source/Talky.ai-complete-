@@ -24,6 +24,7 @@ Endpoints
 """
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import asyncio
 import json
@@ -42,6 +43,8 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from app.core.process_role import telephony_enabled
+from app.core.db import DatabasePoolTimeoutError
+from app.core.db_utils import acquire_connection
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
 from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
@@ -127,7 +130,7 @@ async def _require_telephony_control(
     request: Request,
     current_user: Optional[CurrentUser] = Depends(get_optional_user),
 ) -> None:
-    """Authorize process-wide adapter start/stop controls.
+    """Authorize process-wide adapter controls and diagnostics.
 
     These routes affect every tenant and every live call, so ordinary tenant
     authentication is insufficient. They are limited to the internal service
@@ -538,7 +541,7 @@ async def start_telephony(
 
     except Exception as exc:
         logger.error(f"Failed to start telephony adapter: {exc}")
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=safe_exception_message(exc, 'The request could not be completed.'))
 
 
 @router.post("/stop")
@@ -599,7 +602,7 @@ async def stop_telephony(
     )
 
 
-@router.get("/status")
+@router.get("/status", dependencies=[Depends(_require_telephony_control)])
 async def telephony_status():
     """Return health and active call information for the current adapter."""
     if not _adapter:
@@ -2659,7 +2662,7 @@ async def make_call(request: Request, body: MakeCallRequest):
         proof, recovery_required = await _cleanup_failed_origination(str(exc))
         if recovery_required and proof is not None and durable_call_id is not None:
             raise _incomplete_origination_error(proof) from exc
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail=safe_exception_message(exc, 'The request could not be completed.'))
 
 
 async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
@@ -2680,7 +2683,7 @@ async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
     if not getattr(container, "is_initialized", False) or container.db_pool is None:
         raise HTTPException(status_code=503, detail="Call ownership check unavailable")
     try:
-        async with container.db_pool.acquire() as conn:
+        async with acquire_connection(container.db_pool) as conn:
             # The transaction is load-bearing, not decoration: SET LOCAL outside
             # an explicit transaction applies only to the implicit single-statement
             # transaction it runs in, and is discarded before the fetchrow below.
@@ -2690,10 +2693,14 @@ async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:
                 await conn.execute("SET LOCAL app.bypass_rls = 'on'")
                 row = await conn.fetchrow(
                     "SELECT tenant_id FROM calls "
-                    "WHERE external_call_uuid = $1 OR provider_call_id = $1 "
+                    "WHERE (external_call_uuid = $1 OR provider_call_id = $1) "
+                    "AND tenant_id = $2::uuid "
                     "ORDER BY created_at DESC LIMIT 1",
                     call_id,
+                    ctx.tenant_id,
                 )
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.error("call ownership lookup failed call_id=%s err=%s", call_id, exc)
         raise HTTPException(status_code=503, detail="Call ownership check failed")
@@ -2983,7 +2990,24 @@ def _empty_campaign_termination_summary(
     }
 
 
-async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
+# The campaign calls the stop/pause sweep fences and must prove gone. Also the
+# "calls still ending" count on GET /campaigns/{id} (D3-15/16), so the count
+# reaches 0 exactly when the sweep has nothing left to prove.
+CAMPAIGN_LIVE_CALL_STATUSES = (
+    "queued",
+    "dialing",
+    "ringing",
+    "answered",
+    "in_call",
+    "initiated",
+    "in_progress",
+    "termination_pending",
+)
+
+
+async def hangup_calls_for_campaign(
+    campaign_id: str, *, tenant_id: str | None = None,
+) -> dict[str, object]:
     """Fence, request, and prove every active campaign-call hangup.
 
     Selected calls are atomically moved to non-terminal
@@ -2995,6 +3019,11 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
     Lookup failures are explicit and missing provider identities remain in the
     selected/deferred totals; neither case can masquerade as zero live calls.
     """
+    if not tenant_id:
+        return _empty_campaign_termination_summary(
+            status="lookup_failed",
+            error="tenant_context_required",
+        )
 
     try:
         from app.core.container import get_container
@@ -3015,16 +3044,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
             error="database_unavailable",
         )
 
-    active = (
-        "queued",
-        "dialing",
-        "ringing",
-        "answered",
-        "in_call",
-        "initiated",
-        "in_progress",
-        "termination_pending",
-    )
+    active = CAMPAIGN_LIVE_CALL_STATUSES
     active_leg_statuses = (
         "initiated",
         "ringing",
@@ -3034,7 +3054,7 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
         "active",
     )
     try:
-        async with pool.acquire() as conn:
+        async with acquire_connection(pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'on'")
                 call_rows = list(
@@ -3047,11 +3067,13 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                         FROM calls c
                         WHERE c.campaign_id=$1::uuid
                           AND c.status=ANY($2::text[])
+                          AND c.tenant_id=$3::uuid
                         ORDER BY c.id
                         FOR UPDATE OF c
                         """,
                         campaign_id,
                         list(active),
+                        tenant_id,
                     )
                 )
                 durable_ids = [str(row["durable_call_id"]) for row in call_rows]
@@ -3105,9 +3127,11 @@ async def hangup_calls_for_campaign(campaign_id: str) -> dict[str, object]:
                            SET status='termination_pending', updated_at=NOW()
                          WHERE id::text=ANY($1::text[])
                            AND status=ANY($2::text[])
+                           AND tenant_id=$3::uuid
                         """,
                         durable_ids,
                         list(active),
+                        tenant_id,
                     )
     except Exception as exc:
         logger.error("hangup_calls_for_campaign db lookup failed: %s", exc)
@@ -3405,7 +3429,7 @@ async def _execute_transfer(
         call_id = validate_transfer_call_id(call_id)
         destination = canonicalize_transfer_destination(destination, mode)
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     if not _adapter or not _adapter.connected:
         raise HTTPException(status_code=400, detail="Telephony adapter not connected")
@@ -3492,7 +3516,7 @@ def _transfer_request_metadata(request: Request) -> dict[str, Optional[str]]:
     try:
         idempotency_key = validate_transfer_idempotency_key(request.headers.get("idempotency-key"))
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     internal = is_internal_service_request(request)
     return {
         "idempotency_key": idempotency_key,
@@ -3589,7 +3613,7 @@ async def get_transfer_attempt(attempt_id: str, request: Request):
             tenant_id=None if ctx.is_internal else ctx.tenant_id,
         )
     except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Transfer attempt not found")
     return JSONResponse(result)

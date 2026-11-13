@@ -76,6 +76,7 @@ export const MeResponseSchema = z
         email: z.string().email(),
         name: z.string().optional().nullable(),
         business_name: z.string().optional().nullable(),
+        account_timezone: z.string().nullable().transform(value => value ?? undefined).optional(),
         role: z.string(),
         minutes_remaining: z.number().int().nonnegative().nullable().optional(),
         minutes_state: z.enum(["known", "unlimited", "unavailable"]).optional(),
@@ -174,10 +175,7 @@ export type HangupCallResponse = z.infer<typeof HangupCallResponseSchema>;
  * automatically picked up everywhere.
  *
  * Lazy-initialised on first read so apiBaseUrl() is resolved AFTER
- * any env-var bootstrap has run. The server-side Next.js route at
- * app/api/voices/route.ts intentionally uses its own short-lived
- * client per request (different lifecycle: Vercel function, no
- * AuthContext) — it's the only legitimate exception.
+ * any env-var bootstrap has run.
  */
 let _sharedHttpClient: ReturnType<typeof createHttpClient> | undefined;
 
@@ -374,17 +372,23 @@ class ApiClient {
      *
      * The backend decides which path it serves based on whether
      * `password` is in the body.
+     *
+     * `turnstileToken` is the Cloudflare Turnstile token (QA F4-12); the
+     * backend reads it from the body as `turnstile_token`.
      */
     async login(
         email: string,
         password?: string,
-        options?: { signal?: AbortSignal; ownsOperation?: () => boolean }
+        options?: { signal?: AbortSignal; ownsOperation?: () => boolean; turnstileToken?: string }
     ): Promise<LoginResponse> {
         const path = "/auth/login";
         const method = "POST" as const;
         const body: Record<string, string> = { email };
         if (password !== undefined) {
             body.password = password;
+        }
+        if (options?.turnstileToken) {
+            body.turnstile_token = options.turnstileToken;
         }
         const data = await this.client().request({
             path,
@@ -418,13 +422,23 @@ class ApiClient {
      * Two-step signup, step 1: send name/business/email; backend emails a 6-digit code.
      * No password, no plan_id — plan is hardcoded to "free" server-side.
      */
-    async signupStart(name: string, businessName: string, email: string): Promise<SignupStartResponse> {
+    async signupStart(
+        name: string,
+        businessName: string,
+        email: string,
+        turnstileToken?: string,
+    ): Promise<SignupStartResponse> {
         const path = "/auth/signup/start";
         const method = "POST" as const;
         const data = await this.client().request({
             path,
             method,
-            body: { name, business_name: businessName, email },
+            body: {
+                name,
+                business_name: businessName,
+                email,
+                ...(turnstileToken ? { turnstile_token: turnstileToken } : {}),
+            },
             timeoutMs: 12_000,
         });
         return this.parseOrThrow(SignupStartResponseSchema, data, { url: `${apiBaseUrl()}${path}`, method });
@@ -497,6 +511,8 @@ class ApiClient {
         const data = await this.client().request({
             path,
             method,
+            suppressAuthRedirect: true,
+            skipAuthRefresh: true,
             body: {
                 old_password: oldPassword,
                 new_password: newPassword,
@@ -607,6 +623,8 @@ class ApiClient {
         return this.client().request({
             path,
             method,
+            suppressAuthRedirect: true,
+            skipAuthRefresh: true,
             body: { password },
             timeoutMs: 10_000,
         });

@@ -212,9 +212,49 @@ const PUBLIC_AUTH_PATHS = new Set([
     "/auth/login", "/auth/verify-otp", "/auth/signup/start", "/auth/signup/verify-code",
     "/auth/signup/complete", "/auth/register", "/auth/forgot-password", "/auth/reset-password",
     "/auth/passkey-check", "/auth/passkeys/login/begin", "/auth/passkeys/login/complete", "/auth/mfa/verify",
+    // QA F1-15 / D4-2: an invited person is signed out when they join.
+    "/auth/invites/preview", "/auth/invites/accept",
 ]);
 function managesSession(path: string) {
     return PUBLIC_AUTH_PATHS.has(path) || COOKIE_SESSION_PATHS.has(path);
+}
+// QA F1-27: a failed connection used to surface the browser's own text
+// ("Failed to fetch", "Load failed"), e.g. "Save failed — Failed to fetch".
+function networkErrorMessage() {
+    return typeof navigator !== "undefined" && navigator.onLine === false
+        ? "You appear to be offline. Reconnect, then try again."
+        : "Could not reach the server. Check your connection, then try again.";
+}
+
+// Requests that sign in or out, or establish the identity itself, are never fenced.
+function identityExempt(path: string, method: HttpMethod) {
+    return managesSession(path) || (method === "GET" && (path === "/auth/me" || path === "/me" || path === "/health"));
+}
+
+// QA F1-19: a page segment can start its first reads after AuthProvider armed
+// the identity fence but before /auth/me answered. Those reads wait for that
+// check and are then sent as the verified identity. Only a verification lets
+// them go; an account change, a sign-out or an anonymous result releases them
+// unsent. The bound outlasts /auth/me's own 12 s timeout. Writes never wait.
+const IDENTITY_WAIT_MS = 15_000;
+const identityWaiters = new Set<(verified: boolean) => void>();
+function releaseIdentityWaiters(verified: boolean) {
+    for (const release of [...identityWaiters]) release(verified);
+}
+function waitForRequestIdentity(signal?: AbortSignal) {
+    return new Promise<boolean>((resolve) => {
+        if (signal?.aborted) return resolve(false);
+        const release = (verified: boolean) => {
+            identityWaiters.delete(release);
+            clearTimeout(timer);
+            signal?.removeEventListener("abort", onAbort);
+            resolve(verified);
+        };
+        const onAbort = () => release(false);
+        const timer = setTimeout(() => release(false), IDENTITY_WAIT_MS);
+        identityWaiters.add(release);
+        signal?.addEventListener("abort", onAbort);
+    });
 }
 
 export function setRequestIdentity(identity: RequestIdentity | null) {
@@ -225,11 +265,13 @@ export function setRequestIdentity(identity: RequestIdentity | null) {
     // invalidate pending work through invalidateRequestIdentity().
     if (_requestIdentity !== null && JSON.stringify(identity) !== JSON.stringify(_requestIdentity)) advanceIdentityGeneration();
     _requestIdentity = identity ? { ...identity } : null;
+    releaseIdentityWaiters(identity !== null);
 }
 
 export function invalidateRequestIdentity() {
     advanceIdentityGeneration();
     _requestIdentity = null;
+    releaseIdentityWaiters(false);
 }
 
 // The first sign-in check after a page load. A request made while it is
@@ -454,17 +496,18 @@ export function createHttpClient(config: HttpClientConfig) {
         return { token: getToken(), epoch: _identityEpoch, identity: _requestIdentity ? { ..._requestIdentity } : null };
     }
     type RequestScope = ReturnType<typeof captureScope>;
-    function needsVerifiedIdentity(scope: RequestScope, opts: HttpRequestOptions) {
-        const bootstrap = (opts.method ?? "GET") === "GET" && (opts.path === "/auth/me" || opts.path === "/me" || opts.path === "/health");
-        return !!_externalTokenProvider && !scope.identity && !managesSession(opts.path) && !bootstrap;
+    // A read that would meet the identity fence in raw() waits for the sign-in
+    // check instead (QA F1-19), and its scope is captured only after that.
+    function awaitsIdentity(opts: HttpRequestOptions) {
+        return (opts.method ?? "GET") === "GET" && !!_externalTokenProvider && !_requestIdentity && !identityExempt(opts.path, "GET");
     }
-    async function scopeAfterSignInCheck(opts: HttpRequestOptions) {
-        let scope = captureScope();
-        while (_signInCheck && needsVerifiedIdentity(scope, opts)) {
-            await _signInCheck;
-            scope = captureScope();
+    async function verifiedScope(opts: HttpRequestOptions) {
+        if (!await waitForRequestIdentity(opts.signal)) {
+            const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
+            if (opts.signal?.aborted) throw new ApiClientError({ code: "aborted", message: "Request aborted", url, method: "GET" });
+            throw new ApiClientError({ code: "identity_unverified", message: "Please wait while your sign-in is checked, then try again.", url, method: "GET" });
         }
-        return scope;
+        return captureScope();
     }
     // The current token is the scope's own, or one this client rotated it into.
     function tokenStillOurs(scope: RequestScope) {
@@ -549,13 +592,11 @@ export function createHttpClient(config: HttpClientConfig) {
         return res;
     }
 
-    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>, given?: RequestScope) {
-        let scope = given ?? captureScope();
-        if (_signInCheck && needsVerifiedIdentity(scope, opts)) scope = await scopeAfterSignInCheck(opts);
+    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>, scope = captureScope()) {
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
-        if (needsVerifiedIdentity(scope, opts)) {
+        if (_externalTokenProvider && !scope.identity && !identityExempt(opts.path, method)) {
             throw new ApiClientError({ code: "identity_unverified", message: "Please wait while your sign-in is checked, then try again.", url, method });
         }
         const headers: Record<string, string> = {};
@@ -651,8 +692,7 @@ export function createHttpClient(config: HttpClientConfig) {
     }
 
     async function request<TResponse = unknown, TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<TResponse> {
-        let scope = captureScope();
-        if (_signInCheck && needsVerifiedIdentity(scope, opts)) scope = await scopeAfterSignInCheck(opts);
+        const scope = awaitsIdentity(opts) ? await verifiedScope(opts) : captureScope();
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
@@ -680,7 +720,7 @@ export function createHttpClient(config: HttpClientConfig) {
             }
             throw new ApiClientError({
                 code: "network_error",
-                message: err instanceof Error ? err.message : "Network error",
+                message: networkErrorMessage(),
                 url,
                 method,
                 details: err,
@@ -796,8 +836,7 @@ export function createHttpClient(config: HttpClientConfig) {
      * Throws {@link ApiClientError} on a non-OK response.
      */
     async function requestRaw<TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<Response> {
-        let scope = captureScope();
-        if (_signInCheck && needsVerifiedIdentity(scope, opts)) scope = await scopeAfterSignInCheck(opts);
+        const scope = awaitsIdentity(opts) ? await verifiedScope(opts) : captureScope();
         const method = opts.method ?? "GET";
         const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
         const isRefreshCall = managesSession(opts.path);
@@ -821,7 +860,7 @@ export function createHttpClient(config: HttpClientConfig) {
             }
             throw new ApiClientError({
                 code: "network_error",
-                message: err instanceof Error ? err.message : "Network error",
+                message: networkErrorMessage(),
                 url,
                 method,
                 details: err,

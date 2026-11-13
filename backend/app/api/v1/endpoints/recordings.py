@@ -24,6 +24,7 @@ from app.api.v1.dependencies import (
     require_admin_tenant,
 )
 from app.core.db_utils import acquire_with_tenant
+from app.api.v1.validation import pagination_offset
 from app.core.security.rbac import (
     ROLE_DEFAULT_PERMISSIONS,
     Permission,
@@ -34,6 +35,7 @@ from app.core.security.rbac import (
     rbac_data_is_seeded,
 )
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services import media_privacy
 from app.domain.services.recording_service import S3Client
 
 router = APIRouter(prefix="/recordings", tags=["recordings"])
@@ -325,14 +327,14 @@ async def put_recording_policy(
 @router.get("/", response_model=RecordingListResponse)
 async def list_recordings(
     call_id: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     current_user: CurrentUser = Depends(_require_recording_permission(Permission.RECORDINGS_READ)),
     db_client: Client = Depends(get_db_client),
 ):
     """List recordings for the current tenant, optionally filtered by call."""
+    offset = pagination_offset(page, page_size)
     tenant_id = _tenant_id(current_user)
-    offset = (page - 1) * page_size
 
     # Only list playable recordings — 'failed'/'deleted'/'uploading' rows would
     # render a row + play button that 404s on click.
@@ -533,22 +535,11 @@ def _ranged_file_response(
 
 def _validated_recording_path(raw_path: str) -> str:
     """Resolve a local object key only inside the configured recording root."""
-
-    # abspath/commonpath alone is vulnerable to an in-root symlink or Windows
-    # junction whose target is outside the storage directory. Resolve both the
-    # configured root and candidate through the filesystem before comparing.
-    root = os.path.realpath(
-        os.path.abspath(os.getenv("LOCAL_RECORDINGS_DIR", "./recordings"))
-    )
-    path = os.path.realpath(os.path.abspath(raw_path))
     try:
-        inside = os.path.commonpath((root, path)) == root
-    except ValueError:
-        inside = False
-    if not inside:
+        return media_privacy.validated_recording_path(raw_path)
+    except media_privacy.RecordingPathOutsideRoot as exc:
         logger.error("recording_path_outside_root")
-        raise HTTPException(status_code=500, detail={"code": "recording_storage_invalid"})
-    return path
+        raise HTTPException(status_code=500, detail={"code": "recording_storage_invalid"}) from exc
 
 
 async def _recording_storage_row(

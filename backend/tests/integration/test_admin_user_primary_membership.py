@@ -157,6 +157,7 @@ async def test_concurrent_rbac_insert_is_not_adopted_or_deadlocked(crud_db,monke
         reviewed=(await candidate(db,admin)).json()
         body=await setup_body(db,admin,reviewed)
         task=asyncio.create_task(configure(db,admin,reviewed,prepared_body=body))
+        insert=None
         try:
             await asyncio.wait_for(entered.wait(),5)
             destination=db.tenants[2] if other_primary else db.tenants[1]
@@ -168,21 +169,29 @@ async def test_concurrent_rbac_insert_is_not_adopted_or_deadlocked(crud_db,monke
                     await asyncio.wait_for(conn.execute("""INSERT INTO tenant_users(user_id,tenant_id,role_id,is_primary,status)
                         SELECT $1,$2,id,TRUE,'active' FROM roles WHERE name='tenant_admin'""",db.users[1],destination),5)
             else:
-                inserted=await asyncio.wait_for(call(db,admin,"POST","/rbac/tenant-users",json={
-                    "user_id":str(db.users[1]),"tenant_id":str(destination),"role_name":"tenant_admin","is_primary":True}),5)
-                assert inserted.status_code==201
+                # The RBAC writer is audited (QA F12-10) and takes the audit chain lock first,
+                # as the reviewed setup did, so it waits for the setup instead of racing it.
+                insert=asyncio.create_task(call(db,admin,"POST","/rbac/tenant-users",json={
+                    "user_id":str(db.users[1]),"tenant_id":str(destination),"role_name":"tenant_admin","is_primary":True}))
+                finished,_=await asyncio.wait({insert},timeout=1)
+                assert not finished,"the RBAC insert must wait for the reviewed setup"
             release.set()
             response=await asyncio.wait_for(task,10)
-            assert response.status_code==409 and response.json()["error"]["code"]=="primary_membership_changed"
+            if other_primary:
+                assert response.status_code==409 and response.json()["error"]["code"]=="primary_membership_changed"
+            else:
+                assert response.status_code<300,response.text
+                assert (await asyncio.wait_for(insert,10)).status_code==201
             saved=await db.owner.fetchrow("SELECT tenant_id,r.name AS role FROM tenant_users tu JOIN roles r ON r.id=tu.role_id WHERE user_id=$1",db.users[1])
             assert saved["tenant_id"]==destination and saved["role"]=="tenant_admin"
             assert await db.owner.fetchval("SELECT tenant_id FROM user_profiles WHERE id=$1",db.users[1]) == (None if other_primary else db.tenants[1])
             RUN_EVIDENCE.append({"case":"membership_insert_race","writer":"restricted_service_sql" if other_primary else "normal_rbac_http",
-                                 "other_primary":other_primary,"setup_status":409})
+                                 "other_primary":other_primary,"setup_status":response.status_code})
         finally:
             release.set()
-            if not task.done():task.cancel()
-            await asyncio.gather(task,return_exceptions=True)
+            for pending in (task,insert):
+                if pending is not None and not pending.done():pending.cancel()
+            await asyncio.gather(*(t for t in (task,insert) if t is not None),return_exceptions=True)
 
 
 @pytest.mark.parametrize("audit_denied",[False,True])

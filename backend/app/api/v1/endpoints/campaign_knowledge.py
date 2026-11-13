@@ -13,6 +13,7 @@ window. The tenant's configured LLM is the fallback.
 All tenant-scoped: a campaign is only touchable by its owning tenant.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import asyncio
 import logging
@@ -67,7 +68,12 @@ SELECT COALESCE(
 
 def _require_enabled() -> None:
     if not knowledge_enabled():
-        raise HTTPException(status_code=404, detail="Campaign knowledge is not enabled")
+        # Dedicated code (D3-11). The message is matched word for word by the
+        # frontend's "feature off" check: do not reword it.
+        raise HTTPException(status_code=404, detail={
+            "code": "knowledge_disabled",
+            "message": "Campaign knowledge is not enabled",
+        })
 
 
 def _require_tenant(current_user: CurrentUser) -> str:
@@ -242,7 +248,7 @@ async def upload_knowledge(
     try:
         prepared = prepare_markdown(raw_md)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc))
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.'))
 
     source_id: str | None = None
     try:
@@ -328,7 +334,7 @@ async def upload_knowledge(
         if isinstance(exc, HTTPException):
             raise
         if isinstance(exc, (KnowledgeNodeLimitError, ValueError)):
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
         if isinstance(exc, KnowledgeEnrichmentTimeoutError):
             raise HTTPException(
                 status_code=504,

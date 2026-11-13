@@ -1,4 +1,5 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky.ai Support jobs (deadline checks every 15 min, hourly housekeeping)
 After=network.target
 # One-shot, triggered by talky-support-jobs.timer. Do NOT add Restart= here —
@@ -6,6 +7,16 @@ After=network.target
 # Does nothing while SUPPORT_ENABLED=false.
 
 [Service]
+OOMScoreAdjust=300
+User=talky
+Group=talky
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+ReadWritePaths=/opt/talky/backend/recordings /opt/talky/backend/audio_files /opt/talky/backend/feedback_audio /opt/talky/backend/support_attachments
 Type=oneshot
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env

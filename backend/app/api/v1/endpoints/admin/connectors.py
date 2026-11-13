@@ -2,6 +2,7 @@
 Admin Connectors Endpoints
 Connector management: list, detail, reconnect, revoke
 """
+from app.core.error_handlers import safe_exception_message
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel
 from typing import List, Optional
@@ -11,6 +12,7 @@ from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, require_platform_admin, CurrentUser
+from app.api.v1.validation import pagination_offset
 from ._serialization import AdminResponseModel
 from app.services.connector_lifecycle import ConnectorActor, ConnectorLifecycle, ConnectorLifecycleError, revoke_token_at_provider
 
@@ -99,7 +101,7 @@ async def list_admin_connectors(
     status: Optional[str] = Query(None, description="Filter by status"),
     type: Optional[str] = Query(None, description="Filter by type"),
     provider: Optional[str] = Query(None, description="Filter by provider"),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100)
 ):
     """
@@ -107,6 +109,7 @@ async def list_admin_connectors(
     
     Returns paginated list with token expiry status.
     """
+    offset = pagination_offset(page, page_size)
     filters, args = [], []
     for column, value in (("tenant_id", tenant_id), ("status", status), ("type", type), ("provider", provider)):
         if value is not None:
@@ -140,7 +143,7 @@ async def list_admin_connectors(
                     a.account_email,a.token_expires_at,a.last_refreshed_at,a.refresh_state,a.creation_ties
                 FROM connectors c JOIN tenants t ON t.id=c.tenant_id""" + account_join + where +
                 f" ORDER BY c.created_at DESC,c.id DESC LIMIT ${len(args)+1} OFFSET ${len(args)+2}",
-                *args, page_size, (page-1)*page_size)
+                *args, page_size, offset)
         items = []
         for row in rows:
             item = dict(row)
@@ -232,7 +235,7 @@ async def get_admin_connector_detail(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get connector: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to get connector.')
         )
 
 
@@ -265,7 +268,7 @@ async def force_reconnect_connector(
     except HTTPException:
         raise
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Refresh could not be confirmed. Check connection status; reauthorize if its outcome is unknown.") from exc
 
@@ -298,6 +301,6 @@ async def revoke_connector(
     except HTTPException:
         raise
     except ConnectorLifecycleError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
+        raise HTTPException(status_code=exc.status_code, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Could not confirm connector disconnect. Check its current status before trying again.") from exc

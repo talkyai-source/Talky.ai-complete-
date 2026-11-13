@@ -21,6 +21,7 @@ the real endpoint handlers exercise the real fix.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -77,6 +78,12 @@ class _FakeConn:
 
     async def execute(self, sql: str, *args: Any):
         stripped = sql.strip()
+        timeout_setting = re.fullmatch(
+            r"SET LOCAL (?:statement_timeout|lock_timeout) = '([1-9][0-9]*)ms'", stripped,
+        )
+        if timeout_setting and int(timeout_setting.group(1)) <= 2147483647:
+            assert not args
+            return "SET"
         if stripped.startswith("SET LOCAL app.current_tenant_id"):
             self.guc = stripped.split("'")[1]
             return "SET"
@@ -199,6 +206,13 @@ def rig(monkeypatch):
     monkeypatch.setattr(
         "app.domain.services.minutes_quota.tenant_minutes_status", _fake_minutes_status,
     )
+
+    async def _account_may_call(_db_client, _tenant_id):
+        # The account-authority gate (D4-7) is covered by its own test; this
+        # rig proves where the event rows land.
+        return None
+
+    monkeypatch.setattr(campaigns_ep, "_require_account_can_call", _account_may_call)
     user = CurrentUser(id="user-1", email="u@t.example", tenant_id=TENANT_ID)
     return pool, db, user
 

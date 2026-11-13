@@ -1,6 +1,7 @@
 """Cross-tenant Admin APIs for call recordings and reviewer feedback notes."""
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import asyncio
 import base64
@@ -25,10 +26,12 @@ from app.api.v1.dependencies import (
     require_platform_admin,
 )
 from app.api.v1.endpoints.recordings import _ranged_file_response
+from app.api.v1.validation import pagination_offset
 from app.core.db_utils import acquire_with_tenant
 from app.core.postgres_adapter import Client
 from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services import media_privacy
 from app.domain.services.call_feedback_service import (
     CallFeedbackService,
     FeedbackAudioStorage,
@@ -300,29 +303,7 @@ class _DeletionClaim:
         )
 
 
-_ACTIVE_COMPLIANCE_HOLD_SQL = """
-    EXISTS (
-        SELECT 1
-        FROM suspension_events se
-        WHERE se.suspension_type = 'COMPLIANCE'
-          AND se.is_active = TRUE
-          AND se.restored_at IS NULL
-          AND (se.suspended_until IS NULL OR se.suspended_until > NOW())
-          AND (
-              (se.target_type = 'tenant'
-               AND se.target_id = {tenant_expression})
-              OR (
-                  se.target_type = 'partner'
-                  AND EXISTS (
-                      SELECT 1
-                      FROM tenants held_tenant
-                      WHERE held_tenant.id = {tenant_expression}
-                        AND held_tenant.white_label_partner_id = se.target_id
-                  )
-              )
-          )
-    )
-"""
+_ACTIVE_COMPLIANCE_HOLD_SQL = media_privacy.ACTIVE_COMPLIANCE_HOLD_SQL
 
 
 def _date_bounds(
@@ -422,7 +403,7 @@ async def _safe_audit(audit_logger: AuditLogger, **kwargs) -> None:
 
 @router.get("/recordings", response_model=AdminRecordingListResponse)
 async def list_admin_recordings(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None, max_length=200),
     status: str | None = Query(None, max_length=32),
@@ -435,6 +416,7 @@ async def list_admin_recordings(
     db_client: Client = Depends(get_db_client),
 ) -> AdminRecordingListResponse:
     """List recording metadata across tenants with operational filters."""
+    offset = pagination_offset(page, page_size)
     conditions: list[str] = []
     params: list[Any] = []
 
@@ -471,7 +453,6 @@ async def list_admin_recordings(
         LEFT JOIN tenants t ON t.id = r.tenant_id
         LEFT JOIN campaigns cp ON cp.id = r.campaign_id
     """
-    offset = (page - 1) * page_size
     async with acquire_with_tenant(db_client.pool, None) as conn:
         total = await conn.fetchval(
             f"SELECT COUNT(*) {joins} {where}",
@@ -529,7 +510,7 @@ _FEEDBACK_SELECT = f"""
 
 @router.get("/feedback", response_model=AdminFeedbackListResponse)
 async def list_admin_feedback(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
     search: str | None = Query(None, max_length=200),
     transcript_status: str | None = Query(None, max_length=16),
@@ -542,6 +523,7 @@ async def list_admin_feedback(
     db_client: Client = Depends(get_db_client),
 ) -> AdminFeedbackListResponse:
     """List reviewer voice notes and transcription state across tenants."""
+    offset = pagination_offset(page, page_size)
     conditions: list[str] = []
     params: list[Any] = []
 
@@ -572,7 +554,6 @@ async def list_admin_feedback(
         add("f.created_at < ${index}", end)
 
     where = "WHERE " + " AND ".join(conditions) if conditions else ""
-    offset = (page - 1) * page_size
     async with acquire_with_tenant(db_client.pool, None) as conn:
         total = await conn.fetchval(
             f"SELECT COUNT(*) {_FEEDBACK_JOINS} {where}",
@@ -634,17 +615,10 @@ async def _feedback_storage_row(db_client: Client, feedback_id: UUID):
 
 
 def _validated_recording_path(raw_path: str) -> str:
-    root = os.path.realpath(
-        os.path.abspath(os.getenv("LOCAL_RECORDINGS_DIR", "./recordings"))
-    )
-    path = os.path.realpath(os.path.abspath(raw_path))
     try:
-        inside = os.path.commonpath((root, path)) == root
-    except ValueError:
-        inside = False
-    if not inside:
-        raise HTTPException(status_code=500, detail="Recording path is outside storage root")
-    return path
+        return media_privacy.validated_recording_path(raw_path)
+    except media_privacy.RecordingPathOutsideRoot as exc:
+        raise HTTPException(status_code=500, detail="Recording path is outside storage root") from exc
 
 
 @router.get("/recordings/{recording_id}/audio")
@@ -742,7 +716,7 @@ async def get_admin_feedback_audio(
             return RedirectResponse(url, status_code=302)
         data = await storage.read(row)
     except FeedbackStorageError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     await _safe_audit(
         audit_logger,
         event_type=AuditEvent.RECORD_EXPORTED,
@@ -786,11 +760,11 @@ async def retry_admin_feedback_transcription(
             expected_feedback_id=str(feedback_id),
         )
     except FeedbackTranscriptionInProgressError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except FeedbackNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
+        raise HTTPException(status_code=404, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     except FeedbackStorageError as exc:
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
+        raise HTTPException(status_code=503, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     refreshed = await _feedback_storage_row(db_client, feedback_id)
     if not refreshed:
@@ -822,12 +796,7 @@ def _json_object(value: Any) -> dict[str, Any]:
 
 
 async def _has_active_compliance_hold(conn: Any, tenant_id: Any) -> bool:
-    return bool(
-        await conn.fetchval(
-            "SELECT " + _ACTIVE_COMPLIANCE_HOLD_SQL.format(tenant_expression="$1"),
-            tenant_id,
-        )
-    )
+    return await media_privacy.has_active_compliance_hold(conn, tenant_id)
 
 
 def _claim_from_row(row: Any, attempt_actor_id: UUID | None = None) -> _DeletionClaim:

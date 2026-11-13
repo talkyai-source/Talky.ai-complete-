@@ -288,6 +288,61 @@ Redis AOF at `everysec` gives roughly a 1 s RPO. For a snapshot:
 For tighter RPO than 24 h, enable WAL archiving (`wal-g` / `pgBackRest`) or move
 to managed Postgres.
 
+### Recovery coverage and encryption keys
+
+The database archive alone is not a host-loss recovery package. Before paid
+launch, the recovery owner must record an approved off-host destination,
+encryption/retention policy, remote checksum and freshness evidence, and a
+tested way to retrieve the package without access to the original server.
+The current `db-backup.sh` publishes local database dumps only. The separate
+[database recovery tools](../scripts/database/README.md) also leave off-host
+transport to the approved operating process; neither proves that production
+has encrypted remote copies or point-in-time recovery.
+
+Keep a protected copy of the complete required configuration off-host, with
+these three independent keys recoverable through the approved secret store:
+
+| Key | Data that depends on it |
+|---|---|
+| `SECRETS_MASTER_KEY` | Envelope-encrypted tenant secrets |
+| `CONNECTOR_ENCRYPTION_KEY` | Connector tokens and other credentials using the connector encryption service |
+| `TOTP_ENCRYPTION_KEY` | Two-factor authentication secrets |
+
+Record custody references and authorized recovery operators, never key values,
+in evidence. A new random key cannot decrypt an old backup. Preserve required
+historical keys during a reviewed rotation; do not rotate keys to make a
+failed restore appear healthy. This includes `CONNECTOR_ENCRYPTION_KEYS_OLD`
+when restored ciphertext still depends on those versions. Restoring `.env` from the same lost disk is not
+off-host key recovery.
+
+During an isolated restore, verify a known test record from each encryption
+class using the recovered keys, without printing plaintext or contacting any
+provider. The audited wrong-key repair in `SecretsManager.get()` covers that
+component only: no production code calls that method. Live provider, trunk,
+connector and webhook secret reads use the encryption service and need their
+own restore/decryption verification. The existing credential resolver can fall
+back to the platform provider key when tenant-key decryption fails; this older
+behavior is not repaired by the secret audit change.
+
+Verify that a wrong key refuses access; tenant-secret reads must
+also record a failed audit entry without increasing successful access counts.
+Missing keys, failed decryption or failed audit persistence block acceptance.
+Repeat the key-recovery drill at least quarterly and after key/custody changes.
+
+Recordings and other objects require their own versioned or encrypted backup,
+checksum inventory and restore rehearsal. Compare the restored database's
+object references with the recovered files. Apply deletion and retention
+reconciliation before reopening access; never resurrect an erased customer's
+data or replay stale payment/call/queue effects automatically.
+
+Agree RPO and RTO separately for the database, objects, keys/configuration and
+queue reconciliation, then measure a complete host-loss drill against those
+targets. No target or achieved objective is asserted by this runbook. A new
+WAL/HA architecture needs an explicit operating decision under the production
+readiness plan. Single-tenant recovery is also not implemented by the current
+whole-database restore tools: keep its isolated dry-run, foreign-key ordering,
+tenant/RLS verification and deletion-reconciliation acceptance open.
+
 ## Data retention
 
 `talky-cleanup.timer` runs `app.workers.cleanup_worker` nightly at 03:00,

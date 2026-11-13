@@ -18,9 +18,11 @@ import logging
 import re
 from typing import Optional, Any
 
-from fastapi import Request, status
+from fastapi import HTTPException, Request, status
+from starlette.datastructures import MutableHeaders
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import JSONResponse
+from app.core.error_handlers import http_exception_handler
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +121,7 @@ SUSPICIOUS_UAS = [
 # Against the routes that actually exist that exempted only /api/v1/health and
 # /api/v1/healthz/ready, and silently missed /api/v1/healthz/live,
 # /api/v1/healthz/deep, /api/v1/healthz/workers and /api/v1/health/detailed —
-# all of them unauthenticated probes meant to be polled by monitoring. A suffix
+# all of them probes meant to be polled by monitoring. A suffix
 # test is exactly the wrong shape here: it can only ever cover the literal leaf
 # names someone remembered to list, so every new health sub-route re-opens the
 # same hole.
@@ -129,6 +131,8 @@ SUSPICIOUS_UAS = [
 # A path is a monitoring probe iff it is rooted at a probe namespace
 # (/healthz/..., /health/...). Everything under such a root is covered
 # automatically, so adding GET /healthz/whatever tomorrow needs no change here.
+# This is a rate-limit exemption, not authentication: health handlers still
+# require the internal-service token before returning diagnostic details.
 #
 # WHY THIS DOES NOT OVER-EXEMPT
 # Anchoring at the root segment (rather than a substring or suffix test) is what
@@ -187,7 +191,7 @@ _API_VERSION_PREFIX_RE = re.compile(r"^/api/v\d+(?=/|$)")
 
 # First path segment (after the optional version prefix) that marks a genuine
 # liveness/readiness/monitoring namespace. Add a name here ONLY if the whole
-# subtree under it is a cheap, unauthenticated probe.
+# subtree under it is a cheap probe with its own response/authentication policy.
 MONITORING_ROOT_SEGMENTS = frozenset(
     {
         "health",      # /api/v1/health, /api/v1/health/detailed
@@ -235,23 +239,89 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
     Runs early in the middleware stack to validate requests.
     """
 
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await super().__call__(scope, receive, send)
+
+        request = Request(scope)
+        auth_path = _API_VERSION_PREFIX_RE.sub("", request.url.path, count=1).rstrip("/")
+        private_request = bool(
+            request.headers.get("authorization")
+            or request.headers.get("x-internal-service-token")
+            or any(name in request.cookies for name in ("talky_sid", "talky_at", "talky_rt"))
+            or auth_path == "/auth" or auth_path.startswith("/auth/")
+        )
+        original_send = send
+
+        async def send_private_response(message):
+            if message["type"] == "http.response.start":
+                state = scope.get("state") or {}
+                headers = MutableHeaders(scope=message)
+                if (private_request or state.get("authenticated_user_id") or state.get("user_id")
+                        or "set-cookie" in headers):
+                    headers["Cache-Control"] = "no-store"
+            await original_send(message)
+
+        # This includes auth/exempt dispatch paths, early rejections and streams.
+        send = send_private_response
+
+        # Enforce the cap before any handler or body parser runs, including
+        # auth and other paths exempt from the unrelated checks in dispatch.
+        # Content-Length is only an early rejection hint: count actual ASGI
+        # body bytes as well, so chunking or a false length cannot bypass it.
+        if len(request.headers.getlist("content-length")) > 1:
+            response = JSONResponse(status_code=400, content={"detail": "Ambiguous Content-Length"})
+            return await response(scope, receive, send)
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                size = int(content_length)
+                if size < 0:
+                    raise ValueError
+            except ValueError:
+                response = JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+                return await response(scope, receive, send)
+            if size > MAX_REQUEST_BODY_SIZE:
+                return await self._body_too_large()(scope, receive, send)
+
+        body = bytearray()
+        while True:
+            message = await receive()
+            if message["type"] == "http.disconnect":
+                return
+            chunk = message.get("body", b"")
+            if len(body) + len(chunk) > MAX_REQUEST_BODY_SIZE:
+                return await self._body_too_large()(scope, receive, send)
+            body.extend(chunk)
+            if not message.get("more_body", False):
+                break
+
+        pending_body = bytes(body)
+        del body
+
+        async def bounded_receive():
+            nonlocal pending_body
+            if pending_body is not None:
+                message = {"type": "http.request", "body": pending_body, "more_body": False}
+                pending_body = None
+                return message
+            # StreamingResponse polls for a real disconnect after reading the
+            # body; never replay synthetic http.request messages at that point.
+            return await receive()
+
+        await super().__call__(scope, bounded_receive, send)
+
+    @staticmethod
+    def _body_too_large():
+        return JSONResponse(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            content={"detail": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)"},
+        )
+
     async def dispatch(self, request: Request, call_next):
         # Skip for public/static paths
         if self._is_exempt_path(request.url.path):
             return await call_next(request)
-
-        # 1. Request size check (Content-Length)
-        content_length = request.headers.get("content-length")
-        if content_length:
-            try:
-                size = int(content_length)
-                if size > MAX_REQUEST_BODY_SIZE:
-                    return JSONResponse(
-                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        content={"detail": f"Request body too large (max {MAX_REQUEST_BODY_SIZE} bytes)"}
-                    )
-            except ValueError:
-                pass
 
         # 2. Content-Type validation and Payload Sanitization
         content_type = request.headers.get("content-type", "").split(";")[0].strip()
@@ -259,10 +329,10 @@ class APISecurityMiddleware(BaseHTTPMiddleware):
             # Content-Type validation
             if not self._is_webhook_path(request.url.path):
                 if content_type and content_type not in ALLOWED_CONTENT_TYPES:
-                    return JSONResponse(
+                    return await http_exception_handler(request, HTTPException(
                         status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
-                        content={"detail": f"Content-Type '{content_type}' not supported"}
-                    )
+                        detail=f"Content-Type '{content_type}' not supported",
+                    ))
 
             # Payload Sanitization (Day 6) — DISABLED.
             #

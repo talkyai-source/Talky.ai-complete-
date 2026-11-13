@@ -1,11 +1,14 @@
 [Unit]
-Description=Check age and integrity of the latest Talklee database backup
+OnFailure=talky-notify@%n.service
+Description=Verify actual flat local dump and encrypted off-host DB/media backup
 
 [Service]
 Type=oneshot
-User=talklee-backup
-Group=talklee-backup
-ExecStart=/usr/bin/python3 /opt/talky/scripts/database/recovery.py health --backup-root /var/backups/talklee --maximum-age-hours 26
+User=root
+UMask=0077
+EnvironmentFile=-/etc/talky/db-backup.env
+ExecStart=/usr/bin/python3 /opt/talky/scripts/database/offhost.py health --backup-root /var/backups/talky --maximum-age-hours 26
+TimeoutStartSec=30min
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict

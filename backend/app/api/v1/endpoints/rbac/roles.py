@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
@@ -17,10 +17,14 @@ from app.api.v1.dependencies import (
     CurrentUser,
     UserRole,
     get_current_user,
+    get_audit_logger,
     get_db_client,
     require_role,
 )
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_connection, acquire_with_tenant
+from app.core.security.rbac import normalize_role
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 
 from .schemas import PermissionResponse, RolePermissionResponse, RoleResponse
 
@@ -28,14 +32,45 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["rbac"])
 
+PLATFORM_PERMISSION_PREFIX = "platform:"
+
+
+def visible_role_ceiling(current_user: CurrentUser) -> Optional[int]:
+    """``None`` for a platform admin (every role); else the caller's level (D4-3)."""
+    role = normalize_role(current_user.role or "user")
+    if role == UserRole.PLATFORM_ADMIN:
+        return None
+    return role.level
+
+
+def role_visible(row, ceiling: Optional[int]) -> bool:
+    """Tenant callers see tenant-scoped roles at or below their own level only.
+
+    ``partner_admin`` is seeded ``tenant_scoped = TRUE``; the level bound is
+    what keeps it from tenant admins. ``platform_admin`` is never tenant-visible.
+    """
+    if ceiling is None:
+        return True
+    return (
+        row["tenant_scoped"] is True
+        and row["name"] != UserRole.PLATFORM_ADMIN.value
+        and row["level"] is not None
+        and row["level"] <= ceiling
+    )
+
+
+def permission_visible(name: str, ceiling: Optional[int]) -> bool:
+    return ceiling is None or not str(name).startswith(PLATFORM_PERMISSION_PREFIX)
+
 
 @router.get("/roles", response_model=List[RoleResponse])
 async def list_roles(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> List[RoleResponse]:
-    """List all available roles."""
-    async with db_client.pool.acquire() as conn:
+    """List the roles the caller may see (all of them for a platform admin)."""
+    ceiling = visible_role_ceiling(current_user)
+    async with acquire_connection(db_client.pool) as conn:
         rows = await conn.fetch(
             """
             SELECT id, name, description, level, is_system_role, tenant_scoped
@@ -43,6 +78,7 @@ async def list_roles(
             ORDER BY level DESC
             """
         )
+    rows = [row for row in rows if role_visible(row, ceiling)]
 
     return [
         RoleResponse(
@@ -64,7 +100,7 @@ async def get_role(
     db_client: Client = Depends(get_db_client),
 ) -> RoleResponse:
     """Get a specific role by ID."""
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         row = await conn.fetchrow(
             """
             SELECT id, name, description, level, is_system_role, tenant_scoped
@@ -74,7 +110,7 @@ async def get_role(
             role_id,
         )
 
-    if not row:
+    if not row or not role_visible(row, visible_role_ceiling(current_user)):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Role not found",
@@ -96,14 +132,15 @@ async def get_role_permissions(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ) -> RolePermissionResponse:
-    """Get all permissions assigned to a role."""
-    async with db_client.pool.acquire() as conn:
+    """Get all permissions assigned to a role the caller may see."""
+    ceiling = visible_role_ceiling(current_user)
+    async with acquire_connection(db_client.pool) as conn:
         # Get role name
         role_row = await conn.fetchrow(
-            "SELECT id, name FROM roles WHERE id = $1",
+            "SELECT id, name, level, tenant_scoped FROM roles WHERE id = $1",
             role_id,
         )
-        if not role_row:
+        if not role_row or not role_visible(role_row, ceiling):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Role not found",
@@ -133,6 +170,7 @@ async def get_role_permissions(
                 action=row["action"],
             )
             for row in perm_rows
+            if permission_visible(row["name"], ceiling)
         ],
     )
 
@@ -146,13 +184,16 @@ async def add_permission_to_role(
     role_id: str,
     permission_id: str,
     db_client: Client = Depends(get_db_client),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> Dict[str, str]:
     """
     Assign a permission to a role.
 
     **Requires platform_admin role.**
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, None) as conn:
+        await audit_logger.lock_transaction(conn)
         # Verify role exists
         role_row = await conn.fetchrow(
             "SELECT id, is_system_role FROM roles WHERE id = $1",
@@ -177,7 +218,7 @@ async def add_permission_to_role(
 
         # Insert role-permission mapping
         try:
-            await conn.execute(
+            inserted = await conn.execute(
                 """
                 INSERT INTO role_permissions (role_id, permission_id)
                 VALUES ($1, $2)
@@ -192,6 +233,13 @@ async def add_permission_to_role(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Failed to assign permission",
             )
+        if inserted == "INSERT 0 1":
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="rbac.permission.add",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=None,
+                resource_type="role", resource_id=role_id, before_state=None,
+                after_state={"role_id": role_id, "permission_id": permission_id},
+            )
 
     return {"detail": "Permission assigned to role successfully"}
 
@@ -204,13 +252,16 @@ async def remove_permission_from_role(
     role_id: str,
     permission_id: str,
     db_client: Client = Depends(get_db_client),
+    current_user: CurrentUser = Depends(get_current_user),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> Dict[str, str]:
     """
     Remove a permission from a role.
 
     **Requires platform_admin role.**
     """
-    async with db_client.pool.acquire() as conn:
+    async with acquire_with_tenant(db_client.pool, None) as conn:
+        await audit_logger.lock_transaction(conn)
         result = await conn.execute(
             """
             DELETE FROM role_permissions
@@ -219,6 +270,14 @@ async def remove_permission_from_role(
             role_id,
             permission_id,
         )
+        if result != "DELETE 0":
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="rbac.permission.remove",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=None,
+                resource_type="role", resource_id=role_id,
+                before_state={"role_id": role_id, "permission_id": permission_id},
+                after_state=None,
+            )
 
     if result == "DELETE 0":
         raise HTTPException(

@@ -33,15 +33,43 @@ class _RollbackTransaction:
 
     async def __aenter__(self):
         self._snapshot = copy.deepcopy(self._conn.idempotency)
+        self._audit_snapshot = copy.deepcopy(self._conn.audit_events)
+        self._conn.transaction_depth += 1
         return self
 
     async def __aexit__(self, exc_type, exc, tb):
         if exc_type is not None:
             self._conn.idempotency = self._snapshot
+            self._conn.audit_events = self._audit_snapshot
+        self._conn.transaction_depth -= 1
         return False
 
 
+class _Audit:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def lock_transaction(self, conn):
+        assert conn is self.conn
+        assert conn.transaction_depth > 0
+        conn.audit_lock_calls += 1
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.conn
+        assert conn.transaction_depth > 0 and conn.audit_lock_calls > 0
+        assert event["tenant_id"] == conn.current_tenant_id
+        assert event["actor_id"] == conn.current_user_id
+        conn.audit_events.append(copy.deepcopy(event))
+
+
 class _RollbackConn(FakeTelephonyConn):
+    def __init__(self):
+        super().__init__()
+        self.transaction_depth = 0
+        self.audit_lock_calls = 0
+        self.audit_events = []
+        self.audit = _Audit(self)
+
     def transaction(self):
         return _RollbackTransaction(self)
 
@@ -66,6 +94,7 @@ async def _update(pool, user, trunk_id, payload, key):
         idempotency_key=key,
         current_user=user,
         db_pool=pool,
+        audit_logger=pool._conn.audit,
     )
 
 
@@ -78,8 +107,10 @@ async def test_retry_after_invalid_patch_is_not_stuck_in_progress(rb_context):
         idempotency_key="bh-create",
         current_user=user,
         db_pool=pool,
+        audit_logger=conn.audit,
     )
     trunk_id = _body(created)["id"]
+    assert [event["action"] for event in conn.audit_events] == ["sip.trunk.create"]
     bad = SIPTrunkUpdateRequest(clear_auth=True, auth_username="someone")
 
     first = await _update(pool, user, trunk_id, bad, "bh-patch")
@@ -91,15 +122,20 @@ async def test_retry_after_invalid_patch_is_not_stuck_in_progress(rb_context):
     assert second.status_code == 400, _body(second)
     assert _body(second)["title"] == "Invalid Authentication Patch"
 
+    assert [event["action"] for event in conn.audit_events] == ["sip.trunk.create"]
+    assert not any(key[2] == "bh-patch" for key in conn.idempotency)
+
     # Same key after fixing the payload: not 'reused with a different payload'.
     fixed = await _update(pool, user, trunk_id, SIPTrunkUpdateRequest(metadata={"region": "eu"}), "bh-patch")
     assert getattr(fixed, "status_code", 200) == 200, fixed
     assert fixed.metadata == {"region": "eu"}
+    assert [event["action"] for event in conn.audit_events] == ["sip.trunk.create", "sip.trunk.update"]
+    assert conn.audit_lock_calls == 4 and conn.transaction_depth == 0
 
 
 @pytest.mark.asyncio
 async def test_retry_after_trunk_not_found_is_not_stuck(rb_context):
-    _conn, pool, user = rb_context
+    conn, pool, user = rb_context
     missing = uuid4()
 
     async def activate():
@@ -109,6 +145,7 @@ async def test_retry_after_trunk_not_found_is_not_stuck(rb_context):
             idempotency_key="bh-activate-missing",
             current_user=user,
             db_pool=pool,
+            audit_logger=conn.audit,
         )
 
     first = await activate()
@@ -116,3 +153,5 @@ async def test_retry_after_trunk_not_found_is_not_stuck(rb_context):
     assert first.status_code == 404
     assert second.status_code == 404, _body(second)
     assert _body(second)["title"] == "Trunk Not Found"
+    assert conn.idempotency == {} and conn.audit_events == []
+    assert conn.audit_lock_calls == 2 and conn.transaction_depth == 0

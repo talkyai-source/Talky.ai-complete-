@@ -956,9 +956,13 @@ async def test_durable_revision_invalidates_confirmation_when_contact_revoke_can
             else:
                 assert not row["confirmed"]
                 assert row["validation_status"] != "confirmed"
+        # The list now names the account and user it was read for (D4-12), so the reader
+        # is a real CurrentUser, as the dependency provides, not a bare tenant namespace.
+        reader = CurrentUser(id=str(uuid4()), email="synthetic@example.org",
+                             tenant_id=str(lead_db.tenants[0]), role="tenant_admin")
         listed = await calls_api.list_calls(
             page=1, page_size=20, status=None, direction=None, inbound_campaign_id=None,
-            from_date=None, to_date=None, current_user=SimpleNamespace(tenant_id=str(lead_db.tenants[0])),
+            from_date=None, to_date=None, current_user=reader,
             db_client=SimpleNamespace(pool=lead_db.pool),
         )
         assert len(listed.items) == 1 and listed.items[0].id == str(lead_db.calls[0])

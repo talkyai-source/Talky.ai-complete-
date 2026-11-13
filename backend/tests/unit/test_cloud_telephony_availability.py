@@ -1,5 +1,6 @@
 """Production selection must not silently originate through a different provider."""
 from contextlib import asynccontextmanager
+from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import ANY, AsyncMock
 import json
@@ -27,14 +28,62 @@ class Context:
         return False
 
 
+def admin_actor():
+    return SimpleNamespace(id="22222222-2222-4222-8222-222222222222",
+                           tenant_id=calls.TENANT_ID, role="admin")
+
+
+class Transaction:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        self.snapshot = (deepcopy(self.conn.writes), deepcopy(self.conn.audit_events), self.conn.audit_locked)
+        self.conn.transaction_depth += 1
+        return self
+
+    async def __aexit__(self, exc_type, *_args):
+        if exc_type is not None:
+            self.conn.writes, self.conn.audit_events, self.conn.audit_locked = self.snapshot
+        self.conn.transaction_depth -= 1
+        if self.conn.transaction_depth == 0:
+            self.conn.audit_locked = False
+        return False
+
+
+class Audit:
+    """Explicit direct-call DI port; durable chain behavior has separate tests."""
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def lock_transaction(self, conn):
+        assert conn is self.conn and conn.transaction_depth > 0
+        conn.audit_lock_calls += 1
+        conn.audit_locked = True
+
+    async def log_in_transaction(self, conn, **entry):
+        assert conn is self.conn and conn.transaction_depth >= 2 and conn.audit_locked
+        assert str(entry["tenant_id"]) == calls.TENANT_ID
+        assert entry["actor_id"] == admin_actor().id and entry["actor_role"] == "admin"
+        assert entry["resource_type"] == "telephony_provider"
+        assert str(entry["resource_id"]) == calls.TENANT_ID
+        assert entry["action"] in {"telephony.provider.activate", "telephony.provider.check"}
+        conn.audit_events.append(deepcopy(entry))
+
+
 class Conn:
     def __init__(self, provider="none", *, fail=False, missing=False, saved=False):
         self.provider, self.fail, self.missing, self.saved = provider, fail, missing, saved
         self.writes = []
         self.reads = []
+        self.transaction_depth = 0
+        self.audit_lock_calls = 0
+        self.audit_locked = False
+        self.audit_events = []
+        self.audit = Audit(self)
 
     def transaction(self):
-        return Context()
+        return Transaction(self)
 
     async def execute(self, sql, *args):
         if "UPDATE tenants" in sql:
@@ -83,10 +132,11 @@ async def test_production_activation_rejects_without_changing_selection(provider
     conn = Conn(provider)
     with pytest.raises(HTTPException) as caught:
         await providers.activate_provider(providers.ProviderActivateRequest(provider=provider),
-            SimpleNamespace(tenant_id=calls.TENANT_ID), Pool(conn))
+            admin_actor(), Pool(conn), audit_logger=conn.audit)
     assert caught.value.status_code == 422
     assert caught.value.detail["code"] == "cloud_telephony_unavailable"
     assert conn.writes == []
+    assert conn.audit_events == [] and conn.audit_lock_calls == 0
 
 
 @pytest.mark.asyncio
@@ -112,14 +162,18 @@ async def test_nonproduction_activation_is_explicit_qualification_only(monkeypat
     monkeypatch.setenv("ENVIRONMENT", "staging")
     monkeypatch.setenv(f"{provider.upper()}_BRIDGE_ENABLED", str(enabled))
     conn = Conn(provider)
-    args = (providers.ProviderActivateRequest(provider=provider), SimpleNamespace(tenant_id=calls.TENANT_ID), Pool(conn))
+    args = (providers.ProviderActivateRequest(provider=provider), admin_actor(), Pool(conn))
     if enabled:
-        assert (await providers.activate_provider(*args))["active"] == provider
+        assert (await providers.activate_provider(*args, audit_logger=conn.audit))["active"] == provider
+        assert [entry["action"] for entry in conn.audit_events] == ["telephony.provider.activate"]
+        assert conn.audit_events[0]["after_state"] == {"active_telephony_provider": provider}
+        assert conn.audit_lock_calls == 1 and conn.transaction_depth == 0
     else:
         with pytest.raises(HTTPException) as caught:
-            await providers.activate_provider(*args)
+            await providers.activate_provider(*args, audit_logger=conn.audit)
         assert caught.value.status_code == 422
         assert conn.writes == []
+        assert conn.audit_events == [] and conn.audit_lock_calls == 0
     result = await providers.list_providers(args[1], args[2])
     availability = result.model_dump()["availability"][provider]
     assert availability["activation_allowed"] is enabled
@@ -131,8 +185,11 @@ async def test_nonproduction_activation_is_explicit_qualification_only(monkeypat
 async def test_existing_sip_and_none_activation_unchanged(provider):
     conn = Conn(provider)
     assert (await providers.activate_provider(providers.ProviderActivateRequest(provider=provider),
-        SimpleNamespace(tenant_id=calls.TENANT_ID), Pool(conn)))["active"] == provider
+        admin_actor(), Pool(conn), audit_logger=conn.audit))["active"] == provider
     assert len(conn.writes) == 1
+    assert [entry["action"] for entry in conn.audit_events] == ["telephony.provider.activate"]
+    assert conn.audit_events[0]["after_state"] == {"active_telephony_provider": provider}
+    assert conn.audit_lock_calls == 1 and conn.transaction_depth == 0
 
 
 @pytest.mark.asyncio
@@ -346,8 +403,14 @@ async def test_credential_check_scope_is_returned_and_stored_without_enabling_ca
     conn = Conn(provider)
     stored = []
 
-    async def fetchrow(_sql, *_args):
-        return {"credentials_encrypted": "synthetic-not-a-credential", "from_number": None}
+    async def fetchrow(sql, *args):
+        assert str(args[0]) == calls.TENANT_ID and args[1] == provider
+        query = " ".join(sql.split())
+        if query.startswith("SELECT credentials_encrypted, from_number"):
+            return {"credentials_encrypted": "synthetic-not-a-credential", "from_number": None}
+        assert query == " ".join(providers._PROVIDER_AUDIT_SELECT.split())
+        return {"provider": provider, "label": None, "from_number": None, "status": "active",
+                "last_tested_at": None, "last_test_result": None}
 
     async def execute(sql, *args):
         if "UPDATE tenant_telephony_credentials" in sql:
@@ -360,13 +423,19 @@ async def test_credential_check_scope_is_returned_and_stored_without_enabling_ca
     fake = lambda **_: SimpleNamespace(ping_with_detail=AsyncMock(return_value={"ok": True, "latency_ms": 1}))
     monkeypatch.setattr(twilio_provider_adapter, "TwilioProviderAdapter", fake)
     monkeypatch.setattr(vonage_provider_adapter, "VonageProviderAdapter", fake)
-    result = await providers.test_provider(provider, SimpleNamespace(tenant_id=calls.TENANT_ID), Pool(conn))
+    result = await providers.test_provider(provider, admin_actor(), Pool(conn), audit_logger=conn.audit)
     assert result.check_scope == scope
     assert stored[0]["check_scope"] == scope
+    assert [entry["action"] for entry in conn.audit_events] == ["telephony.provider.check"]
+    assert conn.audit_events[0]["after_state"]["last_test_result"]["check_scope"] == scope
+    assert "synthetic-not-a-credential" not in json.dumps(conn.audit_events, default=str)
+    assert conn.audit_lock_calls == 1 and conn.transaction_depth == 0
     with pytest.raises(HTTPException) as caught:
         await providers.activate_provider(providers.ProviderActivateRequest(provider=provider),
-            SimpleNamespace(tenant_id=calls.TENANT_ID), Pool(conn))
+            admin_actor(), Pool(conn), audit_logger=conn.audit)
     assert caught.value.status_code == 422
+    assert [entry["action"] for entry in conn.audit_events] == ["telephony.provider.check"]
+    assert conn.audit_lock_calls == 1
 
 
 @pytest.mark.asyncio

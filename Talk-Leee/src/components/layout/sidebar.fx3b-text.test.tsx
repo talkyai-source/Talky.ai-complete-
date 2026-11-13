@@ -11,6 +11,8 @@ import { cleanup, render } from "@testing-library/react";
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (id, ...args) {
+    // Their side reads effective permissions (QA F1-21); unknown offers every action.
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => ({ isSuccess: false, data: undefined }) };
     if (id === "next/navigation") return { usePathname: () => "/dashboard" };
     if (id.includes("providers/theme-provider")) return { useTheme: () => ({ theme: "light", setTheme() {}, toggleTheme() {} }) };
     if (id.includes("white-label/white-label-branding-provider")) return { useWhiteLabelBranding: () => null };

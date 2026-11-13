@@ -10,7 +10,7 @@ const originalLoad = loader._load;
 const nothing = () => null;
 const router = { push() {}, replace() {} };
 loader._load = function (id, ...args) {
-    if (id === "next/navigation") return { useParams: () => ({ id: "camp-1" }), useRouter: () => router };
+    if (id === "next/navigation") return { useParams: () => ({ id: "camp-1" }), useRouter: () => router, useSearchParams: () => new URLSearchParams() };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("components/campaigns/smart-csv-import")) return { SmartCsvImport: nothing };
     if (id.includes("components/campaigns/contact-lists")) return { ContactLists: nothing, ActiveContactsSummary: nothing };

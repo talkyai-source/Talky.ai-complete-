@@ -21,7 +21,7 @@ def _block(**kw):
 def test_block_present_with_full_name_and_company():
     b = _block(first_name="Jane", last_name="Doe", company="Acme Roofing")
     assert "PERSON YOU'RE CALLING: Jane Doe, from Acme Roofing." in b
-    assert 'is this Jane?' in b            # greets by FIRST name
+    assert 'speaking with Jane?' in b      # asks for the FIRST name
     assert "not a confirmed fact" in b     # framed as expectation, not CAPTURED
 
 
@@ -46,7 +46,7 @@ def test_block_greet_name_prefers_first_then_full():
     # Only a last name given → greet with the full (last) name, not blank.
     b = _block(last_name="Doe")
     assert "PERSON YOU'RE CALLING: Doe." in b
-    assert "is this Doe?" in b
+    assert "speaking with Doe?" in b
 
 
 # ── build_telephony_session_config integration ────────────────────
@@ -80,8 +80,10 @@ def test_prompt_gets_call_target_block_when_named():
     )
     # The persona/guardrails now PRECEDE the block, and that ordering is the
     # whole point: everything before the lead name is a shared, cacheable prefix.
-    assert "HARD RULES" in cfg.system_prompt
-    assert cfg.system_prompt.index("HARD RULES") < cfg.system_prompt.index(
+    # The static guardrail block is headed "## NON-NEGOTIABLES" in the composed system prompt
+    # (prompts/policies/non_negotiables.md:6; prompts/build.py:204 _FLOOR_MARKER); "HARD RULES" is not in it.
+    assert "NON-NEGOTIABLES" in cfg.system_prompt
+    assert cfg.system_prompt.index("NON-NEGOTIABLES") < cfg.system_prompt.index(
         "PERSON YOU'RE CALLING"
     ), "static instructions must come before the per-call block"
     # Callee identity is also carried on the config for the realtime path.

@@ -1016,6 +1016,13 @@ async def test_admin_directory_reflects_rbac_role_edit_and_effective_role_filter
         "SELECT id FROM tenant_users WHERE user_id=$1 AND tenant_id=$2",
         db.users[1], db.tenants[1],
     )
+    # A workspace keeps an active administrator (QA F1-15): users[1] may be demoted only
+    # while another one remains, so the platform admin also administers this workspace.
+    await db.admin.execute(
+        """INSERT INTO tenant_users(user_id,tenant_id,role_id,status)
+        SELECT $1,$2,id,'active' FROM roles WHERE name='tenant_admin'""",
+        db.users[0], db.tenants[1],
+    )
     edited = await db.http.patch(
         f"/rbac/tenant-users/{membership_id}", headers=auth(), json={"role_name": "readonly"}
     )

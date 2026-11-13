@@ -6,10 +6,12 @@ import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
 import { BarChart2, TrendingUp, TrendingDown, Calendar, Activity, Percent } from "lucide-react";
 import { motion } from "framer-motion";
 import { Select } from "@/components/ui/select";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
-import { formatUtcDateLabel, UTC_TIMEZONE_LABEL } from "@/lib/utc-date-label";
+import { reportingDateRange } from "@/lib/reporting-time";
+import { isApiClientError } from "@/lib/http-client";
+import { formatUtcDateLabel, timezoneLabel } from "@/lib/utc-date-label";
 
 // 3.7 Z3: the backend groups days by UTC date, so the label is the UTC date.
 function formatDate(dateStr: string) {
@@ -63,10 +65,13 @@ export default function AnalyticsPage() {
     const [data, setData] = useState<CallSeriesItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
-    const [reload, setReload] = useState(0);
+    const [errorRequestId, setErrorRequestId] = useState<string | undefined>();
+    const [retry, setRetry] = useState(0);
     const [groupBy, setGroupBy] = useState<"day" | "week" | "month">("day");
     const [direction, setDirection] = useState<"outbound" | "inbound" | "all">("outbound");
     const [dateRange, setDateRange] = useState(30);
+    const [reportingZone, setReportingZone] = useState("");
+    const reportingZoneRef = useRef("");
     const [barTooltip, setBarTooltip] = useState<{ index: number; x: number; y: number } | null>(null);
     const barsWrapRef = useRef<HTMLDivElement>(null);
 
@@ -76,27 +81,33 @@ export default function AnalyticsPage() {
         async function loadAnalytics() {
             try {
                 setLoading(true);
-                const toDate = new Date().toISOString().split("T")[0];
-                // "Last N days" is exactly N UTC dates: today and the N - 1 before it.
-                const fromDate = new Date(Date.now() - (dateRange - 1) * 24 * 60 * 60 * 1000)
-                    .toISOString()
-                    .split("T")[0];
-
-                const response = await extendedApi.getCallAnalytics(
-                    fromDate,
-                    toDate,
-                    groupBy,
-                    direction,
-                    false,
+                let zone = reportingZoneRef.current;
+                // No browser/UTC guess while resolving the account's stored zone.
+                let response = zone ? null : await extendedApi.getCallAnalytics(
+                    undefined, undefined, groupBy, direction, false,
+                );
+                if (cancelled) return;
+                if (response) zone = response.timezone;
+                if (!zone) throw new Error("Reporting timezone unavailable");
+                // "Last N days" is exactly N dates in the account's zone: today and
+                // the N - 1 before it. The first answer only says which zone that is
+                // (the server's own default is today and the 30 dates before it).
+                const range = reportingDateRange(zone, dateRange - 1);
+                response = await extendedApi.getCallAnalytics(
+                    range.from, range.to, groupBy, direction, false, zone,
                 );
                 if (cancelled) return;
                 // An answer without its series is a failed read, not "no data".
                 if (!Array.isArray(response?.series)) throw new Error();
+                reportingZoneRef.current = response.timezone;
+                setReportingZone(response.timezone);
                 setError("");
+                setErrorRequestId(undefined);
                 setData(response.series);
             } catch (err) {
                 if (cancelled) return;
-                setError(failedReadMessage(err, "Failed to load analytics"));
+                setError("Could not load analytics.");
+                setErrorRequestId(isApiClientError(err) ? err.requestId : undefined);
             } finally {
                 if (cancelled) return;
                 setLoading(false);
@@ -108,7 +119,7 @@ export default function AnalyticsPage() {
         return () => {
             cancelled = true;
         };
-    }, [groupBy, dateRange, direction, reload]);
+    }, [groupBy, dateRange, direction, retry]);
 
     const totals = data.reduce(
         (acc, item) => ({
@@ -153,7 +164,7 @@ export default function AnalyticsPage() {
                         <option value="30">Last 30 days</option>
                         <option value="90">Last 90 days</option>
                     </Select>
-                    <span data-testid="analytics-range-timezone" className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{UTC_TIMEZONE_LABEL}</span>
+                    {reportingZone ? <span data-testid="analytics-range-timezone" className="whitespace-nowrap text-xs font-semibold text-muted-foreground">{timezoneLabel(reportingZone)}</span> : null}
                 </motion.div>
 
                 <motion.div
@@ -201,11 +212,10 @@ export default function AnalyticsPage() {
                 </div>
             </motion.div>
 
+            {error ? <ErrorState className="mb-6" message={error} requestId={errorRequestId} staleData={data.length > 0} busy={loading} onRetry={() => setRetry(value => value + 1)} /> : null}
             {loading ? (
                 <LoadingState title="Loading analytics…" />
-            ) : error ? (
-                <ErrorState message={error} onRetry={() => setReload((current) => current + 1)} />
-            ) : (
+            ) : error && data.length === 0 ? null : (
                 <div className="space-y-6">
                     {/* Summary Stats */}
                     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -246,7 +256,7 @@ export default function AnalyticsPage() {
                     >
                         <div className="mb-6 flex flex-wrap items-center justify-between gap-2">
                             <h3 className="text-lg font-semibold text-foreground">Call Volume</h3>
-                            <span data-testid="analytics-chart-timezone" className="text-xs font-semibold text-muted-foreground">{UTC_TIMEZONE_LABEL}</span>
+                            {reportingZone ? <span data-testid="analytics-chart-timezone" className="text-xs font-semibold text-muted-foreground">{timezoneLabel(reportingZone)}</span> : null}
                         </div>
                         {data.length === 0 ? (
                             <EmptyState title="No data for the selected period" />

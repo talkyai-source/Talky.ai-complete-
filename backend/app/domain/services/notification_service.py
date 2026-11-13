@@ -9,6 +9,10 @@ import os
 from typing import Optional, Dict, Any
 from enum import Enum
 from datetime import datetime
+from html import escape
+
+from app.core import config
+from app.domain.services import email_service as account_mail
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +37,9 @@ class NotificationType(str, Enum):
     ACCOUNT_COMPROMISED = "account_compromised"
     SESSION_HIJACKING = "session_hijacking"
     SECURITY_ALERT = "security_alert"
+    CAMPAIGN_FAILURES = "campaign_failures"
+    LOW_MINUTES = "low_minutes"
+    QUALIFIED_LEAD = "qualified_lead"
 
 
 class NotificationService:
@@ -49,16 +56,19 @@ class NotificationService:
 
     def __init__(self):
         """Initialize notification service with environment variables."""
-        # Email configuration
+        # Account notifications share the Microsoft 365 account sender. These
+        # attributes also let the billing outbox preflight that actual transport.
+        settings = config.get_settings()
         self.email_enabled = os.getenv("EMAIL_ENABLED", "true").lower() == "true"
-        self.email_provider = os.getenv("EMAIL_PROVIDER", "sendgrid")  # sendgrid, smtp, ses
+        self.email_provider = "smtp"
         self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
-        self.smtp_host = os.getenv("SMTP_HOST", "")
-        self.smtp_port = int(os.getenv("SMTP_PORT", "587"))
-        self.smtp_user = os.getenv("SMTP_USER", "")
-        self.smtp_password = os.getenv("SMTP_PASSWORD", "")
-        self.from_email = os.getenv("FROM_EMAIL", "noreply@talky.ai")
-        self.from_name = os.getenv("FROM_NAME", "Talky.ai")
+        self.smtp_host = account_mail.EmailService.SMTP_HOST
+        self.smtp_port = account_mail.EmailService.SMTP_PORT
+        self.smtp_user = settings.email_user
+        self.smtp_password = settings.email_pass
+        self.from_email = settings.from_email or settings.email_user
+        self.from_name = settings.brand_name
+        self.frontend_url = settings.frontend_url
 
         # Slack configuration
         self.slack_enabled = os.getenv("SLACK_ENABLED", "true").lower() == "true"
@@ -87,7 +97,7 @@ class NotificationService:
         reply_to: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
-        Send email via configured provider (SendGrid, SMTP, or SES).
+        Send through the shared account sender without retrying unknown outcomes.
 
         Args:
             to_email: Recipient email address
@@ -97,31 +107,26 @@ class NotificationService:
             reply_to: Reply-to address
 
         Returns:
-            Dict with status and message ID if successful
+            Dict with confirmed status; the boolean sender has no message ID.
         """
         if not self.email_enabled:
-            logger.debug(f"Email disabled, skipping send to {to_email}")
+            logger.debug("Email disabled, skipping send")
             return {"status": "skipped", "reason": "email_disabled"}
 
         try:
-            if self.email_provider == "sendgrid":
-                return await self._send_via_sendgrid(
-                    to_email, subject, html_body, text_body, reply_to
-                )
-            elif self.email_provider == "smtp":
-                return await self._send_via_smtp(
-                    to_email, subject, html_body, text_body, reply_to
-                )
-            elif self.email_provider == "ses":
-                return await self._send_via_ses(
-                    to_email, subject, html_body, text_body, reply_to
-                )
-            else:
-                logger.warning(f"Unknown email provider: {self.email_provider}")
-                return {"status": "error", "reason": "unknown_provider"}
+            accepted = await account_mail.get_email_service().send_email(
+                recipient_email=to_email,
+                subject=subject,
+                html_body=html_body,
+                text_body=text_body,
+                reply_to=reply_to,
+            )
+            if accepted is True:
+                return {"status": "success"}
+            return {"status": "error", "reason": "send_outcome_unconfirmed"}
         except Exception as e:
-            logger.error(f"Failed to send email to {to_email}: {e}")
-            return {"status": "error", "reason": str(e)}
+            logger.error("Account notification send failed (%s)", type(e).__name__)
+            return {"status": "error", "reason": "send_outcome_unconfirmed"}
 
     async def _send_via_sendgrid(
         self,
@@ -373,20 +378,22 @@ class NotificationService:
             channels: Notification channels to use
         """
         subject = f"Your {suspension_type.capitalize()} Account Has Been Suspended"
+        support_link = account_mail.frontend_link("/support", base_url=self.frontend_url)
         html_body = f"""
         <html>
             <body style="font-family: Arial, sans-serif; color: #333;">
                 <h1 style="color: #FF3B30;">Account Suspended</h1>
-                <p>Your {suspension_type} account has been suspended.</p>
-                <p><strong>Reason:</strong> {reason}</p>
+                <p>Your {escape(suspension_type)} account has been suspended.</p>
+                <p><strong>Reason:</strong> {escape(reason)}</p>
                 <p>If you believe this is in error, please contact our support team.</p>
                 <p>
-                    <a href="https://talky.ai/support" style="color: #007AFF;">Contact Support</a>
+                    <a href="{escape(support_link, quote=True)}" style="color: #007AFF;">Contact Support</a>
                 </p>
+                <p>{escape(self.from_name)}</p>
             </body>
         </html>
         """
-        text_body = f"Your {suspension_type} account has been suspended. Reason: {reason}"
+        text_body = f"Your {suspension_type} account has been suspended. Reason: {reason}\nSupport: {support_link}\n{self.from_name}"
 
         results = {}
 
@@ -417,20 +424,22 @@ class NotificationService:
     ) -> Dict[str, Any]:
         """Send payment failure notification."""
         subject = "Payment Failed - Action Required"
+        billing_link = account_mail.frontend_link("/billing", base_url=self.frontend_url)
         html_body = f"""
         <html>
             <body style="font-family: Arial, sans-serif; color: #333;">
                 <h1 style="color: #FF3B30;">Payment Failed</h1>
                 <p>Your payment of ${amount:.2f} failed.</p>
-                <p><strong>Error:</strong> {error_message}</p>
+                <p><strong>Error:</strong> {escape(error_message)}</p>
                 <p>Please update your payment method to avoid service interruption.</p>
                 <p>
-                    <a href="https://talky.ai/dashboard/billing" style="color: #007AFF;">Update Payment Method</a>
+                    <a href="{escape(billing_link, quote=True)}" style="color: #007AFF;">Update Payment Method</a>
                 </p>
+                <p>{escape(self.from_name)}</p>
             </body>
         </html>
         """
-        text_body = f"Your payment of ${amount:.2f} failed: {error_message}"
+        text_body = f"Your payment of ${amount:.2f} failed: {error_message}\nBilling: {billing_link}\n{self.from_name}"
 
         results = {}
 
@@ -461,20 +470,22 @@ class NotificationService:
     ) -> Dict[str, Any]:
         """Send security alert notification."""
         subject = "Security Alert - Action Required"
+        security_link = account_mail.frontend_link("/security", base_url=self.frontend_url)
         html_body = f"""
         <html>
             <body style="font-family: Arial, sans-serif; color: #333;">
                 <h1 style="color: #FF9500;">Security Alert</h1>
-                <p><strong>Alert Type:</strong> {alert_type}</p>
-                <p><strong>Details:</strong> {details}</p>
+                <p><strong>Alert Type:</strong> {escape(alert_type)}</p>
+                <p><strong>Details:</strong> {escape(details)}</p>
                 <p>Please review your account security immediately.</p>
                 <p>
-                    <a href="https://talky.ai/dashboard/security" style="color: #007AFF;">Review Security</a>
+                    <a href="{escape(security_link, quote=True)}" style="color: #007AFF;">Review Security</a>
                 </p>
+                <p>{escape(self.from_name)}</p>
             </body>
         </html>
         """
-        text_body = f"Security Alert: {alert_type} - {details}"
+        text_body = f"Security Alert: {alert_type} - {details}\nSecurity: {security_link}\n{self.from_name}"
 
         results = {}
 

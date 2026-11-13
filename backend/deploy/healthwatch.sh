@@ -3,7 +3,7 @@
 # line (severity err) whenever any background worker (dialer/voice/reminder)
 # is unhealthy.
 #
-# Run by talky-healthwatch.service (oneshot), triggered every 2 minutes by
+# Run by talky-healthwatch.service (oneshot), triggered every minute by
 # talky-healthwatch.timer. StandardError=journal on the unit means the
 # "HEALTHWATCH CRITICAL" line below lands in the journal at priority err, so
 # `journalctl -p err` (or any journald-severity alert) catches it. A non-200
@@ -22,15 +22,34 @@ set -euo pipefail
 HEALTH_URL="${TALKY_HEALTHWATCH_URL:-http://localhost:8000/api/v1/healthz/workers}"
 retries="${TALKY_HEALTHWATCH_RETRIES:-6}"
 retry_delay="${TALKY_HEALTHWATCH_RETRY_DELAY:-10}"
+request_timeout="${TALKY_HEALTHWATCH_TIMEOUT:-10}"
+extended=0
+case "${1:-}" in
+    --extended) extended=1 ;;
+    "") ;;
+    *) echo "healthwatch: unsupported argument" >&2; exit 2 ;;
+esac
+
+finish() {
+    local code="$1"
+    if [ "$extended" = 1 ]; then
+        local script_dir
+        script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+        if ! "${TALKY_HEALTHWATCH_PYTHON:-/opt/talky/backend/venv/bin/python}" "$script_dir/../scripts/healthwatch.py"; then
+            code=1
+        fi
+    fi
+    exit "$code"
+}
 
 attempt=1
 while :; do
-    if response="$(curl -sS -m 10 -w '\n%{http_code}' "$HEALTH_URL" 2>&1)"; then
+    if response="$(curl -sS -m "$request_timeout" -w '\n%{http_code}' "$HEALTH_URL" 2>&1)"; then
         http_code="$(printf '%s\n' "$response" | tail -n1)"
         body="$(printf '%s\n' "$response" | sed '$d')"
         if [ "$http_code" = "200" ]; then
             echo "healthwatch: all workers healthy"
-            exit 0
+            finish 0
         fi
         failure="workers unhealthy (http $http_code): $body"
     else
@@ -39,7 +58,7 @@ while :; do
 
     if [ "$attempt" -ge "$retries" ]; then
         echo "HEALTHWATCH CRITICAL: $failure" >&2
-        exit 1
+        finish 1
     fi
     echo "healthwatch: attempt $attempt/$retries failed (possible restart window), retrying in ${retry_delay}s: $failure"
     attempt=$((attempt + 1))

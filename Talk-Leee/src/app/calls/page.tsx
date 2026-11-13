@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallTimestamp } from "@/components/calls/call-timestamp";
+import { formatTimestamp } from "@/lib/timestamps";
 import { DialAgainButton } from "@/components/calls/dial-again-button";
 import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, CalendarClock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { EmptyState, LoadingState, failedReadMessage } from "@/components/states/page-states";
-import { useAllCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
+import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
 import { CallsLoadError, SummaryPreview, distinctDidOptions, inboundCampaignFilterOptions } from "@/components/calls/call-panels";
@@ -28,14 +29,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { getRecordingCapabilities } from "@/lib/media-permissions";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
 import { useAuth } from "@/lib/auth-context";
+import { useCallHistoryWorkflow, type CallWorkflowPatch } from "@/lib/use-call-history-workflow";
 import {
     defaultCallHistoryWorkflow,
     callHasCapturedContact,
     capturedContactParts,
     classifyCall,
     isActiveCallStatus,
-    readCallHistoryWorkflow,
-    writeCallHistoryWorkflow,
     type CallHistoryWorkflowEntry,
     type CallHistoryWorkflowMap,
 } from "@/lib/call-history-workflow";
@@ -144,8 +144,6 @@ function CallParties({ call }: { call: Call }) {
     return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
 }
 
-type CallWorkflowPatch = Partial<Omit<CallHistoryWorkflowEntry, "updatedAt">>;
-
 // The per-call "best time to call" the panel shows. The `Call` type and the
 // list mapper do not carry this field yet, so today it is always null and the
 // panel shows its empty state. Once the backend sends `best_time_to_call` on
@@ -158,12 +156,14 @@ function callBestTimeToCall(call: Call): string | null {
 
 function CallRow({
     call,
+    timeZone,
     canPlayMedia,
     workflow,
     onWorkflowChange,
     onReview,
 }: {
     call: Call;
+    timeZone?: string;
     canPlayMedia: boolean;
     workflow: CallHistoryWorkflowEntry;
     onWorkflowChange: (call: Call, patch: CallWorkflowPatch) => void;
@@ -265,9 +265,9 @@ function CallRow({
                             {humanizeOutcome(call.outcome)}
                         </span>
                     ) : null}
-                    <time dateTime={call.created_at} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                    <time dateTime={call.created_at} title={formatTimestamp(call.created_at, timeZone).utc} className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                         <Clock className="h-3.5 w-3.5" aria-hidden />
-                        {new Date(call.created_at).toLocaleString()}
+                        {formatTimestamp(call.created_at, timeZone).label}
                     </time>
                 </div>
                 <CallHistoryNotesField
@@ -373,7 +373,7 @@ function CallRow({
                     callLabel={callLabel}
                 />
                 <div className="flex justify-center">
-                    <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} />
+                    <CallTimestamp iso={call.created_at} durationSeconds={call.duration_seconds} timeZone={timeZone} />
                 </div>
                 <div className="flex items-center justify-center gap-1">
                     <TooltipProvider delayDuration={250}>
@@ -624,6 +624,7 @@ function groupByCampaign(calls: Call[]): CampaignGroup[] {
 
 function CampaignSection({
     group,
+    timeZone,
     defaultOpen,
     canPlayMedia,
     workflow,
@@ -631,6 +632,7 @@ function CampaignSection({
     onReview,
 }: {
     group: CampaignGroup;
+    timeZone?: string;
     defaultOpen: boolean;
     canPlayMedia: boolean;
     workflow: CallHistoryWorkflowMap;
@@ -813,6 +815,7 @@ function CampaignSection({
                                     >
                                         <CallRow
                                             call={call}
+                                            timeZone={timeZone}
                                             canPlayMedia={canPlayMedia}
                                             workflow={workflow[call.id] ?? defaultCallHistoryWorkflow(call)}
                                             onWorkflowChange={onWorkflowChange}
@@ -836,47 +839,18 @@ export default function CallsPage() {
         permissions.isSuccess ? permissions.data.permissions : undefined,
     );
     const canPlayMedia = permissions.isSuccess && recordingCapabilities.canRead;
+    // Call history is read with the server's cursor, not offsets (QA F6-03),
+    // one cursor page after another until every call is loaded (useCalls),
+    // so the search and the filters below cover all calls. The list then shows
+    // 50 rows of the filtered result per page.
     const [page, setPage] = useState(1);
     const pageSize = 50;
     const [search, setSearch] = useState("");
     const [filter, setFilter] = useState<"all" | "leads" | "issues">("all");
     const [direction, setDirection] = useState<"all" | "inbound" | "outbound">("all");
     const [inboundCampaignId, setInboundCampaignId] = useState<string | undefined>();
-    const [workflow, setWorkflow] = useState<CallHistoryWorkflowMap>({});
-    const [loadedWorkflowScope, setLoadedWorkflowScope] = useState("");
     const [reviewCall, setReviewCall] = useState<Call | null>(null);
     const previousStatusesRef = useRef<Map<string, string> | null>(null);
-    const workflowScope = user?.tenant_id || user?.id || "";
-
-    useEffect(() => {
-        if (!workflowScope) return;
-        // Browser-only, identity-scoped workflow metadata cannot be part of the
-        // server render. Hydrate it once auth has resolved.
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- localStorage hydration after the client/auth boundary
-        setWorkflow(readCallHistoryWorkflow(workflowScope));
-        setLoadedWorkflowScope(workflowScope);
-    }, [workflowScope]);
-
-    useEffect(() => {
-        if (!workflowScope || loadedWorkflowScope !== workflowScope) return;
-        writeCallHistoryWorkflow(workflowScope, workflow);
-    }, [loadedWorkflowScope, workflow, workflowScope]);
-
-    const updateWorkflow = useCallback((call: Call, patch: CallWorkflowPatch) => {
-        const updatedAt = new Date().toISOString();
-        setWorkflow((current) => {
-            const existing = current[call.id] ?? defaultCallHistoryWorkflow(call);
-            return {
-                ...current,
-                [call.id]: {
-                    ...existing,
-                    ...patch,
-                    form: patch.form ?? existing.form,
-                    updatedAt,
-                },
-            };
-        });
-    }, []);
     const [selectedDid, setSelectedDid] = useState<string | undefined>();
 
     // The page and every filter live in the address, so a reload or a shared
@@ -920,10 +894,14 @@ export default function CallsPage() {
         }
     }, [addressRead, page, search, filter, direction, inboundCampaignId, selectedDid]);
 
-    const q = useAllCalls();
+    const firstPage = () => setPage(1);
+    // Direction and inbound campaign are the server's own filters: they are
+    // sent with every cursor request, and a change (like a different signed-in
+    // tenant) starts a new cursor chain from the first page.
+    const q = useCalls(user?.tenant_id ?? null, pageSize, { direction: direction === "all" ? undefined : direction, inboundCampaignId });
     const allCalls = useMemo(() => q.data?.calls ?? [], [q.data]);
-    // Every page is read again on a filter change (and on page load / Retry);
-    // the live refresh in between reads the newest page only.
+    // Search, Leads / Issues and the number filter are applied here, so they
+    // read every page again; the server filters above do that by themselves.
     const readAllCallsAgain = () => { void q.refetch(); };
 
     useEffect(() => {
@@ -961,15 +939,18 @@ export default function CallsPage() {
             return true;
         });
     }, [allCalls, search, filter, direction, inboundCampaignId, selectedDid]);
-    // Every filter above runs over all of the account's calls, so the pages
-    // and the footer count the rows that match, not the account total.
+    // Every filter above runs over all of the loaded calls, so the pages and
+    // the footer count the rows that match.
     const total = calls.length;
-    const totalPages = Math.ceil(total / pageSize);
-    const currentPage = Math.min(page, Math.max(1, totalPages));
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
+    const currentPage = Math.min(page, totalPages);
     const pageCalls = useMemo(
         () => calls.slice((currentPage - 1) * pageSize, currentPage * pageSize),
         [calls, currentPage],
     );
+    // Saved notes and labels are read for the rows on screen only.
+    const workflowSync = useCallHistoryWorkflow(pageCalls, user?.tenant_id, user?.id);
+    const { workflow, update: updateWorkflow } = workflowSync;
     const error = q.isError ? failedReadMessage(q.error, "Failed to load calls") : "";
     const groups = useMemo(() => groupByCampaign(pageCalls), [pageCalls]);
     const hasActiveFilters = Boolean(search.trim()) || filter !== "all" || direction !== "all" || Boolean(inboundCampaignId) || Boolean(selectedDid);
@@ -977,6 +958,15 @@ export default function CallsPage() {
     return (
         <DashboardLayout title="Call History" description="Review calls, classify leads, capture notes, and complete follow-up forms">
             <CallIssuesBanner />
+            {workflowSync.failed ? (
+                <div role="alert" className="mb-4 rounded-lg border border-border p-3 text-sm">
+                    Call details are not saved or could not load. Retry to sync your pending changes.
+                    <button type="button" className="ml-2 font-semibold underline" onClick={workflowSync.retry}>Retry sync</button>
+                </div>
+            ) : workflowSync.busy ? <p role="status" className="mb-2 text-sm text-muted-foreground">Syncing call details…</p> : null}
+            {workflowSync.backupUnavailable ? (
+                <p role="alert" className="mb-4 text-sm">Browser backup is unavailable. Keep this page open until your changes save.</p>
+            ) : null}
             {q.isLoading ? (
                 <LoadingState title="Loading call history" />
             ) : error ? (
@@ -985,7 +975,7 @@ export default function CallsPage() {
                 <EmptyState title="No calls yet" message="Calls will appear here after an outbound campaign starts or an active inbound line receives a call." />
             ) : (
                 <div className="space-y-4">
-                    {/* Search + filter toolbar — client-side over every call of the account */}
+                    {/* Search + filter toolbar — client-side over every loaded call */}
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="relative w-full sm:max-w-xs">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -994,14 +984,14 @@ export default function CallsPage() {
                                 id="call-history-search"
                                 type="text"
                                 value={search}
-                                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                                onChange={(e) => { setSearch(e.target.value); firstPage(); }}
                                 placeholder="Search by phone number or campaign…"
                                 className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
                             />
                         </div>
                         <div className="flex max-w-full flex-wrap items-center gap-2">
                         <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1" role="group" aria-label="Filter calls by direction">
-                            {(["all", "inbound", "outbound"] as const).map((key) => <button key={key} type="button" aria-pressed={direction === key} onClick={() => { setDirection(key); setPage(1); readAllCallsAgain(); }} className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-colors ${direction === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{key}</button>)}
+                            {(["all", "inbound", "outbound"] as const).map((key) => <button key={key} type="button" aria-pressed={direction === key} onClick={() => { setDirection(key); firstPage(); }} className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-colors ${direction === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{key}</button>)}
                         </div>
                         <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1" role="group" aria-label="Filter calls by outcome">
                             {([
@@ -1013,7 +1003,7 @@ export default function CallsPage() {
                                     key={key}
                                     type="button"
                                     aria-pressed={filter === key}
-                                    onClick={() => { setFilter(key); setPage(1); readAllCallsAgain(); }}
+                                    onClick={() => { setFilter(key); firstPage(); readAllCallsAgain(); }}
                                     className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors duration-150 ease-out ${
                                         filter === key
                                             ? "bg-accent text-accent-foreground"
@@ -1030,7 +1020,7 @@ export default function CallsPage() {
                             ariaLabel="Filter calls by phone number"
                             fitLongestOption
                             value={selectedDid ?? ""}
-                            onChange={(next) => { setSelectedDid(next || undefined); setPage(1); readAllCallsAgain(); }}
+                            onChange={(next) => { setSelectedDid(next || undefined); firstPage(); readAllCallsAgain(); }}
                             selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All phone numbers</option>
@@ -1042,7 +1032,7 @@ export default function CallsPage() {
                             ariaLabel="Filter calls by inbound campaign"
                             fitLongestOption
                             value={inboundCampaignId ?? ""}
-                            onChange={(next) => { setInboundCampaignId(next || undefined); setPage(1); readAllCallsAgain(); }}
+                            onChange={(next) => { setInboundCampaignId(next || undefined); firstPage(); }}
                             selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All campaigns</option>
@@ -1061,8 +1051,9 @@ export default function CallsPage() {
                                 setDirection("all");
                                 setInboundCampaignId(undefined);
                                 setSelectedDid(undefined);
-                                setPage(1);
-                                readAllCallsAgain();
+                                firstPage();
+                                // A cleared server filter starts its own reading.
+                                if (direction === "all" && !inboundCampaignId) readAllCallsAgain();
                             }}
                         />
                     ) : (
@@ -1070,6 +1061,7 @@ export default function CallsPage() {
                             <CampaignSection
                                 key={g.id}
                                 group={g}
+                                timeZone={user?.account_timezone}
                                 defaultOpen={idx === 0}
                                 canPlayMedia={canPlayMedia}
                                 workflow={workflow}
@@ -1079,17 +1071,21 @@ export default function CallsPage() {
                         ))
                     )}
 
-                    {totalPages > 1 && (
+                    {calls.length > 0 && (
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
                             transition={{ delay: 0.3 }}
                             className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
                         >
-                            <p className="text-sm text-muted-foreground">
-                                Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, total)} of {total} calls
-                            </p>
-                            <div className="flex gap-2">
+                            {/* The server sends no total in cursor mode: "of N" is the count of the
+                                rows loaded, shown only once every page has been read, so it is exact. */}
+                            {totalPages > 1 ? (
+                                <p className="text-sm text-muted-foreground">
+                                    Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, total)}{q.data?.complete ? ` of ${total}` : ""} calls
+                                </p>
+                            ) : null}
+                            <div className="flex gap-2 sm:ml-auto">
                                 <button
                                     onClick={() => setPage(Math.max(1, currentPage - 1))}
                                     disabled={currentPage === 1}
@@ -1099,7 +1095,7 @@ export default function CallsPage() {
                                 </button>
                                 <button
                                     onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
-                                    disabled={currentPage === totalPages}
+                                    disabled={currentPage >= totalPages}
                                     className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     Next

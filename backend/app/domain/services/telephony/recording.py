@@ -93,6 +93,13 @@ def _session_tenant_uuid(voice_session) -> UUID | None:
 
 
 async def _save_call_recording(voice_session, call_id: str) -> None:
+    """Share the recording acquisition budget through lookup, stub and save."""
+    from app.domain.services.recording_service import _with_recording_pool_budget
+
+    await _with_recording_pool_budget(_save_call_recording_with_budget)(voice_session, call_id)
+
+
+async def _save_call_recording_with_budget(voice_session, call_id: str) -> None:
     """
     Extract the recording buffer from the media gateway, convert to WAV,
     and persist to local storage + DB.
@@ -108,7 +115,9 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
         same as calls.id — we must look up the internal UUID from
         calls.external_call_uuid.
     """
-    from app.domain.services.recording_service import RecordingService, RecordingBuffer, mix_stereo_recording
+    from app.domain.services.recording_service import (
+        RecordingService, RecordingBuffer, mix_stereo_recording, _acquire_recording_connection,
+    )
     from app.core.container import get_container
 
     gateway = voice_session.media_gateway
@@ -264,7 +273,9 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
             _discard_recording(voice_session)
             logger.warning("recording_tenant_unavailable call=%s", call_id[:12])
             return
-        async with get_db() as conn:
+        async with _acquire_recording_connection(
+            db_client.pool, call_id, str(expected_tenant), acquire_context=get_db,
+        ) as conn:
             row = await conn.fetchrow(
                 "SELECT id, tenant_id, campaign_id FROM calls "
                 "WHERE external_call_uuid = $1 "
@@ -309,7 +320,10 @@ async def _save_call_recording(voice_session, call_id: str) -> None:
             )
             from app.core.db_utils import acquire_with_tenant
 
-            async with acquire_with_tenant(db_client.pool, session_tenant) as conn:
+            async with _acquire_recording_connection(
+                db_client.pool, call_id, session_tenant,
+                acquire_context=lambda: acquire_with_tenant(db_client.pool, session_tenant),
+            ) as conn:
                 campaign_uuid = (
                     UUID(str(session_campaign))
                     if session_campaign and session_campaign != "telephony" else None

@@ -50,6 +50,8 @@ afterEach(() => {
 });
 const draw = () => render(<QueryClientProvider client={qc}><AuthProvider><AuditLogsPage /></AuthProvider></QueryClientProvider>);
 const errorText = () => document.querySelector('[role="alert"]')?.textContent ?? "";
+// The message is the alert's own text; the reference, notices and Retry are elements inside the same alert.
+const errorMessage = () => Array.from(document.querySelector('[role="alert"]')?.childNodes ?? []).filter((node) => node.nodeType === 3).map((node) => node.textContent).join("");
 
 test("loading is announced through the shared loading state", async () => {
     let release!: (value: Response) => void;
@@ -107,7 +109,7 @@ test("a malformed answer shows the error state's default message, never the vali
     answer = () => json([auditRow(1, { event_id: "bad-id" })]);
     draw();
     await screen.findByText(TITLE, undefined, { timeout: SLOW });
-    assert.equal(errorText(), "Please retry.");
+    assert.equal(errorMessage(), "Please retry.");
     assert.doesNotMatch(document.body.textContent ?? "", /invalid_|"path"|"code"|Invalid input/i);
     assert.doesNotMatch(document.body.textContent ?? "", PERMISSION);
 });

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 from uuid import UUID, uuid4
 
 import pytest
@@ -27,6 +28,10 @@ def _encryption_key(monkeypatch):
 class _Conn:
     def __init__(self):
         self.executed: list[tuple[str, tuple]] = []
+
+    async def fetchrow(self, query, *args):
+        assert "WHERE tenant_id = $1 AND webhook_name = $2" in query
+        return None
 
     async def execute(self, query, *args):
         self.executed.append((" ".join(query.split()), args))
@@ -60,6 +65,7 @@ async def test_configure_webhook_upserts_with_tenant_scope_and_invalidates_cache
         tenant_id=tenant,
         db_client=SimpleNamespace(pool=pool),
         _admin=None,
+        audit_logger=SimpleNamespace(lock_transaction=AsyncMock(), log_in_transaction=AsyncMock()),
     )
 
     assert contexts == [(pool, tenant)]
@@ -87,6 +93,7 @@ async def test_configure_webhook_rejects_a_malformed_tenant_id(monkeypatch):
             tenant_id="not-a-uuid",
             db_client=SimpleNamespace(pool=object()),
             _admin=None,
+        audit_logger=SimpleNamespace(lock_transaction=AsyncMock(), log_in_transaction=AsyncMock()),
         )
     assert err.value.status_code == 400
     assert conn.executed == []

@@ -2,24 +2,41 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { MFA_REQUIRED_MESSAGE, useAuth } from '../lib/auth';
 import { safeAdminReturn } from '../lib/admin-routes';
+import { TurnstileWidget } from '../components/TurnstileWidget';
 import { Zap, Mail, Lock, AlertCircle, KeyRound } from 'lucide-react';
+
+// Public build-time Cloudflare Turnstile site key. Unset: no script, widget or token.
+const TURNSTILE_SITE_KEY = String(import.meta.env.VITE_TURNSTILE_SITE_KEY ?? '').trim();
 
 export function LoginPage() {
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [factor, setFactor] = useState('');
     const [recovery, setRecovery] = useState(false);
+    const [turnstileToken, setTurnstileToken] = useState<string | null>(null);
+    const [turnstileResets, setTurnstileResets] = useState(0);
     const { login, verifyMfa, cancelMfa, mfaChallenge, error, isAuthenticated, isLoading, user, checkAuth, logout, logoutRecoveryRequired, signInRefused } = useAuth();
     const navigate = useNavigate();
     const location = useLocation();
     const target = safeAdminReturn((location.state as { from?: { pathname?: string } })?.from?.pathname, user?.role);
     useEffect(() => { if (isAuthenticated) navigate(target, { replace: true }); }, [isAuthenticated, target, navigate]);
 
+    // With a site key a password sign-in waits for the widget's token; the MFA step needs none.
+    const waitingForToken = TURNSTILE_SITE_KEY !== '' && !mfaChallenge && !turnstileToken;
+
     const submit = async (event: React.FormEvent) => {
         event.preventDefault();
         if (isLoading) return;
         if (mfaChallenge) await verifyMfa(factor, recovery);
-        else { await login(email, password); setPassword(''); }
+        else if (!TURNSTILE_SITE_KEY) { await login(email, password); setPassword(''); }
+        else if (turnstileToken) {
+            // A Turnstile token is single-use: spend it once, then have the widget issue another.
+            const token = turnstileToken;
+            setTurnstileToken(null);
+            await login(email, password, token);
+            setPassword('');
+            setTurnstileResets((count) => count + 1);
+        }
         setFactor('');
     };
     return <div className="login-page"><div className="login-container">
@@ -55,8 +72,10 @@ export function LoginPage() {
                 <div className="form-group"><label htmlFor="password">Password</label><div className="input-wrapper"><Lock size={18} />
                     <input id="password" type="password" value={password} onChange={(event) => setPassword(event.target.value)}
                         placeholder="Enter your password" autoComplete="current-password" required disabled={isLoading} /></div></div>
+                {TURNSTILE_SITE_KEY !== '' && <TurnstileWidget siteKey={TURNSTILE_SITE_KEY} action="login"
+                    onToken={setTurnstileToken} resetCount={turnstileResets} />}
             </>}
-            <button type="submit" className="login-button" disabled={isLoading}>{isLoading ? 'Verifying...' : mfaChallenge ? 'Verify' : 'Sign in'}</button>
+            <button type="submit" className="login-button" disabled={isLoading || waitingForToken}>{isLoading ? 'Verifying...' : mfaChallenge ? 'Verify' : 'Sign in'}</button>
         </form>
         <div className="login-footer"><p>Admin access only. Contact your administrator for access.</p></div>
     </div></div>;

@@ -12,6 +12,7 @@ plan_id is never accepted from the frontend. Since 2026-10-27 billing is
 paid-only: a new account has no plan and no minutes, and can place calls
 only after buying a monthly or yearly plan in Billing.
 """
+from app.core.error_handlers import safe_exception_message
 
 import hashlib
 import json
@@ -32,6 +33,7 @@ from app.core.security.password import (
     validate_password_strength,
 )
 from app.core.security.sessions import create_session
+from app.core.security.auth_abuse import enforce_budget, reject_disposable_signup_email, verify_turnstile
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.email_service import get_email_service
 
@@ -172,6 +174,8 @@ async def signup_start(
     15-minute TTL. No DB row is created yet."""
 
     email = body.email.strip().lower()
+    reject_disposable_signup_email(email)
+    await verify_turnstile(body.turnstile_token, get_client_ip(request), "signup")
 
     # Reject if a real account with this email already exists.
     # Signup starts with an email, before a tenant identity exists.
@@ -194,6 +198,7 @@ async def signup_start(
     }
 
     redis = _get_redis_or_503()
+    await enforce_budget(redis, "signup-ip-day", get_client_ip(request), limit=10, seconds=24 * 60 * 60)
     await _claim_signup_send(redis, email)
     try:
         await redis.setex(
@@ -299,6 +304,9 @@ async def signup_complete(
     email = body.email.strip().lower()
 
     # Confirm passwords match.
+    from app.domain.services.legal_acceptance import record_acceptance, validate_signup_acceptance
+    legal_versions = validate_signup_acceptance(body.terms_version, body.privacy_version)
+
     if body.password != body.confirm_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -311,7 +319,7 @@ async def signup_complete(
     except PasswordValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(exc),
+            detail=safe_exception_message(exc, 'Invalid password.'),
         ) from exc
 
     # Pull pending signup from Redis.
@@ -442,6 +450,10 @@ async def signup_complete(
 
             ip = get_client_ip(request)
             ua = get_user_agent(request)
+            await record_acceptance(
+                conn, tenant_id=str(tenant["id"]), user_id=user_id,
+                versions=legal_versions, ip_address=ip, user_agent=ua,
+            )
             raw_session_token, session_id = await create_session(
                 conn,
                 user_id=user_id,

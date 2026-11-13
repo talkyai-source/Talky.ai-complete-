@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +44,7 @@ import { humanizeOutcome } from "@/lib/call-outcome-label";
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
+import { campaignActions } from "@/lib/permissions";
 import {
     ArrowLeft,
     Copy,
@@ -145,12 +146,28 @@ export default function CampaignDetailPage() {
     const params = useParams();
     const campaignId = params.id as string;
 
-    return <CampaignDetailScope key={campaignId} campaignId={campaignId} />;
+    // The scope reads useSearchParams (QA F1-31), which Next requires a boundary for.
+    return (
+        <Suspense fallback={null}>
+            <CampaignDetailScope key={campaignId} campaignId={campaignId} />
+        </Suspense>
+    );
 }
 
 function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const router = useRouter();
+    // QA F1-31: the wizard opens a new campaign with ?knowledge_error=1 when
+    // its knowledge upload failed; say so until the user dismisses it.
+    const searchParams = useSearchParams();
+    const [knowledgeNoticeDismissed, setKnowledgeNoticeDismissed] = useState(false);
+    const knowledgeUploadFailed = searchParams?.get("knowledge_error") === "1" && !knowledgeNoticeDismissed;
     const permissions = useEffectivePermissions();
+    // QA F1-21: start, pause, stop, edit and every contact change need
+    // campaigns:update; unknown permissions keep them offered.
+    const allowedActions = campaignActions(permissions.isSuccess ? permissions.data.permissions : undefined);
+    const canChange = allowedActions.update;
+    // A duplicate is a new campaign (QA F1-21 with plan 3.1).
+    const canDuplicate = allowedActions.create;
     const canManageKnowledge = permissions.isSuccess && (
         permissions.data.role?.toLowerCase() === "platform_admin"
         || permissions.data.permissions.includes("campaigns:update")
@@ -549,15 +566,19 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                 disabled={actionLoading}
                                 agentName={campaign.script_config?.agent_names?.[0]}
                             />
-                            <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
-                                <Pencil className="w-4 h-4" />
-                                Edit
-                            </Button>
-                            <Button variant="outline" onClick={() => { void duplicate.run(); }} disabled={actionLoading || duplicate.disabled}>
-                                <Copy className="w-4 h-4" />
-                                Duplicate
-                            </Button>
-                            {canStart ? (
+                            {canChange ? (
+                                <Button variant="outline" onClick={() => router.push(`/campaigns/${campaignId}/edit`)} disabled={actionLoading}>
+                                    <Pencil className="w-4 h-4" />
+                                    Edit
+                                </Button>
+                            ) : null}
+                            {canDuplicate ? (
+                                <Button variant="outline" onClick={() => { void duplicate.run(); }} disabled={actionLoading || duplicate.disabled}>
+                                    <Copy className="w-4 h-4" />
+                                    Duplicate
+                                </Button>
+                            ) : null}
+                            {canChange && canStart ? (
                                 <Button
                                     onClick={handleStartClick}
                                     disabled={actionLoading || outOfMinutes || !readiness.ready}
@@ -566,7 +587,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Play className="w-4 h-4" />
                                     {campaignStartLabel(campaign.status)}
                                 </Button>
-                            ) : campaign.status === "running" ? (
+                            ) : canChange && campaign.status === "running" ? (
                                 <>
                                     <Button variant="outline" onClick={handlePause} disabled={actionLoading}>
                                         {pausing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pause className="w-4 h-4" />}
@@ -582,7 +603,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                     </motion.div>
                     <CampaignDuplicateStatus duplicate={duplicate} />
                     <CampaignControlNoticeBox notice={controlNotice} />
-                    {canStart && <CampaignReadinessNotice readiness={readiness} />}
+                    {canChange && canStart && <CampaignReadinessNotice readiness={readiness} />}
 
                     {/* Running but not placing calls: say why, in the dialer's own
                         words, and when it will try again. */}
@@ -757,6 +778,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                             refreshToken={listsRefreshToken}
                             onListsLoaded={setLists}
                             onCallStarted={() => { void loadData(); }}
+                            readOnly={!canChange}
                         />
                     </div>
 
@@ -769,7 +791,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                     >
                         <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                             <h3 className="text-lg font-semibold text-foreground">Contacts</h3>
-                            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+                            {canChange && <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
                                 <Button size="sm" variant="outline" onClick={() => setCsvModalOpen(true)}>
                                     <Upload className="w-4 h-4" />
                                     Import CSV
@@ -778,7 +800,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                     <Plus className="w-4 h-4" />
                                     Add contact
                                 </Button>
-                            </div>
+                            </div>}
                         </div>
                         <SmartCsvImport
                             open={csvModalOpen}
@@ -1030,7 +1052,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                 </td>
                                                 <td className="px-4 py-3 text-right text-sm text-muted-foreground tabular-nums whitespace-nowrap">{contact.call_attempts}</td>
                                                 <td className="px-4 py-3 text-right whitespace-nowrap">
-                                                    <div className="flex items-center justify-end gap-1">
+                                                    {canChange && <div className="flex items-center justify-end gap-1">
                                                         <button
                                                             type="button"
                                                             onClick={() => startEditContact(contact)}
@@ -1054,7 +1076,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                                 <Trash2 className="h-3.5 w-3.5" />
                                                             )}
                                                         </button>
-                                                    </div>
+                                                    </div>}
                                                     {contactDeleteError?.id === contact.id ? (
                                                         <p role="alert" className="mt-1 whitespace-normal text-xs text-destructive">{contactDeleteError.message}</p>
                                                     ) : null}
@@ -1068,6 +1090,23 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                           </>
                         )}
                     </motion.div>
+
+                    {knowledgeUploadFailed && (
+                        <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-100">
+                            <p>Your knowledge file was not added. The campaign was created; upload the file again below.</p>
+                            <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                    setKnowledgeNoticeDismissed(true);
+                                    router.replace(`/campaigns/${campaignId}`);
+                                }}
+                            >
+                                Dismiss
+                            </Button>
+                        </div>
+                    )}
 
                     {/* Knowledge base — vectorless-RAG tree the agent answers from */}
                     <KnowledgePanel campaignId={campaignId} readOnly={!canManageKnowledge} />

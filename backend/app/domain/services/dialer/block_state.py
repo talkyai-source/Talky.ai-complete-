@@ -76,6 +76,7 @@ _TITLES: dict[BlockCode, str] = {
     BlockCode.CALLER_ID_NOT_VERIFIED: "Caller ID not verified",
     BlockCode.CALL_GUARD_BLOCKED: "Blocked by safety rules",
     BlockCode.DNC: "Number is on a Do-Not-Call list",
+    BlockCode.INVALID_PHONE_NUMBER: "Contact has an invalid phone number",
     BlockCode.VOICE_PIPELINE_UNAVAILABLE: "Voice provider not ready",
     BlockCode.LINE_NOT_READY: "Phone line not ready",
     BlockCode.TELEPHONY_UNAVAILABLE: "Calling service not connected",

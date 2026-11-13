@@ -4,13 +4,16 @@ FastAPI endpoints for meeting booking and management.
 
 Day 25: Meeting Booking Feature
 """
+from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID, bounded_text
 import logging
 from typing import Optional, List
 from datetime import datetime, time as dt_time, timezone as dt_timezone
+from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
@@ -35,27 +38,28 @@ _require_calendar_manage = require_permission(Permission.CALENDAR_MANAGE)
 
 class CreateMeetingRequest(BaseModel):
     """Request to create a meeting"""
-    title: str = Field(..., description="Meeting title")
-    start_time: str = Field(..., description="Start time in ISO format")
+    # QA F2-13: title fits VARCHAR(255), timezone VARCHAR(50).
+    title: bounded_text(255, min_length=1) = Field(..., description="Meeting title")
+    start_time: bounded_text(64) = Field(..., description="Start time in ISO format")
     duration_minutes: int = Field(30, ge=15, le=480, description="Duration in minutes")
-    attendees: List[str] = Field(default_factory=list, description="Attendee emails")
+    attendees: List[bounded_text(254)] = Field(default_factory=list, max_length=50, description="Attendee emails")
     lead_id: Optional[str] = Field(None, description="Lead ID if booking with a lead")
-    description: Optional[str] = Field(None, description="Meeting description")
+    description: Optional[bounded_text(10_000)] = Field(None, description="Meeting description")
     add_video_conference: bool = Field(True, description="Add Google Meet/Teams link")
-    timezone: str = Field("UTC", description="Meeting timezone")
+    timezone: bounded_text(50) = Field("UTC", description="Meeting timezone")
 
 
 class UpdateMeetingRequest(BaseModel):
     """Request to update a meeting"""
-    title: Optional[str] = None
-    start_time: Optional[str] = None
-    description: Optional[str] = None
-    attendees: Optional[List[str]] = None
+    title: Optional[bounded_text(255, min_length=1)] = None
+    start_time: Optional[bounded_text(64)] = None
+    description: Optional[bounded_text(10_000)] = None
+    attendees: Optional[List[bounded_text(254)]] = Field(None, max_length=50)
 
 
 class CancelMeetingRequest(BaseModel):
     """Request to cancel a meeting"""
-    reason: Optional[str] = None
+    reason: Optional[bounded_text(1_000)] = None
 
 
 class AvailabilitySlot(BaseModel):
@@ -65,7 +69,26 @@ class AvailabilitySlot(BaseModel):
     duration_minutes: int
 
 
-class MeetingResponse(BaseModel):
+class _NativeRowModel(BaseModel):
+    """Response model built straight from database rows and service receipts.
+
+    asyncpg returns uuid.UUID for uuid columns and datetime for timestamptz
+    columns. The JSON contract carries both as strings and pydantic v2 does not
+    coerce them, so every real row failed validation (QA F2-08). Same fix as
+    admin/_serialization.AdminResponseModel; a no-op for values already text.
+    """
+
+    @field_validator("*", mode="before")
+    @classmethod
+    def _native_to_text(cls, value):
+        if isinstance(value, UUID):
+            return str(value)
+        if isinstance(value, datetime):
+            return value.isoformat()
+        return value
+
+
+class MeetingResponse(_NativeRowModel):
     """Meeting response"""
     id: str
     title: str
@@ -76,6 +99,8 @@ class MeetingResponse(BaseModel):
     join_link: Optional[str]
     status: str
     attendees: List[dict]
+    # Attendee emails as plain strings: the shape the web client reads (models.ts MeetingSchema).
+    participants: List[str] = Field(default_factory=list)
     lead_id: Optional[str]
     created_at: str
 
@@ -83,7 +108,12 @@ class MeetingResponse(BaseModel):
         from_attributes = True
 
 
-class CreateMeetingResponse(BaseModel):
+class MeetingListResponse(BaseModel):
+    """Meetings in the ``{"items": [...]}`` envelope the web client parses (models.ts ListResponseSchema)."""
+    items: List[MeetingResponse]
+
+
+class CreateMeetingResponse(_NativeRowModel):
     """Response after creating a meeting"""
     success: bool
     meeting_id: Optional[str] = None
@@ -95,6 +125,26 @@ class CreateMeetingResponse(BaseModel):
     provider: Optional[str] = None
     error: Optional[str] = None
     calendar_required: bool = False
+
+
+def _meeting_response(meeting: dict) -> MeetingResponse:
+    """Build the API shape from a ``meetings`` row as the database driver returns it."""
+    attendees = meeting.get("attendees") or []
+    return MeetingResponse(
+        id=meeting["id"],
+        title=meeting["title"],
+        description=meeting.get("description"),
+        start_time=meeting["start_time"],
+        end_time=meeting["end_time"],
+        timezone=meeting.get("timezone") or "UTC",
+        join_link=meeting.get("join_link"),
+        status=meeting["status"],
+        attendees=attendees,
+        # MeetingService stores attendees as {"email", "status"} objects.
+        participants=[a["email"] for a in attendees if isinstance(a, dict) and a.get("email")],
+        lead_id=meeting.get("lead_id"),
+        created_at=meeting["created_at"],
+    )
 
 
 # =============================================================================
@@ -161,7 +211,7 @@ async def get_availability(
             }
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'The request could not be completed.'))
 
 
 @router.post("/", response_model=CreateMeetingResponse, dependencies=[Depends(_require_calendar_manage)])
@@ -206,10 +256,10 @@ async def create_meeting(
             calendar_required=True
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=safe_exception_message(e, 'The request could not be completed.'))
 
 
-@router.get("/", response_model=List[MeetingResponse])
+@router.get("/", response_model=MeetingListResponse)
 async def list_meetings(
     status: Optional[str] = Query(None, description="Filter by status"),
     from_date: Optional[str] = Query(None, description="From date (YYYY-MM-DD)"),
@@ -217,7 +267,7 @@ async def list_meetings(
     limit: int = Query(50, ge=1, le=100, description="Maximum results"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
-) -> List[MeetingResponse]:
+) -> MeetingListResponse:
     """
     List meetings for the tenant.
     
@@ -225,9 +275,12 @@ async def list_meetings(
     """
     service = get_meeting_service(db_client)
     
-    # Parse dates if provided
-    from_dt = datetime.strptime(from_date, "%Y-%m-%d") if from_date else None
-    to_dt = datetime.strptime(to_date, "%Y-%m-%d") if to_date else None
+    # Parse dates if provided; a malformed one is the caller's error, not a 500.
+    try:
+        from_dt = datetime.strptime(from_date, "%Y-%m-%d") if from_date else None
+        to_dt = datetime.strptime(to_date, "%Y-%m-%d") if to_date else None
+    except ValueError:
+        raise HTTPException(status_code=400, detail="from_date and to_date must be dates in YYYY-MM-DD form")
     
     meetings = await service.list_meetings(
         tenant_id=current_user.tenant_id,
@@ -237,27 +290,12 @@ async def list_meetings(
         limit=limit
     )
     
-    return [
-        MeetingResponse(
-            id=m["id"],
-            title=m["title"],
-            description=m.get("description"),
-            start_time=m["start_time"],
-            end_time=m["end_time"],
-            timezone=m.get("timezone", "UTC"),
-            join_link=m.get("join_link"),
-            status=m["status"],
-            attendees=m.get("attendees", []),
-            lead_id=m.get("lead_id"),
-            created_at=m["created_at"]
-        )
-        for m in meetings
-    ]
+    return MeetingListResponse(items=[_meeting_response(m) for m in meetings])
 
 
 @router.get("/{meeting_id}", response_model=MeetingResponse)
 async def get_meeting(
-    meeting_id: str,
+    meeting_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
 ) -> MeetingResponse:
@@ -274,24 +312,12 @@ async def get_meeting(
     if not meeting:
         raise HTTPException(status_code=404, detail="Meeting not found")
     
-    return MeetingResponse(
-        id=meeting["id"],
-        title=meeting["title"],
-        description=meeting.get("description"),
-        start_time=meeting["start_time"],
-        end_time=meeting["end_time"],
-        timezone=meeting.get("timezone", "UTC"),
-        join_link=meeting.get("join_link"),
-        status=meeting["status"],
-        attendees=meeting.get("attendees", []),
-        lead_id=meeting.get("lead_id"),
-        created_at=meeting["created_at"]
-    )
+    return _meeting_response(meeting)
 
 
 @router.put("/{meeting_id}", dependencies=[Depends(_require_calendar_manage)])
 async def update_meeting(
-    meeting_id: str,
+    meeting_id: ResourceUUID,
     request: UpdateMeetingRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)
@@ -332,7 +358,7 @@ async def update_meeting(
 
 @router.delete("/{meeting_id}", dependencies=[Depends(_require_calendar_manage)])
 async def cancel_meeting(
-    meeting_id: str,
+    meeting_id: ResourceUUID,
     request: Optional[CancelMeetingRequest] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client)

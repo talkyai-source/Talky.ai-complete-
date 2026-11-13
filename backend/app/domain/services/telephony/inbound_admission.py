@@ -23,6 +23,10 @@ import asyncpg
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.platform_admin_guard import require_platform_admin_mutation
 from app.domain.services.call_status import TERMINAL_CALL_STATUSES
+from app.domain.services.subscription_status import (
+    SUBSCRIPTION_BLOCKED_STATUSES,
+    is_blocked as is_subscription_blocked,
+)
 from app.domain.services.telephony.business_hours import evaluate_business_hours
 from app.domain.services.telephony.inbound_address import canonical_extension
 from app.domain.services.telephony.inbound_router import (
@@ -32,10 +36,10 @@ from app.domain.services.telephony.inbound_router import (
     redact_did,
 )
 from app.domain.services.telephony.inbound_transfer import (
-    fetch_tenant_accounted_usage_seconds,
     inbound_transfer_destination_approved,
     inbound_transfer_runtime_available,
     inbound_transfer_scope_available,
+    tenant_inbound_allowance,
 )
 from app.domain.services.telephony.trunk_runtime import evaluate_trunk_runtime
 from app.domain.services.telephony_concurrency_limiter import (
@@ -673,6 +677,7 @@ class InboundAdmissionService:
                             t.status AS tenant_status,
                             t.subscription_status,
                             t.minutes_allocated,
+                            bp.billing_model AS plan_billing_model,
                             COALESCE(tic.inbound_enabled, FALSE) AS tenant_inbound_enabled,
                             EXISTS (
                                 SELECT 1
@@ -709,6 +714,7 @@ class InboundAdmissionService:
                         JOIN tenant_sip_trunks st
                           ON st.id=a.sip_trunk_id AND st.tenant_id=a.tenant_id
                         JOIN tenants t ON t.id=a.tenant_id
+                        LEFT JOIN plans bp ON bp.id=t.plan_id
                         LEFT JOIN tenant_inbound_controls tic ON tic.tenant_id=a.tenant_id
                         LEFT JOIN tenant_ai_configs ai ON ai.tenant_id=a.tenant_id
                         WHERE (
@@ -786,7 +792,17 @@ class InboundAdmissionService:
                     (bool(route["tenant_inbound_enabled"]), "tenant_inbound_disabled"),
                     (route["tenant_status"] == "active", "tenant_inactive"),
                     (
-                        route["subscription_status"] in {"active", "trialing"},
+                        route["subscription_status"] in {"active", "trialing"}
+                        # A prepaid (pay-as-you-go) account has no Stripe
+                        # subscription; its bought minutes are its
+                        # entitlement, metered below as outbound does.
+                        or (
+                            route.get("plan_billing_model") == "prepaid"
+                            and not is_subscription_blocked(
+                                route["subscription_status"],
+                                SUBSCRIPTION_BLOCKED_STATUSES,
+                            )
+                        ),
                         "subscription_inactive",
                     ),
                     (route["campaign_direction"] == "inbound", "campaign_not_inbound"),
@@ -1082,6 +1098,11 @@ class InboundAdmissionService:
                     },
                 }
                 from app.domain.services.telephony.control_backend_identity import valid_control_backend
+                from app.domain.services.caller_identity import caller_identity_from_metadata
+                snapshot["caller_identity"] = caller_identity_from_metadata(
+                    request.metadata if provider == "asterisk" and ingress == "asterisk" else {},
+                    caller_ani=caller_ani, ingress_endpoint=ingress_endpoint,
+                )
                 snapshot["control_backend"] = valid_control_backend(request.control_backend)
                 call_uuid = str(uuid.uuid4())
                 talklee_call_id = "IN" + uuid.uuid4().hex[:18]
@@ -1196,23 +1217,23 @@ class InboundAdmissionService:
 
                 # The limiter's tenant advisory lock remains held for this
                 # transaction, so active-reservation counting is race-free.
-                quota = await conn.fetchrow(
-                    "SELECT minutes_allocated FROM tenants WHERE id=$1 FOR UPDATE",
-                    tenant_id,
-                )
-                allocated_minutes = int(quota["minutes_allocated"] or 0)
-                # Use the product-wide quota authority: this month's actual
-                # duration from *all* call directions.  Add only currently
-                # active inbound reservations, because their duration has not
-                # been written yet.  The immutable ledger remains the billing
-                # audit trail, but it must not drift from dashboard/quota
-                # accounting. A non-positive allocation is the established
-                # unlimited-plan sentinel.
-                accounted_seconds = await fetch_tenant_accounted_usage_seconds(
+                # Use the product-wide quota authority: the outbound meter's
+                # allowance (plan minutes in this allowance month plus unused
+                # bought minutes; unlimited only on a zero-minute subscription
+                # plan) less this month's actual duration from *all* call
+                # directions and every live inbound reservation, whose
+                # duration has not been written yet. The immutable ledger
+                # remains the billing audit trail, but it must not drift from
+                # dashboard/quota accounting. An unknown allowance raises and
+                # fails closed below.
+                allowance = await tenant_inbound_allowance(
                     conn,
                     tenant_id=tenant_id,
                     exclude_call_id=call_uuid,
                 )
+                # The policy snapshot keeps 0 for an unlimited plan, as before.
+                allocated_minutes = allowance.allocated_minutes or 0
+                accounted_seconds = allowance.accounted_seconds
                 # Reserve the entire enforceable call window before Answer.
                 # ``request.reservation_seconds`` is a caller-side safety cap;
                 # the live Asterisk callback passes 14,400 so the campaign's
@@ -1224,14 +1245,10 @@ class InboundAdmissionService:
                     configured_max_duration,
                     requested_reservation_seconds,
                 )
-                if allocated_minutes > 0:
-                    remaining_seconds = max(
-                        0,
-                        allocated_minutes * 60 - accounted_seconds,
-                    )
+                if allowance.remaining_seconds is not None:
                     reservation_seconds = min(
                         reservation_seconds,
-                        remaining_seconds,
+                        allowance.remaining_seconds,
                     )
                 if reservation_seconds < 60:
                     await conn.execute(

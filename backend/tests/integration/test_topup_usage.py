@@ -10,6 +10,7 @@ context, the way the application reads. Rows are UUID-scoped and removed.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 from types import SimpleNamespace
 from urllib.parse import urlparse
@@ -181,6 +182,40 @@ async def test_a_plan_change_measures_closed_months_against_the_old_plan(usage_d
 
     assert await allocated(db) == 1000, "the allocation is the new plan's minutes"
     assert (await meter(db)).allocated == 1150, "the new plan plus the 150 bought minutes still unused"
+
+
+async def test_two_plan_changes_in_one_day_debit_each_windows_bought_minutes(usage_db):
+    # QA BIL-18: usage rows were keyed by the window's start date, so the
+    # second re-anchor of a day found the first window's row under the same
+    # key and never debited the bought minutes its own window used.
+    db = usage_db
+    await db.admin.execute(
+        "UPDATE tenants SET allowance_anchor_at=now() - interval '10 seconds' WHERE id=$1", db.tenant)
+    await db.admin.execute(
+        """INSERT INTO billing_ledger(tenant_id,kind,minutes_delta,provider_event_id,created_at)
+           VALUES($1,'topup',250,$2,now() - interval '9 seconds')""",
+        db.tenant, "evt_topup_" + uuid4().hex,
+    )
+
+    async def talk_now(minutes):
+        await db.admin.execute(
+            """INSERT INTO calls(id,tenant_id,campaign_id,phone_number,status,duration_seconds,
+                   direction,billing_status,is_test,created_at)
+               VALUES($1,$2,$3,'+15550001111','ended',$4,'outbound','none',FALSE,now() - interval '500 milliseconds')""",
+            uuid4(), db.tenant, db.campaign, minutes * 60,
+        )
+
+    await talk_now(400)  # 100 beyond the 300 plan minutes
+    async with acquire_with_tenant(db.pool, str(db.tenant)) as conn:
+        await apply_plan_allocation(conn, str(db.tenant), 300)
+    await asyncio.sleep(1.1)  # the next calls fall in the window the change opened
+    await talk_now(400)
+    async with acquire_with_tenant(db.pool, str(db.tenant)) as conn:
+        await apply_plan_allocation(conn, str(db.tenant), 300)
+
+    balance = await db.admin.fetchval(
+        "SELECT SUM(minutes_delta) FROM billing_ledger WHERE tenant_id=$1", db.tenant)
+    assert balance == 250 - 100 - 100
 
 
 async def test_an_unlimited_account_is_left_alone(usage_db):

@@ -216,7 +216,7 @@ def test_admin_configure_accepts_valid_internal_token(monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     import app.api.v1.endpoints.webhooks_secure as ws
-    from app.api.v1.dependencies import get_db_client
+    from app.api.v1.dependencies import get_audit_logger, get_db_client
 
     monkeypatch.setenv("INTERNAL_SERVICE_TOKEN", "s3cret-internal")
     # configure stores the HMAC secret encrypted (bh2) and fails closed (503)
@@ -230,13 +230,48 @@ def test_admin_configure_accepts_valid_internal_token(monkeypatch):
 
     from contextlib import asynccontextmanager
 
+    events, receipts = [], []
+
     class _Conn:
-        async def execute(self, *a, **k):
+        async def fetchrow(self, sql, *args):
+            assert " ".join(sql.split()) == (
+                "SELECT webhook_name, is_active FROM webhook_configs "
+                "WHERE tenant_id = $1 AND webhook_name = $2 FOR UPDATE"
+            )
+            assert tuple(map(str, args)) == (TENANT_B, "call_goal_achieved")
+            assert events == ["lock"]
+            events.append("read")
             return None
+
+        async def execute(self, sql, *args):
+            assert " ".join(sql.split()) == (
+                "INSERT INTO webhook_configs (tenant_id, webhook_name, secret_key) "
+                "VALUES ($1, $2, $3) ON CONFLICT (tenant_id, webhook_name) "
+                "DO UPDATE SET secret_key = $3, is_active = TRUE, updated_at = NOW()"
+            )
+            assert str(args[0]) == TENANT_B and args[1] == "call_goal_achieved"
+            assert args[2].startswith("enc:v1:")
+            assert events == ["lock", "read"]
+            events.append("write")
+
+    conn = _Conn()
+
+    class _Audit:
+        async def lock_transaction(self, supplied):
+            assert supplied is conn and events == []
+            events.append("lock")
+
+        async def log_in_transaction(self, supplied, **entry):
+            assert supplied is conn and events == ["lock", "read", "write"]
+            receipts.append(entry)
+            events.append("audit")
 
     @asynccontextmanager
     async def _acquire(_pool, _tenant_id, **_kw):
-        yield _Conn()
+        assert _pool is _DB.pool and _tenant_id == TENANT_B
+        yield conn
+        assert events == ["lock", "read", "write", "audit"]
+        events.append("commit")
 
     # PostgresClient has no execute(); the route writes through the pool.
     monkeypatch.setattr(ws, "acquire_with_tenant", _acquire)
@@ -247,6 +282,7 @@ def test_admin_configure_accepts_valid_internal_token(monkeypatch):
     app = FastAPI()
     app.include_router(ws.router, prefix="/api/v1")
     app.dependency_overrides[get_db_client] = lambda: _DB()
+    app.dependency_overrides[get_audit_logger] = lambda: _Audit()
     client = TestClient(app, raise_server_exceptions=False)
 
     r = client.post(
@@ -256,3 +292,13 @@ def test_admin_configure_accepts_valid_internal_token(monkeypatch):
     )
     assert r.status_code == 200
     assert r.json()["tenant_id"] == TENANT_B
+    assert events == ["lock", "read", "write", "audit", "commit"]
+    assert len(receipts) == 1
+    receipt = receipts[0]
+    assert receipt["action"] == "webhook.configure"
+    assert receipt["actor_type"] == "system" and receipt["actor_role"] == "internal_service"
+    assert str(receipt["tenant_id"]) == TENANT_B
+    assert receipt["before_state"] is None
+    assert receipt["after_state"] == {
+        "webhook_name": "call_goal_achieved", "is_active": True, "secret_key": "[REDACTED]",
+    }

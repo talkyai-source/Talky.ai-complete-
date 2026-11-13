@@ -213,6 +213,8 @@ _RLS_TABLES = (
     "assistant_action_resolutions",
     "assistant_actions",
     "assistant_conversations",
+    "audit_chain_state",
+    "audit_event_types",
     "audit_logs",
     "billing_checkout_attempts",
     "billing_ledger",
@@ -225,7 +227,10 @@ _RLS_TABLES = (
     "call_lead_details",
     "call_legs",
     "call_velocity_snapshots",
+    "call_workflows",
     "calls",
+    "campaign_alert_outbox",
+    "campaign_alert_state",
     "campaign_knowledge_nodes",
     "campaign_knowledge_sources",
     "campaign_lead_fields",
@@ -240,6 +245,7 @@ _RLS_TABLES = (
     "crm_deliveries",
     "dialer_jobs",
     "dnc_entries",
+    "emergency_access_requests",
     "inbound_audit_events",
     "inbound_billing_hold_finalize_approvals",
     "inbound_campaign_configs",
@@ -252,10 +258,12 @@ _RLS_TABLES = (
     "invoice_snapshots",
     "invoices",
     "leads",
+    "legal_acceptances",
     "meetings",
     "plan_price_options",
     "processed_webhook_events",
     "public_contact_enquiries",
+    "rate_limit_events",
     "recordings",
     "recordings_s3",
     "refresh_tokens",
@@ -276,8 +284,10 @@ _RLS_TABLES = (
     "support_ticket_messages",
     "support_ticket_reads",
     "support_tickets",
+    "suspension_propagation_queue",
     "tenant_ai_configs",
     "tenant_ai_credentials",
+    "tenant_alert_state",
     "tenant_call_limits",
     "tenant_codec_policies",
     "tenant_inbound_controls",
@@ -311,6 +321,7 @@ _RLS_TABLES = (
     "webhook_deliveries",
     "webhook_endpoints",
     "white_label_partners",
+    "worker_status",
 )
 
 
@@ -355,16 +366,58 @@ _ANY_GUC_SET = re.compile(
 _ANY_SET_CONFIG = re.compile(r"set_config\s*\(\s*['\"]app\.", re.IGNORECASE)
 
 
-# There is intentionally no grandfather list. A new bare pooled acquisition on
-# a protected table fails CI in the same change that introduces it.
-_KNOWN_NO_GUC: dict[str, str] = {}
+# Only individually reviewed platform request operations may omit a GUC.
+# The guards below pin every exception to its sole non-tenant table, schema
+# and current platform-only permission admission. This is not tenant debt.
+_KNOWN_NO_GUC: dict[str, str] = {
+    "core/security/emergency_access.py::EmergencyAccess.approve": (
+        "Platform recovery approver reads one request UUID and records distinct approvals/expiry; "
+        "emergency:approve admits platform admins today. Only the tenantless emergency request table is accessed."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.complete_review": (
+        "Platform emergency admin records reviewer identity and notes on one request UUID after an incident; "
+        "the reviewer may differ from its requestor. No tenant business table is queried."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.create_session": (
+        "Platform session issuance reads/updates one approved, unexpired, unused request UUID; "
+        "the HTTP caller first verifies authenticated requestor ownership. The object has no tenant_id."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.deny": (
+        "Platform emergency approver denies one request UUID and records the denier identity; "
+        "cross-operator denial is intentional, and only the tenantless recovery request is changed."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.get_pending_requests": (
+        "Platform emergency admin intentionally lists pending, unexpired recovery requests across operators; "
+        "tenant filtering would hide incidents, and this queue contains no tenant-owned business rows."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.get_request": (
+        "Platform request UUID lookup supports session-owner verification and details restricted to "
+        "requestor/recorded approver/admin; its sole table has no tenant_id or RLS policy."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.log_action": (
+        "Internal currently unmounted helper appends an action to one platform request UUID; "
+        "no application caller was found. Future integration needs a validated session/request boundary."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.request": (
+        "Creates one platform break-glass request for the authenticated emergency requestor; "
+        "requestor identity is the domain boundary. No tenant column or tenant business table is involved."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.terminate_session": (
+        "Platform emergency operator revokes one recovery request/session and records its terminator; "
+        "deliberate cross-requestor revocation touches only the tenantless platform request table."
+    ),
+    "core/security/emergency_access.py::EmergencyAccess.validate_session": (
+        "Resolves a platform capability by token SHA-256, used status, expiry and unterminated state before "
+        "tenant context exists; currently no application caller. This is not a tenant-data or UUID-only lookup."
+    ),
+}
 
 
 def _acquisitions_without_tenant_context(path: Path) -> list[tuple[str, int, list[str]]]:
-    """Report ``.acquire()`` sites in `path` that establish no RLS context.
+    """Report raw/bounded acquisition sites that establish no RLS context.
 
     Returns ``(qualified_function, lineno, tables)`` for every
-    ``async with <expr>.acquire(...)`` where:
+    ``async with <expr>.acquire(...)`` or ``acquire_connection(...)`` where:
 
       * the enclosing function -- or any function enclosing *that* one, since a
         closure inherits the context its owner opened -- neither calls a helper
@@ -404,8 +457,12 @@ def _acquisitions_without_tenant_context(path: Path) -> list[tuple[str, int, lis
                     call = item.context_expr
                     if (
                         isinstance(call, ast.Call)
-                        and isinstance(call.func, ast.Attribute)
-                        and call.func.attr == "acquire"
+                        and (
+                            isinstance(call.func, ast.Attribute)
+                            and call.func.attr in {"acquire", "acquire_connection"}
+                            or isinstance(call.func, ast.Name)
+                            and call.func.id == "acquire_connection"
+                        )
                     ):
                         if any(establishes_context(fn) for fn in functions):
                             continue
@@ -475,6 +532,20 @@ def test_incident_queries_require_an_rls_context(tmp_path: Path) -> None:
     ]
 
 
+@pytest.mark.parametrize("acquire", ["acquire_connection", "db_utils.acquire_connection"])
+def test_bounded_acquire_without_tenant_context_is_rejected(tmp_path: Path, acquire: str) -> None:
+    path = tmp_path / "unsafe_bounded_reader.py"
+    path.write_text(
+        "async def read_calls(pool):\n"
+        f"    async with {acquire}(pool) as conn:\n"
+        "        return await conn.fetch('SELECT * FROM calls')\n",
+        encoding="utf-8",
+    )
+    assert _acquisitions_without_tenant_context(path) == [
+        ("read_calls", 2, ["calls"])
+    ]
+
+
 def test_no_guc_allowlist_has_no_stale_entries() -> None:
     """An entry whose site no longer offends must be deleted, not left to rot."""
     stale: list[str] = []
@@ -491,3 +562,111 @@ def test_no_guc_allowlist_has_no_stale_entries() -> None:
         "Stale _KNOWN_NO_GUC entries in test_rls_set_local_invariant.py: "
         f"{stale}. Remove them so the allowlist keeps meaning what it says."
     )
+
+
+def _assert_platform_emergency_guc_scope(findings) -> None:
+    expected = {
+        "EmergencyAccess.approve", "EmergencyAccess.complete_review", "EmergencyAccess.create_session",
+        "EmergencyAccess.deny", "EmergencyAccess.get_pending_requests", "EmergencyAccess.get_request",
+        "EmergencyAccess.log_action", "EmergencyAccess.request", "EmergencyAccess.terminate_session",
+        "EmergencyAccess.validate_session",
+    }
+    assert set(_KNOWN_NO_GUC) == {f"core/security/emergency_access.py::{fn}" for fn in expected}, (
+        "Every no-GUC exception needs a separate scope/admission review; do not add a generic waiver"
+    )
+    assert len(findings) == len(expected) and {fn for fn, _line, _tables in findings} == expected
+    for fn, _line, tables in findings:
+        assert set(tables) == {"emergency_access_requests"}, (
+            f"{fn} may omit a GUC only for emergency_access_requests; found {tables}"
+        )
+        assert len(_KNOWN_NO_GUC[f"core/security/emergency_access.py::{fn}"]) > 80
+
+
+def test_platform_emergency_guc_exceptions_touch_only_the_reviewed_table() -> None:
+    path = _APP_ROOT / "core/security/emergency_access.py"
+    _assert_platform_emergency_guc_scope(_acquisitions_without_tenant_context(path))
+
+
+def test_platform_emergency_exception_cannot_hide_a_new_tenant_query(tmp_path: Path) -> None:
+    source = (_APP_ROOT / "core/security/emergency_access.py").read_text(encoding="utf-8")
+    anchor = "        async with self.db_pool.acquire() as conn:\n"
+    assert anchor in source
+    path = tmp_path / "emergency_with_tenant_query.py"
+    path.write_text(source.replace(anchor, anchor + "            await conn.fetch('SELECT * FROM calls')\n", 1),
+                    encoding="utf-8")
+    with pytest.raises(AssertionError, match="only for emergency_access_requests"):
+        _assert_platform_emergency_guc_scope(_acquisitions_without_tenant_context(path))
+
+
+def test_platform_emergency_exception_schema_still_has_no_tenant_or_rls_policy() -> None:
+    migration = ast.parse((_BACKEND_ROOT / "Alembic/versions/0087_bootstrap_manual_parity.py").read_text(encoding="utf-8"))
+    table, = [node for node in ast.walk(migration) if isinstance(node, ast.Call)
+              and isinstance(node.func, ast.Name) and node.func.id == "_table" and node.args
+              and isinstance(node.args[0], ast.Constant) and node.args[0].value == "emergency_access_requests"]
+    body = ast.literal_eval(table.args[1])
+    assert not re.search(r"\btenant_id\b", body, re.IGNORECASE)
+    assert all(keyword.arg != "tenant" or ast.literal_eval(keyword.value) is False for keyword in table.keywords)
+    helper, = [node for node in migration.body if isinstance(node, ast.FunctionDef) and node.name == "_table"]
+    defaults = dict(zip((arg.arg for arg in helper.args.kwonlyargs), helper.args.kw_defaults))
+    assert ast.literal_eval(defaults["tenant"]) is False
+    security, = [node.value for node in helper.body if isinstance(node, ast.Assign)
+                 and any(isinstance(target, ast.Name) and target.id == "security" for target in node.targets)]
+    assert isinstance(security, ast.IfExp) and isinstance(security.test, ast.Name) and security.test.id == "tenant"
+    platform_branch = "".join(node.value for node in ast.walk(security.orelse)
+                              if isinstance(node, ast.Constant) and isinstance(node.value, str))
+    assert "relrowsecurity OR relforcerowsecurity" in platform_branch and "pg_policy" in platform_branch
+    assert "RAISE EXCEPTION '0087 refuses unknown platform security on " in platform_branch
+    for relative in ("database/fresh_schema.sql", "database/schema/baseline_2026-06-02.sql"):
+        schema = (_BACKEND_ROOT / relative).read_text(encoding="utf-8")
+        declaration = re.search(r"CREATE TABLE public\.emergency_access_requests \((.*?)\n\);", schema, re.DOTALL)
+        assert declaration and not re.search(r"\btenant_id\b", declaration.group(1), re.IGNORECASE)
+    inventory = runpy.run_path(str(_BACKEND_ROOT / "scripts/rls_acquire_inventory.py"))
+    _protected, tenant_scoped = inventory["discover_rls_tables"](_BACKEND_ROOT)
+    assert "emergency_access_requests" not in tenant_scoped
+    assert "emergency_access_requests" in _RLS_TABLES, "Keep the conservative inventory; do not drop table coverage"
+
+
+def test_platform_emergency_exception_permission_admission_remains_narrow() -> None:
+    """Source guard for the concrete current boundary; no application imports."""
+    endpoint = ast.parse((_APP_ROOT / "api/v1/endpoints/emergency_access.py").read_text(encoding="utf-8"))
+    expected = {
+        "request_emergency_access": ["emergency:request"],
+        "approve_emergency_request": ["emergency:approve"],
+        "deny_emergency_request": ["emergency:approve"],
+        "create_emergency_session": ["emergency:request"],
+        "terminate_emergency_session": ["emergency:request", "emergency:admin"],
+        "list_emergency_requests": ["emergency:admin"],
+        "get_emergency_request": ["emergency:read"],
+        "complete_emergency_review": ["emergency:admin"],
+    }
+    routes = [node for node in endpoint.body if isinstance(node, ast.AsyncFunctionDef) and node.decorator_list]
+    assert {node.name for node in routes} == set(expected)
+    for route in routes:
+        defaults = dict(zip((arg.arg for arg in route.args.args[-len(route.args.defaults):]), route.args.defaults))
+        reviewed = ast.parse(f"Depends(require_permissions({expected[route.name]!r}))", mode="eval").body
+        assert ast.dump(defaults["current_user"]) == ast.dump(reviewed)
+    rbac = ast.parse((_APP_ROOT / "core/security/rbac.py").read_text(encoding="utf-8"))
+    permission, = [node for node in rbac.body if isinstance(node, ast.ClassDef) and node.name == "Permission"]
+    values = {node.value.value for node in permission.body if isinstance(node, ast.Assign)
+              and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str)}
+    required = {value for permissions in expected.values() for value in permissions}
+    assert required.isdisjoint(values), "New non-platform emergency grants need a new ownership/admission review"
+    loader, = [node for node in rbac.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "get_user_permissions"]
+    additions = [node for node in ast.walk(loader) if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                 and isinstance(node.func.value, ast.Name) and node.func.value.id == "permissions"
+                 and node.func.attr in {"add", "update"}]
+    reviewed_add = ast.parse('permissions.add(Permission(row["name"]))', mode="eval").body
+    assert len(additions) == 2 and all(ast.dump(node) == ast.dump(reviewed_add) for node in additions)
+    dependencies = ast.parse((_APP_ROOT / "api/v1/dependencies.py").read_text(encoding="utf-8"))
+    factory, = [node for node in dependencies.body if isinstance(node, ast.FunctionDef) and node.name == "require_permissions"]
+    check, = [node for node in factory.body if isinstance(node, ast.AsyncFunctionDef) and node.name == "_check_permissions"]
+    platform = ast.parse("if user_role == UserRole.PLATFORM_ADMIN:\n    return current_user").body[0]
+    assert any(ast.dump(node) == ast.dump(platform) for node in check.body)
+    rejection_test = ast.parse("not any(perm in user_perms for perm in required_perms)", mode="eval").body
+    rejection, = [node for node in check.body if isinstance(node, ast.If)
+                  and ast.dump(node.test) == ast.dump(rejection_test)]
+    error, = rejection.body
+    assert isinstance(error, ast.Raise) and isinstance(error.exc, ast.Call)
+    assert isinstance(error.exc.func, ast.Name) and error.exc.func.id == "HTTPException"
+    status_code, = [keyword.value for keyword in error.exc.keywords if keyword.arg == "status_code"]
+    assert ast.dump(status_code) == ast.dump(ast.parse("status.HTTP_403_FORBIDDEN", mode="eval").body)

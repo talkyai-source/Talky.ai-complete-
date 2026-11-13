@@ -10,6 +10,9 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const nothing = () => null;
 loader._load = function (id, ...args) {
+    // Their side reads effective permissions (QA F1-21); unknown offers every action.
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => ({ isSuccess: false, data: undefined }) };
+    if (id.includes("hooks/useAuth")) return { useAuth: () => ({ user: { id: "user-1", tenant_id: "tenant-1" } }) };
     if (id === "next/navigation") return { useRouter: () => ({ push() {}, replace() {}, back() {} }) };
     if (id.includes("components/layout/dashboard-layout")) {
         return { DashboardLayout: ({ title, children }: { title?: string; children: React.ReactNode }) => <><h1>{title}</h1>{children}</> };

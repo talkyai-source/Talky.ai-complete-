@@ -33,7 +33,9 @@ afterEach(() => {
 
 test("the range menu and the daily chart show 'Timezone: UTC' and print the UTC date in a zone behind UTC", async () => {
     process.env.TZ = "America/Los_Angeles";
+    // The page takes the account's reporting zone from the response and loads nothing without it (QA F1-30/F1-32).
     mock.method(extendedApi, "getCallAnalytics", async () => ({
+        timezone: "UTC",
         series: [{ date: "2026-03-01", total_calls: 4, answered: 3, failed: 1 }],
     }));
     render(<Page />);
@@ -51,6 +53,7 @@ test("the range menu and the daily chart show 'Timezone: UTC' and print the UTC 
 // ── FX3a2 Task 6 / FX3a3 Task 1: the day label under each bar stays whole on one line ─
 test("FX3a3: the day label under a bar is written down the bar's column on one line, never wrapped", async () => {
     mock.method(extendedApi, "getCallAnalytics", async () => ({
+        timezone: "UTC",
         series: [{ date: "2026-03-01", total_calls: 4, answered: 3, failed: 1 }],
     }));
     render(<Page />);
@@ -59,4 +62,30 @@ test("FX3a3: the day label under a bar is written down the bar's column on one l
     assert.equal(label !== undefined, true);
     assert.equal(label!.classList.contains("[writing-mode:vertical-rl]"), true);
     assert.equal(label!.classList.contains("break-all"), false);
+});
+
+// MERGE2 Task 3: one zone on the page, the account's. The two "Timezone:"
+// labels name the zone the server reports; nothing says UTC beside it.
+test("the page names the account's reporting zone and no second zone", async () => {
+    process.env.TZ = "America/Los_Angeles";
+    mock.method(extendedApi, "getCallAnalytics", async () => ({
+        timezone: "Asia/Karachi",
+        series: [{ date: "2026-03-01", total_calls: 4, answered: 3, failed: 1 }],
+    }));
+    render(<Page />);
+    await waitFor(() => assert.equal(screen.queryByTestId("analytics-chart-timezone") !== null, true), { timeout: SLOW });
+    assert.equal(screen.getByTestId("analytics-range-timezone").textContent, "Timezone: Asia/Karachi");
+    assert.equal(screen.getByTestId("analytics-chart-timezone").textContent, "Timezone: Asia/Karachi");
+    assert.equal(screen.queryByText("Timezone: UTC"), null);
+    assert.equal(/America\/Los_Angeles/.test(document.body.textContent ?? ""), false, "never the browser's zone");
+    // The zone is printed by the two labels only.
+    assert.equal((document.body.textContent ?? "").split("Asia/Karachi").length - 1, 2);
+});
+
+test("no zone is named before the server has said which one the account reports in", async () => {
+    mock.method(extendedApi, "getCallAnalytics", () => new Promise<never>(() => {}));
+    render(<Page />);
+    await screen.findByRole("status");
+    assert.equal(screen.queryByTestId("analytics-range-timezone"), null);
+    assert.equal(screen.queryByText(/Timezone:/), null);
 });

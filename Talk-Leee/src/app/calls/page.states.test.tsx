@@ -39,7 +39,7 @@ const call = {
     id: "call-1", campaign_id: "camp-1", campaign_name: "Main campaign", lead_id: "", phone_number: "+447400000001",
     status: "completed", duration_seconds: 30, created_at: "2026-01-01T00:00:00Z", direction: "outbound", to_number: "+447400000001",
 } as Call;
-type Listing = Awaited<ReturnType<typeof dashboardApi.listCalls>>;
+type Listing = Awaited<ReturnType<typeof dashboardApi.listCallsCursor>>;
 const shown = (text: string | RegExp) => screen.queryByText(text) !== null;
 
 const originalRequestAnimationFrame = window.requestAnimationFrame;
@@ -65,7 +65,7 @@ afterEach(() => {
 
 test("list: loading is a status titled 'Loading call history'", async () => {
     let answer: (() => void) | null = null;
-    mock.method(dashboardApi, "listCalls", () => new Promise<Listing>((resolve) => { answer = () => resolve({ calls: [call], total: 1 } as Listing); }));
+    mock.method(dashboardApi, "listCallsCursor", () => new Promise<Listing>((resolve) => { answer = () => resolve({ calls: [call], nextCursor: null } as Listing); }));
     renderWithQueryClient(<Page />);
     const status = await screen.findByRole("status");
     assert.equal(within(status).queryByText("Loading call history") !== null, true);
@@ -76,9 +76,9 @@ test("list: loading is a status titled 'Loading call history'", async () => {
 
 test("list: a failed read shows the server's message with Retry, which reads again", async () => {
     let fail = true;
-    const read = mock.method(dashboardApi, "listCalls", async () => {
+    const read = mock.method(dashboardApi, "listCallsCursor", async () => {
         if (fail) throw new Error("Call history is unavailable.");
-        return { calls: [call], total: 1 } as Listing;
+        return { calls: [call], nextCursor: null } as Listing;
     });
     renderWithQueryClient(<Page />);
     await waitFor(() => assert.equal(shown("Call history is unavailable."), true), { timeout: SLOW });
@@ -94,7 +94,7 @@ test("list: a failed read shows the server's message with Retry, which reads aga
 test("list: an answer the app could not read shows 'Please retry.', never the validation dump", async () => {
     const parsed = z.object({ calls: z.array(z.string()) }).safeParse({ calls: 1 });
     assert.equal(parsed.success, false);
-    mock.method(dashboardApi, "listCalls", async () => { throw parsed.error; });
+    mock.method(dashboardApi, "listCallsCursor", async () => { throw parsed.error; });
     renderWithQueryClient(<Page />);
     await waitFor(() => assert.equal(shown("Please retry."), true), { timeout: SLOW });
     assert.equal(shown(/invalid_type|expected array/i), false);
@@ -102,9 +102,9 @@ test("list: an answer the app could not read shows 'Please retry.', never the va
 
 test("list: a /calls answer without its list shows 'Please retry.', never the raw JavaScript text", async () => {
     // What the client does with an answer that has no `items`.
-    mock.method(dashboardApi, "listCalls", async () => {
+    mock.method(dashboardApi, "listCallsCursor", async () => {
         const answer = {} as { items: Call[] };
-        return { calls: answer.items.map((item) => item), total: 0 };
+        return { calls: answer.items.map((item) => item), nextCursor: null };
     });
     renderWithQueryClient(<Page />);
     await waitFor(() => assert.equal(shown("Please retry."), true), { timeout: SLOW });
@@ -113,7 +113,7 @@ test("list: a /calls answer without its list shows 'Please retry.', never the ra
 });
 
 test("list: no calls shows 'No calls yet' in the shared EmptyState", async () => {
-    mock.method(dashboardApi, "listCalls", async () => ({ calls: [], total: 0 }) as Listing);
+    mock.method(dashboardApi, "listCallsCursor", async () => ({ calls: [], nextCursor: null }) as Listing);
     renderWithQueryClient(<Page />);
     const title = await screen.findByText("No calls yet", undefined, { timeout: SLOW });
     assert.equal(title.tagName, "H2", "the shared EmptyState title");
@@ -121,7 +121,7 @@ test("list: no calls shows 'No calls yet' in the shared EmptyState", async () =>
 });
 
 test("list: no match shows 'No calls match your search or filter.' in the shared EmptyState and keeps 'Clear filters'", async () => {
-    mock.method(dashboardApi, "listCalls", async () => ({ calls: [call], total: 1 }) as Listing);
+    mock.method(dashboardApi, "listCallsCursor", async () => ({ calls: [call], nextCursor: null }) as Listing);
     renderWithQueryClient(<Page />);
     const search = await screen.findByLabelText("Search calls by phone number or campaign", undefined, { timeout: SLOW });
     fireEvent.change(search, { target: { value: "zzz-no-such" } });
@@ -133,7 +133,7 @@ test("list: no match shows 'No calls match your search or filter.' in the shared
 });
 
 test("transcript panel: loading is a status; a failed read shows its message with Retry, which reads again", async () => {
-    mock.method(dashboardApi, "listCalls", async () => ({ calls: [call], total: 1 }) as Listing);
+    mock.method(dashboardApi, "listCallsCursor", async () => ({ calls: [call], nextCursor: null }) as Listing);
     let fail = true;
     let answer: (() => void) | null = null;
     type Transcript = Awaited<ReturnType<typeof dashboardApi.getCallTranscript>>;

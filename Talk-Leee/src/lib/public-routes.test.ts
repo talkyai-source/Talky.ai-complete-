@@ -11,9 +11,12 @@ test("the sitemap publishes exactly the shared public route list, in order", () 
     assert.deepEqual(fromSitemap, [...PUBLIC_ROUTES]);
 });
 
-test("the list holds 41 distinct routes without trailing slashes", () => {
-    assert.equal(PUBLIC_ROUTES.length, 41);
-    assert.equal(new Set(PUBLIC_ROUTES).size, 41);
+// 39 since QA F17-01 withheld /docs/support and /docs/partners until those
+// features are enabled; 40 with the accessibility statement (QA F12-09);
+// 39 after one unused page was removed.
+test("the list holds 39 distinct routes without trailing slashes", () => {
+    assert.equal(PUBLIC_ROUTES.length, 39);
+    assert.equal(new Set(PUBLIC_ROUTES).size, 39);
     for (const route of PUBLIC_ROUTES) {
         if (route !== "/") assert.doesNotMatch(route, /\/$/, `${route} carries a trailing slash`);
     }
@@ -25,7 +28,6 @@ test("isPublicRoute matches exactly, never by prefix", () => {
     assert.equal(isPublicRoute("/docs"), true);
     assert.equal(isPublicRoute("/docs/getting-started"), true);
     assert.equal(isPublicRoute("/docs/not-a-page"), false);
-    assert.equal(isPublicRoute("/ai-voices"), true);
     assert.equal(isPublicRoute("/ai-options"), false);
     assert.equal(isPublicRoute("/pricing/"), true, "the canonical trailing-slash form usePathname() reports");
     assert.equal(isPublicRoute("/contacts/"), false);

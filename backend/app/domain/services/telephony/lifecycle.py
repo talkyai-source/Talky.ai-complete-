@@ -706,8 +706,13 @@ def _collect_expired_sessions(
 #               for "any future system-initiated prompt". create_response is
 #               False on purpose: the model must fold this into its NEXT turn,
 #               not immediately talk over a caller who is mid-sentence.
-_WRAP_UP_LEAD_DEFAULT_S = 20
-_WRAP_UP_LEAD_MIN_S = 5
+#
+# The duration watchdog wakes every _DURATION_WATCHDOG_TICK_S. The window must
+# be wider than that, or a call reaches its deadline between two wake-ups and
+# is cut off with no nudge at all (QA F3-05: a 20 s window missed 1 in 3).
+_DURATION_WATCHDOG_TICK_S = 30
+_WRAP_UP_LEAD_DEFAULT_S = 45
+_WRAP_UP_LEAD_MIN_S = _DURATION_WATCHDOG_TICK_S + 5
 _WRAP_UP_LEAD_MAX_S = 60
 
 _WRAP_UP_INSTRUCTION_TEMPLATE = (
@@ -720,9 +725,9 @@ _WRAP_UP_INSTRUCTION_TEMPLATE = (
 def _wrap_up_lead_seconds() -> int:
     """How many seconds before the effective deadline the nudge fires.
 
-    ``CALL_WRAP_UP_LEAD_SECONDS``, clamped to [5, 60]. Read per call (not at
+    ``CALL_WRAP_UP_LEAD_SECONDS``, clamped to [35, 60]. Read per call (not at
     import) so an operator can retune it without a restart; anything
-    unparseable falls back to the 20s default rather than disabling the nudge.
+    unparseable falls back to the 45s default rather than disabling the nudge.
     """
     raw = os.getenv("CALL_WRAP_UP_LEAD_SECONDS")
     if raw is None or not str(raw).strip():
@@ -758,6 +763,34 @@ def _effective_deadline_seconds(vs, *, max_duration_s: int, soft_cap_s: int) -> 
     if not transfer_connected and session_soft_cap:
         return float(min(session_soft_cap, session_max_duration))
     return float(session_max_duration)
+
+
+async def _apply_account_call_cap(voice_session) -> None:
+    """End an outbound call at the account's own maximum call length when that
+    is shorter than the platform cap (QA F3-05). Inbound calls pin theirs at
+    admission. Best-effort: on any failure the platform cap stands."""
+    from app.core.container import get_container
+    from app.core.db_utils import acquire_with_tenant
+
+    config = getattr(voice_session, "config", None)
+    tenant_id = getattr(voice_session, "_dialer_tenant_id", None) or getattr(config, "tenant_id", None)
+    short_id = str(getattr(voice_session, "call_id", "?"))[:12]
+    if not tenant_id:
+        return
+    try:
+        async with acquire_with_tenant(get_container().db_pool, str(tenant_id)) as conn:
+            account_max = await conn.fetchval(
+                "SELECT max_call_duration_seconds FROM tenant_call_limits "
+                "WHERE tenant_id = $1::uuid",
+                str(tenant_id),
+            )
+    except Exception as exc:  # noqa: BLE001 — the platform cap stands
+        logger.warning("outbound_account_call_cap_unavailable call=%s err=%s",
+                       short_id, type(exc).__name__)
+        return
+    if isinstance(account_max, int) and 0 < account_max < _SESSION_MAX_DURATION_S:
+        voice_session._max_call_duration_seconds = account_max
+        logger.info("outbound_account_call_cap call=%s max_s=%d", short_id, account_max)
 
 
 def _collect_wrap_up_candidates(
@@ -1075,7 +1108,7 @@ async def _session_watchdog() -> None:
     """
     while True:
         try:
-            await asyncio.sleep(30)
+            await asyncio.sleep(_DURATION_WATCHDOG_TICK_S)
             now = asyncio.get_event_loop().time()
             _sb = _state()
             # Capture ownership before provider/status awaits. An answer can
@@ -4604,6 +4637,14 @@ async def _on_new_call(call_id: str, inbound_admission: Any = None) -> None:
             if is_true_inbound:
                 raise RuntimeError("failed to bind admitted inbound call") from _bind_exc
             logger.debug(f"bind_telephony_call wrapper: {_bind_exc}")
+
+        # QA F3-05: an outbound call ends at the account's own maximum call
+        # length. Looked up off the answer path (it matters only minutes in),
+        # so it never delays the media gateway registration below.
+        if not is_true_inbound:
+            voice_session._account_cap_task = asyncio.create_task(
+                _apply_account_call_cap(voice_session)
+            )
 
         # ── Register media gateway BEFORE any further awaiting ──────────
         # The C++ gateway session was started in AsteriskAdapter._on_outbound_answered

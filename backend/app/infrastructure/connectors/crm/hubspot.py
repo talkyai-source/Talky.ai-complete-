@@ -130,8 +130,22 @@ class HubSpotConnector(CRMProvider):
                 headers={"Content-Type": "application/x-www-form-urlencoded"},
             )
             if response.status_code != 200:
-                logger.error(f"HubSpot token refresh failed: {response.text}")
-                raise ValueError(f"Token refresh failed: {response.text}")
+                try:
+                    payload = response.json()
+                except ValueError:
+                    payload = {}
+                code = str(payload.get("error") or payload.get("status") or "").lower() if isinstance(payload, dict) else ""
+                category = ("configuration" if code in {"invalid_client", "unauthorized_client", "bad_client_id", "bad_client_secret"}
+                            else "authentication" if code in {"invalid_grant", "bad_refresh_token"} or response.status_code == 401
+                            else "permission" if response.status_code == 403
+                            else "rate_limit" if response.status_code == 429
+                            else "temporary" if response.status_code >= 500 else "unknown")
+                logger.error("HubSpot token refresh failed status=%s category=%s", response.status_code, category)
+                raise ConnectorProviderError(
+                    provider="hubspot", operation="refresh_tokens", category=category,
+                    message=f"HubSpot refresh returned HTTP {response.status_code}",
+                    status_code=response.status_code, retry_after=response.headers.get("Retry-After"),
+                )
             token_data = response.json()
             expires_at = None
             if "expires_in" in token_data:

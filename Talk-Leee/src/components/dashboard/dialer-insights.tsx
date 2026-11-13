@@ -38,10 +38,9 @@ export function DialerInsights() {
     const alive = useRef(true);
 
     const load = useCallback(async () => {
-        const browserTz = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
         try {
             const [bt, re] = await Promise.all([
-                extendedApi.getBestTimeToCall(browserTz),
+                extendedApi.getBestTimeToCall(),
                 extendedApi.getRetryEffectiveness(),
             ]);
             if (!alive.current) return;

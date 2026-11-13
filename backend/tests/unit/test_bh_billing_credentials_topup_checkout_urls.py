@@ -32,7 +32,7 @@ class _Svc:
         self.created += 1
         return dict(ORDER)
 
-    async def attach_session(self, *_a):
+    async def attach_session(self, *_a, tenant_id):
         return None
 
 
@@ -113,3 +113,10 @@ async def test_unconfigured_return_destination_is_503_and_no_order_is_created(sv
         await _checkout(bt.CheckoutIn(package_code="m100"), _request())
     assert ei.value.status_code == 503
     assert svc.created == 0  # no orphan order for a checkout that cannot start
+
+
+@pytest.mark.asyncio
+async def test_checkout_line_item_carries_the_talk_lee_brand(svc):
+    """QA F1-36: the Stripe line item read 'Talky.ai — 125 minutes' (old brand)."""
+    await _checkout(bt.CheckoutIn(package_code="m100"), _request())
+    assert _Billing.last["product_name"] == "Talk-Lee — 100 minutes"

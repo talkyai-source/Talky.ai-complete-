@@ -9,7 +9,8 @@ import { ConnectorCard } from "@/components/connectors/connector-card";
 import { SalesforceSettingsPanel } from "@/components/connectors/salesforce-settings";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConnectorStatuses, queryKeys } from "@/lib/api-hooks";
-import { ErrorState, failedReadMessage } from "@/components/states/page-states";
+import { ErrorState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
+import { permits, useKnownPermissions } from "@/lib/permissions";
 import type { ConnectorProviderStatus } from "@/lib/models";
 import { CONNECTOR_RETURN_FAILED_TEXT, type ConnectorOAuthReturn, type ConnectorProviderType } from "@/lib/connectors-utils";
 import { cn } from "@/lib/utils";
@@ -68,6 +69,11 @@ export default function ConnectorsPage() {
     const router = useRouter();
     const searchParams = useSearchParams();
     const q = useConnectorStatuses();
+    // QA F1-21: offer only what the connector endpoints allow this role.
+    const permissions = useKnownPermissions();
+    const mayConnect = permits(permissions, "connectors:create");
+    const mayDisconnect = permits(permissions, "connectors:delete");
+    const mayConfigure = permits(permissions, "connectors:update");
     const seenEvents = useRef(new Set<string>());
     const lastRefreshEventRaw = useRef<string | null>(null);
     const returnSeq = useRef(0);
@@ -238,7 +244,7 @@ export default function ConnectorsPage() {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {q.isError ? (
-                            <ErrorState message={failedReadMessage(q.error, "Request failed")} onRetry={() => { void q.refetch(); }} />
+                            <ErrorState requestId={failedReadRequestId(q.error)} message={failedReadMessage(q.error, "Request failed")} onRetry={() => { void q.refetch(); }} />
                         ) : null}
 
                         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -267,6 +273,8 @@ export default function ConnectorsPage() {
                                         errorMessage={data?.error_message}
                                         oauthCallbackPath={`/connectors/${p.type}/callback`}
                                         available={!salesforceNotAdvertised}
+                                        mayConnect={mayConnect}
+                                        mayDisconnect={mayDisconnect}
                                         unavailableReason={salesforceNotAdvertised
                                             ? "Salesforce is not enabled by this server yet (SALESFORCE_CLIENT_ID / SALESFORCE_CLIENT_SECRET missing). No OAuth request will be started until the backend advertises the capability."
                                             : undefined}
@@ -276,7 +284,7 @@ export default function ConnectorsPage() {
                         </div>
                     </CardContent>
                 </Card>
-                {byType.has("salesforce") ? <SalesforceSettingsPanel connected={byType.get("salesforce")?.status === "connected"} /> : null}
+                {byType.has("salesforce") && mayConfigure ? <SalesforceSettingsPanel connected={byType.get("salesforce")?.status === "connected"} /> : null}
             </div>
         </DashboardLayout>
     );

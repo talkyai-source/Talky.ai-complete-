@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import {
@@ -23,6 +24,8 @@ import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-d
 import { inboundApi } from "@/lib/inbound-api";
 import { ArrowLeft } from "lucide-react";
 import { ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { campaignActions, useKnownPermissions } from "@/lib/permissions";
+import { RoleNotice } from "@/components/states/role-notice";
 import { motion } from "framer-motion";
 
 /**
@@ -76,6 +79,8 @@ export default function EditCampaignPage() {
     const [backHref, setBackHref] = useState(`/campaigns/${campaignId}`);
     // Bumped by Retry: reads the campaign again after a failed read.
     const [reloadToken, setReloadToken] = useState(0);
+    // QA F1-21: a role without campaigns:update is told so, not given an editor.
+    const mayChange = campaignActions(useKnownPermissions()).update;
 
     useEffect(() => {
         let cancelled = false;
@@ -118,6 +123,8 @@ export default function EditCampaignPage() {
                     slots,
                     campaign_brief: scriptConfig.campaign_brief,
                     calling_schedule: (campaign as { calling_config?: CampaignCallingSchedule | null }).calling_config ?? null,
+                    // Sent back on save so a stale edit is refused (QA H7 / F3-03).
+                    updated_at: campaign.updated_at ?? null,
                 });
                 setKnowledgeDriven(
                     Boolean((scriptConfig as Record<string, unknown>).knowledge_driven),
@@ -150,13 +157,14 @@ export default function EditCampaignPage() {
                 animate={{ opacity: 1, x: 0 }}
                 className="mb-6"
             >
-                <button
-                    onClick={() => router.push(backHref)}
-                    className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                {/* A link, so leaving with unsaved edits asks first (QA F1-22). */}
+                <Link
+                    href={backHref}
+                    className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
                 >
                     <ArrowLeft className="w-4 h-4" />
                     Back to campaign
-                </button>
+                </Link>
             </motion.div>
 
             {loading ? (
@@ -167,6 +175,13 @@ export default function EditCampaignPage() {
                 <div className="max-w-2xl">
                     <ErrorState message={error} onRetry={() => setReloadToken((t) => t + 1)} />
                 </div>
+            ) : !mayChange ? (
+                <RoleNotice
+                    title="Your role can't change campaigns"
+                    message="You can view this campaign and its results. Ask an account admin if it needs changing."
+                    href={backHref}
+                    linkLabel="View campaign"
+                />
             ) : initial ? (
                 knowledgeDriven ? (
                     <div className="space-y-6">
@@ -185,6 +200,7 @@ export default function EditCampaignPage() {
                                 goal: initial.goal,
                                 callingSchedule,
                                 campaignBrief: initial.campaign_brief,
+                                updatedAt: initial.updated_at,
                             }}
                         />
                     </div>

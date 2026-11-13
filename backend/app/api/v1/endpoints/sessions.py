@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_connection
 from app.core.security.device_fingerprint import generate_device_fingerprint
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
@@ -150,7 +151,7 @@ async def list_active_sessions(
     # Get current session hash to mark as "this device"
     current_token_hash = hash_session_token(talky_sid) if talky_sid else None
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         sessions = await get_active_sessions_detailed(
             conn,
             user_id=current_user.id,
@@ -249,7 +250,7 @@ async def revoke_specific_session(
     of one, which is a worse bug than this one.
     """
     # Prevent revoking current session through this endpoint
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         # Check if this is the current session
         if talky_sid:
             current_hash = hash_session_token(talky_sid)
@@ -325,7 +326,7 @@ async def verify_session(
     # Generate new fingerprint from current request
     new_fingerprint = generate_device_fingerprint(request)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         verified = await verify_suspicious_session(
             conn,
             session_id=body.session_id,
@@ -376,7 +377,7 @@ async def get_current_session_security_status(
 
     token_hash = hash_session_token(talky_sid)
 
-    async with db_client.pool.acquire() as conn:
+    async with acquire_connection(db_client.pool) as conn:
         status_info = await get_session_security_status(conn, token_hash)
 
     if not status_info:

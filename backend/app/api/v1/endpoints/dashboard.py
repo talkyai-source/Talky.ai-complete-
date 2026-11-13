@@ -4,14 +4,17 @@ Provides aggregated metrics for the dashboard overview
 """
 import logging
 from datetime import datetime, timezone
-from typing import Literal, Optional, Dict
-from fastapi import APIRouter, HTTPException, Depends
+from typing import Annotated, Literal, Optional, Dict
+from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
 from app.core.security.rbac import Permission, require_permission
 from app.utils.tenant_filter import apply_tenant_filter
+from app.domain.services.reporting_time import (
+    ReportingTimeUnavailable, local_month_range, resolve_reporting_zone,
+)
 
 
 def _start_of_current_month_utc() -> str:
@@ -43,6 +46,7 @@ class DashboardSummary(BaseModel):
     are gone; this response is the authoritative source.
     """
     total_calls: int
+    timezone: str = "UTC"
     answered_calls: int
     failed_calls: int
     minutes_used: Optional[int] = None
@@ -70,7 +74,7 @@ class DashboardSummary(BaseModel):
         default=0,
         description=(
             "Mean duration_seconds across this tenant's terminal calls "
-            "in the current billing month. Source of the Dashboard's "
+            "in the current reporting calendar month. Source of the Dashboard's "
             "'Avg Duration' KPI."
         ),
     )
@@ -85,7 +89,7 @@ class DashboardSummary(BaseModel):
     outcome_breakdown: Dict[str, int] = Field(
         default_factory=dict,
         description=(
-            "Counts of `calls.outcome` values for the current billing "
+            "Counts of `calls.outcome` values for the current reporting calendar "
             "month. Source of the Dashboard's outcomes pie chart "
             "(replaces synthesised completed/voicemail/callback splits)."
         ),
@@ -99,7 +103,8 @@ class DashboardSummary(BaseModel):
 )
 async def get_dashboard_summary(
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    tz: Annotated[Optional[str], Query(description="IANA reporting timezone; defaults to the account setting, then UTC")] = None,
 ):
     """
     Get aggregated dashboard metrics.
@@ -114,11 +119,16 @@ async def get_dashboard_summary(
     """
     try:
         # 1. Total calls count (uses PostgreSQL count, no rows transferred)
-        month_start_iso = _start_of_current_month_utc()
+        try:
+            zone = resolve_reporting_zone(db_client, current_user.tenant_id, requested=tz)
+            month_start_iso, month_end_iso = local_month_range(zone=zone)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid reporting timezone or calendar range.")
         total_q = (
             db_client.table("calls")
             .select("id", count="exact")
             .gte("created_at", month_start_iso)
+            .lt("created_at", month_end_iso)
             .eq("direction", "outbound")
             .eq("is_test", False)
         )
@@ -131,7 +141,7 @@ async def get_dashboard_summary(
         #    with the real result in `outcome`; the old status filters
         #    (answered/completed/in_progress, failed/no_answer/busy) missed every
         #    'ended' call, so minutes + answered were a small fraction of reality
-        #    and failed was always 0. Minutes bill monthly (reset at the 1st UTC).
+        #    and failed was always 0. Billing below uses its own canonical meter.
         from app.domain.services.call_outcomes import (
             ANSWERED_OUTCOMES as _ANSWERED_OUTCOMES,
             FAILED_OUTCOMES as _FAILED_OUTCOMES,
@@ -140,7 +150,7 @@ async def get_dashboard_summary(
             "id,outcome,duration_seconds,is_test,direction,billing_status"
         )
         month_q = apply_tenant_filter(month_q, current_user.tenant_id)
-        month_q = month_q.gte("created_at", month_start_iso)
+        month_q = month_q.gte("created_at", month_start_iso).lt("created_at", month_end_iso)
         month_rows = month_q.execute().data or []
 
         customer_month_rows = [
@@ -149,7 +159,7 @@ async def get_dashboard_summary(
         # The dashboard is an outbound-performance surface. Billing minutes
         # below remain shared across both directions, but performance cards,
         # active calls and outcome charts must use one consistent population:
-        # real outbound calls in the current UTC month. Missing direction is
+        # real outbound calls in the current reporting month. Missing direction is
         # treated as outbound for legacy fixtures/rows, matching the DB default.
         performance_month_rows = [
             row
@@ -197,7 +207,7 @@ async def get_dashboard_summary(
         active_resp = active_q.execute()
         active_calls = active_resp.count or 0
 
-        # 5. Average call duration in the current billing month.
+        # 5. Average call duration in the current reporting month.
         # Reuses the same answered_resp.data we already loaded above so we
         # don't pay for a second SELECT. We compute the mean only over rows
         # that have a non-null duration_seconds — the row exists at
@@ -224,7 +234,7 @@ async def get_dashboard_summary(
             # tenants; treat as zero rather than 500.
             queued_jobs = 0
 
-        # 7. Outcome breakdown for the current billing month.
+        # 7. Outcome breakdown for the current reporting month.
         # Used by the dashboard's outcomes pie chart (which previously
         # invented completed/voicemail/callback ratios).
         outcome_breakdown: Dict[str, int] = {}
@@ -234,6 +244,7 @@ async def get_dashboard_summary(
 
         return DashboardSummary(
             total_calls=total_calls,
+            timezone=str(zone),
             answered_calls=answered_calls,
             failed_calls=failed_calls,
             minutes_used=minutes_used,
@@ -247,6 +258,10 @@ async def get_dashboard_summary(
             outcome_breakdown=outcome_breakdown,
         )
     
+    except HTTPException:
+        raise
+    except ReportingTimeUnavailable:
+        raise HTTPException(status_code=503, detail="Reporting timezone unavailable.", headers={"Retry-After": "10"})
     except Exception as e:
         logger.error(f"Failed to fetch dashboard summary: {e}", exc_info=True)
         raise HTTPException(

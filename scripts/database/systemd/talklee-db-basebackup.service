@@ -1,0 +1,24 @@
+[Unit]
+OnFailure=talky-notify@%n.service
+Description=Prepared Talk-Lee physical PostgreSQL backup (owner activation required)
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/talky/pitr.enabled
+
+[Service]
+Type=oneshot
+User=root
+UMask=0077
+EnvironmentFile=/etc/talky/pitr.env
+ExecStart=/bin/sh -c 'exec /usr/bin/python3 /opt/talky/scripts/database/pitr.py base-backup --service-file /etc/talky/pitr-pg-service.conf --service talky_pitr_backup --destination /var/backups/talky-pitr/base/$$(date -u +%%Y%%m%%dT%%H%%M%%SZ)'
+ExecStartPost=/usr/bin/python3 /opt/talky/scripts/database/pitr.py archive-health --archive-dir /var/backups/talky-pitr/wal --max-age-minutes 15
+TimeoutStartSec=2h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/backups/talky-pitr
+
+# Prepared only. No OS/DB role is created and no PostgreSQL setting is changed.
+# Owner provisions this directory, existing credentials and the WAL stream.
+# Retention is a separate reviewed dry-run; no automatic WAL deletion here.

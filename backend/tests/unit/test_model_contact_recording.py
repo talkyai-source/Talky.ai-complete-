@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -21,6 +21,7 @@ class SQLPort:
     def __init__(self, *, fail=False, conflict=False, is_test=False):
         self.fail, self.conflict, self.is_test = fail, conflict, is_test
         self.writes = []
+        self.identity_reads = []
         self.entered = asyncio.Event()
         self.release = None
 
@@ -38,7 +39,19 @@ class SQLPort:
     async def fetchrow(self, sql, *args):
         if "SELECT is_test" in sql:
             return {"is_test": self.is_test}
+        if sql == (
+            "SELECT direction, route_snapshot, caller_ani_private FROM calls "
+            "WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE"
+        ):
+            assert len(args) == 2
+            assert all(isinstance(value, str) and str(UUID(value)) == value for value in args)
+            self.identity_reads.append(args)
+            # Existing contact-model fixtures represent a saved outbound call.
+            return {"direction": "outbound", "route_snapshot": {}, "caller_ani_private": False}
         assert "call_lead_details" in sql
+        if sql.lstrip().startswith("INSERT INTO call_lead_details"):
+            assert self.identity_reads, "Automatic contact writes require saved call authority"
+            assert args[:2] == self.identity_reads[-1]
         self.entered.set()
         if self.release is not None:
             await self.release.wait()
@@ -234,7 +247,7 @@ async def test_revision_during_write_never_returns_current_save_claim():
     pool.release = asyncio.Event()
     old = caller(s, "alex@example.com", 1, "source")
     task = asyncio.create_task(record_contact(s, args("alex@example.com"), turn=old, pool=pool))
-    await pool.entered.wait()
+    await asyncio.wait_for(pool.entered.wait(), timeout=5)
     caller(s, "Not my address", 1, "source")
     pool.release.set()
     result = await task
@@ -466,20 +479,26 @@ def test_canonical_contact_bundle_resolves_only_one_current_owned_row(state):
 
 
 @pytest.mark.asyncio
-async def test_caller_first_hello_reaches_model_once_without_presynth_script(monkeypatch):
+async def test_caller_first_hello_gets_the_identity_opener_once_without_presynth_script(monkeypatch):
+    """Owner decision 2026-11-05 (QA F12-03): the reply to the callee's first
+    "Hello?" is the identity opener, spoken live, not the pre-synth script;
+    the model does not also answer the same words."""
     from unittest.mock import AsyncMock
     from app.domain.models.conversation import MessageRole
     from app.domain.services.voice_pipeline.turn_ender import TurnEnder
     from tests.unit.test_instant_opener_continues_to_llm import _session, _pipeline_stub, _FakeVoiceSession
     s, pipeline = _session(), _pipeline_stub("Hello, what would you like to discuss?")
     s._voice_session_ref = _FakeVoiceSession(s)
+    s._voice_session_ref.pipeline = pipeline
     player = AsyncMock()
     monkeypatch.setattr("app.domain.services.telephony.modes.agent_first._send_outbound_greeting", player)
     await TurnEnder(pipeline).handle(s, None, user_text="Hello?")
     player.assert_not_awaited()
-    assert pipeline._run_turn.await_count == 1
+    assert pipeline._run_turn.await_count == 0
+    assert pipeline.synthesize_and_send_audio.await_count == 1
     assert [m.role for m in s.conversation_history] == [MessageRole.USER, MessageRole.ASSISTANT]
     assert s.conversation_history[0].content == "Hello?"
+    assert "an AI assistant from" in s.conversation_history[1].content
 
 
 @pytest.mark.asyncio
@@ -504,6 +523,27 @@ async def test_newer_caller_words_replace_a_candidate_never_confirmed():
     caller(s, text, 19)
     result = await record_contact(s, args(text, kind="full_name", value="Talha", expected="Talha"), pool=pool)
     assert result["value"] == "Talha" and result["validation_status"] == "awaiting_confirmation"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("expected", ["alex@example.com", "blair@example.com"])
+async def test_a_corrected_email_replaces_the_one_never_confirmed(expected):
+    """QA F10-02 (revised_email): "My email is alex at example dot com", then
+    "Correction, my email is blair at example dot com". The corrected address
+    is the one kept, still unconfirmed, whichever value the model names as
+    expected."""
+    pool, s = SQLPort(), session()
+    first = "My email is alex at example dot com."
+    caller(s, first, 1)
+    await record_contact(s, args(first, value="alex@example.com"), pool=pool)
+    text = "Correction, my email is blair at example dot com."
+    caller(s, text, 2)
+    result = await record_contact(s, args(text, value="blair@example.com", expected=expected), pool=pool)
+    assert result["status"] != "contact_changed"
+    assert result["value"] == "blair@example.com"
+    assert result["validation_status"] == "awaiting_confirmation"
+    assert s.captured_slots.email == "blair@example.com"
+    assert not s.captured_slots.email_confirmed
 
 
 @pytest.mark.asyncio

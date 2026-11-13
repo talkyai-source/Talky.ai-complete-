@@ -8,13 +8,32 @@ from enum import Enum
 
 
 class CampaignStatus(str, Enum):
-    """Campaign status"""
+    """``campaigns.status``: exactly the values the 0088 check allows (D3-18).
+
+    Who writes each one is in ``CAMPAIGN_STATUS_WRITERS``. "preparing",
+    "pausing" and "stopping" are display phases on GET /campaigns/{id}
+    (``campaign_phase``), never stored statuses.
+    """
     DRAFT = "draft"
     SCHEDULED = "scheduled"
     RUNNING = "running"
     PAUSED = "paused"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
+    STOPPED = "stopped"
+    DELETED = "deleted"
+
+
+CAMPAIGN_STATUS_WRITERS = {
+    "draft": "Create (column default), the assistant's create tool, and Duplicate.",
+    "scheduled": "Allowed by the check; no writer today.",
+    "running": "Start (outbound), and activating an inbound campaign.",
+    "paused": "Pause (outbound, from running), and pausing an inbound campaign.",
+    "completed": "Allowed by the check; no writer today (a finished campaign stays running).",
+    "cancelled": "Archiving an inbound campaign.",
+    "stopped": "Stop (outbound, from running or paused).",
+    "deleted": "Delete (soft delete; hidden from lists).",
+}
 
 
 class Campaign(BaseModel):

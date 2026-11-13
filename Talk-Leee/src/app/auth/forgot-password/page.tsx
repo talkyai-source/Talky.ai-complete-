@@ -26,6 +26,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
 import { failedReadMessage } from "@/components/states/page-states";
+import { MIN_PASSWORD_LENGTH } from "@/lib/password-policy";
+import { useTurnstile } from "@/components/auth/turnstile-widget";
 
 const emailSchema = z.string().email("Please enter a valid email address");
 
@@ -43,6 +45,9 @@ function ForgotPasswordInner() {
     const [error, setError] = useState("");
     const [message, setMessage] = useState("");
     const [emailError, setEmailError] = useState("");
+    // The email step and "Request a new code" each send a reset code, and
+    // Cloudflare accepts a Turnstile token once, so each gets its own (QA F4-12).
+    const turnstile = useTurnstile("forgot_password");
     const inputRef = useRef<HTMLInputElement | null>(null);
     const errorId = useId();
 
@@ -68,11 +73,11 @@ function ForgotPasswordInner() {
         setMessage("");
 
         try {
-            await api.request<unknown>({
+            await turnstile.run((token) => api.request<unknown>({
                 path: "/auth/forgot-password",
                 method: "POST",
-                body: { email: normalizedEmail },
-            });
+                body: { email: normalizedEmail, ...(token ? { turnstile_token: token } : {}) },
+            }));
             // A successful request does not disclose whether this address
             // has an account or guarantee email delivery.
             setEmail(normalizedEmail);
@@ -93,8 +98,8 @@ function ForgotPasswordInner() {
             setError("Enter the 6-digit code from your email.");
             return;
         }
-        if (newPassword.length < 8) {
-            setError("Password must be at least 8 characters.");
+        if (newPassword.length < MIN_PASSWORD_LENGTH) {
+            setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
             return;
         }
         if (newPassword !== confirmPassword) {
@@ -227,7 +232,7 @@ function ForgotPasswordInner() {
                                         <Input
                                             id="reset-new-password"
                                             type="password"
-                                            placeholder="At least 8 characters"
+                                            placeholder={`At least ${MIN_PASSWORD_LENGTH} characters`}
                                             value={newPassword}
                                             onChange={(e) => {
                                                 setNewPassword(e.target.value);
@@ -235,7 +240,7 @@ function ForgotPasswordInner() {
                                             }}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                         />
                                     </div>
@@ -258,7 +263,7 @@ function ForgotPasswordInner() {
                                             }}
                                             className="pl-10"
                                             required
-                                            minLength={8}
+                                            minLength={MIN_PASSWORD_LENGTH}
                                             disabled={loading}
                                         />
                                     </div>
@@ -293,7 +298,8 @@ function ForgotPasswordInner() {
                                         </>
                                     )}
                                 </Button>
-                                <Button type="button" variant="outline" className="w-full" disabled={loading} onClick={() => void handleSendCode()}>
+                                {turnstile.widget}
+                                <Button type="button" variant="outline" className="w-full" disabled={loading || turnstile.pending} onClick={() => void handleSendCode()}>
                                     Request a new code
                                 </Button>
                                 <button
@@ -353,6 +359,8 @@ function ForgotPasswordInner() {
                                     )}
                                 </div>
 
+                                {turnstile.widget}
+
                                 {error && (
                                     <div
                                         id={errorId}
@@ -366,7 +374,7 @@ function ForgotPasswordInner() {
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
-                                <Button type="submit" className="w-full" disabled={loading}>
+                                <Button type="submit" className="w-full" disabled={loading || turnstile.pending}>
                                     {loading ? (
                                         <>
                                             <Loader2

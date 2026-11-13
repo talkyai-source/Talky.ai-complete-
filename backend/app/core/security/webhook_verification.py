@@ -143,15 +143,14 @@ def verify_signature(
     """
     Verify webhook signature.
 
-    Supports two schemes:
-    1. Simple: signature = hmac-sha256(payload, secret)
-    2. Timestamped: signature = hmac-sha256(timestamp.payload, secret)
+    Requires signature = hmac-sha256(timestamp.payload, secret).
+    An unsigned or missing timestamp cannot provide replay protection.
 
     Args:
         payload: Raw request body
         signature_header: Value from X-Webhook-Signature header
         secret: Webhook signing secret
-        timestamp_header: Optional timestamp for replay protection
+        timestamp_header: Required timestamp for replay protection
         max_age_seconds: Maximum acceptable age for timestamp
 
     Returns:
@@ -163,7 +162,7 @@ def verify_signature(
     if not secret:
         return False, "Webhook secret not configured"
 
-    # Check timestamp for replay protection
+    # Check the timestamp that is included in the signed bytes.
     if timestamp_header:
         try:
             timestamp = int(timestamp_header)
@@ -173,21 +172,24 @@ def verify_signature(
             if age > max_age_seconds:
                 return False, f"Webhook timestamp too old ({age}s)"
 
-            if age < 0:
-                return False, "Webhook timestamp in future"
+            if age < -max_age_seconds:
+                return False, "Webhook timestamp too far in future"
 
             # Compute expected signature with timestamp
             expected_sig = compute_signature_with_timestamp(payload, secret, timestamp)
         except ValueError:
             return False, "Invalid timestamp format"
     else:
-        # Simple signature without timestamp
-        expected_sig = compute_signature(payload, secret)
+        return False, "Missing timestamp header"
 
     # Use constant-time comparison to prevent timing attacks
+    try:
+        presented_sig = signature_header.lower().encode("ascii")
+    except UnicodeEncodeError:
+        return False, "Invalid signature"
     is_valid = secrets.compare_digest(
-        signature_header.lower(),
-        expected_sig.lower()
+        presented_sig,
+        expected_sig.encode("ascii")
     )
 
     if not is_valid:

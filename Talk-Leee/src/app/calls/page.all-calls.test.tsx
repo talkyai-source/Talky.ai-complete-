@@ -56,7 +56,7 @@ function makeCalls(): Call[] {
     });
 }
 
-const originalListCalls = dashboardApi.listCalls;
+const originalListCalls = dashboardApi.listCallsCursor;
 const originalRequestAnimationFrame = window.requestAnimationFrame;
 const originalCancelAnimationFrame = window.cancelAnimationFrame;
 const originalPause = window.HTMLMediaElement.prototype.pause;
@@ -67,9 +67,11 @@ let all: Call[] = [];
 beforeEach(() => {
     requests = [];
     all = makeCalls();
-    dashboardApi.listCalls = async (page = 1, pageSize = 20) => {
+    // The server's cursor mode: the cursor names the page that follows, and the last page has none.
+    dashboardApi.listCallsCursor = async (cursor: string | null, pageSize = 20) => {
+        const page = cursor === null ? 1 : Number(cursor);
         requests.push({ page, pageSize });
-        return { calls: all.slice((page - 1) * pageSize, page * pageSize), total: all.length };
+        return { calls: all.slice((page - 1) * pageSize, page * pageSize), nextCursor: page * pageSize < all.length ? String(page + 1) : null };
     };
     window.history.replaceState(null, "", "/calls");
     // JSDOM gaps the rows touch on mount and unmount.
@@ -81,7 +83,7 @@ beforeEach(() => {
 
 afterEach(() => {
     cleanup();
-    dashboardApi.listCalls = originalListCalls;
+    dashboardApi.listCallsCursor = originalListCalls;
     window.requestAnimationFrame = originalRequestAnimationFrame;
     window.cancelAnimationFrame = originalCancelAnimationFrame;
     window.HTMLMediaElement.prototype.pause = originalPause;
@@ -102,7 +104,7 @@ function rowIds() {
 
 test("every page of calls is read through the all-pages helper", async () => {
     await renderLoaded();
-    assert.deepEqual(requests, [{ page: 1, pageSize: 100 }, { page: 2, pageSize: 100 }]);
+    assert.deepEqual(requests, [{ page: 1, pageSize: 50 }, { page: 2, pageSize: 50 }, { page: 3, pageSize: 50 }]);
     assert.equal(rowIds().length, 50);
 });
 
@@ -211,7 +213,7 @@ test("while a call is live the refresh reads only the newest page and merges it"
     all[0] = { ...all[0], status: "in_progress" };
     await renderLoaded();
     const afterLoad = requests.length;
-    assert.deepEqual(requests.slice(0, 2), [{ page: 1, pageSize: 100 }, { page: 2, pageSize: 100 }]);
+    assert.deepEqual(requests.slice(0, 3), [{ page: 1, pageSize: 50 }, { page: 2, pageSize: 50 }, { page: 3, pageSize: 50 }]);
 
     // A new call arrives and a loaded one changes on the server.
     all = [{ ...all[0], id: "call-new", phone_number: "+447400555000", status: "completed" }, ...all];
@@ -223,7 +225,7 @@ test("while a call is live the refresh reads only the newest page and merges it"
 
     const live = requests.slice(afterLoad);
     assert.equal(live.length >= 1, true);
-    assert.equal(live.every((request) => request.page === 1 && request.pageSize === 100), true, JSON.stringify(live));
+    assert.equal(live.every((request) => request.page === 1 && request.pageSize === 50), true, JSON.stringify(live));
 });
 
 test("with no live call nothing is read again", async () => {
@@ -238,5 +240,5 @@ test("a filter change reads every page again", async () => {
     await renderLoaded();
     const afterLoad = requests.length;
     await user.click(screen.getByRole("button", { name: "Issues" }));
-    await waitFor(() => assert.deepEqual(requests.slice(afterLoad), [{ page: 1, pageSize: 100 }, { page: 2, pageSize: 100 }]));
+    await waitFor(() => assert.deepEqual(requests.slice(afterLoad), [{ page: 1, pageSize: 50 }, { page: 2, pageSize: 50 }, { page: 3, pageSize: 50 }]));
 });

@@ -114,35 +114,59 @@ def minutes_unlimited(allocated: Any, plan_minutes: Any, billing_model: Any) -> 
     return allocated == 0 and plan_minutes == 0 and (billing_model or "subscription") != "prepaid"
 
 
+#: The tenant columns every allowance read needs, from ``tenants t LEFT JOIN
+#: plans p``. Outbound (``compute_minutes_status``) and inbound admission
+#: (``telephony.inbound_transfer.tenant_inbound_allowance``) read the same ones
+#: so the two gates cannot drift apart again.
+ALLOWANCE_ROW_COLUMNS = f"""t.minutes_allocated,p.minutes AS plan_minutes,p.billing_model,
+                  t.plan_id IS NULL AS no_plan,
+                  EXISTS(SELECT 1 FROM billing_ledger b WHERE b.tenant_id=t.id) AS has_ledger,
+                  {allowance_window_start_sql('t.allowance_anchor_at', 'NOW()')} AS window_start"""
+
+
+async def allowance_minutes(conn: Any, tenant_id: str, row: Any) -> int | None:
+    """Minutes this allowance month grants, from an ``ALLOWANCE_ROW_COLUMNS`` row.
+
+    None is a verified unlimited plan. Raises ``MeteringUnavailable`` when the
+    allowance cannot be established.
+    """
+    if row is None or type(row["minutes_allocated"]) is not int or row["minutes_allocated"] < 0:
+        raise MeteringUnavailable("allowance_unavailable")
+    # minutes_allocated is the plan's monthly minutes; bought minutes live
+    # only in billing_ledger (topup_service, topup_usage).
+    base = row["minutes_allocated"]
+    plan_minutes = row["plan_minutes"]
+    if minutes_unlimited(base, plan_minutes, row.get("billing_model")):
+        return None
+    # No plan bound (new accounts since paid-only billing): zero minutes, a
+    # known and exhausted allowance rather than an unknown one.
+    if base == 0 and not row.get("no_plan") and (type(plan_minutes) is not int or plan_minutes < 0):
+        raise MeteringUnavailable("unlimited_entitlement_unverified")
+    if row.get("has_ledger"):
+        # Bought minutes still unused (negative after a refund of used ones),
+        # less closed months the reminder worker has not recorded yet.
+        from app.domain.services.topup_usage import topup_balance
+        return max(0, base + await topup_balance(conn, tenant_id, base))
+    return base
+
+
 async def _compute_minutes_status(conn: Any, tenant_id: str) -> MinutesStatus:
     # An absent/default tenant allocation cannot prove an unlimited product.
     # The existing bound plan must explicitly carry the zero-minute sentinel.
     row = await conn.fetchrow(
-        f"""SELECT t.minutes_allocated,p.minutes AS plan_minutes,p.billing_model,
-                  t.plan_id IS NULL AS no_plan,
-                  EXISTS(SELECT 1 FROM billing_ledger b WHERE b.tenant_id=t.id) AS has_ledger,
-                  {allowance_window_start_sql('t.allowance_anchor_at', 'NOW()')} AS window_start
+        f"""SELECT {ALLOWANCE_ROW_COLUMNS}
              FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id
             WHERE t.id=$1
               AND (COALESCE(NULLIF(current_setting('app.bypass_rls',true),'')::boolean,false)
                    OR t.id=NULLIF(current_setting('app.current_tenant_id',true),'')::uuid)""", tenant_id
     )
-    if row is None or type(row["minutes_allocated"]) is not int or row["minutes_allocated"] < 0:
-        return unavailable_minutes("allowance_unavailable")
-    # minutes_allocated is the plan's monthly minutes; bought minutes live
-    # only in billing_ledger (topup_service, topup_usage).
-    base = allocated = row["minutes_allocated"]
-    plan_minutes = row["plan_minutes"]
-    unlimited = minutes_unlimited(base, plan_minutes, row.get("billing_model"))
-    # No plan bound (new accounts since paid-only billing): zero minutes, a
-    # known and exhausted allowance rather than an unknown one.
-    if base == 0 and not unlimited and not row.get("no_plan") and (type(plan_minutes) is not int or plan_minutes < 0):
-        return unavailable_minutes("unlimited_entitlement_unverified")
-    if not unlimited and row.get("has_ledger"):
-        # Bought minutes still unused (negative after a refund of used ones),
-        # less closed months the reminder worker has not recorded yet.
-        from app.domain.services.topup_usage import topup_balance
-        allocated = max(0, base + await topup_balance(conn, tenant_id, base))
+    try:
+        allocated = await allowance_minutes(conn, tenant_id, row)
+    except MeteringUnavailable as exc:
+        return unavailable_minutes(str(exc))
+    unlimited = allocated is None
+    if unlimited:
+        allocated = 0
     used_seconds = await conn.fetchval(
         """
         SELECT

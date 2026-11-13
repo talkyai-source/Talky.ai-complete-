@@ -450,7 +450,7 @@ async def test_a_lost_session_link_raises_instead_of_passing_quietly():
     svc = TopupService(FakePool(store))
 
     with pytest.raises(TopupError):
-        await svc.attach_session("order-1", "cs_1")
+        await svc.attach_session("order-1", "cs_1", tenant_id=TENANT)
 
 
 def test_rows_affected_reads_the_asyncpg_tag():

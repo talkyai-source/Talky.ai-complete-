@@ -11,6 +11,7 @@ Security baseline follows RFC 8725 guidance:
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import math
 from typing import Any, Dict, Optional
 
 import jwt
@@ -60,6 +61,8 @@ def encode_access_token(
     settings = get_settings()
     now = datetime.now(timezone.utc)
     effective_ttl = ttl if ttl is not None else timedelta(hours=settings.jwt_expiry_hours)
+    if settings.auth_short_lived_tokens_required:
+        effective_ttl = min(effective_ttl, timedelta(minutes=ACCESS_TOKEN_TTL_MINUTES))
     payload: Dict[str, Any] = {
         "sub": user_id,
         "email": email,
@@ -156,4 +159,19 @@ def decode_and_validate_token(token: str) -> Dict[str, Any]:
     subject = payload.get("sub")
     if not isinstance(subject, str) or not subject.strip():
         raise JWTValidationError("Invalid token: missing subject")
+    if settings.auth_short_lived_tokens_required:
+        issued, expires = payload["iat"], payload["exp"]
+        # Enabling the policy also retires existing long-lived body tokens.
+        # Signature verification still happens first, including key rotation.
+        if any(type(value) not in (int, float) or not math.isfinite(value)
+               for value in (issued, expires)):
+            raise JWTValidationError("Invalid authentication token")
+        if not 0 < expires - issued <= ACCESS_TOKEN_TTL_MINUTES * 60:
+            raise JWTValidationError("Please refresh your login session")
+        # General JWT clock leeway must not lengthen the browser-token bound.
+        now = datetime.now(timezone.utc).timestamp()
+        if now < issued:
+            raise JWTValidationError("Invalid authentication token")
+        if now >= expires:
+            raise JWTValidationError("Token has expired")
     return payload

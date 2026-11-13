@@ -1,4 +1,4 @@
-The Billing area allows you to review your subscription and usage.
+The Billing area allows you to review your subscription or pay-as-you-go AI-minute balance and usage. Available purchase options depend on the current catalog and your account.
 
 ## Available information can include
 
@@ -19,11 +19,11 @@ The Billing area allows you to review your subscription and usage.
 5. Review any overage alerts.
 6. Open plan or invoice options when needed.
 
-Telephony/carrier usage may be billed separately from Talk-Lee AI-platform minutes depending on your commercial agreement.
+AI-minute purchases cover Talk-Lee platform usage. Confirm any telephone carrier service and charges with your account owner or provider before calling; this guide does not promise a separate carrier-billing workflow.
 
 ## Buy AI minute top-ups
 
-If your included AI minutes run out before the next renewal, you can buy additional minutes.
+You can purchase pay-as-you-go minutes or add minutes to an eligible subscription. Review the current bundles and prices shown in Billing rather than relying on a price quoted in a help article.
 
 1. Open **Billing**.
 2. Find the top-up panel.
@@ -31,15 +31,7 @@ If your included AI minutes run out before the next renewal, you can buy additio
 4. Complete the payment.
 5. Confirm the new balance.
 
-Standard bundles are:
-
-| Bundle price | Additional AI minutes | Rate |
-| --- | --- | --- |
-| $50 | 125 minutes | $0.40/min |
-| $70 | 175 minutes | $0.40/min |
-| $100 | 250 minutes | $0.40/min |
-
-Top-up bundles apply only to Talk-Lee AI platform minutes. Telephone/PSTN/SIP carrier usage and premium voice usage remain billed separately. Larger custom bundles can be quoted for higher-volume accounts.
+Before confirming payment, check the bundle's AI minutes, price and currency in the checkout. A pay-as-you-go purchase does not create a recurring subscription. Confirm any premium-voice or separate telephone-service arrangement with your account owner before using it.
 
 ## Change plan
 

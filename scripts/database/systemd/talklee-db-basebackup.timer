@@ -1,0 +1,11 @@
+[Unit]
+OnFailure=talky-notify@%n.service
+Description=Prepared daily physical backup schedule (not installed automatically)
+
+[Timer]
+OnCalendar=*-*-* 03:00:00
+Persistent=true
+Unit=talklee-db-basebackup.service
+
+[Install]
+WantedBy=timers.target

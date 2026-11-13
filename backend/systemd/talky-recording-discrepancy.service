@@ -1,0 +1,24 @@
+[Unit]
+OnFailure=talky-notify@%n.service
+Description=Talky.ai read-only local recording discrepancy report
+After=network.target
+
+[Service]
+Type=oneshot
+User=talky
+Group=talky
+WorkingDirectory=/opt/talky/backend
+EnvironmentFile=/opt/talky/backend/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/talky/backend/venv/bin/python scripts/report_recording_discrepancies.py
+TimeoutStartSec=10min
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=talky-recording-discrepancy
+

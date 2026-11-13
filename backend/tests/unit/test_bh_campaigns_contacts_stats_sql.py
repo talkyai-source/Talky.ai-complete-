@@ -39,7 +39,10 @@ class _Q:
 
 
 class _DB:
-    pool = object()
+    def __init__(self):
+        # Each test seeds an independent database. Real requests sharing one
+        # pool are covered by test_campaign_stats_cache's two-Client scenario.
+        self.pool = object()
 
     def table(self, name):
         return _Q(self, name)

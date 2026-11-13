@@ -121,6 +121,19 @@ class AbuseStatisticsResponse(BaseModel):
     trend: Optional[str] = None
 
 
+def _rule_state(row):
+    if not row:
+        return None
+    return {key: row[key] for key in (
+        "id", "tenant_id", "rule_name", "rule_type", "parameters", "warn_threshold",
+        "block_threshold", "action_on_trigger", "analysis_window_minutes", "priority", "is_active",
+    )}
+
+
+def _resolution_state(row):
+    return {key: row[key] for key in ("resolved_at", "resolved_by", "resolution_notes", "false_positive")}
+
+
 # ---------------------------------------------------------------------------
 # Dependencies
 # ---------------------------------------------------------------------------
@@ -148,7 +161,7 @@ async def list_abuse_events(
     severity: Optional[str] = Query(None, regex="^(low|medium|high|critical)$"),
     unresolved_only: bool = Query(False),
     hours: int = Query(24, ge=1, le=720),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=200),
     db_pool=Depends(get_db_pool),
 ):
     """List abuse events with filtering."""
@@ -285,6 +298,12 @@ async def resolve_abuse_event(
     resolved_by = UUID(str(current_user.id))
     # The platform-admin route resolves an ID before its tenant is known.
     async with acquire_with_tenant(db_pool, None) as conn:
+        await audit_logger.lock_transaction(conn)
+        before = await conn.fetchrow(
+            "SELECT * FROM abuse_events WHERE id=$1 AND resolved_at IS NULL FOR UPDATE", event_id,
+        )
+        if not before:
+            raise HTTPException(status_code=404, detail="Abuse event not found or already resolved")
         # Update the event
         result = await conn.execute(
             """
@@ -293,12 +312,13 @@ async def resolve_abuse_event(
                 resolved_by = $2,
                 resolution_notes = $3,
                 false_positive = $4
-            WHERE id = $1 AND resolved_at IS NULL
+            WHERE id = $1 AND resolved_at IS NULL AND tenant_id = $5
             """,
             event_id,
             resolved_by,
             request.notes,
             request.false_positive,
+            before["tenant_id"],
         )
 
         if "UPDATE 0" in result:
@@ -315,30 +335,18 @@ async def resolve_abuse_event(
                 t.business_name AS tenant_name
             FROM abuse_events e
             JOIN tenants t ON t.id = e.tenant_id
-            WHERE e.id = $1
+            WHERE e.id = $1 AND e.tenant_id = $2
             """,
             event_id,
+            before["tenant_id"],
         )
-
-    # Dismissing a fraud event is a compliance-relevant admin action.
-    await audit_logger.log(
-        event_type=AuditEvent.SUSPICIOUS_ACTIVITY,
-        action=(
-            "abuse_event_marked_false_positive"
-            if request.false_positive
-            else "abuse_event_resolved"
-        ),
-        actor_id=current_user.id,
-        tenant_id=row["tenant_id"],
-        resource_type="abuse_event",
-        resource_id=event_id,
-        metadata={
-            "event_type": row["event_type"],
-            "severity": row["severity"],
-            "false_positive": request.false_positive,
-            "resolution_notes": request.notes,
-        },
-    )
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.SUSPICIOUS_ACTIVITY,
+            action="abuse_event_marked_false_positive" if request.false_positive else "abuse_event_resolved",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=row["tenant_id"],
+            resource_type="abuse_event", resource_id=event_id,
+            before_state=_resolution_state(before), after_state=_resolution_state(row),
+        )
 
     return AbuseEventResponse(
         id=row["id"],
@@ -532,6 +540,8 @@ async def create_abuse_rule(
     rule: AbuseRuleSchema,
     tenant_id: Optional[UUID] = Query(None, description="NULL for global rule"),
     db_pool=Depends(get_db_pool),
+    current_user: CurrentUser = Depends(require_platform_admin),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Create a new abuse detection rule."""
 
@@ -560,6 +570,7 @@ async def create_abuse_rule(
     async with acquire_with_tenant(
         db_pool, str(tenant_id) if tenant_id is not None else None
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         row = await conn.fetchrow(
             """
             INSERT INTO abuse_detection_rules (
@@ -591,6 +602,12 @@ async def create_abuse_rule(
             rule.priority,
             rule.is_active,
         )
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="abuse.rule.create",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_id,
+            resource_type="abuse_rule", resource_id=row["id"],
+            before_state=None, after_state=_rule_state(row),
+        )
 
     return AbuseRuleResponse(
         id=row["id"],
@@ -619,11 +636,19 @@ async def update_abuse_rule(
     rule_id: UUID,
     rule: AbuseRuleSchema,
     db_pool=Depends(get_db_pool),
+    current_user: CurrentUser = Depends(require_platform_admin),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Update an abuse detection rule."""
 
     # The platform-admin route resolves an ID before its tenant is known.
     async with acquire_with_tenant(db_pool, None) as conn:
+        await audit_logger.lock_transaction(conn)
+        before = await conn.fetchrow(
+            "SELECT * FROM abuse_detection_rules WHERE id=$1 FOR UPDATE", rule_id,
+        )
+        if not before:
+            raise HTTPException(status_code=404, detail="Rule not found")
         row = await conn.fetchrow(
             """
             UPDATE abuse_detection_rules
@@ -637,7 +662,7 @@ async def update_abuse_rule(
                 priority = $9,
                 is_active = $10,
                 updated_at = NOW()
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id IS NOT DISTINCT FROM $11::uuid
             RETURNING *
             """,
             rule_id,
@@ -651,10 +676,16 @@ async def update_abuse_rule(
             rule.analysis_window_minutes,
             rule.priority,
             rule.is_active,
+            before["tenant_id"],
         )
-
-    if not row:
-        raise HTTPException(status_code=404, detail="Rule not found")
+        if not row:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="abuse.rule.update",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=before["tenant_id"],
+            resource_type="abuse_rule", resource_id=rule_id,
+            before_state=_rule_state(before), after_state=_rule_state(row),
+        )
 
     return AbuseRuleResponse(
         id=row["id"],
@@ -682,18 +713,31 @@ async def update_abuse_rule(
 async def delete_abuse_rule(
     rule_id: UUID,
     db_pool=Depends(get_db_pool),
+    current_user: CurrentUser = Depends(require_platform_admin),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Delete an abuse detection rule."""
     # The platform-admin route resolves an ID before its tenant is known.
     async with acquire_with_tenant(db_pool, None) as conn:
-        result = await conn.execute(
-            "DELETE FROM abuse_detection_rules WHERE id = $1",
-            rule_id,
+        await audit_logger.lock_transaction(conn)
+        before = await conn.fetchrow(
+            "SELECT * FROM abuse_detection_rules WHERE id=$1 FOR UPDATE", rule_id,
         )
-
-    if "DELETE 0" in result:
-        raise HTTPException(status_code=404, detail="Rule not found")
-
+        if not before:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        result = await conn.execute(
+            "DELETE FROM abuse_detection_rules WHERE id = $1 AND tenant_id IS NOT DISTINCT FROM $2::uuid",
+            rule_id,
+            before["tenant_id"],
+        )
+        if "DELETE 0" in result:
+            raise HTTPException(status_code=404, detail="Rule not found")
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="abuse.rule.delete",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=before["tenant_id"],
+            resource_type="abuse_rule", resource_id=rule_id,
+            before_state=_rule_state(before), after_state=None,
+        )
 
 # ---------------------------------------------------------------------------
 # Alert/Notification Endpoints

@@ -25,7 +25,7 @@ from tests.unit.test_call_service_pooled_teardown import _FakeConn, _service
 from tests.unit.test_dnc_settlement_truth import SuppressionConn
 
 TENANT = "20000000-0000-4000-8000-000000000017"
-PHONE = "+15555550107"
+PHONE = "+14155552671"
 
 
 @pytest.fixture(autouse=True)

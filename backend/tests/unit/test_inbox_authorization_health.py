@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from contextlib import asynccontextmanager
 from copy import deepcopy
 from dataclasses import FrozenInstanceError
@@ -12,12 +13,28 @@ from uuid import UUID
 import pytest
 
 from app.infrastructure.assistant.tools import inbox
+from app.core import db_utils
 from app.services.connector_resolver import _authorization_snapshot_for_row
 
 TENANT = "00000000-0000-0000-0000-000000000001"
 CONNECTOR = "00000000-0000-0000-0000-000000000002"
 ACCOUNT = "00000000-0000-0000-0000-000000000003"
 OTHER = "00000000-0000-0000-0000-000000000004"
+
+
+@pytest.fixture(autouse=True)
+def verify_health_acquisition_budget(monkeypatch):
+    # The deadline now belongs to the shared acquisition context, not the
+    # driver's release/reset timeout. Exercise that real context underneath.
+    acquire = db_utils.acquire_connection
+
+    @asynccontextmanager
+    async def checked(pool, *, timeout=None):
+        assert timeout == inbox._EMAIL_HEALTH_TIMEOUT_SECONDS
+        async with acquire(pool, timeout=timeout) as conn:
+            yield conn
+
+    monkeypatch.setattr(db_utils, "acquire_connection", checked)
 
 
 def account(**changes):
@@ -76,6 +93,9 @@ class Connection:
                 self.audit_lock = False
 
     async def execute(self, sql, *args):
+        if re.fullmatch(r"SET LOCAL (statement_timeout|lock_timeout) = '\d+ms'", sql):
+            assert self.is_in_transaction() and not args
+            return
         if "pg_advisory_xact_lock" in sql:
             assert self.is_in_transaction()
             self.audit_lock = True
@@ -148,8 +168,7 @@ class Pool:
         self.conn = conn
 
     @asynccontextmanager
-    async def acquire(self, **kwargs):
-        assert kwargs["timeout"] == inbox._EMAIL_HEALTH_TIMEOUT_SECONDS
+    async def acquire(self, *, timeout=None):
         yield self.conn
 
 

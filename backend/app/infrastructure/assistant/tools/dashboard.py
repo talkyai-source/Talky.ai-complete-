@@ -3,10 +3,14 @@ Dashboard and usage tools for the assistant agent.
 """
 import logging
 from typing import Optional, Dict, Any
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 from app.infrastructure.assistant.tools.campaigns import campaign_names
+from app.infrastructure.assistant.tools.date_ranges import (
+    SINCE_DESCRIPTION, TZ_DESCRIPTION, UNTIL_DESCRIPTION, apply_range, local_day_range,
+    normalize_range, resolve_reporting_zone, validate_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -15,6 +19,9 @@ class GetDashboardStatsInput(BaseModel):
     """Input for get_dashboard_stats tool"""
     date_str: Optional[str] = Field(None, description="Date in YYYY-MM-DD format, defaults to today")
     campaign_id: Optional[str] = Field(None, description="Only this campaign's calls")
+    since: Optional[str] = Field(None, description=SINCE_DESCRIPTION)
+    until: Optional[str] = Field(None, description=UNTIL_DESCRIPTION)
+    tz: Optional[str] = Field(None, description=TZ_DESCRIPTION)
 
 
 async def get_dashboard_stats(
@@ -22,12 +29,15 @@ async def get_dashboard_stats(
     db_client: Client,
     date_str: Optional[str] = None,
     campaign_id: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    tz: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get dashboard statistics for the tenant, or for one of its campaigns.
 
     Returns:
-        - Total calls today
+        - Total calls in the applied range
         - Calls completed
         - Calls failed
         - Success rate
@@ -35,8 +45,15 @@ async def get_dashboard_stats(
         - scope: "campaign" (with campaign_id/campaign_name) or "all_campaigns"
     """
     try:
-        # Default to today
-        target_date = date_str or date.today().isoformat()
+        if date_str is not None and (since is not None or until is not None):
+            return {"error": "Use either date_str or since/until, not both."}
+        validate_range(since, until)
+        zone = resolve_reporting_zone(db_client, tenant_id, campaign_id=campaign_id, requested=tz)
+        start, end = normalize_range(since, until, zone=zone)
+        target_date = None
+        if since is None and until is None:
+            start, end = local_day_range(date_str, zone=zone)
+            target_date = datetime.fromisoformat(start).astimezone(zone).date().isoformat()
 
         campaign_name = None
         if campaign_id:
@@ -44,18 +61,14 @@ async def get_dashboard_stats(
             if campaign_name is None:
                 return {"error": "campaign not found"}
 
-        # Get calls for the day
+        # The result describes exactly these inclusive/exclusive UTC bounds.
         calls_query = db_client.table("calls").select(
             "id, status, outcome, goal_achieved",
             count="exact"
         ).eq("tenant_id", tenant_id)
         if campaign_id:
             calls_query = calls_query.eq("campaign_id", campaign_id)
-        calls_response = calls_query.gte(
-            "created_at", f"{target_date}T00:00:00"
-        ).lte(
-            "created_at", f"{target_date}T23:59:59"
-        ).execute()
+        calls_response = apply_range(calls_query, "created_at", start, end).execute()
 
         total_calls = calls_response.count or 0
         completed = len([c for c in calls_response.data if c.get("status") == "completed"])
@@ -74,13 +87,16 @@ async def get_dashboard_stats(
 
         stats = {
             "date": target_date,
+            "timezone": str(zone),
             "scope": "campaign" if campaign_id else "all_campaigns",
             "total_calls": total_calls,
             "completed": completed,
             "failed": failed,
             "goal_achieved": goal_achieved,
             "success_rate": round(success_rate, 1),
-            "active_campaigns": active_campaigns
+            "active_campaigns": active_campaigns,
+            "active_campaigns_scope": "current_account",
+            "applied_range": {"since": start, "until": end, "timestamp_field": "created_at"},
         }
         if campaign_id:
             stats["campaign_id"] = str(campaign_id)
@@ -122,16 +138,29 @@ async def get_usage_info(
 
         plan = plan_response.data or {}
 
-        minutes_allocated = tenant.get("minutes_allocated", 0)
-        minutes_used = tenant.get("minutes_used", 0)
+        # The minutes come from the meter the Billing page and every call
+        # gate use (plan minutes plus bought minutes, this allowance month).
+        # tenants.minutes_used is stale and minutes_allocated omits bought
+        # minutes, so a pay-as-you-go customer was told they had none (QA
+        # F3-07). An unknown meter is reported as unknown, never as zero.
+        from app.domain.services import minutes_quota
+
+        status = await minutes_quota.tenant_minutes_status(tenant_id)
+        known = status.state == "known"
+        minutes_allocated = status.allocated if known else None
+        minutes_used = status.used_minutes if status.state != "unavailable" else None
 
         return {
             "plan_name": plan.get("name", "Free"),
             "plan_price": plan.get("price", 0),
+            "minutes_state": status.state,
             "minutes_allocated": minutes_allocated,
             "minutes_used": minutes_used,
-            "minutes_remaining": max(0, minutes_allocated - minutes_used),
-            "usage_percentage": round((minutes_used / minutes_allocated * 100), 1) if minutes_allocated > 0 else 0,
+            "minutes_remaining": status.remaining_minutes if known else None,
+            "usage_percentage": (
+                round(minutes_used / minutes_allocated * 100, 1)
+                if known and minutes_allocated else None
+            ),
             "subscription_status": tenant.get("subscription_status", "inactive")
         }
     except Exception as e:

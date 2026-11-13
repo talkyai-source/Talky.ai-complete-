@@ -1,6 +1,8 @@
-"""The first generated reply identifies the agent, gives the call reason,
-and asks permission in one short breath. Preserve the invitation and response
-boundary while allowing the personas to put the reason before or after it.
+"""Each persona's opening block is an OPENING CONTEXT: it says who is speaking and
+why the call is made, and hands the floor back. It scripts no quoted line and no
+permission question; the wording of the first reply is the model's own
+(b4d25876; personas/lead_gen.py:10-11, customer_support.py:8, receptionist.py:8).
+The bad-time phrasing family must still never reach the prompt.
 """
 from __future__ import annotations
 
@@ -59,109 +61,50 @@ def _flat(text: str) -> str:
     return re.sub(r"\s+", " ", text)
 
 
-#: The permission phrase every persona's turn-2 shape uses. Pinned as a
-#: literal because "the three personas stay consistent" is a testable claim
-#: only if they all say the same thing.
-_PERMISSION_PHRASE = "got a minute?"
-
 _BAD_TIME_FAMILY = ("bad time", "bad moment", "get lost", "buzz off")
 
 
-def _shape_quote(block: str) -> str:
-    """Pull the ONE quoted turn-2 shape out of an OPENING/STAGE-1 block —
-    the quoted span that names both {agent_name} and {company_name}. Mirrors
-    the parsing in test_prompt_brevity_and_narration.test_lead_gen_opener_
-    shape_fits_the_decision_window, which already proved this is the safe
-    way to find it (a length-filtered pattern silently breaks quote parity)."""
-    quoted = re.findall(r'"([^"]*)"', _flat(block))
-    shapes = [q for q in quoted if "{agent_name}" in q and "{company_name}" in q]
-    assert len(shapes) == 1, f"expected exactly one turn-2 shape, found {shapes!r}"
-    return shapes[0]
-
-
 # ---------------------------------------------------------------------------
-# 1. Identity first, with reason and permission in the same breath.
+# 1. Identity and reason are given as context, without a scripted line.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "name,block,reason_marker",
+    "name,block,must_contain",
     [
-        ("lead_gen outbound", LEAD_GEN_OPENINGS["outbound"], "{call_reason}"),
-        ("lead_gen inbound", LEAD_GEN_OPENINGS["inbound"], "{call_reason}"),
-        (
-            "customer_support outbound",
-            CUSTOMER_SUPPORT_OPENINGS["outbound"],
-            "calling about your recent inquiry",
-        ),
-        (
-            "receptionist outbound",
-            RECEPTIONIST_OPENINGS["outbound"],
-            "following up on your inquiry",
-        ),
+        ("lead_gen outbound", LEAD_GEN_OPENINGS["outbound"],
+         ("{agent_name}", "{company_name}", "{call_reason}", "then listen")),
+        ("lead_gen inbound", LEAD_GEN_OPENINGS["inbound"], ("{call_reason}", "recipient speaks first")),
+        ("customer_support outbound", CUSTOMER_SUPPORT_OPENINGS["outbound"],
+         ("{company_name}", "approved reason")),
+        ("receptionist outbound", RECEPTIONIST_OPENINGS["outbound"],
+         ("{company_name}", "approved purpose", "listen")),
     ],
 )
-def test_turn2_shape_identifies_agent_and_gives_reason_and_permission(name, block, reason_marker):
-    shape = _shape_quote(block)
-    name_idx = shape.index("{agent_name}")
-    permission_idx = shape.lower().index(_PERMISSION_PHRASE)
-    reason_idx = shape.index(reason_marker)
-    assert name_idx < min(permission_idx, reason_idx), (
-        f"{name}: expected identity before reason and permission, got shape {shape!r} "
-        f"(name={name_idx}, permission={permission_idx}, reason={reason_idx})"
-    )
-
-
-def test_all_four_turn2_shapes_use_the_same_permission_phrase():
-    """The three personas stay consistent — one shape, not three."""
-    shapes = {
-        "lead_gen outbound": _shape_quote(LEAD_GEN_OPENINGS["outbound"]),
-        "lead_gen inbound": _shape_quote(LEAD_GEN_OPENINGS["inbound"]),
-        "customer_support outbound": _shape_quote(CUSTOMER_SUPPORT_OPENINGS["outbound"]),
-        "receptionist outbound": _shape_quote(RECEPTIONIST_OPENINGS["outbound"]),
-    }
-    for name, shape in shapes.items():
-        assert _PERMISSION_PHRASE in shape.lower(), f"{name} lost the permission ask: {shape!r}"
+def test_opening_context_gives_identity_and_reason_without_a_scripted_line(name, block, must_contain):
+    # b4d25876: OPENING CONTEXT says who is speaking and why; the wording is the model's own.
+    assert block.startswith("OPENING CONTEXT\n"), name
+    for part in must_contain:
+        assert part in block, (name, part)
+    assert '"' not in block, f"{name}: a quoted scripted line is back in the opening context"
 
 
 # ---------------------------------------------------------------------------
-# 2. Length: the shape itself stays inside the stated one-breath budget.
+# 2. Length: the opening context stays short.
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "name,block,fmt_kwargs",
-    [
-        (
-            "lead_gen outbound",
-            LEAD_GEN_OPENINGS["outbound"],
-            dict(agent_name="Sarah", company_name="Allstate", call_reason=LEAD_GEN_SLOTS["call_reason"]),
-        ),
-        (
-            "lead_gen inbound",
-            LEAD_GEN_OPENINGS["inbound"],
-            dict(agent_name="Sarah", company_name="Allstate", call_reason=LEAD_GEN_SLOTS["call_reason"]),
-        ),
-        (
-            "customer_support outbound",
-            CUSTOMER_SUPPORT_OPENINGS["outbound"],
-            dict(agent_name="Sam", company_name="Acme"),
-        ),
-        (
-            "receptionist outbound",
-            RECEPTIONIST_OPENINGS["outbound"],
-            dict(agent_name="Maya", company_name="Acme"),
-        ),
-    ],
-)
-def test_turn2_shape_stays_under_twenty_words(name, block, fmt_kwargs):
-    shape = _shape_quote(block)
-    rendered = shape.format(**fmt_kwargs)
-    words = [w for w in rendered.split() if any(c.isalnum() for c in w)]
-    assert len(words) <= 20, (
-        f"{name} turn-2 shape is {len(words)} spoken words (budget is under "
-        f"twenty): {rendered!r}"
-    )
+@pytest.mark.parametrize("name,block", [
+    ("lead_gen outbound", LEAD_GEN_OPENINGS["outbound"]),
+    ("lead_gen inbound", LEAD_GEN_OPENINGS["inbound"]),
+    ("customer_support outbound", CUSTOMER_SUPPORT_OPENINGS["outbound"]),
+    ("receptionist outbound", RECEPTIONIST_OPENINGS["outbound"]),
+])
+def test_opening_context_stays_short(name, block):
+    # Size guard, not a product rule: the four blocks are 14-19 words today (personas/*.py),
+    # so 30 leaves headroom while still catching a script growing back into the context.
+    words = [w for w in block.split() if any(ch.isalnum() for ch in w)]
+    assert len(words) <= 30, f"{name} opening context is {len(words)} words"
 
 
 # ---------------------------------------------------------------------------
@@ -217,15 +160,14 @@ def test_the_opening_blocks_themselves_never_quote_the_bad_time_phrasing(name, v
 
 
 # ---------------------------------------------------------------------------
-# 4. Permission-ask framing is distinguished from the bad-time family in the
-#    surrounding prose, positively — never by naming the bad phrase.
+# 4. The opening hands the floor back, framed positively — never by naming the
+#    bad-time phrase.
 # ---------------------------------------------------------------------------
 
 
-def test_lead_gen_outbound_requests_permission_and_then_listens():
-    """A concise invitation yields the floor without lengthy framing prose."""
+def test_lead_gen_outbound_introduces_naturally_and_then_listens():
+    """The opening context hands the floor back; it scripts no permission question."""
     low = LEAD_GEN_OPENINGS["outbound"].lower()
-    assert "light permission question" in low
-    assert "stop and let them answer" in low
+    assert "introduce {agent_name} and {company_name} naturally if needed, then listen." in low
     for banned in _BAD_TIME_FAMILY:
         assert banned not in low

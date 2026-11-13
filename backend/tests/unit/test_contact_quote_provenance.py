@@ -16,7 +16,7 @@ import hashlib
 import logging
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 
@@ -30,6 +30,7 @@ class Pool:
 
     def __init__(self, is_test=False):
         self.is_test, self.writes = is_test, []
+        self.identity_reads = []
 
     @asynccontextmanager
     async def acquire(self):
@@ -45,6 +46,17 @@ class Pool:
     async def fetchrow(self, sql, *args):
         if "SELECT is_test" in sql:
             return {"is_test": self.is_test}
+        if sql == (
+            "SELECT direction, route_snapshot, caller_ani_private FROM calls "
+            "WHERE tenant_id=$1::uuid AND id=$2::uuid FOR SHARE"
+        ):
+            assert len(args) == 2
+            assert all(isinstance(value, str) and str(UUID(value)) == value for value in args)
+            self.identity_reads.append(args)
+            return {"direction": "outbound", "route_snapshot": {}, "caller_ani_private": False}
+        if sql.lstrip().startswith("INSERT INTO call_lead_details"):
+            assert self.identity_reads, "Automatic contact writes require saved call authority"
+            assert args[:2] == self.identity_reads[-1]
         self.writes.append(sql)
         return {"id": str(uuid4())}
 

@@ -4,12 +4,14 @@ Call query and action tools for the assistant agent.
 import json
 import logging
 from typing import Optional, Dict, Any
-from datetime import date
 from datetime import datetime, timezone
 from uuid import uuid4
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
 from app.infrastructure.assistant.tools.campaigns import campaign_names
+from app.infrastructure.assistant.tools.date_ranges import (
+    apply_range, local_day_range, normalize_range, resolve_reporting_zone, validate_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +31,20 @@ async def get_recent_calls(
     outcome: Optional[str] = None,
     limit: int = 10,
     campaign_id: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    tz: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get recent calls for the tenant, optionally for one campaign. Every call
     carries its campaign_id and campaign_name so answers never blend campaigns.
     """
     try:
+        validate_range(since, until)
+        zone = resolve_reporting_zone(db_client, tenant_id, campaign_id=campaign_id, requested=tz)
+        start, end = normalize_range(since, until, zone=zone)
+        if today_only and since is None and until is None:
+            start, end = local_day_range(zone=zone)
         query = db_client.table("calls").select(
             "id, campaign_id, phone_number, status, outcome, goal_achieved, duration_seconds, created_at",
             count="exact"
@@ -43,9 +53,7 @@ async def get_recent_calls(
         if campaign_id:
             query = query.eq("campaign_id", campaign_id)
 
-        if today_only:
-            today = date.today().isoformat()
-            query = query.gte("created_at", f"{today}T00:00:00")
+        query = apply_range(query, "created_at", start, end)
 
         if outcome:
             query = query.eq("outcome", outcome)
@@ -58,7 +66,9 @@ async def get_recent_calls(
 
         return {
             "total_count": response.count,
-            "calls": calls
+            "calls": calls,
+            "timezone": str(zone),
+            "applied_range": {"since": start, "until": end, "timestamp_field": "created_at"},
         }
     except Exception as e:
         logger.error(f"Error getting calls: {e}")

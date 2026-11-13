@@ -10,9 +10,12 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, Request
 from fastapi.responses import JSONResponse
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.api.v1.dependencies import CurrentUser, get_audit_logger, get_current_user, get_db_pool
 from app.core.tenant_rls import apply_tenant_rls_context
 from app.core.db_utils import acquire_with_tenant
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
+
+from ._audit import snapshot
 
 from ._shared import (
     _claim_idempotency,
@@ -148,6 +151,7 @@ async def create_route_policy(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -172,6 +176,7 @@ async def create_route_policy(
         user_id=current_user.id,
         request_id=request.headers.get("x-request-id"),
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,
@@ -297,6 +302,12 @@ async def create_route_policy(
 
             response_model = _route_row_to_response(row)
             response_payload = response_model.model_dump(mode="json")
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.route_policy.create",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                resource_type="route_policy", resource_id=row["id"],
+                before_state=None, after_state=snapshot(row),
+            )
             await _store_idempotency_result(
                 conn,
                 tenant_id=current_user.tenant_id,
@@ -319,6 +330,7 @@ async def update_route_policy(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -353,6 +365,7 @@ async def update_route_policy(
         user_id=current_user.id,
         request_id=request.headers.get("x-request-id"),
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,
@@ -495,6 +508,12 @@ async def update_route_policy(
 
             response_model = _route_row_to_response(row)
             response_payload = response_model.model_dump(mode="json")
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.route_policy.update",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                resource_type="route_policy", resource_id=row["id"],
+                before_state=snapshot(existing), after_state=snapshot(row),
+            )
             await _store_idempotency_result(
                 conn,
                 tenant_id=current_user.tenant_id,
@@ -517,6 +536,7 @@ async def _set_route_policy_active_state(
     request_id: Optional[str],
     current_user: CurrentUser,
     db_pool: asyncpg.Pool,
+    audit_logger: AuditLogger,
 ) -> JSONResponse | RoutePolicyResponse:
     if not idempotency_key:
         return _problem(
@@ -539,6 +559,7 @@ async def _set_route_policy_active_state(
         user_id=current_user.id,
         request_id=request.headers.get("x-request-id"),
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,
@@ -593,6 +614,7 @@ async def _set_route_policy_active_state(
                 )
                 return quota_problem
 
+            before = await _get_tenant_route_policy(conn, current_user.tenant_id, policy_id)
             row = await conn.fetchrow(
                 """
                 UPDATE tenant_route_policies
@@ -633,6 +655,13 @@ async def _set_route_policy_active_state(
 
             response_model = _route_row_to_response(row)
             response_payload = response_model.model_dump(mode="json")
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED,
+                action="sip.route_policy.activate" if active_state else "sip.route_policy.deactivate",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                resource_type="route_policy", resource_id=row["id"],
+                before_state=snapshot(before), after_state=snapshot(row),
+            )
             await _store_idempotency_result(
                 conn,
                 tenant_id=current_user.tenant_id,
@@ -654,6 +683,7 @@ async def activate_route_policy(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -666,6 +696,7 @@ async def activate_route_policy(
         request_id=x_request_id,
         current_user=current_user,
         db_pool=db_pool,
+        audit_logger=audit_logger,
     )
 
 
@@ -677,6 +708,7 @@ async def deactivate_route_policy(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -689,4 +721,5 @@ async def deactivate_route_policy(
         request_id=x_request_id,
         current_user=current_user,
         db_pool=db_pool,
+        audit_logger=audit_logger,
     )

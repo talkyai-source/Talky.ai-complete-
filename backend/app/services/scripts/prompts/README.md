@@ -51,9 +51,11 @@ worse, not cleaner:
   `parse_end_session_action()` in the same file. Keep the spec next to its
   parser.
 - **Ask-AI product pitch** → `app/domain/services/ask_ai_constants.py`
-  (`TALKY_PRODUCT_INFO`). That's Talky's own pricing for the public web demo —
+  (`TALKY_PRODUCT_INFO`). That's Talky's own fact sheet for the public web demo —
   a separate product, not a campaign agent — and the module is deliberately
-  import-free to break a circular dependency (see its docstring).
+  import-free to break a circular dependency (see its docstring). It holds no
+  prices: `ask_ai_fact_sheet()` adds the live price list read at session start
+  in `ask_ai_ws.py` (QA F11-05).
 
 The greeting/opener lines (the literal first spoken sentence) live in
 `telephony_session_config.py` with the greeting-dispatch logic — they're TTS

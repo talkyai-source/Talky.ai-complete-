@@ -112,6 +112,9 @@ export default function PricingPage() {
 
   const billingNotes = [
     "Plan limits apply per customer account.",
+    // QA F13-13: what the minutes meter does (backend minutes_quota).
+    "A plan's monthly AI minutes renew each month from the date you subscribe.",
+    "AI minutes used are the recorded duration of your calls, added up over that month and shown in whole minutes, rounded down.",
     "AI calling requires a paid Basic or Business plan or prepaid pay-as-you-go minutes; there is no free minute allowance.",
     "AI top-ups can be purchased with a paid plan when the included monthly AI-minute allowance is exhausted.",
     "Premium voice usage and telephony usage are billed separately from standard AI minutes.",

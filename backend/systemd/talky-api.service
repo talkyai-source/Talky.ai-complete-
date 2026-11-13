@@ -1,8 +1,19 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky.ai API Server (call process: owns telephony)
 After=network.target
 
 [Service]
+User=talky
+Group=talky
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+ReadWritePaths=/opt/talky/backend/recordings /opt/talky/backend/audio_files /opt/talky/backend/feedback_audio /opt/talky/backend/support_attachments /etc/asterisk/pjsip.d
+SupplementaryGroups=asterisk
 Type=exec
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env
@@ -13,7 +24,7 @@ EnvironmentFile=/opt/talky/backend/.env
 # extra worker 503s telephony (see state_backend ARI-ownership lock). Do
 # not raise this without completing Phase 2 (multi-pod) of the telephony
 # state migration. Scale calls vertically + via provider plan limits.
-ExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1 --ws websockets --ws-ping-interval 30 --ws-ping-timeout 5
+ExecStart=/opt/talky/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --workers 1 --ws websockets --ws-ping-interval 30 --ws-ping-timeout 5
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal

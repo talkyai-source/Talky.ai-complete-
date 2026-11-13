@@ -573,7 +573,7 @@ async def manage_lead(
 
         campaign_resp = (
             db_client.table("campaigns")
-            .select("id,direction")
+            .select("id,direction,script_config")
             .eq("id", campaign_id)
             .eq("tenant_id", tenant_id)
             .execute()
@@ -584,12 +584,15 @@ async def manage_lead(
         if refusal:
             return refusal
 
+        from app.domain.services.phone_number_normalizer import resolve_default_country
+        country = resolve_default_country(db_client, tenant_id, campaign_resp.data[0])
+
         # ---- ADD -------------------------------------------------------------
         if action == "add":
             if not phone_number or not phone_number.strip():
                 return {"error": "phone_number is required for action='add'"}
             try:
-                normalized_phone = normalize_phone_number(phone_number)
+                normalized_phone = normalize_phone_number(phone_number, default_country=country)
             except ValueError as exc:
                 return {"error": str(exc)}
 
@@ -718,7 +721,7 @@ async def manage_lead(
         candidate: Dict[str, Any] = {}
         if phone_number is not None:
             try:
-                candidate["phone_number"] = normalize_phone_number(phone_number)
+                candidate["phone_number"] = normalize_phone_number(phone_number, default_country=country)
             except ValueError as exc:
                 return {"error": str(exc)}
         if first_name is not None:

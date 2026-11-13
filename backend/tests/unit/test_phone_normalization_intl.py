@@ -6,8 +6,7 @@ mis-routed as a US area code.
 
 After: libphonenumber is tried first with a per-campaign
 `default_country` (ISO-3166 alpha-2). US default preserved for
-back-compat. The legacy heuristic remains as a fallback for
-environments without libphonenumber installed.
+back-compat. Invalid numbers and countries are refused; no prefix is guessed.
 """
 from __future__ import annotations
 
@@ -66,8 +65,9 @@ def test_australian_number_with_default_au():
 # Edge cases
 # ──────────────────────────────────────────────────────────────────────────
 
-def test_sip_extension_passes_through():
-    assert normalize_phone_number("1001") == "1001"
+def test_sip_extension_is_not_a_dial_destination():
+    with pytest.raises(ValueError):
+        normalize_phone_number("1001")
 
 
 def test_empty_raises():
@@ -85,12 +85,9 @@ def test_too_long_raises():
         normalize_phone_number("1234567890123456")
 
 
-def test_invalid_country_code_falls_back_to_legacy():
-    """Garbage country code → libphonenumber rejects → legacy
-    fallback path (US-centric) kicks in and the number is still
-    normalised (perhaps imperfectly) rather than blowing up."""
-    out = normalize_phone_number("4155551234", default_country="XX")
-    assert out.startswith("+")  # some sane E.164 shape
+def test_invalid_country_code_is_refused():
+    with pytest.raises(ValueError, match="country"):
+        normalize_phone_number("4155551234", default_country="XX")
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -113,7 +110,7 @@ class _PlainUser:
 @pytest.mark.parametrize(
     "raw,country,expected",
     [
-        ("07700 900123", "GB", "+447700900123"),
+        ("020 7946 0123", "GB", "+442079460123"),
         ("02079460958", "GB", "+442079460958"),
         ("03001234567", "PK", "+923001234567"),
         ("4155551234", "US", "+14155551234"),
@@ -134,7 +131,7 @@ def test_csv_import_defaults_to_us_when_no_country_given():
 @pytest.mark.parametrize(
     "raw,country",
     [
-        ("07700 900123", "GB"),
+        ("020 7946 0123", "GB"),
         ("02079460958", "GB"),
         ("03001234567", "PK"),
         ("4155551234", "US"),
@@ -154,10 +151,11 @@ def test_csv_import_and_manual_add_agree(raw, country):
     [
         ({"script_config": {"default_country_code": "gb"}}, "GB"),
         ({"script_config": {"campaign_slots": {"default_country_code": "PK"}}}, "PK"),
-        ({"script_config": {}}, "US"),
-        ({"script_config": None}, "US"),
-        ({}, "US"),
-        (None, "US"),
+        # D2-5: no country anywhere is "unknown", never a US guess.
+        ({"script_config": {}}, None),
+        ({"script_config": None}, None),
+        ({}, None),
+        (None, None),
     ],
 )
 def test_campaign_default_country_resolution(campaign, expected):

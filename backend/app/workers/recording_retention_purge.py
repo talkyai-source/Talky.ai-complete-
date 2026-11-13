@@ -96,6 +96,13 @@ async def select_expired_recordings(pool: Any, limit: int) -> list[Any]:
     # Cross-tenant worker read (no single tenant context); the tenant binding
     # is the JOIN on tenant_id and every later write carries expected_tenant_id.
     async with acquire_with_tenant(pool, None) as conn:
+        # Historical/Alembic-only installations can lack optional media policy
+        # tables. Do not abort the other cleanup jobs or infer that an absent
+        # hold table means no hold. Real query/permission errors still propagate.
+        for table in ("recordings_s3", "tenant_recording_policy", "suspension_events", "tenants"):
+            if not await conn.fetchval("SELECT to_regclass($1)", f"public.{table}"):
+                logger.warning("recording_retention_skipped missing_table=%s", table)
+                return []
         return list(await conn.fetch(_SELECT_EXPIRED_SQL, limit))
 
 

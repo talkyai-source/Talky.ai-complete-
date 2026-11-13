@@ -1,28 +1,5 @@
-Where your account includes white-label access, you manage your own customers from the partner area rather than the standard dashboard.
+## Partner feature availability
 
-## Partner dashboard
+White-label and partner administration are not available in this release. This page is an availability notice; it does not provide an enabled tenant-management, partner-billing or branding workflow.
 
-1. Sign in with your partner administrator account.
-2. Talk-Lee opens the partner dashboard rather than the standard dashboard.
-3. Review activity across your tenants.
-
-## Manage tenants
-
-1. Open **Tenants**.
-2. Review the list of tenant accounts.
-3. Select **Edit** on a tenant to change its details.
-4. Open a tenant's **Agent settings** to review or change how its AI agent behaves.
-5. Creating a new sub-tenant is handled by the Talk-Lee team. Contact them when you need one added.
-
-## Partner analytics and billing
-
-- **Analytics** — calling performance across your tenants
-- **Billing** — usage and charges across your tenants
-
-## Branding preview
-
-Where available, use the preview area to check how the branded experience appears to your customers before publishing changes.
-
-## Note for partner administrators
-
-A partner administrator account is scoped to the partner area. If you also need to work inside a single tenant's standard dashboard, use an account with the appropriate role for that tenant.
+Contact your account owner to confirm the capabilities available to your account. Do not rely on partner controls or a branded customer setup until the owner confirms that the required functionality has been released and provides current instructions.

@@ -150,9 +150,16 @@ def test_daily_cap_allows_under_ceiling():
     assert ok is True
 
 
-def test_daily_cap_disabled_when_zero():
+def test_a_zero_tenant_cap_means_the_platform_cap(monkeypatch):
+    """QA F12-05: 0 used to switch the cap off, and nothing could set it."""
+    monkeypatch.delenv("DIAL_CAP_PER_NUMBER_24H", raising=False)
     eng = SchedulingRuleEngine()
     rules = _all_day_rules(max_calls_per_lead_per_day=0)
+    ok, reason = asyncio.run(
+        eng.can_make_call("t", "c", rules, lead_attempts_today=3)
+    )
+    assert (ok, reason) == (False, "daily_lead_cap_reached_3/3")
+    monkeypatch.setenv("DIAL_CAP_PER_NUMBER_24H", "0")
     ok, _ = asyncio.run(
         eng.can_make_call("t", "c", rules, lead_attempts_today=99)
     )

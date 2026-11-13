@@ -6,6 +6,10 @@ import logging
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel, Field
 from app.core.postgres_adapter import Client
+from app.infrastructure.assistant.tools.date_ranges import (
+    SINCE_DESCRIPTION, TZ_DESCRIPTION, UNTIL_DESCRIPTION, apply_range, normalize_range,
+    resolve_reporting_zone, validate_range,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +35,9 @@ class GetLeadsInput(BaseModel):
         description="Only return contacts flagged as qualified leads (is_lead=true)",
     )
     limit: int = Field(25, description="Maximum number of leads to return (max 100)")
+    since: Optional[str] = Field(None, description=SINCE_DESCRIPTION)
+    until: Optional[str] = Field(None, description=UNTIL_DESCRIPTION)
+    tz: Optional[str] = Field(None, description=TZ_DESCRIPTION)
 
 
 async def get_leads(
@@ -40,6 +47,9 @@ async def get_leads(
     status: Optional[str] = None,
     only_leads: bool = False,
     limit: int = 25,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    tz: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Get leads for the tenant with optional filters. Excludes soft-deleted
@@ -48,6 +58,9 @@ async def get_leads(
     follow-up is.
     """
     try:
+        validate_range(since, until)
+        zone = resolve_reporting_zone(db_client, tenant_id, campaign_id=campaign_id, requested=tz)
+        start, end = normalize_range(since, until, zone=zone)
         capped = max(1, min(int(limit or 25), 100))
         query = db_client.table("leads").select(
             _LEAD_LIST_COLS + ", campaign_id", count="exact"
@@ -59,6 +72,7 @@ async def get_leads(
             query = query.eq("status", status)
         if only_leads:
             query = query.eq("is_lead", True)
+        query = apply_range(query, "created_at", start, end)
 
         response = query.order("created_at", desc=True).limit(capped).execute()
 
@@ -66,6 +80,8 @@ async def get_leads(
             "total_count": response.count,
             "returned_count": len(response.data),
             "leads": response.data,
+            "timezone": str(zone),
+            "applied_range": {"since": start, "until": end, "timestamp_field": "created_at"},
             "analysis_note": "Latest analysis is AI-generated guidance from its source call, not a caller-confirmed fact or completed action. Keep it distinct from follow_up_note.",
         }
     except Exception as e:
@@ -78,6 +94,9 @@ async def get_qualified_leads(
     db_client: Client,
     campaign_id: Optional[str] = None,
     limit: int = 10,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    tz: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Recently-qualified leads, newest first, WITH phone numbers + follow-up.
 
@@ -86,6 +105,9 @@ async def get_qualified_leads(
     follow-up is). Ordered by qualified_at so the freshest wins.
     """
     try:
+        validate_range(since, until)
+        zone = resolve_reporting_zone(db_client, tenant_id, campaign_id=campaign_id, requested=tz)
+        start, end = normalize_range(since, until, zone=zone)
         capped = max(1, min(int(limit or 10), 50))
         query = (
             db_client.table("leads")
@@ -96,6 +118,7 @@ async def get_qualified_leads(
         )
         if campaign_id:
             query = query.eq("campaign_id", campaign_id)
+        query = apply_range(query, "qualified_at", start, end)
         response = query.order("qualified_at", desc=True).limit(capped).execute()
 
         leads = []
@@ -116,6 +139,8 @@ async def get_qualified_leads(
         return {
             "count": len(leads),
             "qualified_leads": leads,
+            "timezone": str(zone),
+            "applied_range": {"since": start, "until": end, "timestamp_field": "qualified_at"},
             "note": "Present each by NAME and NUMBER. Qualification is a historical flag; newer AI analysis may change the next step. Keep latest analysis distinct from the operator's follow_up_note and from completed actions.",
         }
     except Exception as e:

@@ -259,7 +259,11 @@ See you soon!
             raise KeyError(f"Template '{template_name}' not found. Available: {available}")
         
         template = self.templates[template_name]
+        from app.core import config
+
         render_context = dict(context)
+        render_context["brand_name"] = config.get_settings().brand_name
+        render_context.setdefault("sender_name", render_context["brand_name"])
         if "join_link" in render_context:
             safe_link = _safe_join_link(render_context["join_link"])
             if render_context["join_link"] and safe_link is None:

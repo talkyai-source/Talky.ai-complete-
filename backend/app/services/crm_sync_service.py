@@ -40,9 +40,11 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
 
+from app.core import config
 from app.services.crm_delivery_store import CRMDeliveryStore, MAX_ATTEMPTS
 from app.domain.services.call_summary.business_details import transcript_revision
 from app.domain.services.lead_capture_service import LeadCaptureService
+from app.domain.services.caller_identity import automatic_identity_change_allowed, caller_identity_projection
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.call_status import CallOutcome
 from app.infrastructure.connectors.base import ConnectorProviderError
@@ -83,7 +85,7 @@ class CRMNotConnectedWarning:
     """Operator-facing copy for missing/expired CRM connections."""
 
     MISSING_CRM = (
-        "CRM not connected. Call data was saved in Talky.ai but not synced to a CRM. "
+        "CRM not connected. Call data was saved but not synced to a CRM. "
         "Connect HubSpot or Salesforce on the Connectors page to enable automatic "
         "lead creation and call logging."
     )
@@ -164,7 +166,7 @@ def build_call_body(call: Dict[str, Any], summary: Optional[dict], *, campaign_n
     direction = str(call.get("direction") or "outbound").lower()
     duration = int(call.get("duration_seconds") or 0)
     lines: List[str] = [
-        f"Talky.ai {direction} call - {outcome_label(call.get('outcome'), summary)}",
+        f"{config.get_settings().brand_name} {direction} call - {outcome_label(call.get('outcome'), summary)}",
     ]
     if campaign_name:
         lines.append(f"Campaign: {campaign_name}")
@@ -174,6 +176,10 @@ def build_call_body(call: Dict[str, Any], summary: Optional[dict], *, campaign_n
         lines.append(f"When: {started if isinstance(started, str) else started.isoformat()}")
     if call.get("phone_number"):
         lines.append(f"Number: {call['phone_number']}")
+    if direction == "inbound":
+        identity = caller_identity_projection(call)
+        lines.append("Caller ID verification: " + ("verified" if identity["caller_id_verified"] else "unverified"))
+        lines.append("Caller ID attestation: " + (identity["caller_id_attestation"] or "unknown"))
 
     if isinstance(summary, dict) and summary.get("headline"):
         lines.append("")
@@ -199,7 +205,7 @@ def build_call_body(call: Dict[str, Any], summary: Optional[dict], *, campaign_n
         lines.append(excerpt)
 
     lines.append("")
-    lines.append(f"Talky.ai call id: {call.get('id')}")
+    lines.append(f"Call ID: {call.get('id')}")
     return "\n".join(lines)
 
 
@@ -514,6 +520,8 @@ class CRMSyncService:
         current_call = await self._load_call(tenant_id, str(call["id"]))
         if current_call is None or current_call.get("source_revision") != call.get("source_revision"):
             raise CRMDestinationMismatch("CRM call source changed before the write; review required")
+        if expected_create is not None and not automatic_identity_change_allowed(current_call):
+            raise CRMDestinationMismatch("Unverified inbound caller identity requires manual contact review")
         current = await self._recipient_lead(tenant_id, current_call,
             await self._load_lead(tenant_id, current_call.get("lead_id")))
         if (self._recipient_identity(current_call, current) != self._recipient_identity(call, lead)
@@ -646,6 +654,10 @@ class CRMSyncService:
                 and isinstance(saved, dict) and saved.get('account_id') == connector.external_account_id
                 and saved.get('contact_id')):
             return str(saved['contact_id'])
+        if not automatic_identity_change_allowed(call):
+            # Do not associate an unverified number with another person's CRM
+            # record, create a contact, or change the local contact link.
+            return None
         # Provider-only/legacy IDs carry no account proof. Resolve the contact
         # in the verified current account instead of attaching an old ID.
 
@@ -689,7 +701,7 @@ class CRMSyncService:
             return {}
         custom = _coerce_json((lead or {}).get("custom_fields")) or {}
         company = (lead or {}).get("company_name") or custom.get("company")
-        props: Dict[str, Any] = {"description": f"Created by Talky.ai after a call.\n\n{body}"}
+        props: Dict[str, Any] = {"description": f"Created by {config.get_settings().brand_name} after a call.\n\n{body}"}
         if company:
             props["company"] = str(company)
         title = (lead or {}).get("job_title")
@@ -722,7 +734,7 @@ class CRMSyncService:
                 SELECT xmin::text AS source_revision, id, tenant_id, campaign_id, lead_id, phone_number, direction,
                        status, outcome, duration_seconds, transcript, summary,
                        summary_json, transcript_json, action_results, summary_transcript_hash,
-                       recording_url, crm_call_id, crm_synced_at,
+                       recording_url, crm_call_id, crm_synced_at, route_snapshot, caller_ani_private,
                        started_at, answered_at, ended_at, created_at, is_test
                   FROM calls
                  WHERE id = $1::uuid AND tenant_id = $2::uuid

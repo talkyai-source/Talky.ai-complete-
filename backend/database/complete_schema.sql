@@ -66,9 +66,19 @@ CREATE TABLE IF NOT EXISTS tenants (
     stripe_customer_id VARCHAR(100),
     stripe_subscription_id VARCHAR(100),
     subscription_status VARCHAR(50) DEFAULT 'inactive',
-    
-    -- Day 8: Suspension and White Label support
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_deletion')),
+
+    -- created_at .. is_partner sit here, ahead of the Day 8 columns, because that
+    -- is the column order of the production dump (QA F14-02). partner_id is the
+    -- partner link the later ALTER TABLE ... ADD COLUMN IF NOT EXISTS also names;
+    -- with the column already here, that statement does nothing.
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    partner_id UUID REFERENCES tenants(id),
+    is_partner BOOLEAN DEFAULT FALSE,
+
+    -- Day 8: Suspension and White Label support. The status CHECK is spelled
+    -- with explicit casts: that is the text production stores.
+    status VARCHAR(20) DEFAULT 'active' CHECK (status::text = ANY (ARRAY['active'::varchar::text, 'suspended'::varchar::text, 'pending_deletion'::varchar::text])),
     suspended_at TIMESTAMPTZ,
     -- FK is added after user_profiles is created below. Keeping it inline
     -- creates an impossible circular bootstrap: user_profiles references
@@ -76,9 +86,12 @@ CREATE TABLE IF NOT EXISTS tenants (
     suspended_by UUID,
     suspension_reason TEXT,
     white_label_partner_id UUID, -- Will add foreign key after table creation
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+
+    -- Migration 0005 adds this column, but a fresh install is stamped past it, so
+    -- the bootstrap carries it, at production's position: ahead of allowance_anchor_at
+    -- (0072) and assistant_model (0087), which migrations append after it. Migration
+    -- 0087 finds the column and its CHECK here and adopts them unchanged.
+    active_telephony_provider TEXT DEFAULT 'none' CHECK (active_telephony_provider IN ('twilio', 'vonage', 'sip', 'none'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenants_plan_id ON tenants(plan_id);
@@ -100,7 +113,11 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     -- constraint from pg_constraint, so either historical name upgrades.
     role VARCHAR(50) NOT NULL DEFAULT 'user' CONSTRAINT chk_user_profiles_role_valid CHECK (role IN ('platform_admin', 'partner_admin', 'tenant_admin', 'campaign_manager', 'user', 'agent', 'billing_user', 'readonly')),
     password_hash TEXT,                          -- bcrypt hash (nullable for OAuth future)
-    
+    -- created_at/updated_at sit here, ahead of the security columns, because
+    -- that is the column order of the production dump (QA F14-02).
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+
     -- Security hardening columns
     account_locked_until TIMESTAMPTZ,
     is_active BOOLEAN NOT NULL DEFAULT TRUE,
@@ -112,15 +129,14 @@ CREATE TABLE IF NOT EXISTS user_profiles (
     verification_token TEXT,
     verification_token_expires_at TIMESTAMPTZ,
     email_verified_at TIMESTAMPTZ,
+    -- Spelled as the production dump prints it. is_verified is NOT NULL, so
+    -- "NOT is_verified" and "is_verified = FALSE" are the same rule.
     CONSTRAINT chk_email_verification_consistency CHECK (
-        NOT is_verified OR (verification_token IS NULL AND email_verified_at IS NOT NULL)
+        is_verified = FALSE OR (is_verified = TRUE AND verification_token IS NULL AND email_verified_at IS NOT NULL)
     ),
 
     -- Day 3: Passkey denormalized count
-    passkey_count INTEGER NOT NULL DEFAULT 0 CHECK (passkey_count >= 0),
-    
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    passkey_count INTEGER NOT NULL DEFAULT 0 CHECK (passkey_count >= 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_user_profiles_tenant_id ON user_profiles(tenant_id);
@@ -128,6 +144,8 @@ CREATE INDEX IF NOT EXISTS idx_user_profiles_email ON user_profiles(email);
 CREATE INDEX IF NOT EXISTS idx_user_profiles_has_passkey ON user_profiles(passkey_count) WHERE passkey_count > 0;
 CREATE INDEX IF NOT EXISTS idx_user_profiles_is_active ON user_profiles (is_active) WHERE is_active = FALSE;
 CREATE INDEX IF NOT EXISTS idx_user_profiles_mfa_enabled ON user_profiles (mfa_enabled) WHERE mfa_enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_user_profiles_is_verified ON user_profiles (is_verified) WHERE is_verified = FALSE;
+CREATE INDEX IF NOT EXISTS idx_user_profiles_verification_token ON user_profiles (verification_token) WHERE verification_token IS NOT NULL;
 
 -- Complete the tenants -> user_profiles side of the bootstrap cycle now that
 -- both tables exist. The catalog guard keeps the consolidated schema safe to
@@ -310,19 +328,30 @@ CREATE INDEX IF NOT EXISTS idx_cloned_voices_tenant
 
 -- 1.4 SECURITY_SESSIONS
 -- Stores server-side session records for instant revocation.
+-- Column order, constraint names and indexes are the production dump's
+-- (QA F14-02): the Day 5 columns were appended to production one migration at
+-- a time, so they do not form one block here.
 CREATE TABLE IF NOT EXISTS security_sessions (
-    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id             UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    session_token_hash  TEXT        NOT NULL UNIQUE,
+    id                  UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL,
+    session_token_hash  TEXT        NOT NULL,
     ip_address          TEXT,
     user_agent          TEXT,
-    
+    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_active_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    expires_at          TIMESTAMPTZ NOT NULL,
+    revoked             BOOLEAN     NOT NULL DEFAULT FALSE,
+    revoked_at          TIMESTAMPTZ,
+    revoke_reason       TEXT,
+    mfa_verified        BOOLEAN     NOT NULL DEFAULT FALSE,
+
     -- Day 5: Session security enhancements
     device_fingerprint  TEXT,
     device_name         TEXT,
-    device_type         TEXT        CHECK (device_type IN ('mobile', 'tablet', 'desktop', 'unknown')),
+    device_type         TEXT,
     browser             TEXT,
     os                  TEXT,
+    country_code        TEXT,
     bound_ip            TEXT,
     ip_binding_enforced BOOLEAN     NOT NULL DEFAULT FALSE,
     fingerprint_binding_enforced BOOLEAN NOT NULL DEFAULT FALSE,
@@ -332,14 +361,12 @@ CREATE TABLE IF NOT EXISTS security_sessions (
     requires_verification BOOLEAN   NOT NULL DEFAULT FALSE,
     verified_at         TIMESTAMPTZ,
     session_number      INTEGER,
-    mfa_verified        BOOLEAN     NOT NULL DEFAULT FALSE,
-    
-    created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    last_active_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    expires_at          TIMESTAMPTZ NOT NULL,
-    revoked             BOOLEAN     NOT NULL DEFAULT FALSE,
-    revoked_at          TIMESTAMPTZ,
-    revoke_reason       TEXT,
+    rotated_from_session_id UUID,
+    is_rotated          BOOLEAN     NOT NULL DEFAULT FALSE,
+    CONSTRAINT pk_security_sessions PRIMARY KEY (id),
+    CONSTRAINT uq_security_sessions_token_hash UNIQUE (session_token_hash),
+    CONSTRAINT fk_security_sessions_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT chk_device_type CHECK (device_type IN ('mobile', 'tablet', 'desktop', 'unknown')),
     CONSTRAINT chk_revoked_at_consistency CHECK ((revoked = FALSE AND revoked_at IS NULL) OR (revoked = TRUE AND revoked_at IS NOT NULL)),
     CONSTRAINT chk_expires_after_created CHECK (expires_at > created_at)
 );
@@ -347,66 +374,100 @@ CREATE TABLE IF NOT EXISTS security_sessions (
 CREATE INDEX IF NOT EXISTS idx_ss_token_lookup ON security_sessions (session_token_hash) WHERE revoked = FALSE;
 CREATE INDEX IF NOT EXISTS idx_ss_user_active ON security_sessions (user_id, last_active_at DESC) WHERE revoked = FALSE;
 CREATE INDEX IF NOT EXISTS idx_ss_mfa_verified ON security_sessions (user_id, mfa_verified) WHERE mfa_verified = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ss_active_binding ON security_sessions (session_token_hash, bound_ip, device_fingerprint) WHERE revoked = FALSE;
+CREATE INDEX IF NOT EXISTS idx_ss_cleanup ON security_sessions (expires_at) WHERE revoked = FALSE;
+CREATE INDEX IF NOT EXISTS idx_ss_fingerprint ON security_sessions (device_fingerprint) WHERE device_fingerprint IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_ss_suspicious ON security_sessions (user_id, is_suspicious, suspicious_detected_at DESC) WHERE is_suspicious = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ss_suspicious_cleanup ON security_sessions (suspicious_detected_at) WHERE is_suspicious = TRUE;
+CREATE INDEX IF NOT EXISTS idx_ss_user_all ON security_sessions (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_ss_user_session_number ON security_sessions (user_id, session_number DESC) WHERE revoked = FALSE;
 
 -- 1.5 LOGIN_ATTEMPTS
 -- Per-account lockout tracking.
 CREATE TABLE IF NOT EXISTS login_attempts (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
     email           TEXT        NOT NULL,
-    user_id         UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    user_id         UUID,
     ip_address      TEXT        NOT NULL,
     user_agent      TEXT,
     success         BOOLEAN     NOT NULL,
     failure_reason  TEXT,
-    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_login_attempts PRIMARY KEY (id),
+    CONSTRAINT fk_login_attempts_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_la_email_failures ON login_attempts (email, created_at DESC) WHERE success = FALSE;
 CREATE INDEX IF NOT EXISTS idx_la_user_time ON login_attempts (user_id, created_at DESC) WHERE user_id IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_la_email_time ON login_attempts (email, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_la_ip_time ON login_attempts (ip_address, created_at DESC);
 
 -- 1.6 USER_MFA
 -- Encrypted TOTP secrets.
 CREATE TABLE IF NOT EXISTS user_mfa (
-    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id             UUID        NOT NULL UNIQUE REFERENCES user_profiles(id) ON DELETE CASCADE,
+    id                  UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL,
     totp_secret_enc     TEXT        NOT NULL,
     enabled             BOOLEAN     NOT NULL DEFAULT FALSE,
     verified_at         TIMESTAMPTZ,
-    last_used_at        TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_used_at        TIMESTAMPTZ,
+    CONSTRAINT pk_user_mfa PRIMARY KEY (id),
+    CONSTRAINT uq_user_mfa_user UNIQUE (user_id),
+    CONSTRAINT fk_user_mfa_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT chk_user_mfa_verified_before_enabled CHECK ((enabled = FALSE) OR (enabled = TRUE AND verified_at IS NOT NULL))
 );
+
+CREATE INDEX IF NOT EXISTS idx_user_mfa_enabled ON user_mfa (user_id) WHERE enabled = TRUE;
+CREATE INDEX IF NOT EXISTS idx_user_mfa_user_id ON user_mfa (user_id);
 
 -- 1.7 RECOVERY_CODES
 -- Single-use backup codes.
 CREATE TABLE IF NOT EXISTS recovery_codes (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    code_hash       TEXT        NOT NULL UNIQUE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL,
+    code_hash       TEXT        NOT NULL,
     batch_id        UUID        NOT NULL,
     used            BOOLEAN     NOT NULL DEFAULT FALSE,
     used_at         TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_recovery_codes PRIMARY KEY (id),
+    CONSTRAINT uq_recovery_codes_hash UNIQUE (code_hash),
+    CONSTRAINT fk_recovery_codes_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
     CONSTRAINT chk_recovery_codes_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL))
 );
+
+CREATE INDEX IF NOT EXISTS idx_rc_code_hash ON recovery_codes (code_hash) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_rc_user_batch ON recovery_codes (user_id, batch_id);
+CREATE INDEX IF NOT EXISTS idx_rc_user_created ON recovery_codes (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_rc_user_unused ON recovery_codes (user_id, used) WHERE used = FALSE;
 
 -- 1.8 MFA_CHALLENGES
 -- Ephemeral two-step login tokens.
 CREATE TABLE IF NOT EXISTS mfa_challenges (
-    id                  UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id             UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    challenge_hash      TEXT        NOT NULL UNIQUE,
+    id                  UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id             UUID        NOT NULL,
+    challenge_hash      TEXT        NOT NULL,
     ip_address          TEXT,
     user_agent          TEXT,
     expires_at          TIMESTAMPTZ NOT NULL,
     used                BOOLEAN     NOT NULL DEFAULT FALSE,
-    attempts            INTEGER     NOT NULL DEFAULT 0 CONSTRAINT mfa_challenges_attempts_bounds CHECK (attempts >= 0 AND attempts <= 100),
     used_at             TIMESTAMPTZ,
     created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- attempts is last because migration 0007 appended it in production.
+    attempts            INTEGER     NOT NULL DEFAULT 0,
+    CONSTRAINT pk_mfa_challenges PRIMARY KEY (id),
+    CONSTRAINT uq_mfa_challenges_hash UNIQUE (challenge_hash),
+    CONSTRAINT fk_mfa_challenges_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON UPDATE CASCADE ON DELETE CASCADE,
+    CONSTRAINT mfa_challenges_attempts_bounds CHECK (attempts >= 0 AND attempts <= 100),
     CONSTRAINT chk_mfa_challenge_used_at CHECK ((used = FALSE AND used_at IS NULL) OR (used = TRUE AND used_at IS NOT NULL)),
     CONSTRAINT chk_mfa_challenge_expires_after_created CHECK (expires_at > created_at)
 );
+
+CREATE INDEX IF NOT EXISTS idx_mc_cleanup ON mfa_challenges (expires_at) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_mc_hash_active ON mfa_challenges (challenge_hash) WHERE used = FALSE;
+CREATE INDEX IF NOT EXISTS idx_mc_user_time ON mfa_challenges (user_id, created_at DESC);
 
 -- 1.9 USER_PASSKEYS
 -- Registered FIDO2 / WebAuthn credentials (passkeys) per user.
@@ -426,7 +487,10 @@ CREATE TABLE IF NOT EXISTS user_passkeys (
 );
 
 CREATE INDEX IF NOT EXISTS idx_up_credential_id ON user_passkeys (credential_id);
-CREATE INDEX IF NOT EXISTS idx_up_user_id ON user_passkeys (user_id, created_at DESC);
+-- No idx_up_user_id here: in production that name belongs to user_permissions
+-- (created below), so user_passkeys(user_id) has no covering index until the
+-- 0088 foreign-key index sweep adds one. Two archived scripts both used the
+-- name; production kept the user_permissions one.
 
 -- 1.10 WEBAUTHN_CHALLENGES
 -- Ephemeral challenges for WebAuthn registration and authentication ceremonies.
@@ -452,14 +516,17 @@ CREATE INDEX IF NOT EXISTS idx_wc_user_time ON webauthn_challenges (user_id, cre
 -- 1.11 ROLES
 -- RBAC role definitions.
 CREATE TABLE IF NOT EXISTS roles (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            VARCHAR(50) NOT NULL UNIQUE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    name            VARCHAR(50) NOT NULL,
     description     TEXT,
-    level           INTEGER     NOT NULL CHECK (level > 0),
+    level           INTEGER     NOT NULL,
     is_system_role  BOOLEAN     NOT NULL DEFAULT FALSE,
     tenant_scoped   BOOLEAN     NOT NULL DEFAULT TRUE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT pk_roles PRIMARY KEY (id),
+    CONSTRAINT uq_roles_name UNIQUE (name),
+    CONSTRAINT chk_roles_level_positive CHECK (level > 0)
 );
 
 CREATE INDEX IF NOT EXISTS idx_roles_level ON roles (level DESC);
@@ -467,60 +534,93 @@ CREATE INDEX IF NOT EXISTS idx_roles_level ON roles (level DESC);
 -- 1.12 PERMISSIONS
 -- Granular permissions.
 CREATE TABLE IF NOT EXISTS permissions (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    name            VARCHAR(100) NOT NULL UNIQUE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    name            VARCHAR(100) NOT NULL,
     description     TEXT,
     resource        VARCHAR(50) NOT NULL,
     action          VARCHAR(50) NOT NULL,
     is_system       BOOLEAN     NOT NULL DEFAULT FALSE,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (resource, action)
+    CONSTRAINT pk_permissions PRIMARY KEY (id),
+    CONSTRAINT uq_permissions_name UNIQUE (name),
+    CONSTRAINT uq_permissions_resource_action UNIQUE (resource, action)
 );
+
+CREATE INDEX IF NOT EXISTS idx_permissions_resource ON permissions (resource);
+CREATE INDEX IF NOT EXISTS idx_permissions_resource_action ON permissions (resource, action);
 
 -- 1.13 ROLE_PERMISSIONS
 -- Junction table for role-permission assignment.
 CREATE TABLE IF NOT EXISTS role_permissions (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    role_id         UUID        NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
-    permission_id   UUID        NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    role_id         UUID        NOT NULL,
+    permission_id   UUID        NOT NULL,
     granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (role_id, permission_id)
+    CONSTRAINT pk_role_permissions PRIMARY KEY (id),
+    CONSTRAINT uq_role_permissions_role_perm UNIQUE (role_id, permission_id),
+    CONSTRAINT fk_rp_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_rp_permission FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_rp_role_id ON role_permissions (role_id);
+CREATE INDEX IF NOT EXISTS idx_rp_permission_id ON role_permissions (permission_id);
 
 -- 1.14 TENANT_USERS
 -- Junction table for tenant membership with role assignment.
 CREATE TABLE IF NOT EXISTS tenant_users (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    tenant_id       UUID        NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    role_id         UUID        NOT NULL REFERENCES roles(id) ON DELETE RESTRICT,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL,
+    tenant_id       UUID        NOT NULL,
+    role_id         UUID        NOT NULL,
     is_primary      BOOLEAN     NOT NULL DEFAULT FALSE,
-    status          VARCHAR(20) NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'suspended', 'removed')),
-    invited_by      UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    status          VARCHAR(20) NOT NULL DEFAULT 'active',
+    invited_by      UUID,
     invited_at      TIMESTAMPTZ,
     joined_at       TIMESTAMPTZ,
     created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, tenant_id)
+    CONSTRAINT pk_tenant_users PRIMARY KEY (id),
+    CONSTRAINT uq_tenant_users_user_tenant UNIQUE (user_id, tenant_id),
+    CONSTRAINT fk_tu_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_tu_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    CONSTRAINT fk_tu_role FOREIGN KEY (role_id) REFERENCES roles(id) ON DELETE RESTRICT,
+    CONSTRAINT fk_tu_inviter FOREIGN KEY (invited_by) REFERENCES user_profiles(id) ON DELETE SET NULL,
+    -- Explicit casts, so the stored text is the one the production dump has
+    -- ("status IN (...)" would be stored as ARRAY[...]::text[]).
+    CONSTRAINT tenant_users_status_check CHECK (status::text = ANY (ARRAY['pending'::varchar::text, 'active'::varchar::text, 'suspended'::varchar::text, 'removed'::varchar::text]))
 );
 
 CREATE INDEX IF NOT EXISTS idx_tu_user_id ON tenant_users (user_id);
 CREATE INDEX IF NOT EXISTS idx_tu_tenant_id ON tenant_users (tenant_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_tu_user_primary ON tenant_users (user_id) WHERE is_primary = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tu_role_id ON tenant_users (role_id);
+CREATE INDEX IF NOT EXISTS idx_tu_status ON tenant_users (status) WHERE status::text = ANY (ARRAY['pending'::varchar::text, 'active'::varchar::text]);
+CREATE INDEX IF NOT EXISTS idx_tu_user_active ON tenant_users (user_id) WHERE status = 'active';
 
 -- 1.15 USER_PERMISSIONS
 -- Direct permission grants to users.
 CREATE TABLE IF NOT EXISTS user_permissions (
-    id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id         UUID        NOT NULL REFERENCES user_profiles(id) ON DELETE CASCADE,
-    permission_id   UUID        NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
-    tenant_id       UUID        REFERENCES tenants(id) ON DELETE CASCADE,
+    id              UUID        NOT NULL DEFAULT uuid_generate_v4(),
+    user_id         UUID        NOT NULL,
+    permission_id   UUID        NOT NULL,
+    tenant_id       UUID,
     expires_at      TIMESTAMPTZ,
     reason          TEXT,
-    granted_by      UUID        REFERENCES user_profiles(id) ON DELETE SET NULL,
+    granted_by      UUID,
     granted_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    UNIQUE (user_id, permission_id, tenant_id)
+    CONSTRAINT pk_user_permissions PRIMARY KEY (id),
+    CONSTRAINT uq_user_permissions_user_perm_tenant UNIQUE (user_id, permission_id, tenant_id),
+    CONSTRAINT fk_up_user FOREIGN KEY (user_id) REFERENCES user_profiles(id) ON DELETE CASCADE,
+    CONSTRAINT fk_up_permission FOREIGN KEY (permission_id) REFERENCES permissions(id) ON DELETE CASCADE,
+    CONSTRAINT fk_up_tenant FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+    CONSTRAINT fk_up_granter FOREIGN KEY (granted_by) REFERENCES user_profiles(id) ON DELETE SET NULL
 );
+
+-- idx_up_user_id is this table's index in production (see the note at
+-- user_passkeys above).
+CREATE INDEX IF NOT EXISTS idx_up_user_id ON user_permissions (user_id);
+CREATE INDEX IF NOT EXISTS idx_up_permission_id ON user_permissions (permission_id);
+CREATE INDEX IF NOT EXISTS idx_up_expires ON user_permissions (expires_at) WHERE expires_at IS NOT NULL;
 
 -- =============================================================================
 -- SECTION 2: DIALER PIPELINE
@@ -606,11 +706,6 @@ CREATE TABLE IF NOT EXISTS calls (
     started_at TIMESTAMPTZ,
     answered_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
-    -- Separate from status: an operator may write the first terminal status,
-    -- while the provider callback still owns once-only outbound side effects.
-    terminal_settled_at TIMESTAMPTZ,
-    terminal_retry_payload JSONB,
-    terminal_retry_enqueued_at TIMESTAMPTZ,
     duration_seconds INTEGER,
     recording_url TEXT,
     transcript TEXT,
@@ -629,8 +724,15 @@ CREATE TABLE IF NOT EXISTS calls (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-COMMENT ON COLUMN calls.terminal_settled_at IS
-    'Proof that outbound call, lead, job, campaign and retry-outbox intent committed; full durability also requires any retry payload to be acknowledged';
+-- dialer_job_id, terminal_settled_at, terminal_retry_payload and
+-- terminal_retry_enqueued_at (with idx_calls_dialer_job_id and the comment on
+-- terminal_settled_at) are deliberately NOT created here: migration 0028 creates
+-- them, in that order. Production has them right after the inbound columns that
+-- migration 0022 adds, and 0022 uses plain ADD COLUMN, so this bootstrap cannot
+-- hold those columns either. A column created here would land ahead of the
+-- 0015/0017/0022 columns instead of behind them, and QA F14-02 compares column
+-- order (billable_calls expands SELECT * in that order). A fresh install runs
+-- 0028 like every other database, so it ends with the same columns.
 
 CREATE INDEX IF NOT EXISTS idx_calls_tenant_id ON calls(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_calls_campaign_id ON calls(campaign_id);
@@ -673,12 +775,45 @@ CREATE TABLE IF NOT EXISTS recordings (
 CREATE INDEX IF NOT EXISTS idx_recordings_tenant_id ON recordings(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_recordings_call_id ON recordings(call_id);
 
+-- 2.5.1 RECORDINGS IN OBJECT STORAGE
+-- Production has this table from migration 0001, which lies below the 0008
+-- stamp of a fresh install, so the bootstrap carries it (QA F14-02). Migration
+-- 0041 then finds it and only adds its tenant keys, row-level security and
+-- policy, exactly as it does on a production database. The status CHECK is
+-- spelled with explicit casts: that is the text production stores.
+CREATE TABLE IF NOT EXISTS recordings_s3 (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    call_id UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    campaign_id UUID,
+    s3_bucket VARCHAR(255) NOT NULL,
+    s3_key VARCHAR(1024) NOT NULL,
+    s3_region VARCHAR(64) NOT NULL DEFAULT 'us-east-1',
+    storage_provider VARCHAR(32) NOT NULL DEFAULT 's3',
+    file_size_bytes BIGINT,
+    duration_seconds INTEGER,
+    mime_type VARCHAR(64) NOT NULL DEFAULT 'audio/wav',
+    status VARCHAR(32) NOT NULL DEFAULT 'uploaded'
+        CHECK (status::text = ANY (ARRAY['uploading'::varchar::text, 'uploaded'::varchar::text, 'failed'::varchar::text, 'deleted'::varchar::text])),
+    upload_started_at TIMESTAMPTZ,
+    upload_finished_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    UNIQUE (s3_bucket, s3_key)
+);
+
+CREATE INDEX IF NOT EXISTS idx_recordings_s3_call_id ON recordings_s3(call_id);
+CREATE INDEX IF NOT EXISTS idx_recordings_s3_tenant_id ON recordings_s3(tenant_id);
+CREATE INDEX IF NOT EXISTS idx_recordings_s3_status ON recordings_s3(status);
+
 -- 2.6 TRANSCRIPTS
+-- No talklee_call_id column or index here: production has none and the only
+-- transcript writer (transcript_service.py) never sets one; the id lives on
+-- calls (QA F14-02).
 CREATE TABLE IF NOT EXISTS transcripts (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE,
     call_id UUID NOT NULL REFERENCES calls(id) ON DELETE CASCADE,
-    talklee_call_id VARCHAR(20),
     turns JSONB NOT NULL DEFAULT '[]',
     full_text TEXT,
     word_count INTEGER DEFAULT 0,
@@ -694,7 +829,6 @@ CREATE TABLE IF NOT EXISTS transcripts (
 
 CREATE INDEX IF NOT EXISTS idx_transcripts_tenant_id ON transcripts(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_transcripts_call_id ON transcripts(call_id);
-CREATE INDEX IF NOT EXISTS idx_transcripts_talklee_id ON transcripts(talklee_call_id) WHERE talklee_call_id IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_transcripts_full_text_search
 ON transcripts USING gin(to_tsvector('english', COALESCE(full_text, '')));
 
@@ -718,6 +852,11 @@ CREATE TABLE IF NOT EXISTS call_legs (
     answered_at      TIMESTAMPTZ,
     ended_at         TIMESTAMPTZ,
     duration_seconds INTEGER,
+    -- metadata, created_at and updated_at sit ahead of the billing columns
+    -- because that is the column order of the production dump (QA F14-02).
+    metadata         JSONB DEFAULT '{}',
+    created_at       TIMESTAMPTZ DEFAULT NOW(),
+    updated_at       TIMESTAMPTZ DEFAULT NOW(),
     billing_status   VARCHAR(16) NOT NULL DEFAULT 'none'
         CONSTRAINT call_legs_billing_status_valid
         CHECK (billing_status IN ('none', 'reserved', 'held', 'finalized', 'released', 'reversed')),
@@ -729,10 +868,7 @@ CREATE TABLE IF NOT EXISTS call_legs (
     cost              NUMERIC(12, 6)
         CONSTRAINT call_legs_cost_nonnegative
         CHECK (cost IS NULL OR cost >= 0),
-    currency          VARCHAR(3),
-    metadata         JSONB DEFAULT '{}',
-    created_at       TIMESTAMPTZ DEFAULT NOW(),
-    updated_at       TIMESTAMPTZ DEFAULT NOW()
+    currency          VARCHAR(3)
 );
 
 CREATE INDEX IF NOT EXISTS idx_call_legs_call_id ON call_legs(call_id);
@@ -882,7 +1018,8 @@ CREATE TABLE IF NOT EXISTS assistant_conversations (
     started_at TIMESTAMPTZ DEFAULT NOW(),
     last_message_at TIMESTAMPTZ DEFAULT NOW(),
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    -- NOT NULL as in production (archived 20260306_add_assistant_conversations_updated_at.sql).
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 -- 4.4 ASSISTANT ACTIONS (Audit Log)
@@ -935,18 +1072,9 @@ CREATE TABLE IF NOT EXISTS action_plans (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Forward reference fix: calls.action_plan_id → action_plans
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.table_constraints
-        WHERE constraint_name = 'fk_calls_action_plan'
-        AND table_name = 'calls'
-    ) THEN
-        ALTER TABLE calls ADD CONSTRAINT fk_calls_action_plan
-            FOREIGN KEY (action_plan_id) REFERENCES action_plans(id);
-    END IF;
-END $$;
+-- calls.action_plan_id has no foreign key to action_plans: production has none,
+-- and the fresh install matches it (QA F14-02, decision D3). Adding the key to
+-- both paths is a separate change (count orphans, then NOT VALID + VALIDATE).
 
 -- =============================================================================
 -- SECTION 5: SCHEDULING & REMINDERS
@@ -1109,15 +1237,17 @@ CREATE TABLE IF NOT EXISTS tenant_ai_configs (
     tts_model TEXT NOT NULL DEFAULT 'Chirp3-HD',
     tts_voice_id TEXT NOT NULL DEFAULT 'en-US-Chirp3-HD-Leda',
     tts_sample_rate INTEGER NOT NULL DEFAULT 24000,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
     -- Per-tenant voice-pipeline tuning (T4-C3). Partial dict matching
     -- the VoiceTuning dataclass (app/domain/services/voice_tuning.py).
     -- Empty JSONB means "use env / code defaults". Validation happens
     -- in code via VoiceTuningResolver.coerce_user_partial — the column
     -- itself stays permissive so future fields land without a schema
-    -- migration.
-    voice_tuning JSONB NOT NULL DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    -- migration. Last, after updated_at: migration 0008 added it to
+    -- production's table, and the later AI-config migrations append after it
+    -- (QA F14-02 column order).
+    voice_tuning JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 CREATE INDEX IF NOT EXISTS idx_tenant_ai_configs_tenant_id ON tenant_ai_configs(tenant_id);
@@ -1129,8 +1259,10 @@ CREATE TABLE IF NOT EXISTS tenant_sip_trunks (
     trunk_name VARCHAR(100) NOT NULL,
     sip_domain VARCHAR(255) NOT NULL,
     port INTEGER NOT NULL DEFAULT 5060 CHECK (port BETWEEN 1 AND 65535),
-    transport VARCHAR(8) NOT NULL DEFAULT 'udp' CHECK (transport IN ('udp', 'tcp', 'tls')),
-    direction VARCHAR(10) NOT NULL DEFAULT 'both' CHECK (direction IN ('inbound', 'outbound', 'both')),
+    -- The two list CHECKs are spelled with explicit casts so the stored text is
+    -- the production dump's ("col IN (...)" would be stored as ARRAY[...]::text[]).
+    transport VARCHAR(8) NOT NULL DEFAULT 'udp' CHECK (transport::text = ANY (ARRAY['udp'::varchar::text, 'tcp'::varchar::text, 'tls'::varchar::text])),
+    direction VARCHAR(10) NOT NULL DEFAULT 'both' CHECK (direction::text = ANY (ARRAY['inbound'::varchar::text, 'outbound'::varchar::text, 'both'::varchar::text])),
     auth_username VARCHAR(255),
     auth_password_encrypted TEXT,
     is_active BOOLEAN NOT NULL DEFAULT FALSE,
@@ -1139,6 +1271,11 @@ CREATE TABLE IF NOT EXISTS tenant_sip_trunks (
     updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Trunk test result (migration 0006). The chain is stamped past 0006 on a
+    -- fresh install, so the bootstrap carries the two columns, where production
+    -- appended them: right after updated_at.
+    last_tested_at TIMESTAMPTZ,
+    last_test_result JSONB,
     CONSTRAINT chk_tenant_sip_trunks_auth_pair
         CHECK (
             (auth_username IS NULL AND auth_password_encrypted IS NULL) OR
@@ -1186,7 +1323,8 @@ CREATE TABLE IF NOT EXISTS tenant_route_policies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     policy_name VARCHAR(100) NOT NULL,
-    route_type VARCHAR(10) NOT NULL DEFAULT 'outbound' CHECK (route_type IN ('inbound', 'outbound')),
+    -- CHECK spelled with explicit casts: the production dump's text (QA F14-02).
+    route_type VARCHAR(10) NOT NULL DEFAULT 'outbound' CHECK (route_type::text = ANY (ARRAY['inbound'::varchar::text, 'outbound'::varchar::text])),
     priority INTEGER NOT NULL DEFAULT 100 CHECK (priority BETWEEN 1 AND 10000),
     match_pattern TEXT NOT NULL,
     target_trunk_id UUID NOT NULL,
@@ -1246,8 +1384,9 @@ CREATE TABLE IF NOT EXISTS tenant_runtime_policy_versions (
     input_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
     compiled_artifact JSONB NOT NULL,
     validation_report JSONB NOT NULL DEFAULT '{}'::jsonb,
+    -- CHECK spelled with explicit casts: the production dump's text (QA F14-02).
     build_status VARCHAR(20) NOT NULL DEFAULT 'compiled'
-        CHECK (build_status IN ('compiled', 'active', 'failed', 'superseded', 'rolled_back')),
+        CHECK (build_status::text = ANY (ARRAY['compiled'::varchar::text, 'active'::varchar::text, 'failed'::varchar::text, 'superseded'::varchar::text, 'rolled_back'::varchar::text])),
     is_active BOOLEAN NOT NULL DEFAULT FALSE,
     is_last_good BOOLEAN NOT NULL DEFAULT FALSE,
     created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
@@ -1273,9 +1412,10 @@ CREATE TABLE IF NOT EXISTS tenant_runtime_policy_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     policy_version_id UUID NOT NULL REFERENCES tenant_runtime_policy_versions(id) ON DELETE CASCADE,
-    action VARCHAR(20) NOT NULL CHECK (action IN ('activate', 'rollback')),
-    stage VARCHAR(20) NOT NULL CHECK (stage IN ('precheck', 'apply', 'verify', 'commit', 'rollback')),
-    status VARCHAR(20) NOT NULL CHECK (status IN ('started', 'succeeded', 'failed')),
+    -- The three CHECKs are spelled with explicit casts: the production dump's text.
+    action VARCHAR(20) NOT NULL CHECK (action::text = ANY (ARRAY['activate'::varchar::text, 'rollback'::varchar::text])),
+    stage VARCHAR(20) NOT NULL CHECK (stage::text = ANY (ARRAY['precheck'::varchar::text, 'apply'::varchar::text, 'verify'::varchar::text, 'commit'::varchar::text, 'rollback'::varchar::text])),
+    status VARCHAR(20) NOT NULL CHECK (status::text = ANY (ARRAY['started'::varchar::text, 'succeeded'::varchar::text, 'failed'::varchar::text])),
     details JSONB NOT NULL DEFAULT '{}'::jsonb,
     request_id VARCHAR(128),
     created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
@@ -1318,8 +1458,9 @@ CREATE TABLE IF NOT EXISTS tenant_telephony_threshold_policies (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     policy_name VARCHAR(100) NOT NULL,
+    -- CHECK spelled with explicit casts: the production dump's text (QA F14-02).
     policy_scope VARCHAR(32) NOT NULL
-        CHECK (policy_scope IN ('api_mutation', 'runtime_mutation', 'sip_edge')),
+        CHECK (policy_scope::text = ANY (ARRAY['api_mutation'::varchar::text, 'runtime_mutation'::varchar::text, 'sip_edge'::varchar::text])),
     metric_key VARCHAR(120) NOT NULL DEFAULT '*',
     window_seconds INTEGER NOT NULL DEFAULT 60 CHECK (window_seconds BETWEEN 1 AND 3600),
     warn_threshold INTEGER NOT NULL DEFAULT 20 CHECK (warn_threshold > 0),
@@ -1404,7 +1545,8 @@ CREATE TABLE IF NOT EXISTS tenant_telephony_quota_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     policy_id UUID REFERENCES tenant_telephony_threshold_policies(id) ON DELETE SET NULL,
-    event_type VARCHAR(16) NOT NULL CHECK (event_type IN ('warn', 'throttle', 'block')),
+    -- CHECK spelled with explicit casts: the production dump's text (QA F14-02).
+    event_type VARCHAR(16) NOT NULL CHECK (event_type::text = ANY (ARRAY['warn'::varchar::text, 'throttle'::varchar::text, 'block'::varchar::text])),
     policy_scope VARCHAR(32) NOT NULL,
     metric_key VARCHAR(120) NOT NULL,
     counter_value BIGINT NOT NULL DEFAULT 0,
@@ -1451,13 +1593,6 @@ CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_request_id
     ON tenant_policy_audit_log(request_id);
 CREATE INDEX IF NOT EXISTS idx_tenant_policy_audit_log_retention_until
     ON tenant_policy_audit_log(retention_until);
-
-CREATE OR REPLACE FUNCTION prevent_tenant_policy_audit_log_mutation()
-RETURNS TRIGGER AS $$
-BEGIN
-    RAISE EXCEPTION 'tenant_policy_audit_log is immutable';
-END;
-$$ LANGUAGE plpgsql;
 
 CREATE OR REPLACE FUNCTION log_tenant_policy_mutation()
 RETURNS TRIGGER AS $$
@@ -1542,29 +1677,32 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+-- The body is production's text (schema-qualified, indented as migration 0033
+-- wrote it), byte for byte, because the parity check compares function bodies
+-- literally (QA F14-02). The logic is the one this function always had.
 CREATE OR REPLACE FUNCTION prune_tenant_policy_audit_log(p_limit INTEGER DEFAULT 5000)
 RETURNS INTEGER AS $$
-DECLARE
-    deleted_count INTEGER;
-BEGIN
-    WITH to_delete AS (
-        SELECT id
-        FROM tenant_policy_audit_log
-        WHERE retention_until < NOW()
-        ORDER BY retention_until ASC
-        LIMIT GREATEST(COALESCE(p_limit, 0), 0)
-    ),
-    deleted AS (
-        DELETE FROM tenant_policy_audit_log a
-        USING to_delete d
-        WHERE a.id = d.id
-        RETURNING 1
-    )
-    SELECT COUNT(*) INTO deleted_count FROM deleted;
+            DECLARE
+                deleted_count INTEGER;
+            BEGIN
+                WITH to_delete AS (
+                    SELECT id
+                    FROM public.tenant_policy_audit_log
+                    WHERE retention_until < NOW()
+                    ORDER BY retention_until ASC
+                    LIMIT GREATEST(COALESCE(p_limit, 0), 0)
+                ),
+                deleted AS (
+                    DELETE FROM public.tenant_policy_audit_log AS audit_row
+                    USING to_delete
+                    WHERE audit_row.id = to_delete.id
+                    RETURNING 1
+                )
+                SELECT COUNT(*) INTO deleted_count FROM deleted;
 
-    RETURN deleted_count;
-END;
-$$ LANGUAGE plpgsql;
+                RETURN deleted_count;
+            END;
+            $$ LANGUAGE plpgsql;
 
 -- 6.6.12 TENANT POLICY RLS
 ALTER TABLE tenant_sip_trunks ENABLE ROW LEVEL SECURITY;
@@ -1769,19 +1907,10 @@ CREATE POLICY p_tenant_policy_audit_log_delete ON tenant_policy_audit_log
     FOR DELETE
     USING (FALSE);
 
-DROP TRIGGER IF EXISTS trg_prevent_tenant_policy_audit_log_update
-    ON tenant_policy_audit_log;
-CREATE TRIGGER trg_prevent_tenant_policy_audit_log_update
-    BEFORE UPDATE ON tenant_policy_audit_log
-    FOR EACH ROW
-    EXECUTE FUNCTION prevent_tenant_policy_audit_log_mutation();
-
-DROP TRIGGER IF EXISTS trg_prevent_tenant_policy_audit_log_delete
-    ON tenant_policy_audit_log;
-CREATE TRIGGER trg_prevent_tenant_policy_audit_log_delete
-    BEFORE DELETE ON tenant_policy_audit_log
-    FOR EACH ROW
-    EXECUTE FUNCTION prevent_tenant_policy_audit_log_mutation();
+-- As in production, no trigger guards this table: the RLS policies above deny
+-- UPDATE and DELETE to ordinary roles (QA F14-02, decision D1). An immutability
+-- trigger must still let tenant and user deletion cascade, and needs an owner
+-- decision before it is added to both paths.
 
 DROP TRIGGER IF EXISTS trg_audit_tenant_sip_trunks ON tenant_sip_trunks;
 CREATE TRIGGER trg_audit_tenant_sip_trunks
@@ -1818,6 +1947,156 @@ CREATE TRIGGER trg_audit_tenant_telephony_threshold_policies
     AFTER INSERT OR UPDATE OR DELETE ON tenant_telephony_threshold_policies
     FOR EACH ROW
     EXECUTE FUNCTION log_tenant_policy_mutation();
+
+-- 6.6.13 TENANT PHONE NUMBERS (verified DID registry)
+-- Production has this table from the archived 20260425_add_tenant_phone_numbers.sql.
+-- A fresh install carries production's shape here, so migration 0022's
+-- CREATE TABLE IF NOT EXISTS is a no-op, exactly as on a production database;
+-- 0022 still adds its two extra indexes, the table comment and the row-level
+-- security, which is why none of those are repeated here (QA F14-02). The
+-- verification_method CHECK has no "IS NULL OR": a CHECK already passes on NULL,
+-- and that is the text production stores.
+CREATE TABLE IF NOT EXISTS tenant_phone_numbers (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    e164 TEXT NOT NULL,
+    provider TEXT NOT NULL DEFAULT 'manual_admin',
+    status TEXT NOT NULL DEFAULT 'pending_verification'
+        CHECK (status IN ('pending_verification', 'verified', 'suspended', 'revoked')),
+    verification_method TEXT
+        CHECK (verification_method IN ('sms_code', 'carrier_api', 'manual_admin', 'letter_of_authorization')),
+    verification_sent_at TIMESTAMPTZ,
+    verified_at TIMESTAMPTZ,
+    verified_by TEXT,
+    stir_shaken_token TEXT,
+    label TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT tenant_phone_numbers_tenant_e164_unique UNIQUE (tenant_id, e164)
+);
+
+-- Fast path used by every outbound call: tenant + number + status = 'verified'.
+CREATE INDEX IF NOT EXISTS idx_tenant_phone_numbers_tenant_e164
+    ON tenant_phone_numbers(tenant_id, e164)
+    WHERE status = 'verified';
+CREATE INDEX IF NOT EXISTS idx_tenant_phone_numbers_tenant_status
+    ON tenant_phone_numbers(tenant_id, status);
+
+-- Production keeps updated_at current with this dedicated function and trigger,
+-- not with the generic update_updated_at_column() loop in SECTION 8 (which
+-- skips this table). The body is production's text, byte for byte, because the
+-- parity check compares function bodies literally.
+CREATE OR REPLACE FUNCTION tenant_phone_numbers_touch_updated_at() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_tenant_phone_numbers_updated_at ON tenant_phone_numbers;
+CREATE TRIGGER trg_tenant_phone_numbers_updated_at
+    BEFORE UPDATE ON tenant_phone_numbers
+    FOR EACH ROW
+    EXECUTE FUNCTION tenant_phone_numbers_touch_updated_at();
+
+COMMENT ON COLUMN tenant_phone_numbers.stir_shaken_token IS
+    'Attestation token from upstream provider. NULL = test-only. Production enforcement refuses to originate when NULL.';
+
+-- 6.6.14 TENANT TELEPHONY CONCURRENCY (policies, leases, events)
+-- Production's shape, from the archived
+-- 20260303_add_tenant_telephony_concurrency_day9.sql. A fresh install carries
+-- it here, so migration 0022's CREATE TABLE IF NOT EXISTS statements are no-ops,
+-- exactly as on a production database; 0022 still adds the row-level security
+-- (QA F14-02). Three differences from the 0022 text are production's, on
+-- purpose: the policy unique key is named
+-- uq_tenant_telephony_concurrency_policy, the lease check is named
+-- chk_tenant_telephony_concurrency_release_consistency, and the policies table
+-- has no heartbeat-window CHECK until migration 0031 adds it on every path.
+-- The list CHECKs and the active-lease index predicate are spelled with
+-- explicit casts: that is the text production stores. The generic updated_at
+-- trigger loop in SECTION 8 gives policies and leases their touch trigger, as
+-- in production; events has no updated_at.
+CREATE TABLE IF NOT EXISTS tenant_telephony_concurrency_policies (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_name VARCHAR(100) NOT NULL,
+    max_active_calls INTEGER NOT NULL DEFAULT 10 CHECK (max_active_calls BETWEEN 1 AND 1000),
+    max_transfer_inflight INTEGER NOT NULL DEFAULT 2 CHECK (max_transfer_inflight BETWEEN 1 AND 500),
+    lease_ttl_seconds INTEGER NOT NULL DEFAULT 120 CHECK (lease_ttl_seconds BETWEEN 10 AND 3600),
+    heartbeat_grace_seconds INTEGER NOT NULL DEFAULT 30 CHECK (heartbeat_grace_seconds BETWEEN 5 AND 600),
+    is_active BOOLEAN NOT NULL DEFAULT TRUE,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uq_tenant_telephony_concurrency_policy UNIQUE (tenant_id, policy_name)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_telephony_concurrency_policy_active_unique
+    ON tenant_telephony_concurrency_policies(tenant_id)
+    WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_concurrency_policy_tenant_active
+    ON tenant_telephony_concurrency_policies(tenant_id, is_active, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS tenant_telephony_concurrency_leases (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_id UUID REFERENCES tenant_telephony_concurrency_policies(id) ON DELETE SET NULL,
+    call_id UUID NOT NULL,
+    talklee_call_id VARCHAR(64) NOT NULL,
+    lease_kind VARCHAR(16) NOT NULL
+        CHECK (lease_kind::text = ANY (ARRAY['call'::varchar::text, 'transfer'::varchar::text])),
+    state VARCHAR(16) NOT NULL DEFAULT 'active'
+        CHECK (state::text = ANY (ARRAY['active'::varchar::text, 'releasing'::varchar::text, 'released'::varchar::text, 'expired'::varchar::text])),
+    acquired_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_heartbeat_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    released_at TIMESTAMPTZ,
+    release_reason VARCHAR(64),
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    updated_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_tenant_telephony_concurrency_release_consistency
+        CHECK (
+            (state::text = ANY (ARRAY['released'::varchar::text, 'expired'::varchar::text]) AND released_at IS NOT NULL) OR
+            (state::text = ANY (ARRAY['active'::varchar::text, 'releasing'::varchar::text]))
+        )
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_tenant_telephony_concurrency_leases_active_unique
+    ON tenant_telephony_concurrency_leases(tenant_id, call_id, lease_kind)
+    WHERE released_at IS NULL AND state::text = ANY (ARRAY['active'::varchar::text, 'releasing'::varchar::text]);
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_concurrency_leases_tenant_active
+    ON tenant_telephony_concurrency_leases(tenant_id, state, acquired_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_concurrency_leases_tenant_heartbeat
+    ON tenant_telephony_concurrency_leases(tenant_id, last_heartbeat_at DESC);
+
+CREATE TABLE IF NOT EXISTS tenant_telephony_concurrency_events (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    policy_id UUID REFERENCES tenant_telephony_concurrency_policies(id) ON DELETE SET NULL,
+    lease_id UUID REFERENCES tenant_telephony_concurrency_leases(id) ON DELETE SET NULL,
+    event_type VARCHAR(16) NOT NULL
+        CHECK (event_type::text = ANY (ARRAY['acquire'::varchar::text, 'reject'::varchar::text, 'release'::varchar::text, 'expire'::varchar::text, 'heartbeat'::varchar::text])),
+    lease_kind VARCHAR(16) NOT NULL
+        CHECK (lease_kind::text = ANY (ARRAY['call'::varchar::text, 'transfer'::varchar::text])),
+    call_id UUID,
+    talklee_call_id VARCHAR(64),
+    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+    request_id VARCHAR(128),
+    created_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_concurrency_events_tenant_created
+    ON tenant_telephony_concurrency_events(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_telephony_concurrency_events_event_type
+    ON tenant_telephony_concurrency_events(tenant_id, event_type, created_at DESC);
 
 -- 6.7 CLIENTS
 CREATE TABLE IF NOT EXISTS clients (
@@ -1916,15 +2195,9 @@ END $active_owner$;
 -- END 0060 ACTIVE JOB OWNER
 
 
--- Canonical once-only call settlement resolves the originating job from the
--- call row. Kept nullable for inbound/manual calls and added here (after
--- dialer_jobs exists) because calls is declared earlier in this bootstrap.
-ALTER TABLE calls
-    ADD COLUMN IF NOT EXISTS dialer_job_id UUID
-        REFERENCES dialer_jobs(id) ON DELETE SET NULL;
-CREATE INDEX IF NOT EXISTS idx_calls_dialer_job_id
-    ON calls(dialer_job_id)
-    WHERE dialer_job_id IS NOT NULL;
+-- calls.dialer_job_id (the link canonical once-only settlement follows from the
+-- call row to its job) and its index are created by migration 0028, not here;
+-- see the note under the calls table.
 
 -- =============================================================================
 -- SECTION 6.5: VOICE SECURITY & CALL GUARD (Day 7)
@@ -1932,113 +2205,6 @@ CREATE INDEX IF NOT EXISTS idx_calls_dialer_job_id
 -- Pre-call validation, rate limiting, concurrency enforcement, abuse detection.
 -- Unified security gate for all outbound calls (REST + Dialer Worker).
 -- =============================================================================
-
--- =============================================================================
--- TENANT CALL LIMITS
--- =============================================================================
--- Comprehensive per-tenant limits for voice operations including rate limits,
--- concurrency, spend caps, and geographic restrictions.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS tenant_call_limits (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-
-    -- Rate limits (rolling window)
-    calls_per_minute INTEGER NOT NULL DEFAULT 60,
-    calls_per_hour INTEGER NOT NULL DEFAULT 1000,
-    calls_per_day INTEGER NOT NULL DEFAULT 10000,
-
-    -- Concurrency
-    max_concurrent_calls INTEGER NOT NULL DEFAULT 10,
-    max_queue_size INTEGER NOT NULL DEFAULT 50,
-
-    -- Usage limits
-    monthly_minutes_allocated INTEGER NOT NULL DEFAULT 0,
-    monthly_minutes_used INTEGER NOT NULL DEFAULT 0,
-    monthly_spend_cap DECIMAL(12,2),
-    monthly_spend_used DECIMAL(12,2) DEFAULT 0.00,
-
-    -- Call restrictions
-    max_call_duration_seconds INTEGER DEFAULT 3600, -- 1 hour
-    min_call_interval_seconds INTEGER DEFAULT 300,  -- 5 min between calls to same number
-
-    -- Geographic controls (ISO 3166-1 alpha-2 country codes)
-    allowed_country_codes TEXT[] DEFAULT '{}',
-    blocked_country_codes TEXT[] DEFAULT '{}',
-    blocked_prefixes TEXT[] DEFAULT '{}',
-
-    -- Feature flags (override plan features)
-    features_enabled JSONB DEFAULT '{}',
-    features_disabled JSONB DEFAULT '{}',
-
-    -- Business hours (optional, format: '09:00' - '17:00')
-    business_hours_start TIME,
-    business_hours_end TIME,
-    business_hours_timezone TEXT DEFAULT 'UTC',
-    respect_business_hours BOOLEAN DEFAULT FALSE,
-
-    -- Status
-    is_active BOOLEAN DEFAULT TRUE,
-    effective_from TIMESTAMPTZ DEFAULT NOW(),
-    effective_until TIMESTAMPTZ,
-
-    -- Metadata
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    created_by UUID,
-    updated_by UUID,
-
-    UNIQUE(tenant_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_tenant ON tenant_call_limits(tenant_id) WHERE is_active = TRUE;
-CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_effective ON tenant_call_limits(tenant_id, effective_from, effective_until);
-
--- =============================================================================
--- PARTNER AGGREGATE LIMITS (Multi-tenant Reseller Controls)
--- =============================================================================
--- For partners/resellers managing multiple sub-tenants.
--- Enforces aggregate limits across all child tenants.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS partner_limits (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    partner_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE, -- Partner is also a tenant
-
-    -- Tenant management
-    max_tenants INTEGER NOT NULL DEFAULT 10,
-    current_tenant_count INTEGER DEFAULT 0,
-
-    -- Aggregate rate limits across all child tenants
-    aggregate_calls_per_minute INTEGER NOT NULL DEFAULT 600,
-    aggregate_calls_per_hour INTEGER NOT NULL DEFAULT 10000,
-    aggregate_calls_per_day INTEGER NOT NULL DEFAULT 100000,
-    aggregate_concurrent_calls INTEGER NOT NULL DEFAULT 100,
-
-    -- Financial controls
-    revenue_share_percent DECIMAL(5,2) DEFAULT 20.00,
-    min_billing_amount DECIMAL(10,2) DEFAULT 100.00,
-    max_billing_amount DECIMAL(12,2),
-
-    -- Feature governance
-    feature_whitelist JSONB DEFAULT '[]', -- If set, only these features allowed
-    feature_blacklist JSONB DEFAULT '[]', -- These features never allowed
-
-    -- Abuse detection sensitivity (0-100, higher = more sensitive)
-    fraud_detection_sensitivity INTEGER DEFAULT 50 CHECK (fraud_detection_sensitivity BETWEEN 0 AND 100),
-
-    -- Status
-    is_active BOOLEAN DEFAULT TRUE,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    created_by UUID,
-    updated_by UUID,
-
-    UNIQUE(partner_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_partner_limits_partner ON partner_limits(partner_id) WHERE is_active = TRUE;
 
 -- =============================================================================
 -- TENANT-PARTNER RELATIONSHIP (ALTER)
@@ -2112,130 +2278,25 @@ CREATE INDEX IF NOT EXISTS idx_abuse_rules_tenant ON abuse_detection_rules(tenan
 CREATE INDEX IF NOT EXISTS idx_abuse_rules_type ON abuse_detection_rules(rule_type, is_active);
 
 -- =============================================================================
--- ABUSE EVENTS (AUDIT TRAIL)
--- =============================================================================
--- Records of detected abuse patterns and actions taken.
--- Used for fraud investigation and compliance reporting.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS abuse_events (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    partner_id UUID REFERENCES tenants(id), -- If applicable
-
-    event_type TEXT NOT NULL, -- References abuse_detection_rules.rule_type
-    severity TEXT NOT NULL CHECK (severity IN ('low', 'medium', 'high', 'critical')),
-
-    -- Detection details
-    rule_id UUID REFERENCES abuse_detection_rules(id),
-    trigger_value NUMERIC, -- The value that triggered (e.g., 150 calls when limit is 100)
-    threshold_value NUMERIC, -- The threshold that was exceeded
-
-    -- Context
-    source_ip INET,
-    phone_number_called VARCHAR(50),
-    campaign_id UUID,
-    call_id UUID,
-    user_id UUID,
-
-    -- Geographic info
-    destination_country TEXT,
-    destination_prefix TEXT,
-
-    -- Financial impact (if applicable)
-    estimated_cost_impact DECIMAL(12,2),
-
-    -- Action taken
-    action_taken TEXT NOT NULL CHECK (action_taken IN (
-        'flagged',     -- Logged for review
-        'warned',      -- Alert sent
-        'throttled',   -- Rate limited
-        'blocked',     -- Call blocked
-        'suspended'    -- Tenant suspended
-    )),
-    action_details JSONB DEFAULT '{}',
-
-    -- Auto-escalation
-    auto_escalate_at TIMESTAMPTZ,
-    escalation_level INTEGER DEFAULT 0,
-
-    -- Resolution
-    resolved_at TIMESTAMPTZ,
-    resolved_by UUID,
-    resolution_notes TEXT,
-    false_positive BOOLEAN, -- Was this a false positive?
-
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_abuse_events_tenant ON abuse_events(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_abuse_events_type ON abuse_events(event_type, severity, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_abuse_events_unresolved ON abuse_events(tenant_id) WHERE resolved_at IS NULL;
-CREATE INDEX IF NOT EXISTS idx_abuse_events_phone ON abuse_events(phone_number_called) WHERE phone_number_called IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_abuse_events_partner ON abuse_events(partner_id, created_at DESC) WHERE partner_id IS NOT NULL;
-
--- =============================================================================
--- CALL GUARD DECISIONS (AUDIT LOG)
--- =============================================================================
--- Records every call guard decision for compliance and debugging.
--- Critical for troubleshooting blocked calls and proving compliance.
--- =============================================================================
-
-CREATE TABLE IF NOT EXISTS call_guard_decisions (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    partner_id UUID REFERENCES tenants(id),
-
-    -- Request details
-    call_id UUID,
-    phone_number VARCHAR(50) NOT NULL,
-    campaign_id UUID,
-    user_id UUID,
-    call_type TEXT DEFAULT 'outbound' CHECK (call_type IN ('outbound', 'inbound', 'transfer')),
-
-    -- Decision
-    decision TEXT NOT NULL CHECK (decision IN ('allow', 'block', 'queue', 'throttle')),
-
-    -- Check results (JSON array of all checks performed)
-    checks_performed JSONB NOT NULL DEFAULT '[]',
-
-    -- Failed checks (if blocked)
-    failed_checks JSONB DEFAULT '[]',
-
-    -- Queue info (if queued)
-    queue_position INTEGER,
-    queue_wait_seconds INTEGER,
-
-    -- Throttle info (if throttled)
-    retry_after_seconds INTEGER,
-
-    -- Timing
-    total_latency_ms INTEGER,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_tenant ON call_guard_decisions(tenant_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_blocked ON call_guard_decisions(tenant_id, decision) WHERE decision != 'allow';
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_call ON call_guard_decisions(call_id) WHERE call_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_phone ON call_guard_decisions(phone_number);
-
--- =============================================================================
 -- DO-NOT-CALL (DNC) LIST
 -- =============================================================================
 -- Per-tenant and global DNC lists for compliance.
 -- =============================================================================
 
+-- The table is created in the shape of the production baseline
+-- (baseline_2026-06-02.sql): normalized_number varchar(20), source varchar(50),
+-- no phone_number and no created_by. The 0061 contract below then does to it what
+-- migration 0061 does to production: source becomes text and phone_number is
+-- appended last, so a fresh install ends with production's column list (QA F14-02).
 CREATE TABLE IF NOT EXISTS dnc_entries (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID REFERENCES tenants(id) ON DELETE CASCADE, -- NULL = global DNC
-    phone_number VARCHAR(50) NOT NULL,
-    normalized_number VARCHAR(50) NOT NULL,
-    source TEXT NOT NULL DEFAULT 'manual', -- Existing API accepts free-text sources.
+    normalized_number VARCHAR(20) NOT NULL,
+    source VARCHAR(50) NOT NULL DEFAULT 'manual', -- 0061 widens this to free text.
     reason TEXT,
-    expires_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    created_by UUID, -- Retained legacy attribution; not inferred as added_by.
     added_by UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
+    expires_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -2380,7 +2441,7 @@ CREATE TABLE IF NOT EXISTS white_label_partners (
     tenant_id UUID NOT NULL UNIQUE REFERENCES tenants(id) ON DELETE CASCADE, -- partner's own tenant
     company_name VARCHAR(255) NOT NULL,
     contact_email VARCHAR(255),
-    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'suspended', 'pending_deletion')),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status::text = ANY (ARRAY['active'::varchar::text, 'suspended'::varchar::text, 'pending_deletion'::varchar::text])),
     suspended_at TIMESTAMPTZ,
     suspended_by UUID REFERENCES user_profiles(id),
     suspension_reason TEXT,
@@ -2395,7 +2456,8 @@ CREATE INDEX IF NOT EXISTS idx_white_label_partners_status ON white_label_partne
 
 -- Add the deferred tenants -> white_label_partners FK once, including when
 -- this consolidated schema is applied over the canonical baseline (whose
--- constraint name differs from older local schemas).
+-- constraint name differs from older local schemas). It has no ON DELETE action,
+-- as in production: a partner that still has tenants cannot be deleted (QA F14-02).
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -2420,7 +2482,7 @@ BEGIN
         ALTER TABLE tenants
             ADD CONSTRAINT tenants_white_label_partner_id_fkey
             FOREIGN KEY (white_label_partner_id)
-            REFERENCES white_label_partners(id) ON DELETE SET NULL;
+            REFERENCES white_label_partners(id);
     END IF;
 END $$;
 
@@ -2432,8 +2494,8 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     event_category VARCHAR(30) NOT NULL,
     severity VARCHAR(10) NOT NULL DEFAULT 'INFO',
 
-    -- Actor
-    actor_id UUID REFERENCES user_profiles(id),
+    -- Actor (ON DELETE SET NULL as in production: deleting a user keeps the row)
+    actor_id UUID REFERENCES user_profiles(id) ON DELETE SET NULL,
     actor_type VARCHAR(20) NOT NULL DEFAULT 'user',
     actor_role VARCHAR(50),
 
@@ -2456,14 +2518,16 @@ CREATE TABLE IF NOT EXISTS audit_logs (
     after_state JSONB,
     metadata JSONB,
 
-    -- Integrity (tamper-evident)
+    -- Integrity (tamper-evident). entry_hash is NOT NULL and retention_until has
+    -- no default, as in production: both audit writers in
+    -- app/domain/services/audit_logger.py supply them on every insert.
     previous_hash VARCHAR(64),
-    entry_hash VARCHAR(64),
+    entry_hash VARCHAR(64) NOT NULL,
     signature VARCHAR(128),
 
     -- Compliance
     compliance_tags VARCHAR(50)[],
-    retention_until DATE NOT NULL DEFAULT (CURRENT_DATE + INTERVAL '365 days'),
+    retention_until DATE NOT NULL,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
@@ -2473,6 +2537,44 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_event_type ON audit_logs(event_type);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_id ON audit_logs(actor_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_id ON audit_logs(tenant_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_resource ON audit_logs(resource_type, resource_id);
+-- The other seven lookup indexes production has (QA F14-02).
+CREATE INDEX IF NOT EXISTS idx_audit_logs_actor_time ON audit_logs(actor_id, event_time DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_category ON audit_logs(event_category);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_compliance ON audit_logs USING gin (compliance_tags);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_retention ON audit_logs(retention_until);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_severity ON audit_logs(severity);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_tenant_time ON audit_logs(tenant_id, event_time DESC);
+
+-- Legacy audit functions production has (QA F14-02, decision D4: adopted as they
+-- are, neither fixed nor removed). The application never calls them. The bodies
+-- are production's text, byte for byte (the parity check compares function
+-- bodies literally). Production's third one, log_audit_event, is not created
+-- here: it was a SECURITY DEFINER without a pinned search_path that could not
+-- run, and migration 0094 drops it (tests/unit/test_bootstrap_definer_functions.py).
+CREATE OR REPLACE FUNCTION apply_audit_retention() RETURNS void
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+    -- Archive and delete expired audit logs
+    -- In production, this would move to cold storage before deletion
+    DELETE FROM audit_logs WHERE retention_until < CURRENT_DATE - INTERVAL '30 days';
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION cleanup_expired_idempotency_keys() RETURNS integer
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+    deleted_count INTEGER;
+BEGIN
+    DELETE FROM idempotency_keys
+    WHERE expires_at < NOW();
+
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    RETURN deleted_count;
+END;
+$$;
 
 -- Durable boundary for irreversible platform-admin recording/feedback deletes.
 -- The API commits one of these rows before touching audio storage.  Rows are
@@ -2497,13 +2599,15 @@ CREATE TABLE IF NOT EXISTS admin_media_deletion_intents (
     status VARCHAR(24) NOT NULL DEFAULT 'intent_committed'
         CHECK (status IN ('intent_committed', 'object_deleted', 'completed', 'failed')),
     attempt_count INTEGER NOT NULL DEFAULT 1 CHECK (attempt_count > 0),
-    attempt_actor_ids UUID[] NOT NULL,
     last_error TEXT,
     object_deleted_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     response_body JSONB,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    -- Last, as in production, where migration 0026 appended it (QA F14-02 column
+    -- order). The ADD COLUMN IF NOT EXISTS below stays for databases that predate it.
+    attempt_actor_ids UUID[] NOT NULL,
     CONSTRAINT admin_media_deletion_actor_idempotency_unique
         UNIQUE (actor_id, idempotency_key),
     CONSTRAINT admin_media_deletion_resource_unique
@@ -2822,9 +2926,11 @@ CREATE TABLE IF NOT EXISTS security_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- Classification
+    -- The two CHECKs are spelled with explicit casts so the stored text is the
+    -- production dump's ("col IN (...)" would be stored as ARRAY[...]::text[]).
     event_type VARCHAR(50) NOT NULL,
-    severity VARCHAR(10) NOT NULL CHECK (severity IN ('CRITICAL', 'HIGH', 'MEDIUM', 'LOW', 'INFO')),
-    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'investigating', 'resolved', 'false_positive', 'escalated')),
+    severity VARCHAR(10) NOT NULL CHECK (severity::text = ANY (ARRAY['CRITICAL'::varchar::text, 'HIGH'::varchar::text, 'MEDIUM'::varchar::text, 'LOW'::varchar::text, 'INFO'::varchar::text])),
+    status VARCHAR(20) NOT NULL DEFAULT 'open' CHECK (status::text = ANY (ARRAY['open'::varchar::text, 'investigating'::varchar::text, 'resolved'::varchar::text, 'false_positive'::varchar::text, 'escalated'::varchar::text])),
 
     -- Scope
     tenant_id UUID REFERENCES tenants(id),
@@ -2833,7 +2939,7 @@ CREATE TABLE IF NOT EXISTS security_events (
 
     -- Detection
     detection_source VARCHAR(50) NOT NULL, 
-    rule_id UUID, -- References abuse_detection_rules(id) if exists
+    rule_id UUID REFERENCES abuse_detection_rules(id),
 
     -- Details
     title VARCHAR(200) NOT NULL,
@@ -2852,20 +2958,34 @@ CREATE TABLE IF NOT EXISTS security_events (
 
     -- SLA tracking
     sla_deadline TIMESTAMPTZ,
-    first_response_at TIMESTAMPTZ
+    first_response_at TIMESTAMPTZ,
+
+    -- Alert Timeline category (migration 0004). It is the last column here
+    -- because 0004 appended it in production; the migration chain is stamped
+    -- past 0004 on a fresh install, so the bootstrap has to carry it.
+    alert_type TEXT CHECK (alert_type IS NULL OR alert_type IN ('Network', 'API', 'Campaign', 'System'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_security_events_status ON security_events(status);
 CREATE INDEX IF NOT EXISTS idx_security_events_severity ON security_events(severity);
 CREATE INDEX IF NOT EXISTS idx_security_events_tenant ON security_events(tenant_id);
+-- The other seven lookup indexes production has (QA F14-02). The two created
+-- indexes both cover created_at DESC; production has both, so both are kept.
+CREATE INDEX IF NOT EXISTS idx_security_events_alert_type ON security_events(alert_type, created_at DESC) WHERE alert_type IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_security_events_assigned ON security_events(assigned_to);
+CREATE INDEX IF NOT EXISTS idx_security_events_created ON security_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_events_created_at ON security_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_security_events_event_type ON security_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_security_events_sla ON security_events(sla_deadline) WHERE status = 'open';
+CREATE INDEX IF NOT EXISTS idx_security_events_user ON security_events(user_id);
 
 -- 4. SUSPENSION_EVENTS (Formal suspension history)
 CREATE TABLE IF NOT EXISTS suspension_events (
     suspension_id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
-    -- Target
-    target_type VARCHAR(20) NOT NULL CHECK (target_type IN ('user', 'tenant', 'partner')),
+    -- Target (CHECK spelled with explicit casts: the production dump's text)
+    target_type VARCHAR(20) NOT NULL CHECK (target_type::text = ANY (ARRAY['user'::varchar::text, 'tenant'::varchar::text, 'partner'::varchar::text])),
     target_id UUID NOT NULL,
 
     -- Suspension details
@@ -2902,6 +3022,12 @@ CREATE TABLE IF NOT EXISTS suspension_events (
 
 CREATE INDEX IF NOT EXISTS idx_suspension_events_target ON suspension_events(target_type, target_id);
 CREATE INDEX IF NOT EXISTS idx_suspension_events_active ON suspension_events(target_id, is_active) WHERE is_active = TRUE;
+-- The other five lookup indexes production has (QA F14-02).
+CREATE INDEX IF NOT EXISTS idx_suspension_events_appeal ON suspension_events(appeal_submitted_at) WHERE appeal_decision = 'pending';
+CREATE INDEX IF NOT EXISTS idx_suspension_events_suspended_at ON suspension_events(suspended_at DESC);
+CREATE INDEX IF NOT EXISTS idx_suspension_events_tenant ON suspension_events(target_id) WHERE target_type = 'tenant';
+CREATE INDEX IF NOT EXISTS idx_suspension_events_type ON suspension_events(suspension_type);
+CREATE INDEX IF NOT EXISTS idx_suspension_events_user ON suspension_events(target_id) WHERE target_type = 'user';
 
 -- Serialize tenant/partner COMPLIANCE holds with irreversible media deletion.
 CREATE OR REPLACE FUNCTION serialize_compliance_media_hold()
@@ -3205,7 +3331,22 @@ BEGIN
               'cloned_voices',
               'recordings',
               'invoices',
-              'usage_records'
+              'usage_records',
+              -- Production has no generic touch trigger on these two:
+              -- recordings_s3 has none, tenant_phone_numbers has its own
+              -- trg_tenant_phone_numbers_updated_at (SECTION 6.6.13).
+              'recordings_s3',
+              'tenant_phone_numbers',
+              -- Production has none on these either (QA F14-02 P6); abuse_events
+              -- is listed so that applying this file twice adds none.
+              'abuse_events',
+              'admin_media_deletion_intents',
+              'dnc_entries',
+              'roles',
+              'tenant_ai_configs',
+              'tenant_users',
+              'user_mfa',
+              'white_label_partners'
           )
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS update_%I_updated_at ON %I', t, t);
@@ -3215,6 +3356,10 @@ BEGIN
         );
     END LOOP;
 END $$;
+
+-- As in production (decision D2 default): the campaigns touch trigger exists
+-- but is disabled, so campaign writes set updated_at themselves.
+ALTER TABLE campaigns DISABLE TRIGGER update_campaigns_updated_at;
 
 -- =============================================================================
 -- SECTION 9: DEFAULT DATA
@@ -3237,7 +3382,10 @@ INSERT INTO roles (name, description, level, is_system_role, tenant_scoped) VALU
     ('platform_admin', 'Full system access across all tenants.', 100, TRUE, FALSE),
     ('partner_admin', 'Access to multiple tenants within partner scope.', 80, TRUE, TRUE),
     ('tenant_admin', 'Full administrative access within a single tenant.', 60, TRUE, TRUE),
+    ('campaign_manager', 'Runs campaigns, leads and connectors within a tenant.', 50, TRUE, TRUE),
     ('user', 'Standard user within a tenant.', 40, TRUE, TRUE),
+    ('agent', 'Handles calls within a tenant.', 35, TRUE, TRUE),
+    ('billing_user', 'Views and manages billing within a tenant.', 30, TRUE, TRUE),
     ('readonly', 'View-only access within a tenant.', 20, TRUE, TRUE)
 ON CONFLICT (name) DO NOTHING;
 
@@ -3281,17 +3429,175 @@ INSERT INTO permissions (name, description, resource, action, is_system) VALUES
     ('platform:settings:manage', 'Manage global platform settings', 'platform:settings', 'manage', TRUE)
 ON CONFLICT (name) DO NOTHING;
 
--- Populate role_permissions
-WITH role_ids AS (SELECT id, name FROM roles),
-perm_ids AS (SELECT id, name, resource, action FROM permissions)
+-- Populate role_permissions: an explicit list equal to the application's
+-- matrix (app/core/security/rbac.py ROLE_DEFAULT_PERMISSIONS), the source
+-- scripts/seed_rbac_standalone.py seeds production from. A pattern rule here
+-- once gave platform:admin to tenant and partner admins (its resource is
+-- 'platform', which is not LIKE 'platform:%') and user and billing writes to
+-- plain users. tests/integration/test_fresh_schema_role_grants.py keeps the
+-- two equal.
 INSERT INTO role_permissions (role_id, permission_id)
-SELECT r.id, p.id FROM role_ids r CROSS JOIN perm_ids p
-WHERE
-    (r.name = 'readonly' AND (p.action = 'read' OR p.name = 'analytics:export')) OR
-    (r.name = 'user' AND (p.action IN ('read', 'create', 'update') OR (p.resource = 'calls' AND p.action IN ('create', 'read')) OR p.name = 'analytics:export')) OR
-    (r.name = 'tenant_admin' AND p.resource NOT LIKE 'platform:%') OR
-    (r.name = 'partner_admin' AND (p.resource NOT LIKE 'platform:%' OR p.name = 'platform:tenants:read')) OR
-    (r.name = 'platform_admin')
+SELECT r.id, p.id
+FROM (VALUES
+    ('platform_admin', 'analytics:export'),
+    ('platform_admin', 'analytics:read'),
+    ('platform_admin', 'billing:admin'),
+    ('platform_admin', 'billing:read'),
+    ('platform_admin', 'billing:update'),
+    ('platform_admin', 'calls:create'),
+    ('platform_admin', 'calls:delete'),
+    ('platform_admin', 'calls:read'),
+    ('platform_admin', 'campaigns:admin'),
+    ('platform_admin', 'campaigns:create'),
+    ('platform_admin', 'campaigns:delete'),
+    ('platform_admin', 'campaigns:read'),
+    ('platform_admin', 'campaigns:update'),
+    ('platform_admin', 'connectors:create'),
+    ('platform_admin', 'connectors:delete'),
+    ('platform_admin', 'connectors:read'),
+    ('platform_admin', 'connectors:update'),
+    ('platform_admin', 'inbound:assign'),
+    ('platform_admin', 'inbound:controls'),
+    ('platform_admin', 'inbound:manage'),
+    ('platform_admin', 'inbound:read'),
+    ('platform_admin', 'platform:admin'),
+    ('platform_admin', 'platform:settings:manage'),
+    ('platform_admin', 'platform:tenants:manage'),
+    ('platform_admin', 'platform:users:manage'),
+    ('platform_admin', 'recordings:delete'),
+    ('platform_admin', 'recordings:download'),
+    ('platform_admin', 'recordings:read'),
+    ('platform_admin', 'tenants:admin'),
+    ('platform_admin', 'tenants:read'),
+    ('platform_admin', 'tenants:update'),
+    ('platform_admin', 'users:create'),
+    ('platform_admin', 'users:delete'),
+    ('platform_admin', 'users:manage'),
+    ('platform_admin', 'users:read'),
+    ('platform_admin', 'users:update'),
+    ('partner_admin', 'analytics:export'),
+    ('partner_admin', 'analytics:read'),
+    ('partner_admin', 'billing:admin'),
+    ('partner_admin', 'billing:read'),
+    ('partner_admin', 'billing:update'),
+    ('partner_admin', 'calls:create'),
+    ('partner_admin', 'calls:delete'),
+    ('partner_admin', 'calls:read'),
+    ('partner_admin', 'campaigns:admin'),
+    ('partner_admin', 'campaigns:create'),
+    ('partner_admin', 'campaigns:delete'),
+    ('partner_admin', 'campaigns:read'),
+    ('partner_admin', 'campaigns:update'),
+    ('partner_admin', 'connectors:create'),
+    ('partner_admin', 'connectors:delete'),
+    ('partner_admin', 'connectors:read'),
+    ('partner_admin', 'connectors:update'),
+    ('partner_admin', 'inbound:assign'),
+    ('partner_admin', 'inbound:controls'),
+    ('partner_admin', 'inbound:manage'),
+    ('partner_admin', 'inbound:read'),
+    ('partner_admin', 'recordings:delete'),
+    ('partner_admin', 'recordings:download'),
+    ('partner_admin', 'recordings:read'),
+    ('partner_admin', 'tenants:admin'),
+    ('partner_admin', 'tenants:read'),
+    ('partner_admin', 'tenants:update'),
+    ('partner_admin', 'users:create'),
+    ('partner_admin', 'users:delete'),
+    ('partner_admin', 'users:manage'),
+    ('partner_admin', 'users:read'),
+    ('partner_admin', 'users:update'),
+    ('tenant_admin', 'analytics:export'),
+    ('tenant_admin', 'analytics:read'),
+    ('tenant_admin', 'billing:admin'),
+    ('tenant_admin', 'billing:read'),
+    ('tenant_admin', 'billing:update'),
+    ('tenant_admin', 'calls:create'),
+    ('tenant_admin', 'calls:delete'),
+    ('tenant_admin', 'calls:read'),
+    ('tenant_admin', 'campaigns:admin'),
+    ('tenant_admin', 'campaigns:create'),
+    ('tenant_admin', 'campaigns:delete'),
+    ('tenant_admin', 'campaigns:read'),
+    ('tenant_admin', 'campaigns:update'),
+    ('tenant_admin', 'connectors:create'),
+    ('tenant_admin', 'connectors:delete'),
+    ('tenant_admin', 'connectors:read'),
+    ('tenant_admin', 'connectors:update'),
+    ('tenant_admin', 'inbound:assign'),
+    ('tenant_admin', 'inbound:controls'),
+    ('tenant_admin', 'inbound:manage'),
+    ('tenant_admin', 'inbound:read'),
+    ('tenant_admin', 'recordings:delete'),
+    ('tenant_admin', 'recordings:download'),
+    ('tenant_admin', 'recordings:read'),
+    ('tenant_admin', 'tenants:admin'),
+    ('tenant_admin', 'tenants:read'),
+    ('tenant_admin', 'tenants:update'),
+    ('tenant_admin', 'users:create'),
+    ('tenant_admin', 'users:delete'),
+    ('tenant_admin', 'users:manage'),
+    ('tenant_admin', 'users:read'),
+    ('tenant_admin', 'users:update'),
+    ('campaign_manager', 'analytics:export'),
+    ('campaign_manager', 'analytics:read'),
+    ('campaign_manager', 'calls:create'),
+    ('campaign_manager', 'calls:read'),
+    ('campaign_manager', 'campaigns:admin'),
+    ('campaign_manager', 'campaigns:create'),
+    ('campaign_manager', 'campaigns:delete'),
+    ('campaign_manager', 'campaigns:read'),
+    ('campaign_manager', 'campaigns:update'),
+    ('campaign_manager', 'connectors:create'),
+    ('campaign_manager', 'connectors:delete'),
+    ('campaign_manager', 'connectors:read'),
+    ('campaign_manager', 'connectors:update'),
+    ('campaign_manager', 'inbound:assign'),
+    ('campaign_manager', 'inbound:read'),
+    ('campaign_manager', 'recordings:download'),
+    ('campaign_manager', 'recordings:read'),
+    ('campaign_manager', 'tenants:read'),
+    ('campaign_manager', 'users:read'),
+    ('user', 'analytics:export'),
+    ('user', 'analytics:read'),
+    ('user', 'calls:create'),
+    ('user', 'calls:read'),
+    ('user', 'campaigns:create'),
+    ('user', 'campaigns:delete'),
+    ('user', 'campaigns:read'),
+    ('user', 'campaigns:update'),
+    ('user', 'connectors:create'),
+    ('user', 'connectors:delete'),
+    ('user', 'connectors:read'),
+    ('user', 'connectors:update'),
+    ('user', 'inbound:read'),
+    ('user', 'recordings:download'),
+    ('user', 'recordings:read'),
+    ('user', 'tenants:read'),
+    ('user', 'users:read'),
+    ('agent', 'analytics:read'),
+    ('agent', 'calls:create'),
+    ('agent', 'calls:read'),
+    ('agent', 'campaigns:read'),
+    ('agent', 'inbound:read'),
+    ('agent', 'recordings:read'),
+    ('agent', 'tenants:read'),
+    ('billing_user', 'analytics:export'),
+    ('billing_user', 'analytics:read'),
+    ('billing_user', 'billing:read'),
+    ('billing_user', 'billing:update'),
+    ('billing_user', 'tenants:read'),
+    ('readonly', 'analytics:export'),
+    ('readonly', 'analytics:read'),
+    ('readonly', 'calls:read'),
+    ('readonly', 'campaigns:read'),
+    ('readonly', 'connectors:read'),
+    ('readonly', 'inbound:read'),
+    ('readonly', 'recordings:read'),
+    ('readonly', 'tenants:read')
+) AS g(role_name, permission_name)
+JOIN roles r ON r.name = g.role_name
+JOIN permissions p ON p.name = g.permission_name
 ON CONFLICT DO NOTHING;
 
 -- Inbound permissions are listed explicitly so the fresh baseline remains
@@ -3379,6 +3685,7 @@ JOIN user_permissions up_perm ON up_perm.user_id = up.id
 JOIN permissions p ON p.id = up_perm.permission_id
 WHERE up_perm.expires_at IS NULL OR up_perm.expires_at > NOW();
 
+-- The WHERE text is spelled the way the production dump prints it (QA F14-02).
 CREATE OR REPLACE VIEW user_tenant_roles AS
 SELECT
     up.id AS user_id,
@@ -3394,7 +3701,98 @@ FROM user_profiles up
 JOIN tenant_users tu ON tu.user_id = up.id
 JOIN tenants t ON t.id = tu.tenant_id
 JOIN roles r ON r.id = tu.role_id
-WHERE tu.status IN ('active', 'pending');
+WHERE tu.status::text = ANY (ARRAY['active'::varchar::text, 'pending'::varchar::text]);
+
+-- Three views production has and the bootstrap lacked (QA F14-02; archived
+-- day8_audit_suspension_secrets.sql). Nothing in the application reads them.
+-- The column lists are written out as production stores them: the archived
+-- script used SELECT *, which Postgres expanded once when it ran. So
+-- open_security_events has no alert_type (that column came later, migration
+-- 0004) and expiring_secrets has no lookup_hash (migration 0068). The WHERE
+-- text is spelled the way the production dump prints it.
+CREATE OR REPLACE VIEW active_suspensions AS
+SELECT
+    suspension_id,
+    created_at,
+    target_type,
+    target_id,
+    suspension_type,
+    reason_category,
+    reason_description,
+    evidence,
+    suspended_at,
+    suspended_until,
+    restored_at,
+    suspended_by,
+    restored_by,
+    restore_reason,
+    is_active,
+    propagated_services,
+    propagation_confirmed_at,
+    appeal_submitted_at,
+    appeal_reason,
+    appeal_reviewed_by,
+    appeal_decision,
+    appeal_response,
+    audit_log_id
+FROM suspension_events
+WHERE is_active = TRUE AND (suspended_until IS NULL OR suspended_until > NOW());
+
+CREATE OR REPLACE VIEW expiring_secrets AS
+SELECT
+    secret_id,
+    created_at,
+    updated_at,
+    tenant_id,
+    created_by,
+    secret_type,
+    secret_name,
+    description,
+    encrypted_value,
+    encrypted_dek,
+    iv,
+    algorithm,
+    permissions,
+    version,
+    rotated_from,
+    rotated_to,
+    rotated_at,
+    expires_at,
+    last_accessed_at,
+    last_accessed_by,
+    access_count,
+    is_active,
+    is_compromised,
+    revoked_at,
+    revoked_reason
+FROM tenant_secrets
+WHERE is_active = TRUE AND expires_at IS NOT NULL AND expires_at < NOW() + INTERVAL '7 days';
+
+CREATE OR REPLACE VIEW open_security_events AS
+SELECT
+    event_id,
+    created_at,
+    event_type,
+    severity,
+    status,
+    tenant_id,
+    user_id,
+    session_id,
+    detection_source,
+    rule_id,
+    title,
+    description,
+    evidence,
+    assigned_to,
+    resolved_at,
+    resolved_by,
+    resolution_notes,
+    auto_action_taken,
+    auto_action_success,
+    sla_deadline,
+    first_response_at
+FROM security_events
+WHERE status::text = ANY (ARRAY['open'::varchar::text, 'investigating'::varchar::text, 'escalated'::varchar::text]);
 
 -- =============================================================================
 -- SECTION 10: CALLGUARD TABLES
@@ -3433,6 +3831,8 @@ CREATE TABLE IF NOT EXISTS tenant_call_limits (
 
 CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_tenant_active
     ON tenant_call_limits(tenant_id, is_active, effective_from DESC);
+CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_tenant ON tenant_call_limits(tenant_id) WHERE is_active = TRUE;
+CREATE INDEX IF NOT EXISTS idx_tenant_call_limits_effective ON tenant_call_limits(tenant_id, effective_from, effective_until);
 
 -- 10.2 PARTNER LIMITS
 CREATE TABLE IF NOT EXISTS partner_limits (
@@ -3459,6 +3859,14 @@ CREATE TABLE IF NOT EXISTS partner_limits (
 
 CREATE INDEX IF NOT EXISTS idx_partner_limits_partner_active
     ON partner_limits(partner_id, is_active);
+CREATE INDEX IF NOT EXISTS idx_partner_limits_partner ON partner_limits(partner_id) WHERE is_active = TRUE;
+
+-- As in production: the updated_at touch triggers that the SECTION 8 loop
+-- cannot attach, because it runs before this section creates the tables.
+DROP TRIGGER IF EXISTS update_tenant_call_limits_updated_at ON tenant_call_limits;
+CREATE TRIGGER update_tenant_call_limits_updated_at BEFORE UPDATE ON tenant_call_limits FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
+DROP TRIGGER IF EXISTS update_partner_limits_updated_at ON partner_limits;
+CREATE TRIGGER update_partner_limits_updated_at BEFORE UPDATE ON partner_limits FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- 10.3 DNC ENTRIES: canonical definition and 0061 contract appear in the DNC section above.
 
@@ -3469,7 +3877,7 @@ CREATE TABLE IF NOT EXISTS call_guard_decisions (
     partner_id           UUID REFERENCES tenants(id) ON DELETE SET NULL,
     call_id              VARCHAR(100),
     phone_number         VARCHAR(20),
-    decision             VARCHAR(20) NOT NULL CHECK (decision IN ('allow', 'block', 'queue', 'throttle')),
+    decision             VARCHAR(20) NOT NULL CHECK ((decision)::text = ANY (ARRAY[('allow'::character varying)::text, ('block'::character varying)::text, ('queue'::character varying)::text, ('throttle'::character varying)::text])),
     checks_performed     JSONB NOT NULL DEFAULT '[]'::jsonb,
     failed_checks        JSONB NOT NULL DEFAULT '[]'::jsonb,
     queue_position       INTEGER,
@@ -3480,13 +3888,16 @@ CREATE TABLE IF NOT EXISTS call_guard_decisions (
 
 CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_tenant_created ON call_guard_decisions(tenant_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_phone ON call_guard_decisions(phone_number, created_at DESC) WHERE phone_number IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_tenant ON call_guard_decisions(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_blocked ON call_guard_decisions(tenant_id, decision) WHERE decision != 'allow';
+CREATE INDEX IF NOT EXISTS idx_call_guard_decisions_call ON call_guard_decisions(call_id) WHERE call_id IS NOT NULL;
 
 -- 10.5 ABUSE EVENTS
 CREATE TABLE IF NOT EXISTS abuse_events (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id       UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     event_type      VARCHAR(50) NOT NULL DEFAULT 'velocity_anomaly',
-    severity        VARCHAR(20) NOT NULL DEFAULT 'medium' CHECK (severity IN ('low', 'medium', 'high', 'critical')),
+    severity        VARCHAR(20) NOT NULL DEFAULT 'medium' CHECK ((severity)::text = ANY (ARRAY[('low'::character varying)::text, ('medium'::character varying)::text, ('high'::character varying)::text, ('critical'::character varying)::text])),
     source          VARCHAR(50) NOT NULL DEFAULT 'system',
     description     TEXT,
     details         JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -3499,6 +3910,8 @@ CREATE TABLE IF NOT EXISTS abuse_events (
 
 CREATE INDEX IF NOT EXISTS idx_abuse_events_tenant_severity ON abuse_events(tenant_id, severity, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_abuse_events_unresolved ON abuse_events(tenant_id, created_at DESC) WHERE resolved_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_abuse_events_tenant ON abuse_events(tenant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_abuse_events_type ON abuse_events(event_type, severity, created_at DESC);
 
 -- Seed default call limits for every tenant
 INSERT INTO tenant_call_limits (tenant_id)
@@ -3516,3 +3929,12 @@ BEGIN
     RAISE NOTICE 'No Supabase dependencies. Auth via local JWT + bcrypt.';
     RAISE NOTICE '==========================================================';
 END $$;
+
+-- =============================================================================
+-- Retry classifier columns, last: migration 0009 creates them on both paths;
+-- production also carries their comments (archived 20260522 SQL).
+-- =============================================================================
+ALTER TABLE dialer_jobs ADD COLUMN IF NOT EXISTS failure_category TEXT;
+ALTER TABLE dialer_jobs ADD COLUMN IF NOT EXISTS failure_reason TEXT;
+COMMENT ON COLUMN dialer_jobs.failure_category IS 'Track 2 retry classifier output: one of transient_network, auth_gate, carrier_reject, invalid_input, internal. NULL for jobs that never failed or were written before the classifier shipped.';
+COMMENT ON COLUMN dialer_jobs.failure_reason IS 'Track 2 retry classifier output: fine-grained snake_case reason string. Typically the bridge error.code (e.g. caller_id_not_verified) or http_<status> for status-based fallbacks.';

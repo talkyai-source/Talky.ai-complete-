@@ -10,18 +10,35 @@ Responsibilities:
 
 Day 9+ refactoring: Business logic extracted from campaigns.py endpoints
 """
+import asyncio
+import os
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional, List, Dict, Any
+from typing import Literal, Optional, List, Dict, Any, Sequence
 from dataclasses import dataclass
 
 from app.core.postgres_adapter import Client
+from app.core.db_utils import acquire_with_tenant
 
 from app.domain.models.dialer_job import DialerJob, JobStatus
 from app.domain.services.queue_service import DialerQueueService
 
 logger = logging.getLogger(__name__)
+
+# Jobs dispatched between re-reads of the campaign's status (QA F6-04).
+_DISPATCH_STATUS_CHECK_EVERY = 100
+
+# D3-14: a start with more jobs than this answers once they are durable and
+# queues them in a background task. Held here so the task is not collected.
+_BACKGROUND_DISPATCHES: set = set()
+
+
+def _inline_dispatch_max() -> int:
+    try:
+        return max(0, int(os.getenv("CAMPAIGN_START_INLINE_DISPATCH_MAX", "200")))
+    except ValueError:
+        return 200
 
 
 @dataclass
@@ -33,6 +50,8 @@ class StartCampaignResult:
     campaign_id: str
     queue_stats: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
+    # D3-14: jobs a large start is still queueing in the background.
+    jobs_dispatching: int = 0
 
 
 class CampaignError(Exception):
@@ -62,6 +81,33 @@ class CampaignDirectionError(CampaignStateError):
         CampaignError.__init__(self, message, status_code=409)
 
 
+# D3-17: the states pause and stop apply to. A paused campaign still holds
+# queued calls, and stopping is how it ends without resuming. Delete passes
+# from_statuses=None: it stops a campaign in any state before removing it.
+PAUSABLE_STATUSES = ("running",)
+STOPPABLE_STATUSES = ("running", "paused")
+
+
+def campaign_phase(
+    status: Optional[str], live_calls: Optional[int], awaiting_dispatch: Optional[int] = None,
+) -> Optional[str]:
+    """What a campaign is doing now, for display (D3-14, D3-15).
+
+    A large Start answers before its jobs are queued (D3-14): while a running
+    campaign still has jobs waiting to be queued the phase is "preparing".
+    Stop and Pause write their status at once; the calls they hang up can take
+    longer to end. While any are still live the phase is "stopping" or
+    "pausing". The status column keeps its value (0088 has neither state).
+    """
+    if awaiting_dispatch and status == "running":
+        return "preparing"
+    if live_calls and status == "stopped":
+        return "stopping"
+    if live_calls and status == "paused":
+        return "pausing"
+    return status
+
+
 class CampaignReadinessError(CampaignError):
     """The current outbound telephony route cannot safely start."""
 
@@ -74,9 +120,11 @@ class CampaignDispatchError(CampaignError):
     """A durable dialer job could not be confirmed in the queue.
 
     ``jobs_enqueued`` counts Redis acknowledgements from this invocation.
-    ``jobs_pending`` counts durable ``pending`` rows that a later start can
-    reconcile.  Keeping both values on the exception lets HTTP callers report
-    a partial dispatch without pretending the whole list was queued.
+    ``jobs_pending`` counts jobs not acknowledged by this invocation, which a
+    later start must reconcile. It is an upper bound on live pending rows: a
+    worker may already have moved some rows on. A lost Redis reply also leaves
+    delivery unknown for that batch. These counts never promise zero delivery
+    or pretend that the whole list was queued.
     """
 
     def __init__(
@@ -254,7 +302,7 @@ class CampaignService:
         campaign_id: str,
         tenant_id: Optional[str] = None,
         priority_override: Optional[int] = None,
-        first_speaker: Literal["agent", "user"] = "agent",
+        first_speaker: Optional[Literal["agent", "user"]] = None,
         list_id: Optional[str] = None,
         allow_running: bool = False,
     ) -> StartCampaignResult:
@@ -299,6 +347,13 @@ class CampaignService:
 
             # 1. Validate campaign
             campaign = await self.get_campaign(campaign_id, tenant_id=scoping_tenant_id)
+            requested_first_speaker = first_speaker
+            saved_calling_config = campaign.get("calling_config")
+            if first_speaker is None:
+                first_speaker = (saved_calling_config.get("first_speaker", "agent")
+                                 if isinstance(saved_calling_config, dict) else "agent")
+            if first_speaker not in ("agent", "user"):
+                raise CampaignError("Campaign first speaker must be agent or user", status_code=422)
 
             # Inbound configurations have their own readiness/activation
             # lifecycle.  They must never enqueue outbound dialer jobs even if
@@ -313,6 +368,19 @@ class CampaignService:
             # dedup below prevents double-dialing, so re-entry is safe.
             campaign_was_running = campaign.get("status") == "running"
 
+            # The write that flips the campaign to running is a compare-and-set
+            # against the status read here: of two overlapping starts exactly one
+            # wins it, and the other is "already running" before it can dispatch
+            # (QA F2-09). A campaign read as running has no transition to win (its
+            # repeat Start only repairs the pending outbox) and allow_running
+            # callers re-enter it on purpose, so both keep the plain write.
+            observed_status = campaign.get("status")
+            start_from = (
+                (observed_status,)
+                if observed_status and not (campaign_was_running or allow_running)
+                else None
+            )
+
             # 2. Resolve tenant_id
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
 
@@ -321,6 +389,21 @@ class CampaignService:
             readiness = await self._evaluate_outbound_readiness(campaign, campaign_id, str(tenant_id))
             if not readiness["ready"]:
                 raise CampaignReadinessError(readiness)
+
+            if requested_first_speaker is not None:
+                from app.core.db_utils import acquire_with_tenant
+                # Persist only this choice; an atomic JSON update preserves
+                # concurrently edited schedule/trunk/pacing keys on resume.
+                async with acquire_with_tenant(self.db_client.pool, str(tenant_id)) as conn:
+                    saved = await conn.fetchval(
+                        """UPDATE campaigns
+                           SET calling_config = jsonb_set(COALESCE(calling_config, '{}'::jsonb),
+                               '{first_speaker}', to_jsonb($3::text), true), updated_at = NOW()
+                           WHERE id = $1::uuid AND tenant_id = $2::uuid AND direction = 'outbound'
+                           RETURNING id""", str(campaign_id), str(tenant_id), first_speaker,
+                    )
+                if not saved:
+                    raise CampaignDirectionError("Campaign changed; outbound start was refused")
 
             # 3. Get pending leads (optionally scoped to a single contact list)
             leads = await self._get_pending_leads(
@@ -348,7 +431,8 @@ class CampaignService:
                 if campaign_was_running and not allow_running:
                     raise CampaignStateError("Campaign is already running")
                 await self._update_campaign_status(
-                    campaign_id, "running", tenant_id=scoping_tenant_id
+                    campaign_id, "running", tenant_id=scoping_tenant_id,
+                    from_statuses=start_from,
                 )
                 return StartCampaignResult(
                     success=True,
@@ -513,10 +597,37 @@ class CampaignService:
                     total_leads=self._restart_total_leads(campaign, len(leads)),
                     tenant_id=scoping_tenant_id,
                     stamp_started_at=not campaign.get("started_at"),
+                    from_statuses=start_from,
                 )
             else:
                 await self._update_campaign_status(
-                    campaign_id, status="running", tenant_id=scoping_tenant_id
+                    campaign_id, status="running", tenant_id=scoping_tenant_id,
+                    from_statuses=start_from,
+                )
+
+            # 7a. D3-14: a large start answers now. Every job is already a
+            # durable 'pending' row and the campaign is 'running', so the
+            # campaign reads "preparing" until they are queued, and a repeat
+            # Start replays any the background task could not queue.
+            if len(jobs_to_dispatch) > _inline_dispatch_max():
+                task = asyncio.create_task(
+                    self._dispatch_in_background(campaign_id, jobs_to_dispatch)
+                )
+                _BACKGROUND_DISPATCHES.add(task)
+                task.add_done_callback(_BACKGROUND_DISPATCHES.discard)
+                logger.info(
+                    "Campaign %s started; queueing %d jobs in the background",
+                    campaign_id, len(jobs_to_dispatch),
+                )
+                return StartCampaignResult(
+                    success=True,
+                    message=(
+                        f"Campaign {campaign_id} started; "
+                        f"{len(jobs_to_dispatch)} calls are being queued"
+                    ),
+                    jobs_enqueued=0,
+                    campaign_id=campaign_id,
+                    jobs_dispatching=len(jobs_to_dispatch),
                 )
 
             # 7. Dispatch the durable outbox. A false enqueue result is a real
@@ -524,12 +635,7 @@ class CampaignService:
             # pending so this same endpoint can reconcile them on retry.
             queue_service = await self._get_queue_service()
             try:
-                try:
-                    _redis = getattr(queue_service, "_redis", None)
-                    if _redis is not None:
-                        await _redis.delete(f"dialer:last_dial:{campaign_id}")
-                except Exception as _gap_exc:
-                    logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
+                await self._reset_gap_clock(queue_service, campaign_id)
 
                 jobs_created = await self._dispatch_durable_jobs(
                     queue_service,
@@ -555,14 +661,74 @@ class CampaignService:
             logger.error(f"Error starting campaign {campaign_id}: {e}")
             raise CampaignError(f"Failed to start campaign: {str(e)}")
 
+    @staticmethod
+    async def _reset_gap_clock(queue_service, campaign_id: str) -> None:
+        try:
+            _redis = getattr(queue_service, "_redis", None)
+            if _redis is not None:
+                await _redis.delete(f"dialer:last_dial:{campaign_id}")
+        except Exception as _gap_exc:
+            logger.debug("start_campaign: gap-clock reset failed: %s", _gap_exc)
+
+    async def _dispatch_in_background(self, campaign_id: str, jobs: List[DialerJob]) -> None:
+        """D3-14: the same durable dispatch as an inline start, after answering.
+
+        A failure (or a process restart) leaves the rest 'pending'; the
+        campaign keeps reading "preparing" and a repeat Start replays them.
+        """
+        try:
+            queue_service = await self._get_queue_service()
+            try:
+                await self._reset_gap_clock(queue_service, campaign_id)
+                queued = await self._dispatch_durable_jobs(queue_service, jobs)
+            finally:
+                await self._cleanup_queue_service()
+            logger.info(
+                "campaign_background_dispatch_done campaign=%s queued=%d of %d",
+                campaign_id, queued, len(jobs),
+            )
+        except asyncio.CancelledError:
+            logger.warning(
+                "campaign_background_dispatch_cancelled campaign=%s jobs=%d; "
+                "unqueued jobs stay pending until Start is pressed again",
+                campaign_id, len(jobs),
+            )
+            raise
+        except Exception as exc:
+            logger.error(
+                "campaign_background_dispatch_failed campaign=%s jobs=%d error=%s; "
+                "unqueued jobs stay pending until Start is pressed again",
+                campaign_id, len(jobs), exc,
+            )
+
     # =========================================================================
     # Pause Campaign
     # =========================================================================
+
+    @staticmethod
+    def _require_lifecycle_status(campaign: Dict[str, Any], from_statuses, done: str) -> None:
+        """D3-17: refuse pause/stop for a campaign not in a state it applies to."""
+        status = campaign.get("status")
+        if from_statuses is not None and status not in from_statuses:
+            raise CampaignStateError(
+                f"Only a {' or '.join(from_statuses)} campaign can be {done}; "
+                f"this campaign is {status or 'in an unknown state'}."
+            )
+
+    async def _refuse_lost_update(self, campaign_id, tenant_id, from_statuses, done, direction_message):
+        """The guarded UPDATE matched no row: say whether the state or the
+        direction changed since the read."""
+        if from_statuses is not None:
+            current = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+            if current.get("direction", "outbound") == "outbound":
+                self._require_lifecycle_status(current, from_statuses, done)
+        raise CampaignDirectionError(direction_message)
 
     async def pause_campaign(
         self,
         campaign_id: str,
         tenant_id: Optional[str] = None,
+        from_statuses=PAUSABLE_STATUSES,
     ) -> Dict[str, Any]:
         """Pause a campaign.
 
@@ -586,6 +752,7 @@ class CampaignService:
             raise CampaignDirectionError(
                 "Inbound campaigns cannot be paused by the outbound dialer"
             )
+        self._require_lifecycle_status(campaign, from_statuses, "paused")
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         query = self.db_client.table("campaigns").update({
@@ -593,12 +760,15 @@ class CampaignService:
         }).eq("id", campaign_id)
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
+        if from_statuses is not None:
+            query = query.in_("status", list(from_statuses))
         response = query.eq("direction", "outbound").execute()
         if getattr(response, "error", None):
             raise CampaignError("Failed to pause campaign")
         if not getattr(response, "data", None):
-            raise CampaignDirectionError(
-                "Campaign direction changed; outbound pause was refused"
+            await self._refuse_lost_update(
+                campaign_id, tenant_id, from_statuses, "paused",
+                "Campaign direction changed; outbound pause was refused",
             )
 
         # Hang up live calls now. The campaign state is already paused, but
@@ -621,7 +791,9 @@ class CampaignService:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            termination = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(
+                campaign_id, tenant_id=scoped_tenant or campaign.get("tenant_id"),
+            )
         except Exception as exc:
             logger.warning("pause_campaign hangup sweep failed: %s", exc)
 
@@ -648,6 +820,7 @@ class CampaignService:
         campaign_id: str,
         clear_queue: bool = False,
         tenant_id: Optional[str] = None,
+        from_statuses=STOPPABLE_STATUSES,
     ) -> Dict[str, Any]:
         """
         Stop a campaign completely.
@@ -658,6 +831,8 @@ class CampaignService:
             tenant_id: Applied to the UPDATE as defense-in-depth alongside
                 RLS (see ``_resolve_tenant_id``); same value get_campaign
                 just validated the row against.
+            from_statuses: states stop applies to (D3-17); None = any state
+                (delete stops whatever it removes).
         """
         # Validate exists (and belongs to this tenant). See pause_campaign for
         # why direction is checked again at the domain boundary.
@@ -666,6 +841,7 @@ class CampaignService:
             raise CampaignDirectionError(
                 "Inbound campaigns cannot be stopped by the outbound dialer"
             )
+        self._require_lifecycle_status(campaign, from_statuses, "stopped")
 
         scoped_tenant = self._resolve_tenant_id(tenant_id)
         # Update campaign status
@@ -675,12 +851,15 @@ class CampaignService:
         }).eq("id", campaign_id)
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
+        if from_statuses is not None:
+            query = query.in_("status", list(from_statuses))
         response = query.eq("direction", "outbound").execute()
         if getattr(response, "error", None):
             raise CampaignError("Failed to stop campaign")
         if not getattr(response, "data", None):
-            raise CampaignDirectionError(
-                "Campaign direction changed; outbound stop was refused"
+            await self._refuse_lost_update(
+                campaign_id, tenant_id, from_statuses, "stopped",
+                "Campaign direction changed; outbound stop was refused",
             )
 
         # Cancel only queued/not-yet-originated work immediately. Jobs already
@@ -731,7 +910,9 @@ class CampaignService:
             from app.api.v1.endpoints.telephony_bridge import (
                 hangup_calls_for_campaign,
             )
-            termination = await hangup_calls_for_campaign(campaign_id)
+            termination = await hangup_calls_for_campaign(
+                campaign_id, tenant_id=scoped_tenant or campaign.get("tenant_id"),
+            )
         except Exception as exc:
             logger.warning("stop_campaign hangup sweep failed: %s", exc)
 
@@ -1298,10 +1479,39 @@ class CampaignService:
         queue_service,
         jobs: List[DialerJob],
     ) -> int:
-        """Dispatch pending rows at least once and expose partial truth."""
+        """Dispatch pending rows at least once and expose partial truth.
+
+        Every ``_DISPATCH_STATUS_CHECK_EVERY`` jobs the campaign is re-read,
+        and dispatch stops once it is no longer running (QA F6-04: a 20,000-lead
+        start kept pushing cancelled jobs for minutes after Stop). The rest stay
+        pending, which Stop cancels. An unreadable status keeps dispatching:
+        the dialer re-checks the campaign before every call.
+        """
+        # Select the protocol before I/O. Never fall back after a possibly
+        # successful batch push. Legacy clients without a pool retain their
+        # existing per-row acknowledgement contract.
+        if getattr(self.db_client, "pool", None) is not None and callable(
+            getattr(queue_service, "enqueue_jobs", None)
+        ):
+            return await self._dispatch_durable_job_batches(queue_service, jobs)
         redis_accepted = 0
         db_acknowledged = 0
-        for job in jobs:
+        for index, job in enumerate(jobs):
+            if index and index % _DISPATCH_STATUS_CHECK_EVERY == 0:
+                try:
+                    running = await self._campaign_still_running(job.campaign_id, job.tenant_id)
+                except Exception as exc:
+                    logger.warning(
+                        "campaign_dispatch_status_unreadable campaign=%s err=%s — continuing",
+                        job.campaign_id, type(exc).__name__,
+                    )
+                    running = True
+                if not running:
+                    logger.info(
+                        "campaign_dispatch_stopped campaign=%s dispatched=%d left_pending=%d",
+                        job.campaign_id, redis_accepted, len(jobs) - index,
+                    )
+                    break
             try:
                 accepted = await queue_service.enqueue_job(job)
             except Exception as exc:
@@ -1332,6 +1542,146 @@ class CampaignService:
             db_acknowledged += 1
         return redis_accepted
 
+    @staticmethod
+    def _validate_dispatch_batch(jobs: List[DialerJob]) -> None:
+        if not jobs:
+            return
+        scope = (str(jobs[0].tenant_id), str(jobs[0].campaign_id))
+        if len({str(job.job_id) for job in jobs}) != len(jobs) or any(
+            (str(job.tenant_id), str(job.campaign_id)) != scope for job in jobs
+        ):
+            raise ValueError("dialer batch scope is not exact")
+        # Invalid IDs must be rejected before Redis receives any payload.
+        for value in (*scope, *(str(job.job_id) for job in jobs), *(str(job.lead_id) for job in jobs)):
+            if str(uuid.UUID(value)) != value:
+                raise ValueError("dialer batch scope requires canonical UUIDs")
+
+    async def _confirm_jobs_dispatched(self, jobs: List[DialerJob]) -> None:
+        """ACK exact job/lead pairs together; never overwrite advanced states."""
+        if not jobs:
+            return
+        if len(jobs) > _DISPATCH_STATUS_CHECK_EVERY:
+            raise ValueError("dialer acknowledgement batch exceeds 100 jobs")
+        self._validate_dispatch_batch(jobs)
+        tenant_id, campaign_id = str(jobs[0].tenant_id), str(jobs[0].campaign_id)
+        ids = [uuid.UUID(str(job.job_id)) for job in jobs]
+        leads = [uuid.UUID(str(job.lead_id)) for job in jobs]
+        async with acquire_with_tenant(self.db_client.pool, tenant_id) as conn:
+            rows = await conn.fetch(
+                """UPDATE dialer_jobs AS j
+                   SET status = 'queued', updated_at = NOW()
+                   FROM unnest($1::uuid[], $2::uuid[]) AS sent(id, lead_id)
+                   WHERE j.id = sent.id AND j.lead_id = sent.lead_id
+                     AND j.tenant_id = $3::uuid AND j.campaign_id = $4::uuid
+                     AND j.status = 'pending'
+                   RETURNING j.id""",
+                ids, leads, uuid.UUID(tenant_id), uuid.UUID(campaign_id),
+            )
+            acknowledged = {str(row["id"]) for row in rows}
+            expected = {str(job.job_id): job for job in jobs}
+            if not acknowledged <= expected.keys() or len(acknowledged) != len(rows):
+                raise RuntimeError("dialer dispatch acknowledgement was not exact")
+            missing = [job for job in jobs if str(job.job_id) not in acknowledged]
+            if not missing:
+                return
+            # A worker can consume before the ACK. Read only missing exact
+            # pairs; a missing or still-pending row cannot be claimed as ACKed.
+            current = await conn.fetch(
+                """SELECT j.id, j.status
+                   FROM dialer_jobs AS j
+                   JOIN unnest($1::uuid[], $2::uuid[]) AS sent(id, lead_id)
+                     ON j.id = sent.id AND j.lead_id = sent.lead_id
+                   WHERE j.tenant_id = $3::uuid AND j.campaign_id = $4::uuid""",
+                [uuid.UUID(str(job.job_id)) for job in missing],
+                [uuid.UUID(str(job.lead_id)) for job in missing],
+                uuid.UUID(tenant_id), uuid.UUID(campaign_id),
+            )
+            advanced = {str(row["id"]) for row in current if row["status"] and row["status"] != "pending"}
+            if advanced != {str(job.job_id) for job in missing}:
+                # Exiting the tenant transaction with an error rolls back the
+                # whole ACK, keeping unconfirmed pushes replayable.
+                raise RuntimeError("dialer dispatch acknowledgement was not exact")
+
+    async def _dispatch_durable_job_batches(self, queue_service, jobs: List[DialerJob]) -> int:
+        try:
+            self._validate_dispatch_batch(jobs)
+        except (ValueError, TypeError, AttributeError) as exc:
+            raise CampaignDispatchError("Dialer batch scope is not exact", jobs_pending=len(jobs)) from exc
+        accepted_count = acknowledged_count = 0
+        for offset in range(0, len(jobs), _DISPATCH_STATUS_CHECK_EVERY):
+            batch = jobs[offset:offset + _DISPATCH_STATUS_CHECK_EVERY]
+            if offset:
+                try:
+                    running = await self._campaign_still_running(batch[0].campaign_id, batch[0].tenant_id)
+                except Exception as exc:
+                    logger.warning(
+                        "campaign_dispatch_status_unreadable campaign=%s err=%s — continuing",
+                        batch[0].campaign_id, type(exc).__name__,
+                    )
+                    running = True
+                if not running:
+                    break
+            try:
+                accepted = await queue_service.enqueue_jobs(batch)
+            except Exception as exc:
+                # Transport ambiguity: only earlier confirmed replies count.
+                # This batch may have reached Redis and stays replayable.
+                raise CampaignDispatchError(
+                    "Dialer queue batch dispatch could not be confirmed",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                ) from exc
+            if not isinstance(accepted, list) or len(accepted) != len(batch) or any(
+                type(value) is not bool for value in accepted
+            ):
+                raise CampaignDispatchError(
+                    "Dialer queue batch acceptance was not exact",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                )
+            accepted_count += sum(accepted)
+            if not all(accepted):
+                raise CampaignDispatchError(
+                    "Dialer queue batch dispatch failed",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                )
+            try:
+                await self._confirm_jobs_dispatched(batch)
+            except Exception as exc:
+                raise CampaignDispatchError(
+                    "Dialer queue acknowledgement could not be persisted",
+                    jobs_enqueued=accepted_count, jobs_pending=len(jobs) - acknowledged_count,
+                ) from exc
+            acknowledged_count += len(batch)
+        return accepted_count
+
+    async def _campaign_still_running(self, campaign_id: str, tenant_id: str) -> bool:
+        """Whether a campaign being dispatched is still running (QA F6-04)."""
+        response = (
+            self.db_client.table("campaigns")
+            .select("status")
+            .eq("id", str(campaign_id))
+            .eq("tenant_id", str(tenant_id))
+            .execute()
+        )
+        if getattr(response, "error", None):
+            raise RuntimeError("campaign status unavailable")
+        rows = getattr(response, "data", None) or []
+        return bool(rows) and rows[0].get("status") == "running"
+
+    async def _refuse_lost_start(self, campaign_id, tenant_id, observed_statuses) -> None:
+        """The guarded start UPDATE matched no row: another start won it, or the
+        campaign changed since this start read it. Say which (QA F2-09)."""
+        current = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        if current.get("direction", "outbound") == "outbound":
+            if current.get("status") == "running":
+                raise CampaignStateError("Campaign is already running")
+            if current.get("status") not in observed_statuses:
+                raise CampaignStateError(
+                    "Campaign changed while it was starting. Check its status and start it again."
+                )
+        raise CampaignDirectionError(
+            "Campaign direction changed; outbound start was refused"
+        )
+
     async def _update_campaign_status(
         self,
         campaign_id: str,
@@ -1339,6 +1689,7 @@ class CampaignService:
         total_leads: Optional[int] = None,
         tenant_id: Optional[str] = None,
         stamp_started_at: bool = True,
+        from_statuses: Optional[Sequence[str]] = None,
     ) -> None:
         """Update campaign status and metadata.
 
@@ -1348,6 +1699,11 @@ class CampaignService:
         the "default-tenant" literal fallback used for job creation — that
         fallback string would not match a real row's tenant_id and would
         silently zero out this update.
+
+        ``from_statuses`` makes the write a compare-and-set: the row changes
+        only while its status is still one of them (start passes the status it
+        read). A miss is refused by ``_refuse_lost_start``; None keeps the
+        plain write.
         """
         update_data = {"status": status}
         if stamp_started_at:
@@ -1363,10 +1719,14 @@ class CampaignService:
         )
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
+        if from_statuses is not None:
+            query = query.in_("status", list(from_statuses))
         response = query.eq("direction", "outbound").execute()
         if getattr(response, "error", None):
             raise CampaignError("Failed to update campaign status")
         if not getattr(response, "data", None):
+            if from_statuses is not None:
+                await self._refuse_lost_start(campaign_id, tenant_id, from_statuses)
             raise CampaignDirectionError(
                 "Campaign direction changed; outbound start was refused"
             )

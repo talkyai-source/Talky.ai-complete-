@@ -73,7 +73,7 @@ class _FakeConn:
     def __init__(self, calls_row: dict, leads_row: dict, dialer_jobs_row: dict) -> None:
         self.calls_row = calls_row
         self.calls_row.setdefault("tenant_id", "20000000-0000-4000-8000-000000000017")
-        self.calls_row.setdefault("phone_number", "+15555550107")
+        self.calls_row.setdefault("phone_number", "+14155550107")
         self.calls_row.setdefault("outcome", None)
         self.calls_row.setdefault("ended_at", None)
         self.calls_row.setdefault("duration_seconds", None)
@@ -122,6 +122,25 @@ class _FakeConn:
 
     async def fetchrow(self, query: str, *args: Any):
         q = " ".join(query.split())
+        if q.startswith("UPDATE calls SET campaign_alert_processed_at=now()"):
+            assert "WHERE id=$1 AND tenant_id=$2::uuid" in q
+            assert "campaign_alert_processed_at IS NULL" in q
+            assert "status='completed' AND direction='outbound' AND is_test IS NOT TRUE" in q
+            assert "p.id=calls.campaign_id AND p.tenant_id=$2::uuid" in q
+            assert q.endswith("RETURNING campaign_id,outcome")
+            call_id, tenant_id = args
+            row = self.calls_row
+            campaign = self.campaigns_row
+            if (
+                row["id"] != call_id or row["tenant_id"] != tenant_id
+                or row.get("campaign_alert_processed_at") is not None
+                or row["status"] != "completed" or row.get("direction") != "outbound"
+                or row.get("is_test") is True or row.get("campaign_id") is None
+                or campaign.get("id") != row["campaign_id"]
+                or campaign.get("tenant_id") != tenant_id
+            ):
+                return None
+            raise AssertionError("Eligible alert calls require an explicit alert-state fixture")
         if q.startswith("UPDATE calls"):
             if self.calls_row["id"] != args[0]:
                 return None
@@ -152,6 +171,8 @@ class _FakeConn:
     async def fetchval(self, query: str, *args: Any):
         q = " ".join(query.split())
         if "FROM dnc_entries" in q:
+            assert args[0] == self.calls_row["tenant_id"]
+            assert args[1] == self.calls_row["phone_number"]
             return False
         if "SELECT id FROM leads" in q:
             return self.leads_row["id"] if self.leads_row["id"] == args[0] else None
@@ -239,7 +260,7 @@ def _make_case(outcome_value: str = "busy") -> tuple[_FakeConn, _RecordingQueue,
         leads_row={"id": "lead-1", "call_attempts": 0, "status": "calling"},
         dialer_jobs_row={
             "id": "job-1", "status": "processing", "attempt_number": 1,
-            "tenant_id": "tenant-1", "priority": 5, "phone_number": "+15550001111",
+            "tenant_id": "tenant-1", "priority": 5, "phone_number": "+14155550107",
         },
     )
     queue = _RecordingQueue()

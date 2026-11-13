@@ -28,6 +28,30 @@ from app.infrastructure.telephony import pjsip_config_generator
 pytestmark = pytest.mark.integration
 
 
+class AuditReceipts:
+    """Stand-in for AuditLogger on the mutating trunk endpoints (QA F12-10).
+
+    Every mutation now takes an ``audit_logger`` dependency and stages its receipt in the
+    same transaction. Called directly (no FastAPI), the dependency is a ``Depends`` marker,
+    so each call passes this object. It keeps the real preconditions (an open transaction)
+    and records the staged receipts, but takes no chain advisory lock and writes no
+    ``audit_logs`` row: this module proves the trunk rows, so the lock-ordering test below
+    must still wait on the trunk row lock rather than on a global audit lock. Audit
+    atomicity is covered in tests/unit/test_sip_privileged_audit.py.
+    """
+
+    def __init__(self):
+        self.receipts = []
+
+    async def lock_transaction(self, conn):
+        assert conn.is_in_transaction(), "Transactional audit requires an open transaction"
+
+    async def log_in_transaction(self, conn, **entry):
+        assert conn.is_in_transaction(), "Transactional audit requires an open transaction"
+        self.receipts.append(entry)
+        return uuid4()
+
+
 @pytest_asyncio.fixture
 async def trunk_db(monkeypatch):
     dsn = os.getenv("TEST_DATABASE_URL")
@@ -87,8 +111,8 @@ async def trunk_db(monkeypatch):
         monkeypatch.setattr(pjsip_config_generator, "remove_trunk_config", remove)
         monkeypatch.setattr(trunks, "_enforce_ws_i_quota", AsyncMock(return_value=None))
         yield SimpleNamespace(admin=admin, pool=pool, role=role, tenants=tenants, campaigns=campaigns,
-                              trunks=ids, remove=remove, extra=extra,
-                              actor=SimpleNamespace(id=str(users[0]), tenant_id=str(tenants[0])))
+                              trunks=ids, remove=remove, extra=extra, audit=AuditReceipts(),
+                              actor=SimpleNamespace(id=str(users[0]), tenant_id=str(tenants[0]), role="tenant_admin"))
     finally:
         if pool:
             await pool.close()
@@ -117,7 +141,7 @@ def request():
 
 
 async def delete(db, *, index=0, key="synthetic-delete"):
-    return await trunks.delete_sip_trunk(db.trunks[index], request(), key, db.actor, db.pool)
+    return await trunks.delete_sip_trunk(db.trunks[index], request(), key, db.actor, db.pool, db.audit)
 
 
 async def seed_inbound_history(db, trunk, statuses=("active", "archived")):
@@ -165,6 +189,8 @@ async def test_delete_receipt_replays_without_second_configuration_effect(trunk_
     replay = await delete(db)
     assert replay.status_code == 200 and json.loads(replay.body)["deleted"] is True
     assert db.remove.await_count == 1
+    # The replay is a cached answer: it stages no second audit receipt either.
+    assert [receipt["action"] for receipt in db.audit.receipts] == ["sip.trunk.delete"]
     assert not await db.admin.fetchval("SELECT EXISTS(SELECT 1 FROM tenant_sip_trunks WHERE id=$1)", db.trunks[0])
 
 
@@ -387,20 +413,22 @@ async def test_a_deleted_line_is_invisible_and_cannot_be_used(trunk_db):
     trunk_id = db.trunks[0]
 
     assert (await delete(db, key="second-delete")).status_code == 404
-    activate = await trunks.activate_sip_trunk(trunk_id, request(), "act-key", None, db.actor, db.pool)
-    deactivate = await trunks.deactivate_sip_trunk(trunk_id, request(), "deact-key", None, db.actor, db.pool)
+    activate = await trunks.activate_sip_trunk(trunk_id, request(), "act-key", None, db.actor, db.pool, db.audit)
+    deactivate = await trunks.deactivate_sip_trunk(trunk_id, request(), "deact-key", None, db.actor, db.pool, db.audit)
     update = await trunks.update_sip_trunk(
-        trunk_id, SIPTrunkUpdateRequest(metadata={"region": "eu"}), request(), "upd-key", None, db.actor, db.pool
+        trunk_id, SIPTrunkUpdateRequest(metadata={"region": "eu"}), request(), "upd-key", None, db.actor, db.pool,
+        db.audit,
     )
-    probe = await trunks.test_sip_trunk(trunk_id, request(), db.actor, db.pool)
+    probe = await trunks.test_sip_trunk(trunk_id, request(), db.actor, db.pool, db.audit)
     assert [r.status_code for r in (activate, deactivate, update, probe)] == [404, 404, 404, 404]
 
     async def assign():
         campaign = await trunks.set_campaign_trunk_assignment(
-            trunks.CampaignTrunkBody(campaign_id=db.campaigns[0], trunk_id=trunk_id), request(), db.actor, db.pool
+            trunks.CampaignTrunkBody(campaign_id=db.campaigns[0], trunk_id=trunk_id), request(), db.actor, db.pool,
+            db.audit,
         )
         pool_assignment = await trunks.set_pool_assignment(
-            trunks.PoolAssignmentBody(pool_trunk_id=trunk_id), request(), db.actor, db.pool
+            trunks.PoolAssignmentBody(pool_trunk_id=trunk_id), request(), db.actor, db.pool, db.audit
         )
         return campaign.status_code, pool_assignment.status_code
 
@@ -420,7 +448,8 @@ async def test_a_deleted_line_is_invisible_and_cannot_be_used(trunk_db):
     )
     assert await assign() == (400, 400)
     assert str(trunk_id) not in {str(t.id) for t in await trunks.list_sip_trunks(request(), db.actor, db.pool)}
-    assert (await trunks.activate_sip_trunk(trunk_id, request(), "act-key-2", None, db.actor, db.pool)).status_code == 404
+    assert (await trunks.activate_sip_trunk(
+        trunk_id, request(), "act-key-2", None, db.actor, db.pool, db.audit)).status_code == 404
     assert await db.admin.fetchval("SELECT calling_config ? 'trunk' FROM campaigns WHERE id=$1", db.campaigns[0]) is False
 
 
@@ -438,7 +467,7 @@ async def test_the_test_endpoint_stores_the_steps_and_refuses_a_second_click_wit
     trunks._test_history.clear()
 
     db_id = trunk_db.trunks[0]
-    first = await trunks.test_sip_trunk(db_id, request(), trunk_db.actor, trunk_db.pool)
+    first = await trunks.test_sip_trunk(db_id, request(), trunk_db.actor, trunk_db.pool, trunk_db.audit)
     assert first.status == "reachable" and first.ok is True
     stored = await trunk_db.admin.fetchrow(
         "SELECT last_tested_at, last_test_result FROM tenant_sip_trunks WHERE id=$1", db_id
@@ -449,12 +478,13 @@ async def test_the_test_endpoint_stores_the_steps_and_refuses_a_second_click_wit
     assert saved["status"] == "reachable" and saved["detail"] == saved["verdict"]
 
     # last_tested_at, read back from the real row, is what enforces the 10-second gap.
-    second = await trunks.test_sip_trunk(db_id, request(), trunk_db.actor, trunk_db.pool)
+    second = await trunks.test_sip_trunk(db_id, request(), trunk_db.actor, trunk_db.pool, trunk_db.audit)
     assert second.status_code == 429 and 1 <= int(second.headers["Retry-After"]) <= 11
     await trunk_db.admin.execute(
         "UPDATE tenant_sip_trunks SET last_tested_at = NOW() - INTERVAL '11 seconds' WHERE id=$1", db_id
     )
-    assert (await trunks.test_sip_trunk(db_id, request(), trunk_db.actor, trunk_db.pool)).status == "reachable"
+    assert (await trunks.test_sip_trunk(
+        db_id, request(), trunk_db.actor, trunk_db.pool, trunk_db.audit)).status == "reachable"
 
 
 async def test_assignment_share_lock_prevents_delete_from_overtaking_dependency(trunk_db, monkeypatch):
@@ -472,7 +502,7 @@ async def test_assignment_share_lock_prevents_delete_from_overtaking_dependency(
     monkeypatch.setattr(trunks, "_fetch_assignable_trunk", hold_after_read)
     assignment = asyncio.create_task(trunks.set_campaign_trunk_assignment(
         trunks.CampaignTrunkBody(campaign_id=str(db.campaigns[0]), trunk_id=db.trunks[0]),
-        request(), db.actor, db.pool,
+        request(), db.actor, db.pool, db.audit,
     ))
     deletion = None
     try:

@@ -9,6 +9,7 @@ import { Breadcrumbs } from "@/components/layout/breadcrumbs";
 import { HealthIndicator } from "@/components/ui/health-indicator";
 import { useAuth } from "@/hooks/useAuth";
 import { SuspensionBanner, useSuspensionState } from "@/components/admin/suspension-state-provider";
+import { OfflineBanner } from "@/components/ui/offline-banner";
 import { cn } from "@/lib/utils";
 import { Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,7 +23,6 @@ import { isWithinFreshLoginGrace } from "@/lib/http-client";
 // produced "Cannot read properties of undefined (reading 'call')".
 import { FloatingAssistant } from "@/components/assistant/floating-assistant";
 import { QualifiedLeadAlerts } from "@/components/notifications/qualified-lead-alerts";
-import { LowMinutesAlerts } from "@/components/notifications/low-minutes-alerts";
 import { FailedCallAlerts } from "@/components/notifications/failed-call-alerts";
 import { SupportLauncher } from "@/components/support/support-launcher";
 
@@ -136,13 +136,16 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
     return (
         <div className="relative min-h-screen w-full bg-background text-foreground shadow-inner transition-colors duration-300">
             {/* Animated Background Shapes */}
-            <div className="shape-1"></div>
-            <div className="shape-2"></div>
+            <div className="shape-1 print:hidden"></div>
+            <div className="shape-2 print:hidden"></div>
 
-            <Sidebar />
+            {/* QA F1-24: the app shell is not printed; the page content is. */}
+            <div className="print:hidden">
+                <Sidebar />
+            </div>
 
             <div
-                className="flex flex-col overflow-hidden z-10 transition-[padding-left] ease-in-out"
+                className="flex flex-col overflow-hidden z-10 transition-[padding-left] ease-in-out print:overflow-visible print:pl-0!"
                 style={{
                     paddingLeft: desktopPaddingLeft,
                     transitionDuration: "var(--sidebar-transition-ms)",
@@ -157,7 +160,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                                 <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="lg:hidden shrink-0"
+                                    className="lg:hidden shrink-0 print:hidden"
                                     onClick={() => setMobileOpen(true)}
                                     aria-label="Open sidebar"
                                 >
@@ -165,7 +168,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                                 </Button>
                             )}
                             <div className="min-w-0">
-                                <Breadcrumbs className={title || description ? "mb-1.5" : undefined} labels={breadcrumbLabels} />
+                                <Breadcrumbs className={cn("print:hidden", title || description ? "mb-1.5" : undefined)} labels={breadcrumbLabels} />
                                 {title ? (
                                     <h1 className="text-xl md:text-2xl font-semibold text-foreground leading-tight break-words">{title}</h1>
                                 ) : null}
@@ -174,7 +177,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                                 ) : null}
                             </div>
                         </div>
-                        <div className="flex items-center gap-2 justify-self-start md:justify-self-end">
+                        <div className="flex items-center gap-2 justify-self-start md:justify-self-end print:hidden">
                             <HealthIndicator />
                             <NotificationBell />
                         </div>
@@ -182,12 +185,13 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                 </header>
 
                 {/* Main Content */}
-                <main className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300">
+                <main id="main-content" className="flex-1 overflow-y-auto overflow-x-hidden scroll-smooth p-4 md:p-8 transition-colors duration-300 print:overflow-visible">
                     {/* pb-16: keeps every page's last content clear of the fixed
                         bottom-right chat launcher (its top edge sits 72px above
                         the viewport bottom; main's own padding is only 16-32px). */}
                     <div className="mx-auto flex w-full max-w-7xl flex-col gap-4 pb-16">
                         <SuspensionBanner />
+                        <OfflineBanner />
                         <div className="relative">
                             {suspensionState.suspended ? (
                                 <div className="absolute inset-0 z-20 rounded-2xl border border-red-500/20 bg-background/55 backdrop-blur-[1px]" aria-hidden />
@@ -206,19 +210,22 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                 </main>
             </div>
 
+            <div className="print:hidden">
             {/* Floating text assistant — bottom-right across the app. */}
             <FloatingAssistant />
 
-            {/* Real-time qualified-lead toasts (reuses the Event Stream poll). */}
+            {/* Durable server notices: qualified leads, campaign failures and low
+                minutes (QA F3-08). LowMinutesAlerts (plan 3.8 N1) is not mounted:
+                the durable low_minutes notice already covers it, and both would
+                notify twice. Per-call failure alerts (plan 3.8 N2) are separate. */}
             <QualifiedLeadAlerts />
-            {/* Low-minutes and failed-call notifications (plan 3.8 N1, N2). */}
-            <LowMinutesAlerts />
             <FailedCallAlerts />
 
             {/* Support: Help button above the assistant launcher, the drawer and
                 unread notifications. Renders nothing until GET /support/config
                 says support is on for this account. */}
             <SupportLauncher />
+            </div>
         </div>
     );
 }

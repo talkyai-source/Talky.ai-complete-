@@ -2,9 +2,12 @@
 Clients Endpoints
 CRUD operations for client/contact management
 """
+from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID, bounded_text
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import List, Optional
+from uuid import UUID
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, CurrentUser
@@ -30,13 +33,14 @@ def _tenant_scoped(permission: Permission):
 
 
 class ClientCreate(BaseModel):
-    """Create client request"""
-    name: str
-    company: Optional[str] = None
-    phone: Optional[str] = None
+    """Create client request (QA F2-13: name/company fit VARCHAR(255))."""
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
+    name: bounded_text(255, min_length=1)
+    company: Optional[bounded_text(255)] = None
+    phone: Optional[bounded_text(32)] = None
     email: Optional[EmailStr] = None
-    tags: List[str] = []
-    notes: Optional[str] = None
+    tags: List[bounded_text(64)] = Field(default_factory=list, max_length=50)
+    notes: Optional[bounded_text(10_000)] = None
 
 
 class ClientResponse(BaseModel):
@@ -47,6 +51,19 @@ class ClientResponse(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     tags: List[str] = []
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _uuid_as_text(cls, value):
+        # asyncpg returns uuid.UUID for the uuid column and pydantic v2 will not
+        # coerce it to str, so every real row failed validation (QA F2-08).
+        return str(value) if isinstance(value, UUID) else value
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _null_tags_are_empty(cls, value):
+        # tags is a nullable jsonb column; NULL means no tags.
+        return [] if value is None else value
 
 
 @router.get("/", response_model=List[ClientResponse])
@@ -82,7 +99,7 @@ async def list_clients(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch clients: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to fetch clients.')
         )
 
 
@@ -98,11 +115,21 @@ async def create_client(
     Used by: /dashboard/clients create form.
     """
     try:
+        phone = client.phone
+        if phone:
+            from app.api.v1.endpoints.contacts import _resolve_country
+            from app.domain.services.phone_number_normalizer import normalize_phone_number
+            country = _resolve_country(db_client, current_user.tenant_id, requested=client.default_country)
+            try:
+                phone = normalize_phone_number(phone, country)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=[{"row": 1, "field": "phone",
+                                    "message": "Invalid phone number for the selected country"}]) from exc
         # Prepare client data
         client_data = {
             "name": client.name,
             "company": client.company,
-            "phone": client.phone,
+            "phone": phone,
             "email": client.email,
             "tags": client.tags,
             "notes": client.notes,
@@ -134,13 +161,13 @@ async def create_client(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to create client: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to create client.')
         )
 
 
 @router.get("/{client_id}", response_model=ClientResponse)
 async def get_client(
-    client_id: str,
+    client_id: ResourceUUID,
     current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_READ)),
     db_client: Client = Depends(get_db_client)
 ):
@@ -176,13 +203,13 @@ async def get_client(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to fetch client: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to fetch client.')
         )
 
 
 @router.delete("/{client_id}")
 async def delete_client(
-    client_id: str,
+    client_id: ResourceUUID,
     current_user: CurrentUser = Depends(_tenant_scoped(Permission.CAMPAIGNS_UPDATE)),
     db_client: Client = Depends(get_db_client)
 ):
@@ -209,5 +236,5 @@ async def delete_client(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete client: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to delete client.')
         )

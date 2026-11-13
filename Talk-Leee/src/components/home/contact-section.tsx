@@ -114,7 +114,8 @@ export function ContactSection({ sectionClassName }: ContactSectionProps = {}) {
             // viewport={{ once: true }}
             className="text-center mb-16"
           >
-            <h2 className="text-3xl md:text-5xl font-bold text-primary dark:text-foreground mb-4">Contact Us</h2>
+            {/* QA F1-10: the /contact page's one level-1 heading. */}
+            <h1 className="text-3xl md:text-5xl font-bold text-primary dark:text-foreground mb-4">Contact Us</h1>
             <p className="text-lg text-gray-700 dark:text-muted-foreground max-w-xl mx-auto">Get in touch with our team to learn how Talk-Lee can help.</p>
           </div>
 

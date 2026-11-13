@@ -15,6 +15,52 @@ env:
   NODE_VERSION: "22"
 
 jobs:
+  quarantine-policy:
+    name: Quarantine policy
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Refuse growth and quarantine older than 14 days
+        env:
+          # PRs compare exact identities against their trusted base SHA. Pushes
+          # compare the previous SHA; age remains enforced in both cases.
+          POLICY_BASE: ${{ github.event.pull_request.base.sha || github.event.before || github.sha }}
+        run: python backend/scripts/check_release_quarantine.py --base-ref "$POLICY_BASE"
+
+  changed-line-coverage:
+    name: Changed-line coverage
+    if: github.event_name == 'pull_request'
+    needs: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-coverage
+          path: backend
+      - name: Require 80 percent of changed backend executable lines
+        env:
+          COVERAGE_BASE: ${{ github.event.pull_request.base.sha }}
+        run: python backend/scripts/check_diff_coverage.py --base-ref "$COVERAGE_BASE" --coverage backend/coverage.xml --threshold 80
+
   # ──────────────────────────────────────────────────────────────────
   # Secret scanning — runs first, blocks everything if secrets found
   # ──────────────────────────────────────────────────────────────────
@@ -283,6 +329,9 @@ jobs:
             tests/integration/test_dnc_schema_migration.py \
             tests/integration/test_op07_native_dnc.py \
             tests/integration/test_dnc_settlement_truth.py \
+            tests/integration/test_touch_trigger_repair_pg.py \
+            tests/integration/test_abuse_event_columns_pg.py \
+            tests/integration/test_legacy_object_hardening_pg.py \
             -q
         env:
           TEST_DATABASE_URL: postgresql://talky:testpassword@localhost:5432/talky_alembic_test
@@ -453,6 +502,42 @@ jobs:
           name: openapi-schema
           path: backend/openapi.json
           retention-days: 30
+
+      # Runs last (QA F14-02 is still open): the integration tests above
+      # report on every run, and a parity difference still fails the job.
+      - name: Compare clean and preserved bootstrap schemas
+        id: schema-parity
+        # The existing PostgreSQL service is disposable. Keep the snapshot's
+        # client guards and compare both dumps with the same pinned client.
+        run: |
+          client_dir="$RUNNER_TEMP/schema-parity-client"
+          mkdir -p "$client_dir"
+          cat > "$client_dir/psql" <<'SH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          exec docker run --rm --network host \
+            -e PGHOST -e PGPORT -e PGUSER -e PGPASSWORD -e PGDATABASE -e PGCONNECT_TIMEOUT \
+            -v "$PARITY_BACKEND_ROOT:$PARITY_BACKEND_ROOT:ro" -w "$PARITY_BACKEND_ROOT" \
+            postgres:16.14-alpine "$(basename "$0")" "$@"
+          SH
+          cp "$client_dir/psql" "$client_dir/pg_dump"
+          chmod +x "$client_dir/psql" "$client_dir/pg_dump"
+          export PARITY_BACKEND_ROOT="$PWD"
+          python scripts/verify_schema_parity.py \
+            --psql "$client_dir/psql" --pg-dump "$client_dir/pg_dump" \
+            --output-dir test-artifacts/schema-parity
+          pytest tests/integration/test_bootstrap_manual_parity.py -q
+        env:
+          SCHEMA_PARITY_ADMIN_DSN: postgresql://talky:testpassword@127.0.0.1:5432/talky_test
+          TEST_DATABASE_URL: postgresql://talky:testpassword@127.0.0.1:5432/talky_test
+
+      - name: Retain schema parity evidence
+        if: always() && steps.schema-parity.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-parity
+          path: backend/test-artifacts/schema-parity/
+          if-no-files-found: warn
 
   # ──────────────────────────────────────────────────────────────────
   # Frontend: lint + typecheck + audit + build

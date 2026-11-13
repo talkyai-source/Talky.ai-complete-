@@ -1425,6 +1425,61 @@ async def test_confirmed_absence_settlement_db_failure_rolls_back_and_fails_clos
     )
 
 
+class _TrunkTransaction:
+    def __init__(self, conn):
+        self.conn = conn
+
+    async def __aenter__(self):
+        assert self.conn.transaction_depth == 0
+        self.conn.transaction_depth += 1
+        self.updates_before = self.conn.updates
+        self.audit_before = list(self.conn.audit.events)
+        return self
+
+    async def __aexit__(self, exc_type, *_args):
+        if exc_type is not None:
+            self.conn.updates = self.updates_before
+            self.conn.audit.events[:] = self.audit_before
+        self.conn.transaction_depth -= 1
+        return False
+
+
+class _TrunkAudit:
+    def __init__(self, conn):
+        self.conn = conn
+        self.lock_calls = 0
+        self.log_calls = 0
+        self.events = []
+        self.error = None
+
+    async def lock_transaction(self, conn):
+        assert conn is self.conn and conn.transaction_depth == 1
+        assert conn.tenant_id == TENANT_ID and conn.actor_id == USER_ID
+        self.lock_calls += 1
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn is self.conn and conn.transaction_depth == 1
+        assert self.lock_calls == 1 and conn.updates == 1
+        assert event["tenant_id"] == conn.tenant_id == TENANT_ID
+        assert event["actor_id"] == conn.actor_id == USER_ID
+        assert event["actor_role"] == "tenant_admin"
+        assert event["resource_type"] == "campaign"
+        assert str(event["resource_id"]) == CAMPAIGN_ID
+        assert event["before_state"] == {
+            "trunk": conn.campaign_row["calling_config"].get("trunk")
+        }
+        after = event["after_state"]["trunk"]
+        assert event["action"] == (
+            "sip.campaign_assignment.set" if after else "sip.campaign_assignment.clear"
+        )
+        if after:
+            assert after["id"] == TRUNK_ID and after["label"] == "Test trunk"
+        self.log_calls += 1
+        if self.error:
+            raise self.error
+        self.events.append(event)
+
+
 class _TrunkConn:
     def __init__(self, *, campaign_row, campaign_error=None):
         self.campaign_row = campaign_row
@@ -1433,18 +1488,26 @@ class _TrunkConn:
         self.trunk_reads = 0
         self.trunk_queries = []
         self.campaign_reads = 0
+        self.transaction_depth = 0
+        self.tenant_id = None
+        self.actor_id = None
+        self.audit = _TrunkAudit(self)
 
     def transaction(self):
-        return _Transaction()
+        return _TrunkTransaction(self)
 
-    async def fetchrow(self, query, *_args):
+    async def fetchrow(self, query, *args):
         normalized = " ".join(query.split()).lower()
         if "from campaigns" in normalized:
+            assert args == (CAMPAIGN_ID, TENANT_ID)
+            assert "tenant_id = $2::uuid" in normalized
             self.campaign_reads += 1
             if self.campaign_error:
                 raise self.campaign_error
             return self.campaign_row
         if "from tenant_sip_trunks" in normalized:
+            assert args == (TRUNK_ID, TENANT_ID)
+            assert "tenant_id = $2::uuid" in normalized
             self.trunk_reads += 1
             self.trunk_queries.append(normalized)
             return {
@@ -1464,11 +1527,23 @@ class _TrunkConn:
     async def fetchval(self, query, *_args):
         raise AssertionError(f"Campaign assignment must use an existence/direction row: {query}")
 
-    async def execute(self, query, *_args):
+    async def execute(self, query, *args):
         normalized = " ".join(query.split()).lower()
-        if normalized.startswith("set local") or normalized.startswith("select set_config"):
+        if normalized.startswith("set local"):
+            if "app.current_tenant_id" in normalized:
+                assert TENANT_ID in normalized
+                self.tenant_id = TENANT_ID
+            return "SELECT 1"
+        if normalized.startswith("select set_config"):
+            if "app.current_user_id" in normalized:
+                assert args == (USER_ID,)
+                self.actor_id = USER_ID
             return "SELECT 1"
         if "update campaigns" in normalized:
+            assert self.transaction_depth == 1 and self.audit.lock_calls == 1
+            assert args[:2] == (CAMPAIGN_ID, TENANT_ID)
+            assert "tenant_id = $2::uuid" in normalized
+            assert "direction = 'outbound'" in normalized
             self.updates += 1
             return "UPDATE 1"
         raise AssertionError(f"Unexpected execute: {normalized}")
@@ -1499,11 +1574,13 @@ async def test_trunk_assignment_and_clear_reject_inbound_before_update(trunk_id)
         request,
         user,
         pool,
+        audit_logger=conn.audit,
     )
 
     assert response.status_code == 409
     assert conn.updates == 0
     assert conn.trunk_reads == 0
+    assert conn.audit.events == [] and conn.transaction_depth == 0
 
 
 @pytest.mark.asyncio
@@ -1515,10 +1592,12 @@ async def test_trunk_clear_missing_or_foreign_campaign_is_real_404():
         _request(method="PUT"),
         user,
         pool,
+        audit_logger=conn.audit,
     )
 
     assert response.status_code == 404
     assert conn.updates == 0
+    assert conn.audit.events == [] and conn.transaction_depth == 0
 
 
 @pytest.mark.asyncio
@@ -1533,10 +1612,13 @@ async def test_trunk_assignment_lookup_failure_is_503_not_fake_404():
         _request(method="PUT"),
         user,
         pool,
+        audit_logger=conn.audit,
     )
 
     assert response.status_code == 503
     assert conn.updates == 0
+    assert conn.campaign_reads == 1 and conn.audit.lock_calls == 1
+    assert conn.audit.events == [] and conn.transaction_depth == 0
 
 
 @pytest.mark.asyncio
@@ -1548,11 +1630,14 @@ async def test_outbound_trunk_clear_updates_exactly_one_locked_campaign():
         _request(method="PUT"),
         user,
         pool,
+        audit_logger=conn.audit,
     )
 
     assert response.campaign_id == CAMPAIGN_ID
     assert response.trunk_id is None
     assert conn.updates == 1
+    assert len(conn.audit.events) == 1 and conn.transaction_depth == 0
+    assert conn.audit.events[0]["action"] == "sip.campaign_assignment.clear"
 
 
 @pytest.mark.asyncio
@@ -1573,6 +1658,7 @@ async def test_outbound_trunk_assignment_still_updates_locked_campaign(monkeypat
         _request(method="PUT"),
         user,
         pool,
+        audit_logger=conn.audit,
     )
 
     assert response.campaign_id == CAMPAIGN_ID
@@ -1581,6 +1667,27 @@ async def test_outbound_trunk_assignment_still_updates_locked_campaign(monkeypat
     assert conn.trunk_reads == 1
     assert "for share" in conn.trunk_queries[0]
     assert conn.updates == 1
+    assert len(conn.audit.events) == 1 and conn.transaction_depth == 0
+    assert conn.audit.events[0]["action"] == "sip.campaign_assignment.set"
+
+
+@pytest.mark.asyncio
+async def test_outbound_trunk_assignment_audit_failure_rolls_back_mutation():
+    conn, pool, user = _trunk_context(campaign_row=_campaign())
+    conn.audit.error = RuntimeError("audit write unavailable")
+
+    response = await trunks.set_campaign_trunk_assignment(
+        CampaignTrunkBody(campaign_id=CAMPAIGN_ID, trunk_id=None),
+        _request(method="PUT"),
+        user,
+        pool,
+        audit_logger=conn.audit,
+    )
+
+    assert response.status_code == 503
+    assert conn.updates == 0 and conn.audit.events == []
+    assert conn.campaign_reads == 1 and conn.audit.log_calls == 1
+    assert conn.transaction_depth == 0
 
 
 @pytest.mark.asyncio

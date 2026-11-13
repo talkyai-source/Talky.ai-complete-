@@ -152,6 +152,35 @@ test("ConnectorCard confirms and calls disconnect", async () => {
     assert.equal(disconnected, 1);
 });
 
+// QA F1-21 (QA-UI-041): a read-only user was offered Connect, Reconnect and
+// Disconnect, which need connectors:create / connectors:delete.
+test("a role that may not connect sees the status without Connect or Reconnect", () => {
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "disconnected", mayConnect: false,
+        })
+    );
+    assert.equal(screen.queryByRole("button", { name: "Connect" }) === null, true, "Connect offered");
+    assert.ok(screen.getByText(/Your role can view connectors but not connect them/));
+    cleanup();
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "expired", mayConnect: false,
+        })
+    );
+    assert.equal(screen.queryByRole("button", { name: "Reconnect" }) === null, true, "Reconnect offered");
+});
+
+test("a role that may not disconnect sees a connected account without Disconnect", () => {
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "connected", mayDisconnect: false,
+        })
+    );
+    assert.equal(screen.queryByRole("button", { name: "Disconnect" }) === null, true, "Disconnect offered");
+    assert.ok(screen.getByText("Connected."));
+});
+
 // A failing assert.equal(<DOM node>, null) makes node:assert print the whole
 // JSDOM node and never return, so a regression would hang instead of fail.
 const absent = (node: unknown, message?: string) => assert.equal(node === null, true, message ?? "expected nothing to be rendered");
@@ -428,4 +457,16 @@ test("FX3a2: the app's own time limit reads Please retry., a server message is s
         await wait(50);
         assert.equal(screen.queryByText("Connector service is unavailable") !== null, true);
     });
+});
+
+// MERGE2 Task 7.1: one state name. A view-only role reads the same
+// "Disconnected" as everyone else, followed by why it cannot connect.
+test("a role that may not connect reads 'Disconnected.' with the reason, never 'Not connected'", () => {
+    renderWithQueryClient(
+        createElement(ConnectorCard, {
+            type: "email", name: "Email", description: "Connect inboxes", icon: Mail, status: "disconnected", mayConnect: false,
+        })
+    );
+    assert.ok(screen.getByText("Disconnected. Your role can view connectors but not connect them."));
+    assert.equal(screen.queryByText(/Not connected/), null);
 });

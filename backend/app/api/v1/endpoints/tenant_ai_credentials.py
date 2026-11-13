@@ -9,15 +9,20 @@ the last four characters and a label.
 from __future__ import annotations
 
 import logging
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field, field_validator
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
+from app.api.v1.dependencies import CurrentUser, get_audit_logger, get_current_user, get_db_pool, require_admin
+from app.api.v1.validation import ResourceUUID
 from app.core.db_utils import acquire_with_tenant
-from app.domain.services.credential_resolver import CredentialResolver, env_var_for_provider
+from app.domain.services.credential_resolver import CredentialResolver
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.provider_key_validation import (
+    SUPPORTED_PROVIDERS, ProviderProbeUnavailable, probe_provider_key,
+)
 from app.infrastructure.connectors.encryption import get_encryption_service
 
 logger = logging.getLogger(__name__)
@@ -33,17 +38,15 @@ router = APIRouter(prefix="/tenant-ai-credentials", tags=["Tenant AI Credentials
 class CredentialCreateRequest(BaseModel):
     provider: str = Field(..., min_length=1, max_length=64)
     api_key: str = Field(..., min_length=8, max_length=8192)
-    credential_kind: str = Field(default="api_key", max_length=64)
+    credential_kind: Literal["api_key"] = "api_key"
     label: Optional[str] = Field(default=None, max_length=128)
 
     @field_validator("provider")
     @classmethod
     def _lc_provider(cls, v: str) -> str:
         v = v.strip().lower()
-        # Warn (but don't reject) unknown providers — allows early
-        # registration for providers we haven't wired factories for yet.
-        if not env_var_for_provider(v):
-            logger.info("tenant_credential_unknown_provider provider=%s", v)
+        if v not in SUPPORTED_PROVIDERS:
+            raise ValueError("Provider key validation is not supported for this provider")
         return v
 
 
@@ -59,6 +62,8 @@ class CredentialResponse(BaseModel):
     status: str
     created_at: Optional[str] = None
     last_used_at: Optional[str] = None
+    validation_status: Optional[Literal["valid", "invalid"]] = None
+    last_checked_at: Optional[str] = None
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -83,7 +88,32 @@ def _row_to_response(row) -> CredentialResponse:
         status=row["status"],
         created_at=row["created_at"].isoformat() if row.get("created_at") else None,
         last_used_at=row["last_used_at"].isoformat() if row.get("last_used_at") else None,
+        validation_status=row.get("validation_status"),
+        last_checked_at=row["last_checked_at"].isoformat() if row.get("last_checked_at") else None,
     )
+
+
+def _credential_state(row):
+    if not row:
+        return None
+    # Never copy plaintext or encrypted material into the durable audit trail.
+    result = {key: row[key] for key in
+              ("id", "tenant_id", "provider", "credential_kind", "last4", "label", "status")}
+    result["validation_status"] = row.get("validation_status")
+    checked_at = row.get("last_checked_at")
+    result["last_checked_at"] = checked_at.isoformat() if checked_at else None
+    return result
+
+
+async def _check_key(provider, api_key):
+    try:
+        return await probe_provider_key(provider, api_key)
+    except ValueError:
+        raise HTTPException(400, detail={"code": "provider_key_check_unsupported",
+                                        "message": "This provider or key format cannot be checked."}) from None
+    except ProviderProbeUnavailable:
+        raise HTTPException(503, detail={"code": "provider_key_check_unavailable",
+                                        "message": "Provider verification is temporarily unavailable. Existing key unchanged."}) from None
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -101,7 +131,7 @@ async def list_credentials(
         rows = await conn.fetch(
             """
             SELECT id, tenant_id, provider, credential_kind, last4, label,
-                   status, created_at, last_used_at
+                   status, created_at, last_used_at, validation_status, last_checked_at
             FROM tenant_ai_credentials
             WHERE tenant_id = $1
             ORDER BY provider, created_at DESC
@@ -116,6 +146,7 @@ async def create_credential(
     payload: CredentialCreateRequest,
     current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> CredentialResponse:
     """Register (or rotate) a tenant's API key for a provider.
 
@@ -123,12 +154,25 @@ async def create_credential(
     disables the existing active row (audit-preserving) and inserts the
     new one."""
     tenant_id = _require_tenant(current_user)
+    checked = await _check_key(payload.provider, payload.api_key)
+    if checked.status != "valid":
+        raise HTTPException(400, detail={"code": "provider_key_invalid",
+                                        "message": "The provider rejected this key or its validation permissions. Existing key unchanged.",
+                                        "validation_status": "invalid", "last_checked_at": checked.checked_at.isoformat()})
     encryption = get_encryption_service()
     encrypted = encryption.encrypt(payload.api_key)
     last4 = payload.api_key[-4:] if len(payload.api_key) >= 4 else None
 
     async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
         async with conn.transaction():
+            before = await conn.fetchrow(
+                """SELECT id, tenant_id, provider, credential_kind, last4, label, status,
+                          validation_status, last_checked_at
+                   FROM tenant_ai_credentials WHERE tenant_id=$1 AND provider=$2
+                   AND credential_kind=$3 AND status='active' FOR UPDATE""",
+                tenant_id, payload.provider, payload.credential_kind,
+            )
             # Disable any existing active row for this tuple. Every disabled
             # version is kept as history: since migration 0067 only the ACTIVE
             # row is unique (partial index), so any number of disabled rows can
@@ -149,10 +193,10 @@ async def create_credential(
                 """
                 INSERT INTO tenant_ai_credentials
                     (tenant_id, provider, credential_kind, encrypted_key,
-                     last4, label, status)
-                VALUES ($1, $2, $3, $4, $5, $6, 'active')
+                     last4, label, status, validation_status, last_checked_at)
+                VALUES ($1, $2, $3, $4, $5, $6, 'active', $7, $8)
                 RETURNING id, tenant_id, provider, credential_kind, last4, label,
-                          status, created_at, last_used_at
+                          status, created_at, last_used_at, validation_status, last_checked_at
                 """,
                 tenant_id,
                 payload.provider,
@@ -160,6 +204,17 @@ async def create_credential(
                 encrypted,
                 last4,
                 payload.label,
+                checked.status,
+                checked.checked_at,
+            )
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED,
+                action="ai_credential.rotate" if before else "ai_credential.create",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_id,
+                resource_type="ai_credential", resource_id=row["id"],
+                before_state=_credential_state(before),
+                after_state={"active": _credential_state(row),
+                             "previous": {**_credential_state(before), "status": "disabled"} if before else None},
             )
 
     # After commit: invalidating inside the transaction would let a concurrent
@@ -174,22 +229,75 @@ async def create_credential(
     return _row_to_response(row)
 
 
+@router.post("/{credential_id}/check", response_model=CredentialResponse)
+async def check_credential(
+    credential_id: ResourceUUID,
+    current_user: CurrentUser = Depends(require_admin),
+    db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
+) -> CredentialResponse:
+    """Recheck a fixed saved version, leaving activation and ciphertext intact."""
+    tenant_id = _require_tenant(current_user)
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        before = await conn.fetchrow(
+            """SELECT id, tenant_id, provider, credential_kind, encrypted_key, updated_at,
+                      last4, label, status, validation_status, last_checked_at
+               FROM tenant_ai_credentials WHERE tenant_id=$1 AND id=$2""",
+            tenant_id, credential_id,
+        )
+    if before is None:
+        raise HTTPException(404, "Credential not found")
+    if before["credential_kind"] != "api_key" or before["provider"] not in SUPPORTED_PROVIDERS:
+        raise HTTPException(400, detail={"code": "provider_key_check_unsupported",
+                                        "message": "This credential type cannot be checked."})
+    try:
+        api_key = get_encryption_service().decrypt(before["encrypted_key"])
+    except Exception:
+        raise HTTPException(503, detail={"code": "provider_key_check_unavailable",
+                                        "message": "Saved credential verification is temporarily unavailable."}) from None
+    # Provider I/O holds no DB transaction or audit lock.
+    checked = await _check_key(before["provider"], api_key)
+    async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
+        row = await conn.fetchrow(
+            """UPDATE tenant_ai_credentials
+               SET validation_status=$3, last_checked_at=$4
+               WHERE tenant_id=$1 AND id=$2 AND updated_at=$5
+               RETURNING id, tenant_id, provider, credential_kind, last4, label,
+                         status, created_at, last_used_at, validation_status, last_checked_at""",
+            tenant_id, credential_id, checked.status, checked.checked_at, before["updated_at"],
+        )
+        if row is None:
+            raise HTTPException(409, detail={"code": "credential_changed",
+                                            "message": "The saved credential changed during verification. Reload and check again."})
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="ai_credential.check",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_id,
+            resource_type="ai_credential", resource_id=row["id"],
+            before_state=_credential_state(before), after_state=_credential_state(row),
+        )
+    return _row_to_response(row)
+
+
 @router.delete("/{credential_id}", status_code=204, response_class=Response)
 async def disable_credential(
     credential_id: str,
     current_user: CurrentUser = Depends(require_admin),  # audit #16: tenant-admin only
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Disable a credential. Row kept for audit; resolver ignores
     disabled rows."""
     tenant_id = _require_tenant(current_user)
     provider: Optional[str] = None
     async with acquire_with_tenant(db_pool, tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
         target = await conn.fetchrow(
             """
-            SELECT provider, credential_kind, status
+            SELECT id, tenant_id, provider, credential_kind, last4, label, status,
+                   validation_status, last_checked_at
             FROM tenant_ai_credentials
-            WHERE tenant_id = $1 AND id = $2
+            WHERE tenant_id = $1 AND id = $2 FOR UPDATE
             """,
             tenant_id,
             credential_id,
@@ -204,6 +312,13 @@ async def disable_credential(
                 """,
                 tenant_id,
                 credential_id,
+            )
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="ai_credential.disable",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_id,
+                resource_type="ai_credential", resource_id=target["id"],
+                before_state=_credential_state(target),
+                after_state={**_credential_state(target), "status": "disabled"},
             )
     if provider is not None:
         # After commit, see create_credential.

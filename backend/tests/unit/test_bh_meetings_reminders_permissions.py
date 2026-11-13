@@ -9,16 +9,17 @@ from app.api.v1 import dependencies
 from app.api.v1.endpoints import meetings
 
 TENANT = '00000000-0000-0000-0000-000000000001'
+MEETING = '00000000-0000-0000-0000-000000000002'
 WRITES = [
     ('post', '/meetings/', {'title': 'Demo', 'start_time': '2030-01-01T10:00:00Z', 'attendees': []}),
-    ('put', '/meetings/m1', {'title': 'Moved'}),
-    ('delete', '/meetings/m1', None),
+    ('put', f'/meetings/{MEETING}', {'title': 'Moved'}),
+    ('delete', f'/meetings/{MEETING}', None),
 ]
 
 
 def client_for(role, monkeypatch):
     service = MagicMock()
-    service.create_meeting = AsyncMock(return_value={'success': True, 'meeting_id': 'm1'})
+    service.create_meeting = AsyncMock(return_value={'success': True, 'meeting_id': MEETING})
     service.update_meeting = AsyncMock(return_value={'success': True})
     service.cancel_meeting = AsyncMock(return_value={'success': True})
     service.list_meetings = AsyncMock(return_value=[])
@@ -44,9 +45,22 @@ def test_low_privilege_roles_cannot_change_calendars(monkeypatch, role, method, 
 
 @pytest.mark.parametrize('method,path,body', WRITES)
 def test_tenant_admin_can_still_change_calendars(monkeypatch, method, path, body):
-    client, _ = client_for('tenant_admin', monkeypatch)
+    client, service = client_for('tenant_admin', monkeypatch)
     response = getattr(client, method)(path, **({'json': body} if body is not None else {}))
     assert response.status_code == 200, response.text
+    if method == 'post':
+        service.create_meeting.assert_awaited_once()
+        assert service.create_meeting.await_args.kwargs['tenant_id'] == TENANT
+        assert service.create_meeting.await_args.kwargs['title'] == body['title']
+    elif method == 'put':
+        service.update_meeting.assert_awaited_once_with(
+            tenant_id=TENANT, meeting_id=MEETING, new_start_time=None,
+            new_title='Moved', new_description=None, new_attendees=None,
+        )
+    else:
+        service.cancel_meeting.assert_awaited_once_with(
+            tenant_id=TENANT, meeting_id=MEETING, reason=None,
+        )
 
 
 def test_ordinary_user_can_still_list_meetings(monkeypatch):

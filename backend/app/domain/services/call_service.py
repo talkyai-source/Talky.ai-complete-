@@ -33,6 +33,7 @@ from app.domain.services.dialer.job_states import IN_FLIGHT_STATUSES
 from app.domain.services.dialer.job_lifecycle import NOT_ORIGINATED_JOB_STATUSES
 from app.workers.disposition_policy import DNC_OUTCOMES
 from app.domain.services.dnc_service import normalize_e164_for_storage
+from app.domain.services.campaign_alerts import record_terminal_call
 
 logger = logging.getLogger(__name__)
 
@@ -759,6 +760,11 @@ class CallService:
                         "attempt_number": retry_attempt_number,
                         "delay_seconds": retry_delay_seconds,
                     }
+
+                # Count a completed call once, not job deferrals or repeated
+                # provider callbacks. Its visible alert/mail intent commits
+                # with the same settlement, before the durable marker.
+                await record_terminal_call(conn, call_tenant_id, call_uuid)
 
                 # Commit marker is intentionally the last DB write in this
                 # transaction. Any exception above rolls back the terminal row

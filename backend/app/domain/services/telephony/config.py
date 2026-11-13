@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Optional
 
 from app.domain.services.telephony_session_config import (
     TELEPHONY_COMPANY_NAME,
     _warn_company_name_fallback,
+    build_identity_opener,
     build_persona_greeting,
     build_telephony_session_config,
     build_telephony_greeting,
@@ -167,13 +169,51 @@ def _resolve_greeting_context(session) -> tuple[str, str]:
     return agent_name, TELEPHONY_COMPANY_NAME
 
 
-def _build_call_greeting(session, *, first_speaker: str) -> str:
+def _call_direction(session) -> str:
+    config = getattr(session, "config", None)
+    raw_direction = getattr(session, "_call_direction", None)
+    if raw_direction is None:
+        raw_direction = getattr(config, "direction", Direction.OUTBOUND) if config else Direction.OUTBOUND
+    return (
+        raw_direction.value
+        if isinstance(raw_direction, Direction)
+        else str(raw_direction or "outbound").strip().lower()
+    )
+
+
+def _callee_first_name(session) -> Optional[str]:
+    """The lead's cleaned first name (VoiceSessionConfig.callee_first_name)."""
+    for holder in (getattr(session, "_voice_session_ref", None), session):
+        config = getattr(holder, "config", None)
+        name = getattr(config, "callee_first_name", None) if config is not None else None
+        if isinstance(name, str) and name.strip():
+            return name.strip()
+    return None
+
+
+_OPENER_NAME = re.compile(r"(Am I speaking with )[^?]*\?")
+
+
+def opener_for_log(text: Optional[str]) -> str:
+    """The opener without the callee's name, for log lines."""
+    return _OPENER_NAME.sub(r"\1<name>?", text or "")
+
+
+def outbound_opener_with_notice(session) -> Optional[str]:
+    """The outbound opener saying ", on a recorded line"; None on an inbound call."""
+    if _call_direction(session) == "inbound":
+        return None
+    return _build_call_greeting(session, first_speaker="agent", recorded_line=True)
+
+
+def _build_call_greeting(session, *, first_speaker: str, recorded_line: bool = False) -> str:
     """Build the spoken greeting for the call's persona.
 
     Direction comes from the pinned session config, never from first-speaker
     timing. Genuine inbound agent-first calls consume the configured inbound
     greeting when present, otherwise an inbound persona greeting. Outbound
-    calls preserve their historical pickup opener.
+    calls open with the identity line: agent, company, that it is an AI
+    assistant, and the callee's name (owner decision 2026-11-05, QA F12-03).
 
     Falls back to the generic outbound opener when ``persona_type`` is
     None (legacy estimation campaign) or missing from the dispatch
@@ -190,37 +230,23 @@ def _build_call_greeting(session, *, first_speaker: str) -> str:
     del first_speaker
     agent_name, company = _resolve_greeting_context(session)
 
-    config = getattr(session, "config", None)
-    raw_direction = getattr(session, "_call_direction", None)
-    if raw_direction is None:
-        raw_direction = getattr(config, "direction", Direction.OUTBOUND) if config else Direction.OUTBOUND
-    direction = (
-        raw_direction.value
-        if isinstance(raw_direction, Direction)
-        else str(raw_direction or "outbound").strip().lower()
-    )
+    direction = _call_direction(session)
     if direction == "inbound":
         custom = getattr(session, "_inbound_greeting", None)
         if isinstance(custom, str) and custom.strip():
             return custom.strip()
-
-    # ── LLM-authored opener (flag-gated, default OFF) ────────────────────
-    # `prewarm._attach_llm_opener` may have stashed a per-lead opener on the
-    # session during the PRE-ORIGINATE window (before the callee's phone rang).
-    # It is only ever set after passing `llm_opener.validate_opener`, so if the
-    # attribute is present the text is already known to satisfy the word
-    # budget, the banned shapes, the identity requirement and the
-    # ends-in-one-question rule. Absent — which is every call until the flag is
-    # turned on, and every call where generation failed for any reason — this
-    # falls straight through to the templates below, unchanged.
-    #
-    # Read here rather than in prewarm so BOTH spoken paths are covered: the
-    # pre-synth fast path (prepare_pre_originate_greeting) and the realtime
-    # slow-path fallback in modes.agent_first._send_outbound_greeting both
-    # arrive at this one function for their text.
-    generated = getattr(session, "_llm_opener_text", None)
-    if direction != "inbound" and isinstance(generated, str) and generated.strip():
-        return generated.strip()
+    else:
+        # The flag-gated LLM opener (`_llm_opener_text`, llm_opener.py) is not
+        # read: it was written to hide the AI ("You are a person") and must
+        # never replace this line. The raw agent name, not the "your
+        # assistant" fallback, so an unnamed agent says "an AI assistant".
+        agent_config = getattr(session, "agent_config", None)
+        return build_identity_opener(
+            getattr(agent_config, "agent_name", None) if agent_config else None,
+            company,
+            _callee_first_name(session),
+            recorded_line=recorded_line,
+        )
 
     # Persona drives which greeting template is used. It is mirrored straight
     # onto the CallSession (CallSession.persona_type, copied from the

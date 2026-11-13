@@ -25,14 +25,10 @@ from app.domain.models.ai_config import (
     DEEPGRAM_MODELS,
     DEEPGRAM_TTS_MODELS,
     ELEVENLABS_TTS_MODELS,
-    CEREBRAS_MODELS,
-    GEMINI_MODELS,
     GOOGLE_TTS_MODELS,
-    GROQ_MODELS,
-    OPENAI_MODELS,
-    DEEPSEEK_MODELS,
     ProviderListResponse,
     STT_ENGINES,
+    offered_traditional_llm_models,
 )
 from app.infrastructure.tts.elevenlabs_catalog import (
     elevenlabs_enabled,
@@ -80,19 +76,20 @@ async def list_providers(current_user=Depends(get_current_user)):
         tts_models.extend(model.model_dump() for model in (elevenlabs_models or ELEVENLABS_TTS_MODELS))
 
     # The catalog drives the traditional picker; native Realtime stays separate.
+    offered = offered_traditional_llm_models()
     llm_providers: list[str] = ["groq"]
-    llm_models = [model.model_dump() for model in GROQ_MODELS]
+    llm_models = [model.model_dump() for model in offered["groq"]]
     if realtime_available:
         llm_providers.append("openai")
-        llm_models.extend(model.model_dump() for model in OPENAI_MODELS)
+        llm_models.extend(model.model_dump() for model in offered["openai"])
     if os.getenv("CEREBRAS_API_KEY"):
         llm_providers.append("cerebras")
-        llm_models.extend(model.model_dump() for model in CEREBRAS_MODELS)
+        llm_models.extend(model.model_dump() for model in offered["cerebras"])
     # 2026-10-01 (owner decision): Google is offered again, with exactly ONE
-    # model -- Gemini 3.8 Flash. The older Gemini ids stay accepted on save
-    # (a tenant may have one stored) but are never shown.
+    # model -- Gemini 3.8 Flash. Older saved IDs remain readable/runtime-known,
+    # while an explicit save must select a currently offered model.
     if os.getenv("GEMINI_API_KEY"):
-        gemini_offered = [m for m in GEMINI_MODELS if m.id == "gemini-3.8-flash"]
+        gemini_offered = offered["gemini"]
         if gemini_offered:
             llm_providers.append("gemini")
             llm_models.extend(model.model_dump() for model in gemini_offered)
@@ -100,7 +97,7 @@ async def list_providers(current_user=Depends(get_current_user)):
     # Single key or the DEEPSEEK_API_KEYS pool (2026-10-19) both count.
     if resolve_sync_env_only("deepseek"):
         llm_providers.append("deepseek")
-        llm_models.extend(model.model_dump() for model in DEEPSEEK_MODELS)
+        llm_models.extend(model.model_dump() for model in offered["deepseek"])
 
     return ProviderListResponse(
         llm={

@@ -62,7 +62,7 @@ Turn timing is aggressive by design: a 500 ms timeout ends a turn quickly but ca
 | ID | Standard | Target | Where | Status |
 |---|---|---|---|---|
 | HAL-1 | Facts come only from the knowledge or the prompt; otherwise say you can't confirm | grounding rule in every prompt | `policies/company_knowledge.md` | MEETS |
-| HAL-2 | Money and percentages spoken must appear in what the agent was given or heard | per-sentence value check before TTS, for digits and for numbers written as words (cardinals, lakh/crore, "point" decimals); derived figures withheld; bare numbers logged only | `figure_grounding.py`, wired in `turn_streamer.py` | MEETS (words since 2026-10-09; DeepSeek speaks every price as words) |
+| HAL-2 | Money and percentages spoken must appear in what the agent was given, never only in the caller's words; a percentage only as a percentage | per-sentence value check before TTS, for digits and for numbers written as words (cardinals, lakh/crore, "point" decimals); derived figures withheld; bare numbers logged only | `figure_grounding.py`, wired in `turn_streamer.py` | MEETS (words since 2026-10-09; DeepSeek speaks every price as words) |
 | HAL-3 | No claim that an action happened without a result that allows it | sentence replaced unless `confirmation_allowed` | `speech_guard.py` | MEETS |
 | HAL-4 | Internal identifiers are never spoken | section ids stripped | `speech_guard.py` `_SECTION_ID` | MEETS |
 | HAL-5 | Every knowledge lookup is traceable | one log line: arguments, status, passage count, size (never source text) | `knowledge_tool.py` `run_knowledge_lookup` | MEETS |

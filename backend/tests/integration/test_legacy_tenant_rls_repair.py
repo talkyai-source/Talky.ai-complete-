@@ -10,6 +10,7 @@ import pytest
 import pytest_asyncio
 
 from tests.integration.test_admin_real_auth_journey import protected_snapshot, reviewed_database
+from tests.integration.test_support_migration import _repository_head
 
 MIGRATION = import_module("Alembic.versions.0077_legacy_tenant_rls_repair")
 pytestmark = pytest.mark.integration
@@ -46,7 +47,7 @@ async def repair_db():
             r"admin_rls_[0-9a-f]{32}_test", database
         ), "This DDL regression must run only in its owned clone or explicit CI fixture"
         before = await protected_snapshot(conn)
-        assert before["head"] == "0083_pay_as_you_go"
+        assert before["head"] == _repository_head()
         tx = conn.transaction()
         await tx.start()
         await conn.execute(f'CREATE ROLE "{role}" NOLOGIN NOSUPERUSER NOBYPASSRLS')

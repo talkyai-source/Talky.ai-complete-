@@ -41,7 +41,7 @@ const RealWebSocket = globalThis.WebSocket;
 const router = { push() {}, replace() {}, refresh() {}, back() {}, forward() {}, async prefetch() {} } as unknown as React.ContextType<typeof AppRouterContext>;
 afterEach(() => { cleanup(); mock.restoreAll(); globalThis.WebSocket = RealWebSocket; });
 
-const summary = { total_calls: 0, answered_calls: 0, failed_calls: 0, minutes_used: 0, minutes_remaining: 100, active_campaigns: 0 };
+const summary = { timezone: "UTC", total_calls: 0, answered_calls: 0, failed_calls: 0, minutes_used: 0, minutes_remaining: 100, active_campaigns: 0 };
 const shown = (text: string) => screen.queryAllByText(text).length;
 const heading = (name: string) => screen.getByRole("heading", { name });
 const card = (name: string) => within(heading(name).closest(".rounded-2xl") as HTMLElement);

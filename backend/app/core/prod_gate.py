@@ -15,6 +15,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import os
+import re
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
@@ -50,14 +51,67 @@ class GateViolation:
     detail: str
 
 
+KNOWN_ENVIRONMENTS = frozenset({"production", "staging", "development", "test"})
+
+
+def normalized_environment() -> str:
+    """ENVIRONMENT stripped and lower-cased: the one reading every production
+    decision uses (QA F2-15: " production" kept this gate but opened /docs).
+    Unset means development."""
+    return (os.getenv("ENVIRONMENT") or "development").strip().lower()
+
+
+def secret_strength_warnings() -> list[str]:
+    """Secrets that are set but too weak to trust (QA F2-15).
+
+    Reported, not yet fatal: production's values cannot be checked from
+    here, and refusing to boot on them could take it down at the next
+    deploy. Make them violations once production is confirmed to meet them.
+    """
+    import base64
+    import binascii
+
+    from cryptography.fernet import Fernet
+
+    warnings: list[str] = []
+    jwt_secret = (os.getenv("JWT_SECRET", "") or "").strip()
+    if jwt_secret and len(jwt_secret) < 32:
+        warnings.append("JWT_SECRET is shorter than 32 characters")
+    master = (os.getenv("SECRETS_MASTER_KEY", "") or "").strip()
+    if master:
+        try:
+            key = bytes.fromhex(master)
+        except ValueError:
+            try:
+                key = base64.b64decode(master)
+            except (binascii.Error, ValueError):
+                key = b""
+        if len(key) != 32:
+            warnings.append("SECRETS_MASTER_KEY is not a 32-byte key (64 hex characters)")
+    totp_key = (os.getenv("TOTP_ENCRYPTION_KEY", "") or "").strip()
+    try:
+        Fernet(totp_key.encode())
+    except (ValueError, TypeError):
+        warnings.append("TOTP_ENCRYPTION_KEY is missing or not a Fernet key: MFA setup fails")
+    return warnings
+
+
 def enforce_production_gate() -> None:
     """Raise ProductionGateError if this process should not run in its
     current environment.
 
-    No-op for dev/staging — only the "production" environment triggers
-    strict checks. Logs a structured summary either way.
+    An ENVIRONMENT nobody knows ("prod", "productoin") refuses to boot: it
+    used to skip every production check (QA F2-15). Otherwise a no-op for
+    dev/staging — only "production" triggers strict checks. Logs a
+    structured summary either way.
     """
-    environment = os.getenv("ENVIRONMENT", "development").strip().lower()
+    environment = normalized_environment()
+    if environment not in KNOWN_ENVIRONMENTS:
+        raise ProductionGateError(
+            "Startup refused: [unknown_environment] ENVIRONMENT="
+            f"{os.getenv('ENVIRONMENT')!r} is not one of "
+            f"{', '.join(sorted(KNOWN_ENVIRONMENTS))}"
+        )
     if environment != "production":
         logger.info(
             "prod_gate_skipped environment=%s — strict checks are PROD-only",
@@ -70,8 +124,12 @@ def enforce_production_gate() -> None:
     violations.extend(_check_staging_only_flags())
     violations.extend(_check_pbx_default_credentials())
     violations.extend(_check_required_secrets())
+    violations.extend(_check_account_sender())
     violations.extend(_check_caller_id_enforcement())
     violations.extend(_check_inbound_strict_routing())
+
+    for warning in secret_strength_warnings():
+        logger.warning("prod_gate_warning %s", warning)
 
     if not violations:
         logger.info("prod_gate_passed — all production-mandatory checks ok")
@@ -84,6 +142,17 @@ def enforce_production_gate() -> None:
     for v in violations:
         msg_lines.append(f"  - [{v.rule}] {v.detail}")
     raise ProductionGateError("\n".join(msg_lines))
+
+
+def _check_account_sender() -> list[GateViolation]:
+    """Account mail must use a bare address on the owned sending domain."""
+    atom = r"[A-Za-z0-9!#$%&'*+/=?^_`{|}~-]+"
+    if re.fullmatch(rf"{atom}(?:\.{atom})*@talkleeai\.com", os.getenv("FROM_EMAIL", ""), re.IGNORECASE):
+        return []
+    return [GateViolation(
+        rule="invalid_account_sender",
+        detail="FROM_EMAIL must be a bare email address on talkleeai.com.",
+    )]
 
 
 def _check_guard_bypass_flags() -> list[GateViolation]:

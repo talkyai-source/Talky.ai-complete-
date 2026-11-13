@@ -17,15 +17,18 @@ import asyncpg
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool
+from app.api.v1.dependencies import CurrentUser, get_audit_logger, get_current_user, get_db_pool
 from app.core.container import get_container
 from app.core.db_utils import acquire_with_tenant
 from app.core.tenant_rls import apply_tenant_rls_context
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.telephony.trunk_runtime import (
     evaluate_trunk_runtime,
     trunk_status_freshness_seconds,
 )
 from app.infrastructure.connectors.encryption import get_encryption_service
+
+from ._audit import snapshot as audit_snapshot
 
 from ._shared import (
     _canonical_domain,
@@ -366,6 +369,7 @@ async def create_sip_trunk(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -403,6 +407,7 @@ async def create_sip_trunk(
         user_id=current_user.id,
         request_id=request.headers.get("x-request-id"),
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,
@@ -515,6 +520,12 @@ async def create_sip_trunk(
 
             response_model = _row_to_response(row)
             response_payload = response_model.model_dump(mode="json")
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.trunk.create",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                resource_type="sip_trunk", resource_id=row["id"],
+                before_state=None, after_state=audit_snapshot(row),
+            )
             await _store_idempotency_result(
                 conn,
                 tenant_id=current_user.tenant_id,
@@ -538,6 +549,7 @@ async def update_sip_trunk(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -570,6 +582,7 @@ async def update_sip_trunk(
         user_id=current_user.id,
         request_id=request.headers.get("x-request-id"),
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,
@@ -775,6 +788,12 @@ async def update_sip_trunk(
 
             response_model = _row_to_response(row)
             response_payload = response_model.model_dump(mode="json")
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.trunk.update",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                resource_type="sip_trunk", resource_id=row["id"],
+                before_state=audit_snapshot(existing), after_state=audit_snapshot(row),
+            )
             await _store_idempotency_result(
                 conn,
                 tenant_id=current_user.tenant_id,
@@ -808,6 +827,7 @@ async def _set_trunk_active_state(
     request_id: Optional[str],
     current_user: CurrentUser,
     db_pool: asyncpg.Pool,
+    audit_logger: AuditLogger,
 ) -> JSONResponse | SIPTrunkResponse:
     if not idempotency_key:
         return _problem(
@@ -829,6 +849,7 @@ async def _set_trunk_active_state(
         user_id=current_user.id,
         request_id=request.headers.get("x-request-id"),
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,
@@ -956,6 +977,13 @@ async def _set_trunk_active_state(
 
             response_model = _row_to_response(row)
             response_payload = response_model.model_dump(mode="json")
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED,
+                action="sip.trunk.activate" if active_state else "sip.trunk.deactivate",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                resource_type="sip_trunk", resource_id=row["id"],
+                before_state=audit_snapshot(existing), after_state=audit_snapshot(row),
+            )
             await _store_idempotency_result(
                 conn,
                 tenant_id=current_user.tenant_id,
@@ -988,6 +1016,7 @@ async def activate_sip_trunk(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -1000,6 +1029,7 @@ async def activate_sip_trunk(
         request_id=x_request_id,
         current_user=current_user,
         db_pool=db_pool,
+        audit_logger=audit_logger,
     )
 
 
@@ -1011,6 +1041,7 @@ async def deactivate_sip_trunk(
     x_request_id: Optional[str] = Header(default=None, alias="X-Request-ID"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     tenant_problem = _require_tenant(request, current_user)
     if tenant_problem:
@@ -1023,6 +1054,7 @@ async def deactivate_sip_trunk(
         request_id=x_request_id,
         current_user=current_user,
         db_pool=db_pool,
+        audit_logger=audit_logger,
     )
 
 
@@ -1096,6 +1128,7 @@ async def test_sip_trunk(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Report a line's real state: address, reachability, credentials, registration.
 
@@ -1198,12 +1231,20 @@ async def test_sip_trunk(
         user_id=current_user.id,
         request_id=request.headers.get("x-request-id"),
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         await apply_tenant_rls_context(
             conn,
             current_user.tenant_id,
             current_user.id,
             request_id=request.headers.get("x-request-id"),
         )
+        before = await conn.fetchrow(
+            "SELECT last_tested_at, last_test_result FROM tenant_sip_trunks "
+            "WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL FOR UPDATE",
+            current_user.tenant_id, trunk_id,
+        )
+        if not before:
+            return _problem(request, 404, "Trunk Not Found", "The trunk was removed during the check.", "trunk-not-found")
         await conn.execute(
             """
             UPDATE tenant_sip_trunks
@@ -1216,6 +1257,13 @@ async def test_sip_trunk(
             result,
             trunk_id,
             current_user.tenant_id,
+        )
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.trunk.check",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+            resource_type="sip_trunk", resource_id=trunk_id,
+            before_state=audit_snapshot({"last_tested_at": before["last_tested_at"], "last_test_result": before["last_test_result"]}),
+            after_state=audit_snapshot({"last_tested_at": tested_at, "last_test_result": result}),
         )
 
     return SIPTrunkTestResponse(
@@ -1439,6 +1487,7 @@ async def set_pool_assignment(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Allot a shared-pool account to this tenant (or clear it with null)."""
     tenant_problem = _require_tenant(request, current_user)
@@ -1450,17 +1499,28 @@ async def set_pool_assignment(
         async with acquire_with_tenant(
             db_pool, current_user.tenant_id, user_id=current_user.id
         ) as conn:
+            await audit_logger.lock_transaction(conn)
             await apply_tenant_rls_context(conn, current_user.tenant_id, current_user.id)
+            before = await conn.fetchrow("SELECT calling_rules FROM tenants WHERE id=$1 FOR UPDATE", current_user.tenant_id)
             await conn.execute(
                 "UPDATE tenants SET calling_rules = (COALESCE(calling_rules,'{}'::jsonb) - 'pool_trunk'), "
                 "updated_at = NOW() WHERE id = $1",
                 current_user.tenant_id,
+            )
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.pool_assignment.clear",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                resource_type="tenant", resource_id=current_user.tenant_id,
+                before_state=audit_snapshot({"pool_trunk": (_coerce_jsonb(before["calling_rules"]) or {}).get("pool_trunk")}),
+                after_state={"pool_trunk": None},
             )
         return PoolAssignmentResponse()
 
     # Keep the trunk share lock through assignment so deletion cannot leave
     # behind a new dangling JSON reference after checking existing users.
     async with acquire_with_tenant(db_pool, current_user.tenant_id, user_id=current_user.id) as conn:
+        await audit_logger.lock_transaction(conn)
+        before = await conn.fetchrow("SELECT calling_rules FROM tenants WHERE id=$1 FOR UPDATE", current_user.tenant_id)
         pool = await _fetch_pool_trunk(conn, pid, current_user.tenant_id)
         if pool is None or not evaluate_trunk_runtime(dict(pool), require_inbound=False).ready:
             return _problem(
@@ -1476,6 +1536,13 @@ async def set_pool_assignment(
             "UPDATE tenants SET calling_rules = COALESCE(calling_rules,'{}'::jsonb) "
             "|| jsonb_build_object('pool_trunk', $2::jsonb), updated_at = NOW() WHERE id = $1",
             current_user.tenant_id, snapshot,
+        )
+        await audit_logger.log_in_transaction(
+            conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.pool_assignment.set",
+            actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+            resource_type="tenant", resource_id=current_user.tenant_id,
+            before_state=audit_snapshot({"pool_trunk": (_coerce_jsonb(before["calling_rules"]) or {}).get("pool_trunk")}),
+            after_state=audit_snapshot({"pool_trunk": snapshot}),
         )
     return PoolAssignmentResponse(
         pool_trunk_id=snapshot["id"], label=snapshot["label"], caller_id=snapshot["caller_id"]
@@ -1612,6 +1679,7 @@ async def set_campaign_trunk_assignment(
     request: Request,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Allot a specific trunk to one campaign (or clear it with null).
 
@@ -1633,8 +1701,9 @@ async def set_campaign_trunk_assignment(
                 user_id=current_user.id,
                 timeout=_CAMPAIGN_ASSIGNMENT_DB_TIMEOUT_S,
             ) as conn:
+                await audit_logger.lock_transaction(conn)
                 campaign = await conn.fetchrow(
-                    "SELECT id, direction FROM campaigns "
+                    "SELECT id, direction, calling_config FROM campaigns "
                     "WHERE id = $1::uuid AND tenant_id = $2::uuid FOR UPDATE",
                     campaign_id,
                     current_user.tenant_id,
@@ -1706,6 +1775,14 @@ async def set_campaign_trunk_assignment(
                         current_user.tenant_id,
                         # Raw dict — see create-path comment above.
                         snapshot,
+                    )
+                if updated == "UPDATE 1":
+                    await audit_logger.log_in_transaction(
+                        conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.campaign_assignment.set" if snapshot else "sip.campaign_assignment.clear",
+                        actor_id=current_user.id, actor_role=current_user.role, tenant_id=current_user.tenant_id,
+                        resource_type="campaign", resource_id=campaign_id,
+                        before_state=audit_snapshot({"trunk": (_coerce_jsonb(campaign["calling_config"]) or {}).get("trunk")}),
+                        after_state=audit_snapshot({"trunk": snapshot}),
                     )
     except Exception as exc:  # noqa: BLE001 - DB uncertainty is not not-found
         logger.error("campaign_trunk_assignment_write_failed: %s", exc)
@@ -1885,6 +1962,7 @@ async def delete_sip_trunk(
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
     """Delete one of the tenant's own lines. Switching it off first is not required.
 
@@ -1914,6 +1992,7 @@ async def delete_sip_trunk(
     async with acquire_with_tenant(
         db_pool, tenant_id, user_id=current_user.id
     ) as conn:
+        await audit_logger.lock_transaction(conn)
         async with conn.transaction():
             state, cached, code = await _claim_idempotency(
                 conn,
@@ -1993,6 +2072,15 @@ async def delete_sip_trunk(
 
             from app.infrastructure.telephony.pjsip_config_generator import remove_trunk_config
 
+            # Stage the receipt before external configuration removal. It is
+            # published only with the successful deletion transaction below;
+            # audit refusal must never remove an active Asterisk endpoint.
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.CONFIG_CHANGED, action="sip.trunk.delete",
+                actor_id=current_user.id, actor_role=current_user.role, tenant_id=tenant_id,
+                resource_type="sip_trunk", resource_id=trunk_id,
+                before_state=audit_snapshot(row), after_state={"deleted": True, "is_active": False},
+            )
             try:
                 await remove_trunk_config(
                     str(trunk_id), require_reload=_requires_confirmed_pjsip_apply()

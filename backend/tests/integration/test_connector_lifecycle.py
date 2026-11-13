@@ -167,10 +167,11 @@ async def test_concurrent_refresh_dispatches_only_once(connector_db):
 
 
 @pytest.mark.parametrize("outcome", ["timeout", "cancel", "save_failure"])
-async def test_unknown_refresh_is_never_replayed(connector_db, outcome):
+@pytest.mark.parametrize("provider_name", ["gmail", "salesforce"])
+async def test_unknown_refresh_retries_only_reusable_grants_once(connector_db, outcome, provider_name):
     db = connector_db
-    cid, _ = await db.new_connector(config={"preserve": True})
-    remote = provider(config={"instance_url": "https://synthetic.example.invalid"})
+    cid, _ = await db.new_connector(provider=provider_name, config={"preserve": True})
+    remote = provider(name=provider_name, config={"instance_url": "https://synthetic.example.invalid"})
     if outcome == "timeout":
         remote.refresh_tokens.side_effect = TimeoutError("synthetic provider outcome unknown")
     elif outcome == "cancel":
@@ -183,10 +184,26 @@ async def test_unknown_refresh_is_never_replayed(connector_db, outcome):
     assert accounts[0]["refresh_state"] == "uncertain"
     assert accounts[0]["access_token_encrypted"] == "synthetic:old-access"
     assert json.loads(parent["config"]) == {"preserve": True}
-    retry = provider()
-    with pytest.raises(lifecycle.ConnectorLifecycleError, match="previous refresh outcome is unknown"):
+    retry = provider(name=provider_name)
+    if provider_name == "salesforce":
+        with pytest.raises(lifecycle.ConnectorLifecycleError, match="previous refresh outcome is unknown"):
+            await db.service.refresh(db.tenant, cid, connector=retry)
+        retry.refresh_tokens.assert_not_awaited()
+    elif outcome == "save_failure":
+        # The same synthetic storage trigger still fails the single recovery.
+        # Persisted retry ownership prevents a third provider dispatch.
+        with pytest.raises(asyncpg.RaiseError):
+            await db.service.refresh(db.tenant, cid, connector=retry)
+        retry.refresh_tokens.assert_awaited_once()
+        third = provider(name=provider_name)
+        with pytest.raises(lifecycle.ConnectorLifecycleError, match="safe retry is exhausted"):
+            await db.service.refresh(db.tenant, cid, connector=third)
+        third.refresh_tokens.assert_not_awaited()
+    else:
         await db.service.refresh(db.tenant, cid, connector=retry)
-    retry.refresh_tokens.assert_not_awaited()
+        retry.refresh_tokens.assert_awaited_once()
+        recovered = (await db.state(cid))[1][0]
+        assert recovered["refresh_state"] == "idle" and recovered["credential_generation"] == 1
 
 
 async def test_revoke_wins_over_inflight_refresh_without_false_provider_confirmation(connector_db):
@@ -351,17 +368,17 @@ async def test_expired_account_can_refresh_but_revoked_account_never_can(connect
     remote.refresh_tokens.assert_not_awaited()
 
 
-async def test_abandoned_claim_is_not_taken_over_even_after_a_day(connector_db):
+async def test_abandoned_rotating_claim_is_not_taken_over_even_after_a_day(connector_db):
     db = connector_db
-    cid, aid = await db.new_connector()
+    cid, aid = await db.new_connector(provider="salesforce")
     await db.owner.execute("""UPDATE connector_accounts SET refresh_state='in_flight',
         refresh_claim_id=$2,refresh_claimed_at=NOW()-INTERVAL '1 day' WHERE id=$1::uuid""", aid, uuid4())
-    remote = provider()
-    with pytest.raises(lifecycle.ConnectorLifecycleError, match="already in progress"):
+    remote = provider(name="salesforce")
+    with pytest.raises(lifecycle.ConnectorLifecycleError, match="previous refresh outcome is unknown"):
         await db.service.refresh(db.tenant, cid, connector=remote)
     remote.refresh_tokens.assert_not_awaited()
-    replacement, _ = await db.new_connector(status="pending")
-    await db.service.activate(db.tenant, replacement, "gmail", "email", account_data(), {})
+    replacement, _ = await db.new_connector(status="pending", provider="salesforce")
+    await db.service.activate(db.tenant, replacement, "salesforce", "crm", account_data(), {})
     parent, accounts = await db.state(cid)
     assert parent["status"] == "revoked" and accounts[0]["refresh_claim_id"] is None
 

@@ -13,7 +13,7 @@ export default function TermsPage() {
     <LegalDocument
       title="Terms of Service"
       effectiveDate="17 May 2026"
-      lastUpdated="17 May 2026"
+      lastUpdated="11 November 2026"
       summary={{
         title: "Legally Binding Agreement",
         text: "These Terms constitute a legally binding contract between you and Talk-Lee Limited. By creating an account or using Talk-Lee, you agree to be bound by these Terms. If you do not agree, do not use the service.",

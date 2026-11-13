@@ -174,6 +174,7 @@ export const termsBlocks: LegalBlock[] = [
     items: [
       `Subscriptions are billed monthly in advance unless otherwise agreed`,
       `Usage-based charges (call minutes, API requests) are billed monthly in arrears`,
+      `AI minutes used are the recorded duration of your calls, added up over each monthly period (a plan's allowance renews from the date you subscribe) and counted in whole minutes, rounded down`,
       `All payments processed by Stripe — we never store your payment card details`,
       `You authorise us to charge your payment method on file for all applicable fees`,
       `All prices are exclusive of applicable taxes`,
@@ -188,11 +189,6 @@ export const termsBlocks: LegalBlock[] = [
   {
     type: "p",
     text: `Monthly subscription fees are non-refundable once a billing period has commenced. Usage fees are non-refundable. We may provide refunds at our discretion for verified billing errors. Contact billing@talkleeai.com for billing disputes within 30 days of the invoice date.`,
-  },
-  { type: "h3", text: "6.5 Free Trials" },
-  {
-    type: "p",
-    text: `If we offer a free trial, your subscription will automatically begin at the end of the trial period unless you cancel before it ends. We will notify you before any trial ends.`,
   },
 
   { type: "h2", text: "7. Partner and Reseller Accounts" },
@@ -236,7 +232,7 @@ export const termsBlocks: LegalBlock[] = [
   { type: "h2", text: "9. Data, Privacy, and Processing" },
   {
     type: "p",
-    text: `Your use of Talk-Lee is subject to our Privacy Policy at talkleeai.com/privacy. A Data Processing Agreement (DPA) is available at talkleeai.com/dpa and is incorporated into these Terms for GDPR and UK GDPR compliance.`,
+    text: `Your use of Talk-Lee is subject to our Privacy Policy at talkleeai.com/privacy. A Data Processing Agreement (DPA) is available on request from privacy@talkleeai.com and is incorporated into these Terms for GDPR and UK GDPR compliance.`,
   },
   { type: "h3", text: "9.1 Your Data" },
   {
@@ -328,10 +324,10 @@ export const termsBlocks: LegalBlock[] = [
   },
 
   { type: "h2", text: "14. Service Availability" },
-  { type: "h3", text: "14.1 Uptime Target" },
+  { type: "h3", text: "14.1 Availability" },
   {
     type: "p",
-    text: `We aim to maintain 99.9% monthly uptime excluding scheduled maintenance. Scheduled maintenance will be communicated with reasonable advance notice. We do not guarantee uninterrupted service and are not liable for downtime.`,
+    text: `We work to keep the Service available, but we do not guarantee uninterrupted service and are not liable for downtime. Scheduled maintenance will be communicated with reasonable advance notice.`,
   },
   { type: "h3", text: "14.2 Modifications" },
   {

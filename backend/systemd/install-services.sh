@@ -10,6 +10,17 @@ SYSTEMD_DIR="/etc/systemd/system"
 echo "=== Talky.ai Systemd Service Installer ==="
 echo ""
 
+# Keep rebuilds on the same journal budget as the existing host. install -D
+# creates the drop-in directory and gives the non-secret policy an explicit mode.
+install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/journald-talky.conf" \
+  /etc/systemd/journald.conf.d/60-talky.conf
+systemctl restart systemd-journald.service
+
+# Apply the daemon priority on its next normal start; never restart Docker
+# from an application deploy, because it owns the live database containers.
+install -D -m 0644 "$SCRIPT_DIR/../deploy/infra/systemd/docker-oom.conf" \
+  /etc/systemd/system/docker.service.d/60-talky-oom.conf
+
 # 1. Symlink every service/target/timer file in this directory.
 #
 # backend/systemd/ is now the SINGLE source of truth for units. The second
@@ -25,10 +36,19 @@ for unit in "$SCRIPT_DIR"/*.service "$SCRIPT_DIR"/*.target "$SCRIPT_DIR"/*.timer
   ln -sf "$unit" "$SYSTEMD_DIR/$name"
 done
 
+# The selected recovery tool remains in scripts/database. Install only its
+# read-only health pair; physical/PITR schedules require separate owner setup.
+for name in talklee-db-backup-health.service talklee-db-backup-health.timer; do
+  ln -sf "$SCRIPT_DIR/../../scripts/database/systemd/$name" "$SYSTEMD_DIR/$name"
+done
+
 # The compatibility definition keeps old symlinks resolvable during checkout.
 # Disable the previous timer after linking it, before reloading definitions.
 # Only the service's own loop will refresh runtime evidence after this release.
 systemctl disable --now talky-trunk-status.timer
+
+# Deliberate operator test: dry-run unless --send is explicitly supplied.
+ln -sf "$SCRIPT_DIR/../deploy/talky-alert-test" /usr/local/bin/talky-alert-test
 
 # 2. Reload systemd
 echo ""
@@ -42,6 +62,8 @@ systemctl daemon-reload
 # anyone who runs this installer and moves on.
 #
 # Deliberate exceptions:
+#   * talky-notify@.service — instantiated only by OnFailure, never enabled as
+#     a daemon and deliberately has no recursive failure notification.
 #   * talky-trunk-status.timer — retained only for upgrade compatibility and
 #     disabled above; the long-running service replaces it.
 #   * talky-migrate.service — oneshot, started explicitly by deploy_to_server.sh
@@ -61,10 +83,13 @@ systemctl enable talky-dialer-worker.service
 systemctl enable talky-reminder-worker.service
 systemctl enable talky-voice-gateway.service   # C++ media gateway; see the unit's header
 systemctl enable talky-cleanup.timer   # activates talky-cleanup.service nightly
-systemctl enable talky-healthwatch.timer   # activates talky-healthwatch.service every 2 min
+systemctl enable talky-recording-discrepancy.timer --now  # read-only file/row reconciliation nightly
+systemctl enable talky-model-catalog.timer --now  # nightly credential-scoped saved-model report
+systemctl enable talky-healthwatch.timer   # activates bounded operational checks every minute
 systemctl enable talky-trunk-status.service  # refreshes runtime SIP evidence every 10 sec (loop)
 systemctl enable talky-inbound-synthetic.timer  # hourly carrier-hairpin proof
 systemctl enable talky-db-backup.timer  # nightly verified pg_dump (deploy/db-backup.sh)
+systemctl enable talklee-db-backup-health.timer --now  # actual local/remote integrity + age; unconfigured offhost alerts
 systemctl enable talky-support-jobs.timer  # support deadlines every 15 min + hourly housekeeping (no-op while SUPPORT_ENABLED=false)
 systemctl enable --now talky-asterisk-reconcile.timer # applies website line/number/inbound changes to Asterisk, every minute, only on drift
 systemctl enable talky.target

@@ -75,12 +75,43 @@ def _build(rows, tmp_path, **kwargs):
     )
 
 
+def _assert_extension_stasis_arguments(dialplan: str):
+    # Split the actual Stasis argv only at top-level commas. The encoded SIP
+    # header expressions themselves contain commas and nested parentheses.
+    lines = [line.strip() for line in dialplan.splitlines()
+             if "Stasis(talky_ai,inbound,ext:940003," in line]
+    assert len(lines) == 1
+    application = lines[0].split("Stasis(", 1)[1]
+    assert application.endswith(")")
+    arguments, current, depth = [], [], 0
+    for char in application[:-1]:
+        if char == "," and depth == 0:
+            arguments.append("".join(current))
+            current = []
+            continue
+        if char == "(":
+            depth += 1
+        elif char == ")":
+            depth -= 1
+            assert depth >= 0
+        current.append(char)
+    assert depth == 0
+    arguments.append("".join(current))
+    # Preserve the original four slots and permit exactly the two named,
+    # base64-encoded identity inputs; no raw header or asserted trust flag.
+    assert arguments[:4] == ["talky_ai", "inbound", "ext:940003", "${CONTEXT}"]
+    assert arguments[4:] == [
+        "cid_pai_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Asserted-Identity)})}",
+        "cid_attestation_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Attestation-Indicator)})}",
+    ]
+
+
 def test_a_bound_extension_renders_its_own_tagged_route(tmp_path):
     candidate = _build([_extension_row()], tmp_path)
 
     dialplan = candidate.files[reconcile.DIALPLAN_NAME].decode()
     assert "exten => 940003,1," in dialplan
-    assert "Stasis(talky_ai,inbound,ext:940003,${CONTEXT})" in dialplan
+    _assert_extension_stasis_arguments(dialplan)
     # The fail-closed catch-all is preserved, and it strips colons so untrusted
     # input can never arrive already tagged.
     assert "exten => _.,1," in dialplan
@@ -102,7 +133,7 @@ def test_an_extension_never_consults_the_public_did_inventory(tmp_path):
         verified_account_dids={"150001": "+442046132300"},
     )
     dialplan = candidate.files[reconcile.DIALPLAN_NAME].decode()
-    assert "Stasis(talky_ai,inbound,ext:940003,${CONTEXT})" in dialplan
+    _assert_extension_stasis_arguments(dialplan)
     assert "+442046132300" not in dialplan
 
 

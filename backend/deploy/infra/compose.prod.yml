@@ -32,6 +32,7 @@ services:
     # so it is a separate, planned change, never a side effect of this file.
     image: postgres@sha256:09e4f20b14ddb3dfe3a0c825b206032aaf8f28300ba2070c0b60fc1c10c6abc7
     container_name: talky-postgres-1
+    oom_score_adj: -900
     restart: unless-stopped
     logging: *logging
     environment:

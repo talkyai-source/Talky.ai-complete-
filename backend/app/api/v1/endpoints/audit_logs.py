@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from app.api.v1.dependencies import get_audit_logger, get_db_pool, require_permissions
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.rbac import UserRole, normalize_role
+from app.utils.csv_safe import csv_safe
 from app.domain.services.audit_logger import (
     AuditEvent,
     AuditLogger,
@@ -24,6 +25,9 @@ from app.domain.services.audit_logger import (
 )
 
 router = APIRouter(prefix="/admin/audit", tags=["Audit Logs"])
+
+# Rows in one audit export; the export says when it stopped here (QA F14-01).
+_EXPORT_ROW_LIMIT = 10_000
 
 
 def resolve_tenant_scope(current_user, requested_tenant_id, *, denied_detail: str):
@@ -107,8 +111,8 @@ async def query_audit_logs(
     tenant_id: Optional[UUID] = Query(None, description="Filter by tenant"),
     resource_type: Optional[str] = Query(None, description="Filter by resource type"),
     severity: Optional[Severity] = Query(None, description="Exact severity"),
-    limit: int = Query(100, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=10000),
     event_group: Optional[Literal["login", "role_change", "billing_change", "suspension"]] = None,
     user_query: Annotated[Optional[str], Query(max_length=255, description="Literal current actor name/email or saved actor UUID")] = None,
     partner_id: Annotated[Optional[UUID], Query(description="Platform only: current child tenants or direct partner resource")] = None,
@@ -233,12 +237,16 @@ async def export_audit_logs(
         current_user, tenant_id, denied_detail="Cannot export other tenant logs"
     )
 
+    # One row past the limit says whether the export is complete (QA F14-01:
+    # it stopped at 10,000 rows without saying so).
     logs = await audit_logger.query(
         start_date=start_date,
         end_date=end_date,
         tenant_id=tenant_id,
-        limit=10000,  # Max export size
+        limit=_EXPORT_ROW_LIMIT + 1,
     )
+    truncated = len(logs) > _EXPORT_ROW_LIMIT
+    logs = logs[:_EXPORT_ROW_LIMIT]
 
     # Log export
     await audit_logger.log(
@@ -258,6 +266,7 @@ async def export_audit_logs(
         return {
             "export_time": datetime.utcnow().isoformat(),
             "record_count": len(logs),
+            "truncated": truncated,
             "records": [
                 {
                     "event_id": str(log.event_id),
@@ -286,7 +295,7 @@ async def export_audit_logs(
             "description",
         ])
         for log in logs:
-            writer.writerow([
+            writer.writerow([csv_safe(cell) for cell in (
                 str(log.event_id),
                 log.event_time.isoformat(),
                 log.event_type.value if isinstance(log.event_type, AuditEvent) else log.event_type,
@@ -297,6 +306,10 @@ async def export_audit_logs(
                 str(log.resource_id) if log.resource_id else "",
                 log.action,
                 log.description or "",
+            )])
+        if truncated:
+            writer.writerow([
+                f"Export truncated at {_EXPORT_ROW_LIMIT:,} rows; narrow the date range for the rest."
             ])
         filename = f"audit_logs_{start_date.date().isoformat()}_{end_date.date().isoformat()}.csv"
         return Response(

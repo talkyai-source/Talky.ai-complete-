@@ -22,6 +22,8 @@ import pyotp
 import pytest
 import pytest_asyncio
 
+from tests.integration.test_support_migration import _repository_head
+
 
 pytestmark = pytest.mark.integration
 ROOT = Path(__file__).resolve().parents[3]
@@ -148,7 +150,7 @@ async def journey_db(monkeypatch):
     assert not app.dependency_overrides, "Authentication must use normal dependencies"
     owner = await asyncpg.connect(configured, command_timeout=30)
     before = await protected_snapshot(owner)
-    assert before["head"] == "0083_pay_as_you_go"
+    assert before["head"] == _repository_head()
     role = "admin_http_" + uuid4().hex
     tenants = [uuid4() for _ in range(3)]
     users = [uuid4() for _ in range(3)]
@@ -291,7 +293,9 @@ async def test_admin_mfa_cookie_hold_evidence_restore_and_old_credentials(journe
         # The real Admin client sends its issued bearer with matching cookies.
         # Keep the cookie-only identity check above, then exercise that transport.
         admin.headers["Authorization"] = "Bearer " + verified.json()["access_token"]
-        listed = await request(admin, "GET", "/admin/tenants", params={"limit": 1000})
+        # A page holds at most 200 tenants (QA F2-13); the search keeps this run's three on it.
+        listed = await request(admin, "GET", "/admin/tenants",
+                               params={"limit": 200, "search": "Synthetic Admin HTTP"})
         assert set(map(str, db.tenants)) <= {row["id"] for row in listed.json()}
 
         for client, user in ((member, db.users[1]), (other, db.users[2])):
@@ -327,7 +331,10 @@ async def test_admin_mfa_cookie_hold_evidence_restore_and_old_credentials(journe
         member.cookies = httpx.Cookies(old_cookies)
         await request(member, "POST", "/auth/refresh", 401)
         await request(other, "GET", "/auth/me")
-        await request(member, "POST", "/auth/login", 401, json={"email": f"{db.users[1]}@example.com", "password": db.password})
+        # A correct password on a held account is told about the hold with a coded 403 (D4-5).
+        held_login = await request(member, "POST", "/auth/login", 403,
+                                   json={"email": f"{db.users[1]}@example.com", "password": db.password})
+        assert held_login.json()["error"]["code"] == "tenant_suspended"
         await request(admin, "POST", tenant_path + "/restore", 422, json={"reason": "Missing reviewed identity"})
         await request(admin, "POST", tenant_path + "/restore", 409, json={"reason": "Wrong reviewed identity", "expected_suspension_id": str(uuid4())})
         restored = (await request(admin, "POST", tenant_path + "/restore", json={

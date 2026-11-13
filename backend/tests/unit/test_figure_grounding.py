@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.domain.models.conversation import Message, MessageRole
 from app.domain.services.voice_pipeline.figure_grounding import (
     UNGROUNDED_FIGURE_LINE,
     guard_figures,
@@ -50,7 +51,9 @@ def test_bare_numbers_are_observed_never_blocked():
     assert ungrounded_figures(sentence, [FARES])[1] == ["11", "32"]
 
 
-def test_the_callers_own_figure_may_be_repeated_back():
+def test_any_supplied_source_grounds_the_same_value():
+    # Whatever text is supplied grounds a figure; the live turn no longer
+    # supplies the caller's words (QA F3-04, test below).
     said = "My budget is about 6,000 rupees."
     assert ungrounded_figures("So about 6,000 rupees, got it.", [FARES, said]) == ([], [])
 
@@ -137,3 +140,33 @@ def test_sources_are_only_built_for_a_sentence_with_a_number():
     assert calls == []
     guard_figures(session, "It's 8,550 rupees.", sources)
     assert calls == [1]
+
+
+# QA F3-04: probes against the real guard let the agent confirm the caller's
+# own figure as the offer ("Yes, that's 50 pounds a month." after "So it's 50
+# pounds a month, right?") and grant a discount the caller named. A figure
+# must come from what the agent was given, never from the caller's words.
+@pytest.mark.parametrize("caller, answer", [
+    ("So it's 50 pounds a month, right?", "Yes, that's 50 pounds a month."),
+    ("Can you do 30 percent off?", "Yes, I can do 30 percent off."),
+])
+async def test_live_turn_never_confirms_a_figure_only_the_caller_said(monkeypatch, caller, answer):
+    service, session, _ = setup_turn(monkeypatch, caller, [answer])
+    await service._stream_llm_and_tts(session)
+    assert session._spoken_sentences == [UNGROUNDED_FIGURE_LINE]
+
+
+async def test_live_turn_may_repeat_a_figure_it_already_stated(monkeypatch):
+    service, session, _ = setup_turn(monkeypatch, "Sorry, how much was it?", ["It's $25 a month."])
+    session.conversation_history[:0] = [
+        Message(role=MessageRole.USER, content="How much is it?"),
+        Message(role=MessageRole.ASSISTANT, content="It's $25 a month."),
+    ]
+    await service._stream_llm_and_tts(session)
+    assert session._spoken_sentences == ["It's $25 a month."]
+
+
+def test_a_percentage_must_come_from_a_percentage():
+    assert ungrounded_figures("I can do 30 percent off.", ["Please reply within 30 seconds."])[0] == ["30"]
+    assert ungrounded_figures("I can do 30 percent off.", ["Returns get 30% off."]) == ([], [])
+    assert ungrounded_figures("That's thirty per cent off.", ["A thirty percent discount applies."]) == ([], [])

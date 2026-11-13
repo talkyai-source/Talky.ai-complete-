@@ -14,6 +14,7 @@ Routes:
 """
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 from typing import Any, Dict, List, Optional
 from uuid import UUID
@@ -439,7 +440,7 @@ async def add_dnc_entry(
     try:
         normalized = normalize_e164_for_storage(entry.phone_number)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     # Parse expires_at
     expires = None
@@ -459,6 +460,9 @@ async def add_dnc_entry(
         reason=entry.reason,
         expires_at=expires,
         added_by=str(admin_user.id) if getattr(admin_user, "id", None) else None,
+        # QA F12-10: audited in the same transaction, like the tenant route.
+        audit=audit_logger,
+        actor_role=getattr(admin_user, "role", None),
     )
 
     return DncEntryResponse(
@@ -481,7 +485,7 @@ async def add_dnc_entry(
 async def list_dnc_entries(
     tenant_id: Optional[UUID] = Query(None),
     phone_number: Optional[str] = Query(None),
-    limit: int = Query(100, ge=1, le=1000),
+    limit: int = Query(100, ge=1, le=200),
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
@@ -536,15 +540,20 @@ async def remove_dnc_entry(
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
 ):
-    """Remove a DNC entry. Requires admin privileges."""
-    # The platform-admin route resolves an ID before its tenant is known.
-    async with acquire_with_tenant(db_client.pool, None) as conn:
-        result = await conn.execute(
-            "DELETE FROM dnc_entries WHERE id = $1",
-            entry_id,
-        )
+    """Remove a DNC entry. Requires admin privileges.
 
-    if "DELETE 0" in result:
+    QA F12-10: the removal and its audit row (the removed number included)
+    commit together; this alias used to delete with no trace.
+    """
+    from app.domain.services.dnc_service import DNCService
+
+    removed = await DNCService(db_client.pool).remove_any(
+        entry_id=str(entry_id),
+        audit=audit_logger,
+        actor_id=str(admin_user.id) if getattr(admin_user, "id", None) else None,
+        actor_role=getattr(admin_user, "role", None),
+    )
+    if not removed:
         raise HTTPException(status_code=404, detail="DNC entry not found")
 
 

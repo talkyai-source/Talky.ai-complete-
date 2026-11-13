@@ -401,6 +401,7 @@ def test_every_llm_exposed_action_has_an_explicit_authorization_policy():
     ("send_email", Permission.EMAIL_SEND), ("send_sms", Permission.SMS_SEND),
     ("report_issue", Permission.SUPPORT_REPORT), ("book_meeting", Permission.CALENDAR_MANAGE),
     ("update_meeting", Permission.CALENDAR_MANAGE), ("cancel_meeting", Permission.CALENDAR_MANAGE),
+    ("start_campaign", Permission.CAMPAIGNS_UPDATE),
 ])
 async def test_execution_tools_preview_with_narrow_grant_and_reject_model_confirmation(monkeypatch, tool_name, permission):
     calls = _install_tool(monkeypatch, tool_name, {"preview": True, "changes": [{"field": "test"}]})

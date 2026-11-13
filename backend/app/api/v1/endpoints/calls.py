@@ -9,11 +9,13 @@ from datetime import date, datetime, time, timedelta, timezone
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Depends, Query
 from pydantic import BaseModel, Field
-from typing import Any, List, Literal, Optional
+from typing import Annotated, Any, List, Literal, Optional
 from app.core.postgres_adapter import Client
+from app.api.v1.validation import ResourceUUID, pagination_offset
 
 from app.api.v1.dependencies import get_db_client, get_current_user, CurrentUser
-from app.core.db_utils import acquire_with_tenant
+from app.core.db import DatabasePoolTimeoutError
+from app.core.db_utils import acquire_connection, acquire_with_tenant
 from app.core.security.rbac import require_permission, Permission
 from app.core.security.api_security import rate_limit_dependency
 from app.domain.services.call_redial_service import RedialError, preview_redial, request_redial
@@ -24,6 +26,9 @@ from app.domain.services.telephony.termination import (
 )
 from app.utils.tenant_filter import verify_tenant_access
 from app.domain.services.transcript_service import conversation_turns, transcript_text_from_turns
+from app.domain.services.caller_identity import caller_identity_projection
+from app.domain.services.call_history_cursor import history_scope, encode_history_cursor, decode_history_cursor
+from app.domain.services.call_outcomes import FAILED_OUTCOME_LIST
 
 logger = logging.getLogger(__name__)
 
@@ -285,6 +290,9 @@ class CallListItem(BaseModel):
 class CallDetail(BaseModel):
     """Full call details"""
 
+    caller_id_verified: bool = False
+    caller_id_attestation: Optional[Literal["A", "B", "C"]] = None
+
     id: str
     talklee_call_id: Optional[str] = None
     timestamp: str
@@ -337,7 +345,12 @@ class CallListResponse(BaseModel):
     items: List[CallListItem]
     page: int
     page_size: int
-    total: int
+    total: Optional[int]
+    next_cursor: Optional[str] = None
+    # D4-12: whose list this is (as on /events), so the app can check that an
+    # alert built from it belongs to the signed-in account.
+    tenant_id: Optional[str] = None
+    user_id: Optional[str] = None
 
 
 class CallIssueItem(BaseModel):
@@ -565,7 +578,7 @@ _LIVE_MAX_AGE_MINUTES = 30
     "/{call_id}/hangup", dependencies=[Depends(require_permission(Permission.CALLS_DELETE))]
 )
 async def hangup_live_call(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -948,7 +961,7 @@ async def list_live_calls(
     dependencies=[Depends(_require_calls_read)],
 )
 async def list_rejected_inbound_calls(
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(50, ge=1, le=100),
     campaign_id: Optional[UUID] = Query(None),
     current_user: CurrentUser = Depends(get_current_user),
@@ -961,7 +974,7 @@ async def list_rejected_inbound_calls(
     after-hours hangup path do have a calls row. The explicit union prevents
     "who called while we were closed?" from silently returning an empty list.
     """
-
+    offset = pagination_offset(page, page_size)
     if not current_user.tenant_id:
         return RejectedInboundCallsResponse(
             items=[],
@@ -977,7 +990,7 @@ async def list_rejected_inbound_calls(
     if campaign_id is not None:
         params.append(campaign_id)
         campaign_filter = f"WHERE rejected.campaign_id = ${len(params)}"
-    params.extend([page_size, (page - 1) * page_size])
+    params.extend([page_size, offset])
     limit_index = len(params) - 1
     offset_index = len(params)
 
@@ -1272,7 +1285,7 @@ async def list_call_issues(
     dependencies=[Depends(_require_calls_read)],
 )
 async def list_calls(
-    page: int = Query(1, ge=1, description="Page number"),
+    page: int = Query(1, ge=1, le=10001, description="Page number"),
     page_size: int = Query(20, ge=1, le=100, description="Items per page"),
     status: Optional[str] = Query(None, description="Filter by status"),
     direction: Optional[Literal["inbound", "outbound"]] = Query(
@@ -1284,6 +1297,14 @@ async def list_calls(
     ),
     from_date: Optional[str] = Query(None, alias="from", description="Start date (YYYY-MM-DD)"),
     to_date: Optional[str] = Query(None, alias="to", description="End date (YYYY-MM-DD)"),
+    search: Annotated[Optional[str], Query(max_length=200, description="Literal phone, DID or campaign text")] = None,
+    pagination: Annotated[Literal["offset", "cursor"], Query(description="Cursor mode omits the expensive total count")] = "offset",
+    cursor: Annotated[Optional[str], Query(max_length=1024, description="Continue the same tenant and filters")] = None,
+    failed: Annotated[Optional[bool], Query(
+        description="true: only calls that did not reach a live human (no answer, busy, "
+                    "voicemail, ...); false: only calls that did or have no outcome yet")] = None,
+    since: Annotated[Optional[datetime], Query(
+        description="Only calls created after this instant (ISO 8601; no zone means UTC)")] = None,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1299,6 +1320,29 @@ async def list_calls(
         - from: Start date filter
         - to: End date filter
     """
+    cursor_mode = pagination == "cursor" or cursor is not None
+    if cursor_mode and page != 1:
+        raise HTTPException(422, "Cursor pagination cannot be combined with a page number")
+    if search is not None and (len(search) > 200 or any(ord(c) < 32 or 127 <= ord(c) <= 159 or 0xD800 <= ord(c) <= 0xDFFF for c in search)):
+        raise HTTPException(422, "Invalid call history search")
+    search = search.strip() if search else None
+    offset = pagination_offset(page, page_size)
+    scope_filters = {
+        "status": status, "direction": direction, "inbound_campaign_id": str(inbound_campaign_id) if inbound_campaign_id else None,
+        "from": from_date, "to": to_date, "search": search,
+    }
+    # D4-11: only when given, so cursors issued before these filters stay valid.
+    if since is not None and since.tzinfo is None:
+        since = since.replace(tzinfo=timezone.utc)
+    if failed is not None:
+        scope_filters["failed"] = failed
+    if since is not None:
+        scope_filters["since"] = since.isoformat()
+    scope = history_scope(str(current_user.tenant_id), scope_filters)
+    try:
+        boundary = decode_history_cursor(cursor, scope) if cursor is not None else None
+    except ValueError:
+        raise HTTPException(422, "Invalid call history cursor for these filters") from None
     # asyncpg will not coerce strings for a timestamptz parameter, so parse the
     # dates here (a bad value is the caller's error, not a 500).
     from_bound: Optional[datetime] = None
@@ -1321,7 +1365,6 @@ async def list_calls(
         import uuid as _uuid
 
         tenant_uuid = _uuid.UUID(str(current_user.tenant_id))
-        offset = (page - 1) * page_size
 
         conditions = ["c.tenant_id = $1"]
         params: list = [tenant_uuid]
@@ -1351,10 +1394,45 @@ async def list_calls(
             conditions.append(f"c.created_at < ${idx}")
             params.append(to_bound)
             idx += 1
+        if failed is not None:
+            # D4-11: the one definition of a failed call (did not reach a person).
+            match = f"c.outcome = ANY(${idx}::text[])"
+            conditions.append(match if failed else f"(c.outcome IS NULL OR NOT {match})")
+            params.append(FAILED_OUTCOME_LIST)
+            idx += 1
+        if since is not None:
+            conditions.append(f"c.created_at > ${idx}")
+            params.append(since)
+            idx += 1
+
+        if search:
+            conditions.append(
+                f"(c.phone_number ILIKE ${idx} ESCAPE '\\' OR c.caller_ani ILIKE ${idx} ESCAPE '\\' "
+                f"OR c.called_did ILIKE ${idx} ESCAPE '\\' OR EXISTS (SELECT 1 FROM campaigns searched "
+                f"WHERE searched.id = c.campaign_id AND searched.tenant_id = c.tenant_id "
+                f"AND searched.name ILIKE ${idx} ESCAPE '\\'))"
+            )
+            params.append("%" + search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%")
+            idx += 1
+
+        if boundary is not None:
+            if boundary[0] is None:
+                # DESC NULLS FIRST: finish undated ID ties, then dated rows.
+                conditions.append(
+                    f"((c.created_at IS NULL AND c.id < ${idx}) OR c.created_at IS NOT NULL)"
+                )
+                params.append(boundary[1])
+                idx += 1
+            else:
+                conditions.append(f"(c.created_at, c.id) < (${idx}, ${idx + 1})")
+                params.extend(boundary)
+                idx += 2
 
         where = " AND ".join(conditions)
 
-        async with db_client.pool.acquire() as conn:
+        window = f"LIMIT ${idx}" if cursor_mode else f"LIMIT ${idx} OFFSET ${idx + 1}"
+        window_params = [page_size + 1] if cursor_mode else [page_size, offset]
+        async with acquire_connection(db_client.pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 rows = await conn.fetch(
@@ -1377,34 +1455,39 @@ async def list_calls(
                              ORDER BY leg.created_at, leg.id LIMIT 1)
                                AS outbound_from_number,
                            (SELECT r.id FROM recordings_s3 r
-                             WHERE r.call_id = c.id AND r.status = 'uploaded'
+                             WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id
+                               AND r.status = 'uploaded'
                              ORDER BY r.created_at DESC LIMIT 1) AS recording_id,
                            (SELECT r.status FROM recordings_s3 r
-                             WHERE r.call_id = c.id
+                             WHERE r.call_id = c.id AND r.tenant_id = c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1) AS recording_status,
                            ((c.transcript IS NOT NULL AND BTRIM(c.transcript) <> '')
                              OR EXISTS (SELECT 1 FROM transcripts tr
                                          WHERE tr.call_id = c.id
+                                           AND (tr.tenant_id = c.tenant_id OR tr.tenant_id IS NULL)
                                            AND COALESCE(tr.full_text, '') <> ''))
                                AS has_transcript,
                            EXISTS (SELECT 1 FROM call_feedback f
-                                    WHERE f.call_id = c.id) AS has_feedback,
+                                    WHERE f.call_id = c.id AND f.tenant_id = c.tenant_id) AS has_feedback,
                            {_captured_contact_rows_sql()} AS captured_contact_rows
                     FROM calls c
-                    LEFT JOIN campaigns camp ON camp.id = c.campaign_id
+                    LEFT JOIN campaigns camp ON camp.id = c.campaign_id AND camp.tenant_id = c.tenant_id
                     WHERE {where}
-                    ORDER BY c.created_at DESC
-                    LIMIT ${idx} OFFSET ${idx + 1}
+                    ORDER BY c.created_at DESC NULLS FIRST, c.id DESC
+                    {window}
                     """,
                     *params,
-                    page_size,
-                    offset,
+                    *window_params,
                 )
-                total = await conn.fetchval(
+                total = None if cursor_mode else await conn.fetchval(
                     f"SELECT COUNT(*) FROM calls c WHERE {where}",
                     *params,
                 )
 
+        next_cursor = None
+        if cursor_mode and len(rows) > page_size:
+            rows = rows[:page_size]
+            next_cursor = encode_history_cursor(rows[-1]["id"], rows[-1]["created_at"], scope)
         items = []
         for row in rows:
             contacts = _display_captured_contacts(row)
@@ -1468,9 +1551,14 @@ async def list_calls(
             items=items,
             page=page,
             page_size=page_size,
-            total=total or 0,
+            total=None if cursor_mode else total or 0,
+            next_cursor=next_cursor,
+            tenant_id=str(current_user.tenant_id),
+            user_id=str(current_user.id),
         )
 
+    except DatabasePoolTimeoutError:
+        raise
     except Exception as e:
         logger.error(f"Failed to fetch calls: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to fetch calls")
@@ -1551,7 +1639,7 @@ async def redial_call(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1571,7 +1659,7 @@ async def get_call(
         except (TypeError, ValueError, AttributeError):
             raise HTTPException(status_code=404, detail="Call not found")
 
-        async with db_client.pool.acquire() as conn:
+        async with acquire_connection(db_client.pool) as conn:
             async with conn.transaction():
                 await conn.execute("SET LOCAL app.bypass_rls = 'true'")
                 call_row = await conn.fetchrow(
@@ -1580,23 +1668,25 @@ async def get_call(
                            camp.name AS campaign_name,
                            (SELECT tr.full_text FROM transcripts tr
                              WHERE tr.call_id=c.id
+                               AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL)
                              ORDER BY tr.created_at DESC LIMIT 1)
                                AS persisted_transcript,
                            EXISTS (SELECT 1 FROM transcripts tr
                                     WHERE tr.call_id=c.id
+                                      AND (tr.tenant_id=c.tenant_id OR tr.tenant_id IS NULL)
                                       AND COALESCE(tr.full_text, '') <> '')
                                AS has_transcript,
                            (SELECT r.id FROM recordings_s3 r
-                             WHERE r.call_id=c.id
+                             WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1)
                                AS recording_id,
                            (SELECT r.status FROM recordings_s3 r
-                             WHERE r.call_id=c.id
+                             WHERE r.call_id=c.id AND r.tenant_id=c.tenant_id
                              ORDER BY r.created_at DESC LIMIT 1)
                                AS recording_status,
                            (SELECT NULLIF(u.policy_snapshot->>'actual_seconds', '')::int
                              FROM inbound_usage_transactions u
-                             WHERE u.call_id=c.id
+                             WHERE u.call_id=c.id AND u.tenant_id=c.tenant_id
                                AND u.call_leg_id IS NULL
                                AND u.transaction_type IN ('finalize','release','reverse')
                              ORDER BY u.created_at DESC LIMIT 1)
@@ -1609,7 +1699,7 @@ async def get_call(
                                AS outbound_from_number,
                            to_jsonb(c)->'summary_json' AS persisted_summary_json
                     FROM calls c
-                    LEFT JOIN campaigns camp ON camp.id=c.campaign_id
+                    LEFT JOIN campaigns camp ON camp.id=c.campaign_id AND camp.tenant_id=c.tenant_id
                     WHERE c.id=$1 AND c.tenant_id=$2
                     """,
                     call_uuid,
@@ -1665,6 +1755,7 @@ async def get_call(
 
         created_at = call.get("created_at", "")
         return CallDetail(
+            **caller_identity_projection(call),
             id=str(call["id"]),
             talklee_call_id=call.get("talklee_call_id"),
             timestamp=(
@@ -1721,7 +1812,7 @@ async def get_call(
             transfer_legs=transfer_legs,
         )
 
-    except HTTPException:
+    except (HTTPException, DatabasePoolTimeoutError):
         raise
     except Exception as e:
         logger.error(f"Failed to fetch call {call_id}: {e}", exc_info=True)
@@ -1733,7 +1824,7 @@ async def get_call(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_transcript(
-    call_id: str,
+    call_id: ResourceUUID,
     format: str = Query("json", description="Format: 'json' or 'text'"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -1805,7 +1896,7 @@ async def get_call_transcript(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_summary(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):
@@ -1836,8 +1927,8 @@ async def get_call_summary(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_events(
-    call_id: str,
-    limit: int = Query(100, ge=1, le=500),
+    call_id: ResourceUUID,
+    limit: int = Query(100, ge=1, le=200),
     event_type: Optional[str] = Query(None, description="Filter by event type"),
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -1849,7 +1940,7 @@ async def get_call_events(
     transcripts, LLM calls, TTS, webhooks, etc.
 
     Query params:
-        - limit: Max events to return (default 100, max 500)
+        - limit: Max events to return (default 100, max 200)
         - event_type: Filter by type (state_change, transcript, etc.)
     """
     try:
@@ -1883,7 +1974,7 @@ async def get_call_events(
     dependencies=[Depends(_require_calls_read)],
 )
 async def get_call_legs(
-    call_id: str,
+    call_id: ResourceUUID,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
 ):

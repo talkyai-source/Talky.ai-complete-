@@ -9,11 +9,13 @@ Day 9 Enhancements:
 - Batch insertion for performance
 - Detailed error reporting per row
 """
+from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import ResourceUUID
 import csv
 import io
 import logging
 import uuid
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Query
 from fastapi.responses import Response
@@ -80,76 +82,64 @@ class BulkPasteRequest(BaseModel):
     line or separated by commas/semicolons. Names are not parsed from a
     paste (use CSV for that); every token is treated as a phone number."""
     text: str
+    default_country: Optional[str] = None
 
 
 def _campaign_default_country(campaign) -> str:
-    """The campaign's ISO country, resolved exactly as campaigns.py does.
-
-    Imported lazily (and defensively) because contacts.py <-> campaigns.py is
-    already a circular pair; a failure here must degrade to "US", never break
-    an import.
-    """
-    try:
-        from app.api.v1.endpoints.campaigns import campaign_default_country
-        return campaign_default_country(campaign)
-    except Exception:  # noqa: BLE001 — country resolution must never break import
-        return "US"
+    from app.domain.services.phone_number_normalizer import campaign_country
+    return campaign_country(campaign)
 
 
 def _normalize_for_user(phone: str, user, default_country: str = "US") -> str:
-    """Normalize a phone number the SAME way the Add-Contact endpoint does, so
-    CSV import and manual add never disagree.
+    """All accounts use the same valid-only dial destination contract."""
+    from app.domain.services.phone_number_normalizer import normalize_phone_number
+    return normalize_phone_number(phone, default_country=default_country)
 
-    Uses the canonical domain normalizer (libphonenumber-backed, rejects 6-digit
-    junk), and the lenient passthrough only for accounts whose phone validation
-    is temporarily relaxed — exactly mirroring add_contact_to_campaign. Before
-    this, CSV import had its OWN looser rules (accepted 6-digit numbers for
-    everyone), so a contact imported via CSV could be un-dialable by the
-    campaign path that re-validated with the stricter normalizer.
 
-    ``default_country`` is the campaign's country (see
-    :func:`app.api.v1.endpoints.campaigns.campaign_default_country`) and is the
-    second half of that same "never disagree" promise: the manual-add path has
-    always passed it, so a UK campaign's "07700 900123" became ``+447700900123``
-    there while the CSV path — which dropped the parameter and silently used US
-    — stored the un-dialable ``+07700900123`` for the very same number.
+def _preflight_phones(records, default_country):
+    from app.domain.services.phone_number_normalizer import normalize_phone_number, phone_number_error
+    errors = []
+    for record in records:
+        try:
+            normalize_phone_number(record.phone_raw, default_country)
+        except ValueError:
+            errors.append({"row": record.source_row, "field": "phone_number",
+                           "message": phone_number_error(record.phone_raw, default_country)})
+    if errors:
+        raise HTTPException(status_code=422, detail=errors[:100])
+
+
+def _check_optional_numbers(values: dict, row_num: int, country) -> list["ImportError"]:
+    """CSV: mobile_number / business_number follow the dial number's rule (D2-9).
+
+    A valid one is stored in E.164; a bad one is dropped from the row and
+    reported, and the contact still imports (the policy for every bad cell).
+    A mobile column that IS the dial number (no phone_number column) is left
+    to the stricter dial-number check, which rejects the import.
     """
-    from app.domain.services.phone_number_normalizer import (
-        normalize_phone_number as _domain_normalize,
-        normalize_phone_number_lenient,
-    )
+    from app.domain.services.phone_number_normalizer import normalize_phone_number, phone_number_error
+
+    errors = []
+    for field in ("mobile_number", "business_number"):
+        raw = (values.get(field) or "").strip()
+        if not raw or (field == "mobile_number" and not values.get("phone_number")):
+            continue
+        try:
+            values[field] = normalize_phone_number(raw, default_country=country)
+        except ValueError:
+            values.pop(field, None)
+            errors.append(ImportError(row=row_num, field=field, value=raw[:40],
+                                      error=phone_number_error(raw, country)))
+    return errors
+
+
+def _resolve_country(db_client, tenant_id, campaign=None, requested=None):
+    from app.domain.services.phone_number_normalizer import resolve_default_country
     try:
-        from app.api.v1.endpoints.campaigns import _phone_validation_relaxed
-        relaxed = _phone_validation_relaxed(user)
-    except Exception:  # noqa: BLE001 — never let the relaxed check break import
-        relaxed = False
-    if relaxed:
-        return normalize_phone_number_lenient(phone)
-    return _domain_normalize(phone, default_country=default_country or "US")
-
-
-def normalize_phone_number(phone: str) -> str:
-    """
-    DEPRECATED legacy normalizer — kept only so nothing breaks if an old import
-    path still references it. New code must use _normalize_for_user so CSV import
-    and Add-Contact share one definition (see Fix #9). Do not add callers.
-
-    Normalize phone number to E.164 format.
-
-    Args:
-        phone: Raw phone number string
-
-    Returns:
-        Normalized phone in E.164 format (+1234567890)
-        
-    Raises:
-        ValueError: If phone is invalid
-    """
-    from app.domain.services.phone_number_normalizer import (
-        normalize_phone_number_legacy,
-    )
-
-    return normalize_phone_number_legacy(phone)
+        return resolve_default_country(db_client, tenant_id, campaign, requested)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=[{"row": 1, "field": "default_country",
+                            "message": "Use a supported ISO alpha-2 country"}]) from exc
 
 
 # =============================================================================
@@ -205,11 +195,12 @@ async def download_import_template(
     dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
 )
 async def upload_campaign_contacts(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     file: UploadFile = File(..., description="CSV file with contacts"),
     skip_duplicates: bool = Query(True, description="Skip duplicate phone numbers within campaign"),
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    default_country: Annotated[Optional[str], Query(min_length=2, max_length=2)] = None,
 ):
     """
     Bulk import contacts from CSV to a specific campaign.
@@ -251,7 +242,7 @@ async def upload_campaign_contacts(
         campaign_tenant_id = campaign.get("tenant_id")
         # Same country the manual Add-Contact path uses, so a CSV-imported and
         # a hand-typed national-format number normalise identically.
-        default_country = _campaign_default_country(campaign)
+        default_country = _resolve_country(db_client, current_user.tenant_id, campaign, default_country)
 
         # 2. Read and decode file
         content = await file.read()
@@ -350,6 +341,7 @@ async def upload_campaign_contacts(
                     row=issue.row, field=issue.field, value=issue.value,
                     error=f"{label}: {issue.reason}",
                 ))
+            field_errors.extend(_check_optional_numbers(values, row_num, default_country))
 
             first_name = values.get("first_name")
             last_name = values.get("last_name")
@@ -381,6 +373,8 @@ async def upload_campaign_contacts(
                 custom_fields=custom_fields,
                 source_row=row_num,
             ))
+
+        _preflight_phones(records, default_country)
 
         # 5. Create (or reuse) the contact list for this upload — named after
         #    the uploaded file. Ordinary list failures fall back to Ungrouped;
@@ -453,7 +447,7 @@ async def upload_campaign_contacts(
         logger.error(f"CSV upload failed for campaign {campaign_id}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to import contacts: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to import contacts.')
         )
 
 
@@ -467,7 +461,7 @@ async def upload_campaign_contacts(
     dependencies=[Depends(require_permission(Permission.CAMPAIGNS_UPDATE))],
 )
 async def paste_campaign_contacts(
-    campaign_id: str,
+    campaign_id: ResourceUUID,
     body: BulkPasteRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
@@ -491,7 +485,7 @@ async def paste_campaign_contacts(
         extra_columns=("name", "script_config"),
     )
     campaign_tenant_id = campaign.get("tenant_id")
-    default_country = _campaign_default_country(campaign)
+    default_country = _resolve_country(db_client, current_user.tenant_id, campaign, body.default_country)
 
     # 2. Parse the blob into raw tokens.
     tokens = parse_pasted_numbers(body.text)
@@ -502,6 +496,8 @@ async def paste_campaign_contacts(
         LeadRecord(phone_raw=tok, source_row=i)
         for i, tok in enumerate(tokens, start=1)
     ]
+
+    _preflight_phones(records, default_country)
 
     # 3. Create (or reuse) the paste's contact list ("Pasted contacts <date>").
     from app.api.v1.endpoints.contact_lists import (
@@ -583,7 +579,8 @@ async def bulk_import_contacts(
     file: UploadFile = File(..., description="CSV file with contacts"),
     campaign_id: Optional[str] = None,
     current_user: CurrentUser = Depends(get_current_user),
-    db_client: Client = Depends(get_db_client)
+    db_client: Client = Depends(get_db_client),
+    default_country: Annotated[Optional[str], Query(min_length=2, max_length=2)] = None,
 ):
     """
     Bulk import contacts from CSV file.
@@ -617,7 +614,7 @@ async def bulk_import_contacts(
                 tenant_id=current_user.tenant_id,
                 extra_columns=("script_config",),
             )
-        default_country = _campaign_default_country(campaign or {})
+        default_country = _resolve_country(db_client, current_user.tenant_id, campaign, default_country)
 
         # Read file content
         content = await file.read()
@@ -638,11 +635,17 @@ async def bulk_import_contacts(
         # Parse CSV
         csv_reader = csv.DictReader(io.StringIO(text_content))
         
+        from app.domain.services.dialer.bulk_ingest import LeadRecord
+        csv_rows = list(csv_reader)
+        _preflight_phones([
+            LeadRecord(phone_raw=(row.get("phone_number") or "").strip(), source_row=i)
+            for i, row in enumerate(csv_rows, start=2)
+        ], default_country)
         total_rows = 0
         imported = 0
         errors = []
         
-        for row_num, row in enumerate(csv_reader, start=2):  # Start at 2 (header is row 1)
+        for row_num, row in enumerate(csv_rows, start=2):  # Start at 2 (header is row 1)
             total_rows += 1
             
             try:
@@ -736,5 +739,5 @@ async def bulk_import_contacts(
     except Exception as e:
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to import contacts: {str(e)}"
+            detail=safe_exception_message(e, 'Failed to import contacts.')
         )

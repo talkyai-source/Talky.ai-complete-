@@ -30,6 +30,7 @@ import asyncio
 import hashlib
 import hmac
 import json
+import logging
 import os
 import re
 import stat
@@ -46,6 +47,8 @@ from pathlib import Path
 from typing import Any
 
 import asyncpg
+
+logger = logging.getLogger(__name__)
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[1]
 _REPO_ROOT = _BACKEND_ROOT.parent
@@ -206,6 +209,9 @@ class CandidateSet:
     # Active assignment whose login is not in the reviewed carrier inventory:
     # it stays on the catch-all (admission rejects it) but is no longer silent.
     unrouted_unknown_account_trunks: tuple[str, ...] = ()
+    # Invalid values are excluded before routing/conflict maps are built.
+    # Safe per-tick diagnostics only; no credentials or arbitrary row text.
+    invalid_trunks: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -573,7 +579,9 @@ def render_inbound_dialplan(
             [
                 f"exten => {route.account},1,NoOp(Inbound mapped carrier account)",
                 " same => n,Ringing()",
-                f" same => n,Stasis(talky_ai,inbound,{route.did},${{CONTEXT}})",
+                f" same => n,Stasis(talky_ai,inbound,{route.did},${{CONTEXT}},"
+                "cid_pai_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Asserted-Identity)})},"
+                "cid_attestation_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Attestation-Indicator)})})",
                 " same => n,Hangup()",
                 "",
             ]
@@ -821,6 +829,65 @@ def build_candidate_set(
     evicted_accounts: set[str] = set()
     evicted_dids: set[str] = set()
 
+    # Group stable fields first. Contradictory rows and invalid identities
+    # remain fatal; those are not ordinary renderer validation failures.
+    for row in source_rows:
+        trunk_id = _canonical_trunk_id(row.get("id"))
+        prepared = dict(row)
+        prepared["id"] = trunk_id
+        prepared["tenant_id"] = _canonical_uuid(row.get("tenant_id"), label="SIP trunk tenant")
+        metadata = _metadata(row)
+        metadata.pop("inbound_did", None)
+        prepared["metadata"] = metadata
+        previous = trunks.get(trunk_id)
+        if previous is None:
+            trunks[trunk_id] = prepared
+        else:
+            stable_fields = (
+                "tenant_id", "trunk_name", "sip_domain", "port", "transport", "direction",
+                "auth_username", "auth_password_encrypted", "metadata",
+            )
+            if any(previous.get(field) != prepared.get(field) for field in stable_fields):
+                raise PJSIPReconciliationError(f"trunk-{trunk_id} has conflicting source rows")
+
+    # Validate before any global account/DID/carrier-host map: dropping a bad
+    # row only at the final render would leave its poisoned route ownership.
+    files: dict[str, bytes] = {}
+    invalid_trunks: list[str] = []
+    invalid_ids: set[str] = set()
+    for trunk_id in sorted(trunks):
+        row = trunks[trunk_id]
+        plaintext: str | None = None
+        try:
+            encrypted = row.get("auth_password_encrypted")
+            if encrypted:
+                # Key/decryption failures remain fatal, including ValueError.
+                plaintext = decrypt_password(str(encrypted))
+            try:
+                values = [row.get(field) for field in ("trunk_name", "sip_domain", "auth_username")]
+                values.append(plaintext)
+                if any(isinstance(value, str) and any(ord(ch) < 32 or 127 <= ord(ch) <= 159 for ch in value)
+                       for value in values):
+                    raise ValueError("Invalid control character in trunk configuration")
+                projection = build_trunk_config_input(row, decrypted_password=plaintext)
+                rendered = render_trunk_conf(projection)
+            except ValueError:
+                invalid_ids.add(trunk_id)
+                invalid_trunks.append(f"trunk-{trunk_id}:invalid_configuration")
+                logger.warning("trunk-%s skipped: invalid_configuration", trunk_id)
+                continue
+            if "set_var=TALKY_INBOUND_DID" in rendered:
+                raise UnsafeInboundMappingError(
+                    f"trunk-{trunk_id} rendered an endpoint-owned DID map"
+                )
+            files[f"{PJSIP_PREFIX}trunk-{trunk_id}.conf"] = rendered.encode("utf-8")
+        finally:
+            plaintext = None
+
+    for trunk_id in invalid_ids:
+        del trunks[trunk_id]
+    source_rows = [row for row in source_rows if _canonical_trunk_id(row.get("id")) not in invalid_ids]
+
     def _register_route(route: InboundRoute, *, evict_on_conflict: bool = False) -> None:
         """Add a route; a later claimant of a taken account/DID is dropped.
 
@@ -867,35 +934,7 @@ def build_candidate_set(
     } - {""}
     for row in source_rows:
         trunk_id = _canonical_trunk_id(row.get("id"))
-        tenant_id = _canonical_uuid(row.get("tenant_id"), label="SIP trunk tenant")
-        prepared = dict(row)
-        prepared["id"] = trunk_id
-        prepared["tenant_id"] = tenant_id
-        metadata = _metadata(row)
-        # Deprecated metadata was the 2026-08-30 workaround. It is not proof
-        # of an active DID assignment and must never reach endpoint set_var.
-        metadata.pop("inbound_did", None)
-        prepared["metadata"] = metadata
-
-        previous = trunks.get(trunk_id)
-        if previous is None:
-            trunks[trunk_id] = prepared
-        else:
-            stable_fields = (
-                "tenant_id",
-                "trunk_name",
-                "sip_domain",
-                "port",
-                "transport",
-                "direction",
-                "auth_username",
-                "auth_password_encrypted",
-                "metadata",
-            )
-            if any(previous.get(field) != prepared.get(field) for field in stable_fields):
-                raise PJSIPReconciliationError(
-                    f"trunk-{trunk_id} has conflicting source rows"
-                )
+        tenant_id = trunks[trunk_id]["tenant_id"]
 
         extension_route, extension_skip = _extension_route_from_row(
             row,
@@ -1001,24 +1040,6 @@ def build_candidate_set(
             # catch-all and the operator is told which trunk is unrouted.
             unrouted_verified_trunks.append(f"trunk-{trunk_id}")
 
-    files: dict[str, bytes] = {}
-    for trunk_id in sorted(trunks):
-        row = trunks[trunk_id]
-        encrypted = row.get("auth_password_encrypted")
-        plaintext: str | None = None
-        try:
-            if encrypted:
-                plaintext = decrypt_password(str(encrypted))
-            projection = build_trunk_config_input(row, decrypted_password=plaintext)
-            rendered = render_trunk_conf(projection)
-            if "set_var=TALKY_INBOUND_DID" in rendered:
-                raise UnsafeInboundMappingError(
-                    f"trunk-{trunk_id} rendered an endpoint-owned DID map"
-                )
-            files[f"{PJSIP_PREFIX}trunk-{trunk_id}.conf"] = rendered.encode("utf-8")
-        finally:
-            plaintext = None
-
     try:
         template = Path(dialplan_template).read_text(encoding="utf-8")
     except OSError as exc:
@@ -1046,6 +1067,7 @@ def build_candidate_set(
         unrouted_extension_trunks=tuple(sorted(set(unrouted_extension_trunks))),
         unrouted_conflict_trunks=tuple(sorted(set(unrouted_conflict_trunks))),
         unrouted_unknown_account_trunks=tuple(sorted(set(unrouted_unknown_account_trunks))),
+        invalid_trunks=tuple(sorted(invalid_trunks)),
     )
 
 
@@ -1688,6 +1710,7 @@ async def _execute(args: argparse.Namespace) -> int:
         "unrouted_extension_trunks": list(candidate.unrouted_extension_trunks),
         "unrouted_conflict_trunks": list(candidate.unrouted_conflict_trunks),
         "unrouted_unknown_account_trunks": list(candidate.unrouted_unknown_account_trunks),
+        "invalid_trunks": list(candidate.invalid_trunks),
         **summary.to_safe_dict(),
     }
     print(json.dumps(output, sort_keys=True))

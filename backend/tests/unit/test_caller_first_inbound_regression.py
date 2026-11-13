@@ -87,9 +87,9 @@ class TestActivePromptCarriesInboundContract:
         assert active.startswith(INBOUND_DIRECTIVE_SENTINEL)
         # Persona body still present below directive.
         assert "friendly customer support specialist at Acme" in active
-        # Outbound opener present and parameterized to this campaign — the
-        # agent introduces itself as "<agent> from <company>", not a receiver.
-        assert "Sarah from Acme" in active
+        # Outbound framing present and parameterized to this campaign — the agent is
+        # framed as the caller, not a receiver (prompts/direction.py:11).
+        assert "You are Sarah for Acme. You dialed this person; they did not call the company." in active
 
     def test_canonical_opener_matches_receiver_pattern(self):
         """The canonical opener phrasing must still match the receiver

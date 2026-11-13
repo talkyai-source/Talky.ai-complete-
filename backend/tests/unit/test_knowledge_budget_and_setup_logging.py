@@ -145,10 +145,6 @@ def test_modes_widen_as_the_knowledge_base_grows():
 # --------------------------------------------------------------------------
 
 
-async def _fake_compact_tree(pool, tenant_id, campaign_id, *, skeleton_only=False, max_chars=12000):
-    return "SKELETON_TOC" if skeleton_only else "FULL_TREE_BODY"
-
-
 def _session(**kw):
     base = dict(
         call_id="call-abcdef123456",
@@ -196,7 +192,15 @@ def test_outbound_says_why_it_is_off_when_the_campaign_mode_is_none(monkeypatch,
 
 def test_outbound_reports_on_for_a_live_campaign(monkeypatch, caplog):
     monkeypatch.setenv("CAMPAIGN_KNOWLEDGE_ENABLED", "true")
-    monkeypatch.setattr(session_inject, "compact_tree", _fake_compact_tree)
+
+    async def _fake_load_catalog(pool, tenant_id, campaign_id):  # 764502a0: call-scoped section catalog
+        from app.services.scripts.knowledge.sections import build_section_catalog
+        return build_section_catalog(
+            [{"id": "n1", "source_id": "s1", "source_version": 1, "version": 1,
+              "heading": "Pricing", "content": "x", "path": "1", "depth": 1}],
+            tenant_id=tenant_id, campaign_id=campaign_id, source_policy="call_snapshot")
+
+    monkeypatch.setattr(session_inject, "load_section_catalog", _fake_load_catalog)
     cs = _session()
     with caplog.at_level(logging.INFO, logger=session_inject.logger.name):
         asyncio.run(
@@ -205,8 +209,11 @@ def test_outbound_reports_on_for_a_live_campaign(monkeypatch, caplog):
                 pool=object(),
             )
         )
-    line = [ln for ln in _kb_setup_lines(caplog) if " ON " in ln][0]
-    assert "effective=inline" in line and "configured=inline" in line
+    # apply_campaign_knowledge loads the section catalog (session_inject.py:90) and logs
+    # "KB_SETUP model_selected policy=call_snapshot ... sections=<n>" (session_inject.py:103-104);
+    # the old " ON ... effective=/configured=" line and compact_tree no longer exist.
+    line = [ln for ln in _kb_setup_lines(caplog) if "model_selected" in ln][0]
+    assert "policy=call_snapshot" in line and "sections=1" in line
     assert cs.knowledge_mode == "inline"
 
 

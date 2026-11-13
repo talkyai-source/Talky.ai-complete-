@@ -1,10 +1,21 @@
 [Unit]
+OnFailure=talky-notify@%n.service
 Description=Talky.ai Data-Retention Cleanup (call_events/stream_events/call_legs)
 After=network.target
 # One-shot, triggered by talky-cleanup.timer. Do NOT add Restart= here —
 # a failed run surfaces via exit code in journald and retries next night.
 
 [Service]
+OOMScoreAdjust=300
+User=talky
+Group=talky
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+ReadWritePaths=/opt/talky/backend/recordings /opt/talky/backend/audio_files /opt/talky/backend/feedback_audio /opt/talky/backend/support_attachments
 Type=oneshot
 WorkingDirectory=/opt/talky/backend
 EnvironmentFile=/opt/talky/backend/.env

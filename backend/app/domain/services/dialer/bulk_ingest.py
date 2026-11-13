@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 # Delimiters between pasted numbers. Deliberately NOT space — a number
 # like "+1 415 555 1234" must survive as one token — so we split only on
 # line breaks and the common list separators.
-_PASTE_SPLIT = re.compile(r"[\n\r;,|\t]+")
+_PASTE_SPLIT = re.compile(r"[\n\r,|\t]+|;(?!ext=)", re.IGNORECASE)
 
 # Default insert chunk size (mirrors the CSV path).
 DEFAULT_CHUNK_SIZE = 500

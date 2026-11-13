@@ -25,6 +25,8 @@ loader._load = function (id, ...args) {
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("components/campaigns/contact-lists")) return { ContactLists: nothing };
     if (id.includes("components/calls/lead-details-panel")) return { ContactCapturedDetails: nothing };
+    // Contact changes follow effective permissions (QA F1-21); unknown offers all.
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => ({ isSuccess: false }) };
     return originalLoad.call(this, id, ...args);
 };
 let Page: React.ComponentType;

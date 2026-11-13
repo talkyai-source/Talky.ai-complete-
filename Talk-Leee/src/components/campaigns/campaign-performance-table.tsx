@@ -28,6 +28,7 @@ import { ChevronDown, ChevronRight, Download, Loader2, Pause, Play, Trash2 } fro
 import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { CampaignStartControl } from "@/components/campaigns/campaign-readiness";
+import type { CampaignActions } from "@/lib/permissions";
 import { CampaignDuplicateStatus, useCampaignDuplicate } from "@/components/campaigns/campaign-duplicate";
 import type { CampaignDuplicateResult } from "@/lib/campaign-duplicate";
 import { CampaignControlNoticeBox } from "@/components/campaigns/campaign-control-notice";
@@ -35,6 +36,9 @@ import { campaignStartLabel, canStartCampaign, useCampaignsInFlight, type Campai
 import { campaignDisplayStatus, campaignStatusFilterOptions, campaignStatusLabel, migrateStatusFilterLabels } from "@/lib/campaign-status";
 
 type ColumnDef = { key: CampaignSortKey; label: string; numeric?: boolean };
+
+// No server job executes the browser-only report schedule (QA F1-13).
+const REPORT_SCHEDULING_AVAILABLE = false;
 
 const COLUMNS: ColumnDef[] = [
     { key: "name", label: "Campaign" },
@@ -251,6 +255,8 @@ export function printCampaignsWithColumns(campaigns: Campaign[], columns: Export
         w = null;
     }
     if (!w) return false;
+    // QA F1-18: cut the opener link before writing anything.
+    w.opener = null;
     const headCells = columns.map((c) => `<th>${escapeHtml(c)}</th>`).join("");
     const rows = campaigns
         .map((c) => {
@@ -340,6 +346,7 @@ export function CampaignPerformanceTable({
     campaigns,
     loading,
     error,
+    errorRequestId,
     onRetry,
     onPause,
     onStop,
@@ -347,6 +354,7 @@ export function CampaignPerformanceTable({
     onResume,
     onDelete,
     onDuplicate,
+    allowed = { create: true, update: true, delete: true },
     notice,
     onNoticeDismiss,
     exportOpen: exportOpenProp,
@@ -357,6 +365,7 @@ export function CampaignPerformanceTable({
     error: string;
     /** Reads the list again after a failed read. */
     onRetry?: () => void | Promise<void>;
+    errorRequestId?: string;
     /** Pauses one campaign (details modal). */
     onPause: (id: string) => Promise<void>;
     /** Stops one campaign (details modal). */
@@ -375,6 +384,8 @@ export function CampaignPerformanceTable({
     /** 3.4 E4: the Export window's open state, when the page owns it (the command bar opens it too). */
     exportOpen?: boolean;
     onExportOpenChange?: (next: boolean) => void;
+    /** What the signed-in role may do (QA F1-21); everything by default. */
+    allowed?: CampaignActions;
 }) {
     const router = useRouter();
     const [sort, setSort] = useState<CampaignSortSpec[]>([]);
@@ -977,20 +988,33 @@ export function CampaignPerformanceTable({
                         >
                             Export
                         </Button>
-                        <Button
-                            asChild
-                            variant="outline"
-                            className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
-                        >
-                            <Link href="/campaigns/new" className="shrink-0">
-                                Create campaign
-                            </Link>
-                        </Button>
+                        {allowed.create ? (
+                                <Button
+                                asChild
+                                variant="outline"
+                                className="h-10 border-teal-500/60 bg-teal-600 text-white shadow-sm hover:bg-teal-700 hover:text-white"
+                            >
+                                <Link href="/campaigns/new" className="shrink-0">
+                                    Create campaign
+                                </Link>
+                            </Button>
+                        ) : null}
                     </div>
                 </div>
             </div>
 
-            {bulkCount > 0 ? (
+            {bulkCount > 0 && !allowed.update && !allowed.delete ? (
+                // A role that may not change campaigns can still export them.
+                <div className="content-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="text-sm font-semibold text-foreground">
+                        {bulkCount} selected
+                    </div>
+                    <Button type="button" variant="secondary" size="sm" className="self-start sm:self-auto" onClick={() => setExportOpen(true)}>
+                        <Download className="h-4 w-4" />
+                        Export Selected
+                    </Button>
+                </div>
+            ) : bulkCount > 0 ? (
                 <div className="content-card flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                     <div className="text-sm font-semibold text-foreground">
                         {bulkCount} selected
@@ -1012,12 +1036,12 @@ export function CampaignPerformanceTable({
                         notice's own mt-1 is zeroed at every width so the phone column keeps
                         this container's 8px gap above it instead of 12px. */}
                     <div className="flex flex-col items-start gap-2 [&>div:first-of-type]:contents [&>div:first-of-type>div]:mt-0 [&>div:first-of-type>div]:[overflow-wrap:anywhere] sm:grid sm:min-w-0 sm:flex-1 sm:grid-cols-[max-content_minmax(0,1fr)_max-content] sm:items-center sm:gap-x-4 sm:[&>div:first-of-type>button]:col-start-1 sm:[&>div:first-of-type>button]:row-start-2 sm:[&>div:first-of-type>button]:w-40 sm:[&>div:first-of-type>button]:justify-start sm:[&>div:first-of-type>div]:col-start-2 sm:[&>div:first-of-type>div]:row-start-1 sm:[&>div:first-of-type>div]:row-span-2 sm:[&>div:first-of-type>div]:self-center sm:[&>div:first-of-type>div]:justify-self-center sm:[&>div:first-of-type>div]:text-center sm:[&>div:first-of-type>p]:col-start-2 sm:[&>div:first-of-type>p]:row-start-3 sm:[&>div:first-of-type>p]:justify-self-center">
-                        <Button type="button" variant="outline" size="sm" className="sm:col-start-1 sm:row-start-1 sm:w-40 sm:justify-start" onClick={bulkPause} disabled={bulkPausing}>
+                        <Button type="button" variant="outline" size="sm" className="sm:col-start-1 sm:row-start-1 sm:w-40 sm:justify-start" onClick={bulkPause} disabled={bulkPausing || !allowed.update}>
                             {bulkPausing ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Pause className="h-4 w-4" />}
                             {bulkPausing ? "Pausing…" : "Pause Selected"}
                         </Button>
                         <div>
-                            <Button type="button" variant="outline" size="sm" onClick={bulkResume} disabled={resumableSelectedIds.length === 0}>
+                            <Button type="button" variant="outline" size="sm" onClick={bulkResume} disabled={resumableSelectedIds.length === 0 || !allowed.update}>
                                 <Play className="h-4 w-4" aria-hidden />
                                 Resume Selected
                             </Button>
@@ -1027,7 +1051,7 @@ export function CampaignPerformanceTable({
                                 <Download className="h-4 w-4" />
                                 Export Selected
                             </Button>
-                            <Button type="button" variant="destructive" size="sm" className="sm:col-start-3 sm:row-start-2 sm:w-40 sm:justify-start" onClick={() => setConfirmDeleteId("__bulk__")}>
+                            <Button type="button" variant="destructive" size="sm" className="sm:col-start-3 sm:row-start-2 sm:w-40 sm:justify-start" onClick={() => setConfirmDeleteId("__bulk__")} disabled={!allowed.delete}>
                                 <Trash2 className="h-4 w-4" />
                                 Delete Selected
                             </Button>
@@ -1039,7 +1063,7 @@ export function CampaignPerformanceTable({
             <div className="content-card overflow-hidden">
                 <div className="flex flex-col gap-3 border-b border-border px-3 py-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
                     <div className="text-sm text-muted-foreground text-center sm:text-left">
-                        {paged.start}-{paged.end} of {sorted.length}
+                        {error ? "Campaign data could not be refreshed" : <>{paged.start}-{paged.end} of {sorted.length}</>}
                     </div>
                     <div className="flex flex-wrap items-center justify-center gap-2 sm:justify-end">
                         <div className="text-xs font-semibold text-muted-foreground">Rows</div>
@@ -1080,15 +1104,16 @@ export function CampaignPerformanceTable({
                     </div>
                 </div>
 
+                {error ? (
+                    <div className="p-4">
+                        <ErrorState message={error} requestId={errorRequestId} staleData={campaigns.length > 0} busy={loading} onRetry={onRetry} />
+                    </div>
+                ) : null}
                 {loading ? (
                     <div className="p-4">
                         <LoadingState />
                     </div>
-                ) : error ? (
-                    <div className="p-4">
-                        <ErrorState message={error} onRetry={onRetry} />
-                    </div>
-                ) : campaigns.length === 0 ? (
+                ) : error && sorted.length === 0 ? null : campaigns.length === 0 ? (
                     <div className="p-4">
                         <EmptyState title="No campaigns yet" />
                     </div>
@@ -1266,11 +1291,11 @@ export function CampaignPerformanceTable({
                             PDF opens a print view; save as PDF from your browser.
                         </div>
                     </div>
-                    <div className="rounded-xl border border-border bg-muted/30 p-4">
+                    {REPORT_SCHEDULING_AVAILABLE && <div className="rounded-xl border border-border bg-muted/30 p-4">
                         <div className="text-sm font-semibold text-foreground">Scheduling</div>
                         <div className="mt-2 text-sm text-muted-foreground">Save recurring settings locally (prototype mode).</div>
                         <ReportScheduleEditor storageKey="campaigns.performance.reportSchedule" />
-                    </div>
+                    </div>}
                 </div>
                 <div className="mt-4 grid grid-cols-1 gap-4 md:grid-cols-2">
                     <div className="rounded-xl border border-border bg-muted/30 p-4">
@@ -1383,7 +1408,7 @@ export function CampaignPerformanceTable({
                                     Open page
                                 </Link>
                             </Button>
-                            {detailsCanResume ? (
+                            {!allowed.update ? null : detailsCanResume ? (
                                 <CampaignStartControl
                                     campaignIds={[detailsCampaign.id]}
                                     onStart={async () => onResume([detailsCampaign.id], detailsCampaign.id)}
@@ -1402,26 +1427,30 @@ export function CampaignPerformanceTable({
                                     </Button>
                                 </>
                             ) : null}
-                            <Button
-                                type="button"
-                                variant="outline"
-                                disabled={duplicate.disabled}
-                                onClick={() => {
-                                    void duplicate.run();
-                                }}
-                            >
-                                Duplicate
-                            </Button>
-                            <Button
-                                type="button"
-                                variant="outline"
-                                onClick={() => {
-                                    setDetailsId(null);
-                                    router.push(`/campaigns/${detailsCampaign.id}/edit`);
-                                }}
-                            >
-                                Edit
-                            </Button>
+                            {allowed.create ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    disabled={duplicate.disabled}
+                                    onClick={() => {
+                                        void duplicate.run();
+                                    }}
+                                >
+                                    Duplicate
+                                </Button>
+                            ) : null}
+                            {allowed.update ? (
+                                <Button
+                                    type="button"
+                                    variant="outline"
+                                    onClick={() => {
+                                        setDetailsId(null);
+                                        router.push(`/campaigns/${detailsCampaign.id}/edit`);
+                                    }}
+                                >
+                                    Edit
+                                </Button>
+                            ) : null}
                             <Button
                                 type="button"
                                 variant="outline"
@@ -1429,16 +1458,18 @@ export function CampaignPerformanceTable({
                             >
                                 View Analytics
                             </Button>
-                            <Button
-                                type="button"
-                                variant="destructive"
-                                onClick={() => {
-                                    setDetailsId(null);
-                                    setConfirmDeleteId(detailsCampaign.id);
-                                }}
-                            >
-                                Delete
-                            </Button>
+                            {allowed.delete ? (
+                                <Button
+                                    type="button"
+                                    variant="destructive"
+                                    onClick={() => {
+                                        setDetailsId(null);
+                                        setConfirmDeleteId(detailsCampaign.id);
+                                    }}
+                                >
+                                    Delete
+                                </Button>
+                            ) : null}
                         </div>
                         <CampaignDuplicateStatus duplicate={duplicate} />
                         {notice && notice.campaignId === detailsCampaign.id ? <CampaignControlNoticeBox notice={notice.notice} /> : null}

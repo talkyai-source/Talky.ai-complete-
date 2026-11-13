@@ -25,9 +25,44 @@ from slowapi.errors import RateLimitExceeded
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.core.request_id_middleware import get_request_id
-from app.core.db import DatabasePoolTimeoutError
+from app.core.db import DATABASE_RETRYABLE_ERRORS
 
 logger = logging.getLogger(__name__)
+
+_DATABASE_CAPACITY_ERRORS = DATABASE_RETRYABLE_ERRORS
+
+
+def safe_exception_message(exc: BaseException, message: str = "The request could not be completed.") -> str:
+    """Keep driver/provider text in correlated logs, never in HTTP detail.
+
+    Password diagnostics are an exact finite public vocabulary. Unknown text,
+    including an unexpected PasswordValidationError message, uses the caller's
+    fixed fallback. The exception chain remains available to the 503 handler.
+    """
+    logger.warning("HTTP operation failed request_id=%s error_type=%s", get_request_id(),
+                   type(exc).__name__, exc_info=(type(exc), exc, exc.__traceback__))
+    from app.core.security.password import PasswordValidationError
+    if type(exc) is PasswordValidationError and len(exc.args) == 1:
+        public = {
+            "Password cannot be empty.": "Password cannot be empty.",
+            "Password must be at least 15 characters.": "Password must be at least 15 characters.",
+            "Password cannot exceed 128 characters.": "Password cannot exceed 128 characters.",
+            "Choose a password that is not commonly used.": "Choose a password that is not commonly used.",
+        }
+        if isinstance(exc.args[0], str) and exc.args[0] in public:
+            return public[exc.args[0]]
+    return message
+
+
+def _database_capacity_cause(exc: BaseException) -> BaseException | None:
+    """Keep retry semantics when a route wraps the driver error in HTTP 500."""
+    seen: set[int] = set()
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if isinstance(exc, _DATABASE_CAPACITY_ERRORS):
+            return exc
+        exc = exc.__cause__ or exc.__context__
+    return None
 
 
 # Map HTTP status codes to stable error codes for HTTPException paths
@@ -83,6 +118,10 @@ async def http_exception_handler(
         `{"error":{"message":"{'error': 'x', ...}"}}` — a Python repr
         inside JSON that clients can't reliably parse.
     """
+    if exc.status_code == 500:
+        database_error = _database_capacity_cause(exc)
+        if database_error is not None:
+            return await db_pool_timeout_exception_handler(request, database_error)
     default_code = _DEFAULT_CODES.get(exc.status_code, "http_error")
     headers = dict(exc.headers or {})
 
@@ -149,12 +188,12 @@ async def rate_limit_exception_handler(
 
 
 async def db_pool_timeout_exception_handler(
-    request: Request, exc: DatabasePoolTimeoutError
+    request: Request, exc: BaseException
 ) -> JSONResponse:
     # Pool exhaustion / DB unresponsive — this is a transient capacity
     # problem, not a client error or a code bug, so 503 (not 500) is the
     # correct signal for clients/load-balancers to back off and retry.
-    logger.error("DB pool acquire timed out: %s", exc)
+    logger.error("DB temporarily unavailable: %s", type(exc).__name__)
     return JSONResponse(
         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
         content=_envelope(
@@ -175,11 +214,20 @@ async def unhandled_exception_handler(
     cached = getattr(request.state, "_talky_unhandled_error", None)
     if cached is not None and cached[0] is exc:
         return cached[1]
+    database_error = _database_capacity_cause(exc)
+    if database_error is not None:
+        response = await db_pool_timeout_exception_handler(request, database_error)
+        response.headers["Cache-Control"] = "no-store"
+        request.state._talky_unhandled_error = (exc, response)
+        return response
     # Never leak internal error details to clients. Operators get the full
     # traceback in logs (tagged with request_id) and Sentry.
     logger.exception("Unhandled exception in request handler")
     response = JSONResponse(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        # The outer ServerErrorMiddleware may render after inner middleware has
+        # unwound. Its response still must not cache an authenticated failure.
+        headers={"Cache-Control": "no-store"},
         content=_envelope(
             code="internal_error",
             message="An unexpected error occurred. Reference the request_id when reporting.",
@@ -212,5 +260,6 @@ def register_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(HTTPException, http_exception_handler)
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.add_exception_handler(RateLimitExceeded, rate_limit_exception_handler)
-    app.add_exception_handler(DatabasePoolTimeoutError, db_pool_timeout_exception_handler)
+    for error_type in _DATABASE_CAPACITY_ERRORS:
+        app.add_exception_handler(error_type, db_pool_timeout_exception_handler)
     app.add_exception_handler(Exception, unhandled_exception_handler)

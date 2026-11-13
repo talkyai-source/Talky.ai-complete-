@@ -18,6 +18,7 @@ Every assertion here is derived from the consumer, not restated from memory:
 """
 from __future__ import annotations
 
+import base64
 import re
 from pathlib import Path
 
@@ -38,6 +39,8 @@ INBOUND_CONTEXT = "from-talky-inbound"
 # Sentinels standing in for what Asterisk expands at call time.
 DIALLED_DID = "+441184960111"
 CALLER_ANI = "+447700900123"
+CALLER_PAI = f"<tel:{CALLER_ANI}>;verstat=TN-Validation-Passed"
+CALLER_ATTESTATION = "A"
 
 # Dialplan variables the inbound context is allowed to reference, mapped to the
 # value Asterisk would substitute for a call to DIALLED_DID from CALLER_ANI.
@@ -53,6 +56,10 @@ DIALPLAN_VARS = {
     # (sip:ext%3A940003@...), which would otherwise let untrusted input reach
     # Stasis already tagged as the internal-extension address "ext:940003".
     "${FILTER(0-9+,${EXTEN})}": DIALLED_DID,
+    "cid_pai_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Asserted-Identity)})}":
+        "cid_pai_b64=" + base64.b64encode(CALLER_PAI.encode("ascii")).decode("ascii"),
+    "cid_attestation_b64=${BASE64_ENCODE(${PJSIP_HEADER(read,P-Attestation-Indicator)})}":
+        "cid_attestation_b64=" + base64.b64encode(CALLER_ATTESTATION.encode("ascii")).decode("ascii"),
 }
 
 
@@ -203,6 +210,9 @@ def test_inbound_stasis_args_parse_to_the_dialled_did(inbound_stasis_args):
     meta = adapter._extract_inbound_meta(
         _stasis_start_event(inbound_stasis_args, with_dialplan_exten=False)
     )
+    assert meta["caller_identity_headers"] == {
+        "pai": CALLER_PAI, "attestation": CALLER_ATTESTATION,
+    }, "The shipped identity arguments must reach the real bounded decoder"
 
     assert meta["direction"] == "inbound", (
         f"adapter parsed direction={meta['direction']!r} from args "
@@ -242,6 +252,9 @@ def test_caller_number_is_not_in_the_did_position(inbound_stasis_args):
     meta = adapter._extract_inbound_meta(
         _stasis_start_event(inbound_stasis_args, with_dialplan_exten=True)
     )
+    assert meta["caller_identity_headers"] == {
+        "pai": CALLER_PAI, "attestation": CALLER_ATTESTATION,
+    }, "The shipped identity arguments must reach the real bounded decoder"
     assert meta["caller_number"] == CALLER_ANI, (
         "the caller number must still reach the adapter (it reads "
         "channel.caller.number); got {!r}".format(meta["caller_number"])
@@ -288,8 +301,9 @@ def test_setup_and_deploy_share_candidate_digest_reconciler(script_text):
         "CANDIDATE_DIGEST"
     )
     assert "for required_tool in asterisk " in deploy
+    # The recovery function is defined earlier; compare the live candidate checkout.
     assert deploy.index("for required_tool in asterisk ") < deploy.index(
-        "git checkout --detach"
+        "git checkout --detach '${DEPLOY_SHA}'"
     )
 
 
@@ -313,7 +327,7 @@ def test_deploy_blocks_on_candidate_mapping_conflicts_before_checkout():
         'reconcile_asterisk_release.sh\\" --check-only'
     )
     assert candidate_check in deploy
-    assert deploy.index(candidate_check) < deploy.index("git checkout --detach")
+    assert deploy.index(candidate_check) < deploy.index("git checkout --detach '${DEPLOY_SHA}'")
 
 
 def test_managed_dialplan_preserves_catch_all_and_has_no_endpoint_variable(

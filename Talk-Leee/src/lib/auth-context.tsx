@@ -2,10 +2,13 @@
 
 import { normalizeMinutesAllowance, type MinutesState } from "@/lib/minutes-allowance";
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { api } from "@/lib/api";
-import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, beginRequestIdentityCheck, ApiClientError } from "@/lib/http-client";
+import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
 import { notificationsStore } from "@/lib/notifications";
+import { emailAuditStore } from "@/lib/email-audit";
+import { isPublicRoute } from "@/lib/public-routes";
 
 // Contains no token or account data. Cookie-only sessions also need an explicit
 // cross-tab boundary because removing an absent bearer key emits no event.
@@ -26,6 +29,7 @@ interface MeResponse {
     email: string;
     name?: string;
     business_name?: string;
+    account_timezone?: string;
     role: string;
     minutes_remaining: number | null;
     minutes_state?: MinutesState;
@@ -79,12 +83,23 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+    const publicPage = isPublicRoute(usePathname() ?? "");
+    const emailHistorySyncAvailable = useRef(false);
     const [user, setUserState] = useState<MeResponse | null>(null);
     const setUser = useCallback((next: MeResponse | null) => {
         // Optimistic legacy login payloads can omit tenant identity. Only /me
         // may complete that scope; a platform administrator can be tenantless.
         setRequestIdentity(next && (next.tenant_id || next.role === "platform_admin")
             ? { userId: next.id, tenantId: next.tenant_id } : null);
+        if (emailHistorySyncAvailable.current && next?.tenant_id && next.id) {
+            emailAuditStore.setIdentity({ tenantId: next.tenant_id, userId: next.id });
+        } else if (next) {
+            // A verified identity without an eligible tenant is a new owner,
+            // not a pending recheck of the previous user's retained scope.
+            emailAuditStore.setIdentity(null);
+        } else {
+            emailAuditStore.suspendIdentity();
+        }
         setUserState(next);
     }, []);
     const [loading, setLoading] = useState(true);
@@ -93,6 +108,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const broadcastIdentityChange = useCallback((kind: "changed" | "logout") => {
         if (!publishIdentityChange(kind, identityChannel.current)) {
             notificationsStore.setIdentity(null);
+            emailHistorySyncAvailable.current = false;
+            emailAuditStore.suspendIdentity();
             setNotificationSyncAvailable(false);
         }
     }, []);
@@ -159,6 +176,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         identityEpoch.current += 1;
         profileRead.current += 1;
         notificationsStore.setIdentity(null);
+        emailAuditStore.suspendIdentity();
         return identityEpoch.current;
     }, []);
 
@@ -175,6 +193,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             setAccessTokenState(token);
         });
         return () => {
+            emailHistorySyncAvailable.current = false;
+            emailAuditStore.suspendIdentity();
             profileReadsAllowed.current = false;
             identityEpoch.current += 1;
             profileRead.current += 1;
@@ -191,6 +211,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (typeof window === "undefined") return;
         const seen = new Set<string>();
         function handleIdentityChange(kind: "changed" | "logout") {
+            if (kind === "logout") emailAuditStore.clearForLogout();
+            else emailAuditStore.suspendIdentity();
             invalidateRequestIdentity();
             setUser(null);
             const epoch = ++identityEpoch.current;
@@ -278,6 +300,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             }
         } catch { /* The existing foreign storage marker remains the fallback. */ }
         identityChannel.current = channel;
+        emailHistorySyncAvailable.current = storageAvailable || !!channel;
+        if (!emailHistorySyncAvailable.current) emailAuditStore.suspendIdentity();
         // Capability depends on successfully opening browser transports, which
         // must happen after mount rather than during render or on the server.
         // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -294,16 +318,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // A failed logout has an unknown server outcome. Do not replay a timestamp
     // against current cookies: they may now belong to a different session.
 
-    // Verify the session on mount using existing cookies and any saved bearer.
-    // A missing bearer says nothing about the HttpOnly cookie. getMe suppresses
-    // the global expiry redirect; an anonymous response settles this provider.
+    // Public marketing pages defer cookie-only discovery until protected
+    // navigation or explicit refresh. A saved bearer still gets verified.
+    // The category dependency also verifies cookies when leaving those pages;
+    // private-to-private navigation does not restart bootstrap.
     // Token changes stay outside the dependency list so rotation cannot restart
     // bootstrap. The HTTP client reads the live token ref when needed.
     useEffect(() => {
         let cancelled = false;
-        const epoch = identityEpoch.current;
-        const read = ++profileRead.current;
-        const current = () => !cancelled && identityEpoch.current === epoch && profileRead.current === read;
         try {
             if (window.localStorage.getItem("talky.logout.pending")) {
                 logoutIntent.current = true;
@@ -314,6 +336,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 return;
             }
         } catch { /* Continue the usual bootstrap when storage is unavailable. */ }
+        const skipBootstrap = logoutIntent.current || !profileReadsAllowed.current
+            || (publicPage && !accessTokenRef.current);
+        // Settle a deferred public bootstrap, or mark protected discovery in
+        // flight. Navigation must never reopen a logout/identity boundary.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setLoading(!skipBootstrap);
+        if (skipBootstrap) return;
+        const epoch = identityEpoch.current;
+        const read = ++profileRead.current;
+        const current = () => !cancelled && identityEpoch.current === epoch && profileRead.current === read;
         // Retain the existing single retry during fresh-login grace. Current
         // ownership checks reject reads superseded by logout or another login.
         async function loadMe(attempt: number): Promise<void> {
@@ -346,11 +378,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (current()) setLoading(false);
             }
         }
-        // Requests the page makes before this first check answers wait for it.
-        const settleSignInCheck = beginRequestIdentityCheck();
-        void loadMe(0).finally(settleSignInCheck);
-        return () => { cancelled = true; settleSignInCheck(); };
-    }, [setUser]);
+        void loadMe(0);
+        return () => { cancelled = true; };
+    }, [publicPage, setUser]);
 
     // The ONE writer that touches the persisted token + the reactive state.
     // Every other action (login, logout, setToken, applyLoginResult)
@@ -400,6 +430,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const logout = useCallback(async () => {
         const expectedIdentity = user ? { userId: user.id, tenantId: user.tenant_id } : undefined;
+        emailAuditStore.clearForLogout();
         logoutIntent.current = true;
         // Persist before a cross-app hint can retire this operation's epoch.
         // A failed write still leaves the mounted provider fenced in memory.
@@ -586,6 +617,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
         setLoading(false);
         broadcastIdentityChange("changed");
+        // QA F1-32: the login answer has no account time zone (or the rest
+        // of the profile), so times showed in the browser's zone until a
+        // reload. Read the profile once, fenced to this sign-in: a sign-out
+        // or a later sign-in discards the answer, and a failure (such as the
+        // cookie race inside the fresh-login grace) keeps the seeded user.
+        // It only completes this same user (and tenant, when the login named
+        // one); it never switches the tab to a different account.
+        const epoch = identityEpoch.current;
+        const read = ++profileRead.current;
+        void api.getMe()
+            .then((me) => {
+                if (identityEpoch.current !== epoch || profileRead.current !== read) return;
+                if (me.id !== res.user_id || (res.tenant_id && me.tenant_id !== res.tenant_id)) return;
+                setUser(me);
+            })
+            .catch(() => { /* The next reload reads the profile again. */ });
     }, [invalidateIdentity, broadcastIdentityChange, setUser]);
 
     // Compute the AuthStatus from the underlying state. Order matters:

@@ -4,6 +4,7 @@ import { minutesSummaryPresentation } from "@/lib/minutes-allowance";
 import React, { useEffect, useLayoutEffect, useMemo, useState, useRef } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
+import { LoadingSkeleton } from "@/components/states/page-states";
 import { dashboardApi, DashboardSummary, Campaign } from "@/lib/dashboard-api";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
@@ -27,9 +28,10 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
-import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { EmptyState, ErrorState, failedReadMessage } from "@/components/states/page-states";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
+import { calendarBucketBounds, calendarHourBounds, reportingDateRange } from "@/lib/reporting-time";
 import { campaignStatusLabel } from "@/lib/campaign-status";
 import { browserTimeZoneName, formatUtcDateLabel, timezoneLabel, UTC_TIMEZONE_LABEL } from "@/lib/utc-date-label";
 
@@ -83,14 +85,6 @@ function statusVariantLowerBetter(value: number, thresholds: { green: number; ye
     if (value <= thresholds.green) return "green" as const;
     if (value <= thresholds.yellow) return "yellow" as const;
     return "red" as const;
-}
-
-function currentUtcMonthRange(now = new Date()): { from: string; to: string } {
-    const from = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    return {
-        from: from.toISOString().slice(0, 10),
-        to: now.toISOString().slice(0, 10),
-    };
 }
 
 function KpiCard({
@@ -181,81 +175,51 @@ function KpiCard({
     );
 }
 
-// Pulls real call-volume buckets from /analytics/calls and shapes them into
-// LiveTimeBucket[] for the dashboard charts. Polls every 30s; when no data is
-// returned the chart shows an empty state rather than fake numbers.
-function useLiveBuckets() {
-    const [state, setState] = useState<{
-        loading: boolean;
-        error: string;
-        lastUpdatedMs: number;
-        buckets: LiveTimeBucket[];
-    }>({ loading: true, error: "", lastUpdatedMs: 0, buckets: [] });
+// Both charts use the same daily response. Convert it before replacing the
+// snapshot so a failed fetch/transform preserves both last-good consumers.
+function dailySnapshot(series: CallSeriesItem[], timeZone: string) {
+    const buckets: LiveTimeBucket[] = [];
+    for (const s of series) {
+        // Daily rows retain account-local day boundaries; they are not
+        // per-minute observations (API_CONNECTIVITY_GAP_ANALYSIS.md §2.1).
+        const { startMs, endMs } = calendarBucketBounds(s.date, timeZone);
+        if (!Number.isFinite(startMs)) continue;
+        buckets.push({
+            startMs,
+            endMs,
+            total: s.total_calls ?? 0,
+            answered: s.answered ?? 0,
+            failed: s.failed ?? 0,
+            avgDurationSec: null,
+        });
+    }
+    buckets.sort((a, b) => a.startMs - b.startMs);
+    return { series, buckets, lastUpdatedMs: Date.now() };
+}
 
-    useEffect(() => {
-        let cancelled = false;
+// QA F1-30: windows of a day or less are drawn from hourly rows; day rows
+// made 1h, 4h, 8h and 24h all show the same single day.
+const HOURLY_RANGE_MAX_MS = 24 * 60 * 60 * 1000;
 
-        const seriesToBuckets = (series: CallSeriesItem[]): LiveTimeBucket[] => {
-            // Backend returns daily-grouped rows; use day boundaries for the
-            // bucket window. Time-of-day breakdowns require a per-minute
-            // endpoint that doesn't exist yet (tracked in
-            // API_CONNECTIVITY_GAP_ANALYSIS.md §2.1).
-            const DAY_MS = 24 * 60 * 60 * 1000;
-            const out: LiveTimeBucket[] = [];
-            for (const s of series) {
-                const startMs = Date.parse(s.date);
-                if (!Number.isFinite(startMs)) continue;
-                out.push({
-                    startMs,
-                    endMs: startMs + DAY_MS,
-                    total: s.total_calls ?? 0,
-                    answered: s.answered ?? 0,
-                    failed: s.failed ?? 0,
-                    avgDurationSec: null,
-                });
-            }
-            out.sort((a, b) => a.startMs - b.startMs);
-            return out;
-        };
-
-        const fetchOnce = async () => {
-            try {
-                const month = currentUtcMonthRange();
-                const resp = await extendedApi.getCallAnalytics(
-                    month.from,
-                    month.to,
-                    "day",
-                    "outbound",
-                    false,
-                );
-                if (cancelled) return;
-                const buckets = seriesToBuckets(resp?.series ?? []);
-                setState({
-                    loading: false,
-                    error: "",
-                    lastUpdatedMs: Date.now(),
-                    buckets,
-                });
-            } catch (err) {
-                if (cancelled) return;
-                setState((prev) => ({
-                    ...prev,
-                    loading: false,
-                    error: err instanceof Error ? err.message : "Failed to load live buckets",
-                    lastUpdatedMs: Date.now(),
-                }));
-            }
-        };
-
-        void fetchOnce();
-        const id = window.setInterval(fetchOnce, 30_000);
-        return () => {
-            cancelled = true;
-            window.clearInterval(id);
-        };
-    }, []);
-
-    return state;
+function hourlyBuckets(series: CallSeriesItem[], timeZone: string) {
+    const buckets: LiveTimeBucket[] = [];
+    for (const s of series) {
+        let bounds: { startMs: number; endMs: number };
+        try {
+            bounds = calendarHourBounds(s.date, timeZone);
+        } catch {
+            continue;
+        }
+        buckets.push({
+            startMs: bounds.startMs,
+            endMs: bounds.endMs,
+            total: s.total_calls ?? 0,
+            answered: s.answered ?? 0,
+            failed: s.failed ?? 0,
+            avgDurationSec: null,
+        });
+    }
+    return buckets.sort((a, b) => a.startMs - b.startMs);
 }
 
 function toDatetimeLocalValue(ms: number) {
@@ -710,9 +674,12 @@ export default function DashboardPage() {
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [liveSummary, setLiveSummary] = useState<DashboardSummary | null>(null);
     const [campaigns, setCampaigns] = useState<Campaign[]>([]);
-    const [series, setSeries] = useState<CallSeriesItem[]>([]);
+    const [daily, setDaily] = useState<ReturnType<typeof dailySnapshot>>({ series: [], buckets: [], lastUpdatedMs: 0 });
+    const series = daily.series;
     // Real hourly buckets (heatmap) + real per-campaign series (campaign lines).
     const [hourSeries, setHourSeries] = useState<CallSeriesItem[]>([]);
+    // Hourly buckets for the live chart's windows of a day or less (QA F1-30).
+    const [hourBuckets, setHourBuckets] = useState<LiveTimeBucket[]>([]);
     const [campaignSeries, setCampaignSeries] = useState<Array<{ campaign_id: string; name: string; series: CallSeriesItem[] }>>([]);
     const [liveBars, setLiveBars] = useState<DualSeriesPoint[]>([]);
     const [streamStatus, setStreamStatus] = useState<"connecting" | "connected" | "retrying" | "offline">("connecting");
@@ -723,6 +690,9 @@ export default function DashboardPage() {
     // One entry per first request that failed. Each card reads only its own
     // sources, so one failure never replaces the whole page.
     const [sourceErrors, setSourceErrors] = useState<Partial<Record<DashboardSource, string>>>({});
+    // Sources that failed only because the summary, which reports the zone
+    // they are cut in, failed. They are read again once a summary arrives.
+    const [zoneBlockedSources, setZoneBlockedSources] = useState<readonly DashboardSource[]>([]);
     const lastValidBarsRef = useRef<DualSeriesPoint[]>([]);
     const lastValidSummaryRef = useRef<DashboardSummary | null>(null);
     const lastAppliedTsRef = useRef<number>(0);
@@ -737,9 +707,11 @@ export default function DashboardPage() {
     const [activeBucket, setActiveBucket] = useState<LiveTimeBucket | null>(null);
     const [callStatsView, setCallStatsView] = useState<"status" | "campaigns" | "outcomes">("status");
 
-    const sim = useLiveBuckets();
-    // 3.7 Z3: the live chart and its Custom range are read in the browser's zone.
-    const browserZone = useMemo(() => browserTimeZoneName(), []);
+    const sim = daily;
+    // 3.7 Z3 with QA F1-30/F1-32: label the charts with the zone their
+    // buckets are really cut in, the account's reporting zone (the browser's
+    // until the summary has said which).
+    const chartZone = useMemo(() => summary?.timezone || browserTimeZoneName(), [summary?.timezone]);
 
     const activeRange = useMemo(() => {
         const end = callRangeMode === "custom" ? (customEndMs ?? sim.lastUpdatedMs) : sim.lastUpdatedMs;
@@ -762,20 +734,25 @@ export default function DashboardPage() {
         setCustomStartMs(start);
     }, [callRangeMode, customEndMs, customStartMs, liveRangeHours, sim.lastUpdatedMs]);
 
+    const rangeBuckets = useMemo(() => {
+        const short = activeRange.endMs - activeRange.startMs <= HOURLY_RANGE_MAX_MS;
+        return short && hourBuckets.length > 0 ? hourBuckets : sim.buckets;
+    }, [activeRange.endMs, activeRange.startMs, hourBuckets, sim.buckets]);
+
     const liveBucketsBase = useMemo(() => {
-        if (sim.buckets.length === 0) return [];
+        if (rangeBuckets.length === 0) return [];
         const startMs = activeRange.startMs;
         const endMs = activeRange.endMs;
-        return sim.buckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
-    }, [activeRange.endMs, activeRange.startMs, sim.buckets]);
+        return rangeBuckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
+    }, [activeRange.endMs, activeRange.startMs, rangeBuckets]);
 
     const previousBucketsBase = useMemo(() => {
-        if (sim.buckets.length === 0) return [];
+        if (rangeBuckets.length === 0) return [];
         const rangeMs = Math.max(1, activeRange.endMs - activeRange.startMs);
         const endMs = activeRange.startMs;
         const startMs = endMs - rangeMs;
-        return sim.buckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
-    }, [activeRange.endMs, activeRange.startMs, sim.buckets]);
+        return rangeBuckets.filter((b) => b.endMs >= startMs && b.startMs <= endMs);
+    }, [activeRange.endMs, activeRange.startMs, rangeBuckets]);
 
     const liveBuckets = useMemo(() => {
         const totals = liveBucketsBase.map((b) => b.total).filter((v): v is number => typeof v === "number");
@@ -1011,33 +988,64 @@ export default function DashboardPage() {
     // Each source is read on its own: a failure is recorded against that
     // source only, and Retry on a failed card re-reads just its sources.
     async function loadSources(sources: readonly DashboardSource[]) {
-        const month = currentUtcMonthRange();
+        // The month and every analytics read are cut in the account's reporting
+        // zone, which the summary reports (QA F1-30/F1-32). The summary is read
+        // once per call and shared; a card retried on its own reuses the zone
+        // already known, or reads the summary first when there is none yet.
+        let summaryRead: Promise<{ timezone: string }> | null = null;
+        const readSummary = () => (summaryRead ??= (async () => {
+            const summaryData = await dashboardApi.getDashboardSummary();
+            if (!summaryData.timezone) throw new Error("Reporting timezone unavailable");
+            setSummary(summaryData);
+            setLiveSummary(summaryData);
+            return { timezone: summaryData.timezone };
+        })());
+        const waitedForZone = new Set<DashboardSource>();
+        // Unchanged lists keep their identity, so nothing re-renders for them.
+        const markZoneBlocked = (source: DashboardSource, blocked: boolean) => setZoneBlockedSources((previous) =>
+            previous.includes(source) === blocked ? previous : blocked ? [...previous, source] : previous.filter((entry) => entry !== source));
+        const reportingZone = async (source: DashboardSource) => {
+            if (!sources.includes("summary") && summary?.timezone) return { timezone: summary.timezone };
+            try {
+                return await readSummary();
+            } catch (err) {
+                // This source never ran: only the summary it needs the zone from failed.
+                waitedForZone.add(source);
+                throw err;
+            }
+        };
         const read: Record<DashboardSource, () => Promise<void>> = {
             summary: async () => {
-                const summaryData = await dashboardApi.getDashboardSummary();
-                setSummary(summaryData);
-                setLiveSummary(summaryData);
+                await readSummary();
             },
             campaigns: async () => {
                 const campaignsData = await dashboardApi.listCampaigns();
                 setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
             },
             daily: async () => {
-                const analytics = await extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false);
-                setSeries(analytics.series ?? []);
+                const summaryData = await reportingZone("daily");
+                const month = reportingDateRange(summaryData.timezone, "month");
+                const analytics = await extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false, summaryData.timezone);
+                setDaily(dailySnapshot(analytics.series ?? [], summaryData.timezone));
             },
             hourly: async () => {
-                const hourly = await extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false);
+                const summaryData = await reportingZone("hourly");
+                const month = reportingDateRange(summaryData.timezone, "month");
+                const hourly = await extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false, summaryData.timezone);
                 setHourSeries(hourly.series ?? []);
+                setHourBuckets(hourlyBuckets(hourly.series ?? [], summaryData.timezone));
             },
             byCampaign: async () => {
-                const byCampaign = await extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false);
+                const summaryData = await reportingZone("byCampaign");
+                const month = reportingDateRange(summaryData.timezone, "month");
+                const byCampaign = await extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false, summaryData.timezone);
                 setCampaignSeries(byCampaign.campaigns ?? []);
             },
         };
         await Promise.all(sources.map(async (source) => {
             try {
                 await read[source]();
+                markZoneBlocked(source, false);
                 setSourceErrors((previous) => {
                     const next = { ...previous };
                     delete next[source];
@@ -1045,6 +1053,7 @@ export default function DashboardPage() {
                 });
             } catch (err) {
                 const message = failedReadMessage(err, "Failed to load dashboard");
+                markZoneBlocked(source, waitedForZone.has(source));
                 setSourceErrors((previous) => ({ ...previous, [source]: message }));
             }
         }));
@@ -1064,7 +1073,52 @@ export default function DashboardPage() {
         // Initial REST fetch on mount. The shell shows its spinner (loading
         // starts true) until every source has answered or failed.
         void loadSources(DASHBOARD_SOURCES).finally(() => setLoading(false));
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- first read on mount only; loadSources is a new function on every render
     }, []);
+
+    // A summary that arrived later (the 30-second refresh or the live stream)
+    // also frees the cards that were only waiting for its reporting zone:
+    // they are read again without a click, like the summary cards themselves.
+    useEffect(() => {
+        if (!liveSummary || summary || zoneBlockedSources.length === 0) return;
+        void loadSources(zoneBlockedSources);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- runs when a summary arrives; loadSources is a new function on every render
+    }, [liveSummary, summary, zoneBlockedSources]);
+
+    // Initial load already fetched this slice. Later polls replace one shared
+    // snapshot, keeping the live buckets and stacked series in step.
+    useEffect(() => {
+        const timeZone = summary?.timezone;
+        if (!timeZone) return;
+        let cancelled = false;
+        let inFlight = false;
+        const refreshDaily = async () => {
+            if (inFlight) return;
+            inFlight = true;
+            try {
+                const month = reportingDateRange(timeZone, "month");
+                // QA F1-30: the live chart's short windows also need fresh hours,
+                // but only the last three calendar days, never the month again.
+                const recent = reportingDateRange(timeZone, 2);
+                const [days, hours] = await Promise.allSettled([
+                    extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false, timeZone),
+                    extendedApi.getCallAnalytics(recent.from, recent.to, "hour", "outbound", false, timeZone),
+                ]);
+                if (cancelled) return;
+                if (days.status === "fulfilled") setDaily(dailySnapshot(days.value.series ?? [], timeZone));
+                if (hours.status === "fulfilled") setHourBuckets(hourlyBuckets(hours.value.series ?? [], timeZone));
+            } catch {
+                // Keep both last-good charts; the next scheduled poll retries.
+            } finally {
+                inFlight = false;
+            }
+        };
+        const id = window.setInterval(refreshDaily, 30_000);
+        return () => {
+            cancelled = true;
+            window.clearInterval(id);
+        };
+    }, [summary?.timezone]);
 
     // liveSummary and liveBars are now driven exclusively by the WebSocket
     // stream (when connected) and the initial REST fetch. The previous
@@ -1112,9 +1166,9 @@ export default function DashboardPage() {
 
         const getWsUrl = () => {
             const envUrl = process.env.NEXT_PUBLIC_DASHBOARD_WS_URL;
-            if (envUrl && envUrl.trim().length > 0) return envUrl.trim();
-            const proto = window.location.protocol === "https:" ? "wss" : "ws";
-            return `${proto}://${window.location.host}/ws`;
+            // The frontend host has no dashboard socket. REST polling remains
+            // available when a stream endpoint has not been configured.
+            return envUrl?.trim() ?? "";
         };
 
         let ws: WebSocket | null = null;
@@ -1193,6 +1247,10 @@ export default function DashboardPage() {
             try {
                 url = getWsUrl();
             } catch {
+                setStreamStatus("offline");
+                return;
+            }
+            if (!url) {
                 setStreamStatus("offline");
                 return;
             }
@@ -1297,7 +1355,7 @@ export default function DashboardPage() {
             if (inFlight) return; // skip if the previous poll hasn't resolved yet
             inFlight = true;
             try {
-                const summaryData = await dashboardApi.getDashboardSummary();
+                const summaryData = await dashboardApi.getDashboardSummary(summary?.timezone);
                 if (cancelled) return;
                 setLiveSummary(summaryData);
             } catch {
@@ -1312,7 +1370,7 @@ export default function DashboardPage() {
             cancelled = true;
             window.clearInterval(id);
         };
-    }, [streamStatus]);
+    }, [streamStatus, summary?.timezone]);
 
     const effectiveSummary = liveSummary ?? summary;
 
@@ -1392,7 +1450,8 @@ export default function DashboardPage() {
 
     const heatRows = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
     const heatCols = ["0–3", "3–6", "6–9", "9–12", "12–15", "15–18", "18–21", "21–24"];
-    // Real time-of-day grid from hourly buckets (date = "YYYY-MM-DDTHH:00", UTC).
+    // Hour labels are already calendar wall time in the API's reporting zone.
+    // Parse their fields as UTC only to retain the labeled weekday/hour.
     // Row = weekday (Mon..Sun), col = 3-hour band. No more even-spread estimate.
     const heatValues = heatRows.map(() => heatCols.map(() => 0));
     for (const h of hourSeries) {
@@ -1484,11 +1543,24 @@ export default function DashboardPage() {
         .reverse();
 
     return (
-        <DashboardLayout title="Dashboard" description="Outbound campaign performance and shared voice usage">
+        <DashboardLayout title="Dashboard" description={`Outbound campaign performance and shared voice usage${summary?.timezone ? ` · Reporting: ${summary.timezone}` : ""}`}>
             <FirstCallSetup />
             <CallIssuesBanner />
             {loading ? (
-                <LoadingState title="Loading dashboard" />
+                // QA F1-34: the shape of the cards and chart being loaded, not a lone spinner.
+                <div className="space-y-8" role="status" aria-live="polite">
+                    <span className="sr-only">Loading dashboard</span>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6" aria-hidden="true">
+                        {Array.from({ length: 4 }).map((_, i) => (
+                            <div key={i} className="content-card">
+                                <LoadingSkeleton variant="text" lines={2} showAction={false} />
+                            </div>
+                        ))}
+                    </div>
+                    <div className="content-card" aria-hidden="true">
+                        <LoadingSkeleton variant="card" lines={2} showAction={false} />
+                    </div>
+                </div>
             ) : (
                 <div className="space-y-8">
                     {/* Stats Grid */}
@@ -1558,7 +1630,7 @@ export default function DashboardPage() {
                                         Custom
                                     </button>
                                 </div>
-                                <div data-testid="dashboard-live-timezone" className="text-xs font-bold text-muted-foreground">{timezoneLabel(browserZone)}</div>
+                                <div data-testid="dashboard-live-timezone" className="text-xs font-bold text-muted-foreground">{timezoneLabel(chartZone)}</div>
                             </div>
 
                             {callRangeMode === "custom" ? (
@@ -1601,6 +1673,7 @@ export default function DashboardPage() {
                             ) : (
                                 <LiveCallsTimeSeriesChart
                                     buckets={liveBuckets}
+                                    timeZone={summary?.timezone}
                                     markers={markers}
                                     anomalies={anomalies}
                                     maintenanceWindows={maintenanceWindows}
@@ -1805,7 +1878,7 @@ export default function DashboardPage() {
                                     <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">
                                         {new Date(activeRange.startMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}–{new Date(activeRange.endMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                                     </p>
-                                    <p data-testid="dashboard-stats-timezone" className="text-xs font-bold text-muted-foreground">{timezoneLabel(browserZone)}</p>
+                                    <p data-testid="dashboard-stats-timezone" className="text-xs font-bold text-muted-foreground">{timezoneLabel(chartZone)}</p>
                                 </div>
 
                                 <div className="flex flex-wrap items-center gap-2">

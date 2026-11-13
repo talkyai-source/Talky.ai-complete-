@@ -504,7 +504,10 @@ async def _run_case(root, data, case, spec):
             "Failed media text must not appear as delivered assistant history.",
         )
     if "expected_relationship" in case:
-        actual = getattr(getattr(state, "customer_relationship", None), "value", "unknown")
+        # A plain string ("denied"/"affirmed") since the 7 Oct live-state
+        # rewrite; reading only `.value` reported every relationship as unknown.
+        relationship = getattr(state, "customer_relationship", None)
+        actual = getattr(relationship, "value", relationship) or "unknown"
         check(
             "relationship",
             actual == case["expected_relationship"],

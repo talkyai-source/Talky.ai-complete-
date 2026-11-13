@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
+import { ApiClientError } from "@/lib/http-client";
 import { INBOUND_RETRY_WINDOW_MS, inboundApi, inboundErrorCode, parseInboundCampaign, parseInboundCampaignList, parseInboundRuntimeCapabilities, parsePhoneNumberAvailability, type InboundCampaignInput } from "@/lib/inbound-api";
 
 const serverCampaign = {
@@ -222,6 +223,12 @@ test("create sends only the confirmed inbound contract and an idempotency key", 
     }
 });
 
+/** The rejection is this network failure (QA F1-27 keeps the browser's error in `details`). */
+function networkFailure(text: RegExp) {
+    return (error: unknown) => error instanceof ApiClientError && error.code === "network_error"
+        && error.details instanceof TypeError && text.test(error.details.message);
+}
+
 test("an ambiguous retry reuses its idempotency key and a later operation gets a fresh key", async () => {
     const previousFetch = globalThis.fetch;
     const keys: Array<string | null> = [];
@@ -233,7 +240,7 @@ test("an ambiguous retry reuses its idempotency key and a later operation gets a
         return new Response(JSON.stringify(serverCampaign), { status: 201, headers: { "content-type": "application/json" } });
     }) as typeof fetch;
     try {
-        await assert.rejects(inboundApi.create(input, input.did_number), /connection closed/i);
+        await assert.rejects(inboundApi.create(input, input.did_number), networkFailure(/connection closed/i));
         await inboundApi.create(input, input.did_number);
         await inboundApi.create(input, input.did_number);
 
@@ -257,7 +264,7 @@ test("an expired ambiguous retry is blocked before the server claim can roll ove
     }) as typeof fetch;
     const expiredInput = { ...input, name: "Expiry safety test" };
     try {
-        await assert.rejects(inboundApi.create(expiredInput, expiredInput.did_number), /ambiguous network failure/i);
+        await assert.rejects(inboundApi.create(expiredInput, expiredInput.did_number), networkFailure(/ambiguous network failure/i));
         now += INBOUND_RETRY_WINDOW_MS + 1;
         await assert.rejects(inboundApi.create(expiredInput, expiredInput.did_number), /safe retry window expired/i);
         assert.equal(requests, 1, "an expired retry must not reach the server with a claim that can roll over");

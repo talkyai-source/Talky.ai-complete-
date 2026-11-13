@@ -3,9 +3,10 @@ from __future__ import annotations
 
 import re
 import pytz
+from datetime import timedelta
 from typing import Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 from app.domain.services.voice_action_config import VoiceEmailAction, VoiceFormAction
 
 
@@ -90,7 +91,7 @@ class CampaignStartRequest(BaseModel):
 
     priority_override: Optional[int] = None
     tenant_id: Optional[str] = None
-    first_speaker: Literal["agent", "user"] = "agent"
+    first_speaker: Optional[Literal["agent", "user"]] = None
     # Max calls in flight at once (dialing/ringing/answered). The campaign dials
     # in batches of this size — a new call starts only as an earlier one reaches
     # a terminal outcome. Client-selectable; None keeps the campaign's existing
@@ -151,6 +152,11 @@ class CampaignCallingSchedule(BaseModel):
     def _validate_days(cls, v: Optional[List[int]]) -> Optional[List[int]]:
         if v is None:
             return None
+        if not v:
+            # An empty list would allow no day at all: the campaign could never
+            # dial and nothing would say why (D2-4). Unset means "use the
+            # account's days".
+            raise ValueError("Choose at least one calling day, or leave the days unset to use the account's days.")
         if any(d < 0 or d > 6 for d in v):
             raise ValueError("allowed_days entries must be 0–6 (Mon–Sun)")
         return sorted(set(v))
@@ -191,10 +197,10 @@ class CampaignCreateRequest(CampaignVoiceSelection):
     """
 
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    system_prompt: str = Field(default="")
+    description: Optional[str] = Field(default=None, max_length=10_000)
+    system_prompt: str = Field(default="", max_length=100_000)
     voice_id: str = Field(default="", max_length=100)
-    goal: Optional[str] = None
+    goal: Optional[str] = Field(default=None, max_length=5_000)
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
     agent_name_genders: Optional[Dict[str, str]] = Field(
@@ -205,7 +211,7 @@ class CampaignCreateRequest(CampaignVoiceSelection):
             "without an entry are treated as unknown gender."
         ),
     )
-    company_name: str = Field(..., min_length=1)
+    company_name: str = Field(..., min_length=1, max_length=255)
     campaign_slots: dict = Field(default_factory=dict)
     campaign_brief: Optional[CampaignBriefInput] = Field(
         default=None,
@@ -268,11 +274,25 @@ class CampaignUpdateRequest(CampaignVoiceSelection):
     and bypass the production prompt composer.
     """
 
+    expected_updated_at: Optional[AwareDatetime] = Field(
+        None, description="Version read by the editor; a stale version returns 409 with current values.",
+    )
+
+    @field_validator("expected_updated_at")
+    @classmethod
+    def _version_can_advance(cls, value):
+        if value is not None:
+            try:
+                value + timedelta(microseconds=1)
+            except OverflowError as exc:
+                raise ValueError("Version timestamp cannot be advanced.") from exc
+        return value
+
     name: str = Field(..., min_length=1, max_length=255)
-    description: Optional[str] = None
-    system_prompt: str = Field(default="")
+    description: Optional[str] = Field(default=None, max_length=10_000)
+    system_prompt: str = Field(default="", max_length=100_000)
     voice_id: str = Field(default="", max_length=100)
-    goal: Optional[str] = None
+    goal: Optional[str] = Field(default=None, max_length=5_000)
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
     agent_names: List[str] = Field(..., min_length=1)
     agent_name_genders: Optional[Dict[str, str]] = Field(
@@ -283,7 +303,7 @@ class CampaignUpdateRequest(CampaignVoiceSelection):
             "without an entry are treated as unknown gender."
         ),
     )
-    company_name: str = Field(..., min_length=1)
+    company_name: str = Field(..., min_length=1, max_length=255)
     campaign_slots: dict = Field(default_factory=dict)
     campaign_brief: Optional[CampaignBriefInput] = Field(
         default=None,
@@ -341,7 +361,7 @@ class CampaignPromptPreviewRequest(CampaignVoiceSelection):
     """
 
     persona_type: Literal["lead_gen", "customer_support", "receptionist"]
-    company_name: str = Field(..., min_length=1)
+    company_name: str = Field(..., min_length=1, max_length=255)
     agent_name: str = Field(
         ...,
         min_length=1,
@@ -352,7 +372,7 @@ class CampaignPromptPreviewRequest(CampaignVoiceSelection):
     )
     campaign_slots: dict = Field(default_factory=dict)
     campaign_brief: Optional[CampaignBriefInput] = None
-    additional_instructions: Optional[str] = None
+    additional_instructions: Optional[str] = Field(default=None, max_length=100_000)
     direction: Literal["outbound", "inbound"] = "outbound"
     opening_mode: Optional[Literal["agent_first", "callee_first"]] = Field(
         None,
@@ -430,6 +450,8 @@ class ApplyTtsConfigRequest(BaseModel):
 class ContactCreate(BaseModel):
     """Request body for adding a single contact to a campaign."""
 
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
+
     phone_number: str = Field(..., description="Phone number in any format (will be normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)
@@ -452,9 +474,7 @@ class ContactCreate(BaseModel):
         cleaned = re.sub(r"[\s\-\(\)\.]", "", v)
         if not cleaned:
             raise ValueError("Phone number cannot be empty")
-        # Length/format is enforced in the add-contact endpoint, where it can be
-        # tenant-scoped (some accounts have phone validation relaxed for
-        # testing). Only emptiness is rejected here.
+        # Library validity is enforced with campaign/account country in the endpoint.
         return v
 
 
@@ -462,6 +482,7 @@ class ContactUpdate(BaseModel):
     """Request body for editing an existing contact. All fields optional —
     only the provided fields are changed."""
 
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     phone_number: Optional[str] = Field(None, description="New phone number (normalized)")
     first_name: Optional[str] = Field(None, max_length=100)
     last_name: Optional[str] = Field(None, max_length=100)

@@ -6,8 +6,7 @@ import Module from "node:module";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import React from "react";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { z } from "zod";
+import { cleanup, render, screen } from "@testing-library/react";
 
 import type { InboundCampaign } from "@/lib/inbound-api";
 
@@ -24,16 +23,7 @@ function campaign(overrides: Partial<InboundCampaign>): InboundCampaign {
         ...overrides,
     } as InboundCampaign;
 }
-const dump = () => {
-    const parsed = z.object({ items: z.array(z.string()) }).safeParse({ items: 1 });
-    if (parsed.success) throw new Error("expected a validation failure");
-    return parsed.error;
-};
 const shown = (text: string | RegExp) => screen.queryByText(text) !== null;
-// The shared LoadingState: a status whose title is a heading.
-const status = (title: string) => screen.queryAllByRole("status").some((node) => within(node).queryByRole("heading", { name: title }) !== null);
-const retry = () => screen.getByRole("button", { name: "Retry" });
-const noOldRetry = () => assert.equal(screen.queryByRole("button", { name: "Try again" }) === null, true, "no 'Try again'");
 
 const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) => unknown };
 const originalLoad = loader._load;

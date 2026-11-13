@@ -16,6 +16,7 @@ from fastapi.encoders import jsonable_encoder
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
+from app.api.v1.validation import pagination_offset
 from app.core.db_utils import acquire_with_tenant
 from app.core.security.principal import (
     PrincipalUnavailable, load_session_principal, assistant_session_context, check_assistant_session,
@@ -807,7 +808,7 @@ async def assistant_chat(
 async def list_conversations(
     current_user: CurrentUser = Depends(get_current_user),
     db_client: Client = Depends(get_db_client),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100)
 ):
     """List user's assistant conversations.
@@ -817,7 +818,7 @@ async def list_conversations(
     sees an empty conversation list. Same fix pattern as the campaign
     endpoints.
     """
-    offset = (page - 1) * page_size
+    offset = pagination_offset(page, page_size)
 
     response = db_client.table("assistant_conversations").select(
         "id, title, message_count, last_message_at, created_at",
@@ -889,10 +890,11 @@ async def list_actions(
     to_date: Optional[datetime] = Query(None),
     sort_by: str = Query("created_at", pattern="^(created_at|started_at|completed_at|type|status)$"),
     sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
-    page: int = Query(1, ge=1),
+    page: int = Query(1, ge=1, le=10001),
     page_size: int = Query(20, ge=1, le=100),
 ):
     """Tenant activity metadata. Provider payloads and recipient/content are private."""
+    offset = pagination_offset(page, page_size)
     from app.core.db_utils import acquire_with_tenant
     if not current_user.tenant_id:
         raise HTTPException(status_code=403, detail="Tenant context required")
@@ -925,7 +927,7 @@ async def list_actions(
         rows = await conn.fetch(
             "SELECT id,type,status,triggered_by,lead_id,output_data,created_at,started_at,completed_at "
             f"FROM assistant_actions WHERE {where} ORDER BY {sort_by} {sort_dir} NULLS LAST,id {sort_dir} "
-            f"LIMIT ${len(values)+1} OFFSET ${len(values)+2}", *values, page_size, (page-1)*page_size)
+            f"LIMIT ${len(values)+1} OFFSET ${len(values)+2}", *values, page_size, offset)
     return {"actions": [public_action_receipt(dict(row)) for row in rows],
             "total": total, "page": page, "page_size": page_size}
 

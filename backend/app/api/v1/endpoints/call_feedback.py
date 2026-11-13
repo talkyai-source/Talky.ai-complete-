@@ -1,6 +1,7 @@
 """Call feedback audio-note endpoints (durable-first synchronous STT)."""
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import logging
 from datetime import datetime
@@ -95,11 +96,11 @@ def _expected_error(exc: Exception) -> HTTPException:
     if isinstance(exc, FeedbackNotFoundError):
         return HTTPException(status_code=404, detail="Feedback not found")
     if isinstance(exc, FeedbackAlreadyExistsError):
-        return HTTPException(status_code=409, detail=str(exc))
+        return HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.'))
     if isinstance(exc, FeedbackTranscriptionInProgressError):
-        return HTTPException(status_code=409, detail=str(exc))
+        return HTTPException(status_code=409, detail=safe_exception_message(exc, 'The request could not be completed.'))
     if isinstance(exc, FeedbackStorageError):
-        return HTTPException(status_code=503, detail=str(exc))
+        return HTTPException(status_code=503, detail=safe_exception_message(exc, 'The request could not be completed.'))
     return HTTPException(status_code=500, detail="Call feedback operation failed")
 
 

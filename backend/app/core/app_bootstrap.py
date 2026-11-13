@@ -114,3 +114,7 @@ def configure_middleware(app: FastAPI) -> None:
     app.state.limiter = limiter
     # Standardized error envelope + Retry-After on 429
     register_error_handlers(app)
+    # Router mounting follows bootstrap; generate the contract lazily so it
+    # describes the effective routes and the handlers registered above.
+    from app.core.openapi_contract import install_openapi_contract
+    install_openapi_contract(app)

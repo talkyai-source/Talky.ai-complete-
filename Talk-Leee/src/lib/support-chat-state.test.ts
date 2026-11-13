@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { chatReducer, draftFromMessages, initialChatState, type ChatEvent, type ChatState } from "@/lib/support-chat-state";
-import type { BotMessage, Escalation } from "@/lib/support-api";
+import type { BotMessage, Escalation, PageContext } from "@/lib/support-api";
 
 const at = "2026-10-30T10:00:00+00:00";
 const bot = (content: string, id = "m-bot"): BotMessage => ({ id, role: "assistant", content, sources: [], created_at: at });
@@ -14,21 +14,31 @@ function run(events: ChatEvent[], from: ChatState = initialChatState): ChatState
     return events.reduce(chatReducer, from);
 }
 
+const openedOn: PageContext = { route: "/campaigns/c-1", campaign_id: "c-1", viewport: "1280x720" };
 const started: ChatEvent[] = [
-    { type: "start", requestId: "r-start" },
+    { type: "start", requestId: "r-start", pageContext: openedOn },
     { type: "started", conversationId: "c1", greeting: "Hi", suggestions: ["Billing"], at },
 ];
 
 test("idle → chatting: start names a pending write and started records the greeting", () => {
     const pending = run([started[0]!]);
     assert.equal(pending.phase, "chatting");
-    assert.deepEqual(pending.pending, { kind: "start", requestId: "r-start" });
+    assert.deepEqual(pending.pending, { kind: "start", requestId: "r-start", pageContext: openedOn });
     const state = run(started);
     assert.equal(state.conversationId, "c1");
     assert.equal(state.pending, null);
     assert.deepEqual(state.suggestions, ["Billing"]);
     assert.equal(state.messages[0]?.content, "Hi");
-    assert.equal(run([{ type: "start", requestId: "again" }], state).pending, null, "a second start while chatting is ignored");
+    assert.equal(run([{ type: "start", requestId: "again", pageContext: {} }], state).pending, null, "a second start while chatting is ignored");
+});
+
+test("a failed start keeps the page context it was dispatched with, so Retry resends the same request", () => {
+    const failed = chatReducer(run([started[0]!]), { type: "fail", message: "network" });
+    assert.equal(failed.phase, "failed");
+    assert.deepEqual(failed.pending, { kind: "start", requestId: "r-start", pageContext: openedOn });
+    const retried = chatReducer(failed, { type: "retry" });
+    assert.equal(retried.phase, "chatting");
+    assert.deepEqual(retried.pending, { kind: "start", requestId: "r-start", pageContext: openedOn }, "the stored context survives the retry");
 });
 
 test("chatting → awaiting_feedback on a resolution prompt, back to chatting without one", () => {

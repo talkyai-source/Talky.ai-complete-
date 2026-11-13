@@ -260,7 +260,7 @@ export const backendApi = {
                 timeoutMs: 8_000,
                 signal,
             });
-            return data as { items: AlertItemDto[]; next_cursor: string | null };
+            return data as { items: AlertItemDto[]; next_cursor: string | null; tenant_id: string; user_id: string };
         },
         ack: async (alertId: string, note?: string) => {
             const data = await httpClient().request({

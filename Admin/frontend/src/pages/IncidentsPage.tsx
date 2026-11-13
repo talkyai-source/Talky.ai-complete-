@@ -65,7 +65,7 @@ function IncidentResults({ params, onSelect, onPage, onFailed }: { params: Incid
         {error && <p role="alert">Incident records unavailable: {error}{data ? ' Last retrieved records may be stale; refresh before acting.' : ''}</p>}
         {data && <>
             <p>{data.open_count} open across all severities; {data.critical_count} critical and open. {data.total} matching records.</p>
-            {!data.items.length && !error && <p>No incidents match these filters.</p>}
+            {!data.items.length && !error && <p>No incidents match these filters; incidents appear here when a monitoring alert fires.</p>}
             <table className="data-table"><thead><tr><th>Incident</th><th>Severity</th><th>Status</th><th>Triggered</th><th>Details</th></tr></thead>
                 <tbody>{data.items.map((item) => <tr key={item.id}>
                     <td>{item.title}</td><td>{item.severity.charAt(0).toUpperCase() + item.severity.slice(1)}</td><td>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</td><td>{observedAt(item.triggered_at)}</td>

@@ -1,9 +1,9 @@
 export const backendEndpoints = {
     health: { method: "GET", path: "/health", tags: ["System"], summary: "Health check" },
 
-    authLogoutAll: { method: "POST", path: "/auth/logout_all", tags: ["Auth"], summary: "Logout all sessions" },
-    authSessionsList: { method: "GET", path: "/auth/sessions", tags: ["Auth"], summary: "List active sessions" },
-    authSessionsRevoke: { method: "POST", path: "/auth/sessions/revoke", tags: ["Auth"], summary: "Revoke a session" },
+    authLogoutAll: { method: "POST", path: "/auth/logout-all", tags: ["Auth"], summary: "Logout all sessions" },
+    authSessionsList: { method: "GET", path: "/sessions/active", tags: ["Auth"], summary: "List active sessions" },
+    authSessionsRevoke: { method: "DELETE", path: "/sessions/{session_id}", tags: ["Auth"], summary: "Revoke a session" },
 
     eventsList: { method: "GET", path: "/events", tags: ["Events"], summary: "List stream events (paged)" },
     alertsList: { method: "GET", path: "/alerts", tags: ["Alerts"], summary: "List operational alerts" },

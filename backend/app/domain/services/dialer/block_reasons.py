@@ -58,6 +58,8 @@ class BlockCode(str, Enum):
     # Per-lead
     LEAD_COOLDOWN = "lead_cooldown"
     DAILY_LEAD_CAP = "daily_lead_cap"
+    # The stored number is not a dialable phone number (D2-7); terminal.
+    INVALID_PHONE_NUMBER = "invalid_phone_number"
 
     # Capacity / pacing (self-clearing, benign)
     MAX_CONCURRENT_CALLS = "max_concurrent_calls"
@@ -451,6 +453,25 @@ def classify(
     # ``calling_not_allowed_on_Tue`` (day gate) and
     # ``outside_time_window_14:00_17:00`` (hour gate) both come from
     # CallingRules.is_within_time_window.
+    # The legal floor (dialer/legal_hours.py) holds whatever the campaign says.
+    if "legal_hours_unknown_timezone" in low:
+        return BlockReason(
+            BlockCode.SCHEDULE_INVALID,
+            "This contact is not being called because their local time can't be "
+            "worked out from the number. Add the contact's timezone and calls "
+            "resume within the hour.",
+            severity="error", stage="schedule", details=extra,
+        )
+    if "legal_hours" in low:
+        return BlockReason(
+            BlockCode.SCHEDULE_OUTSIDE_WINDOW,
+            "It is outside legal calling hours where this contact is (08:00-21:00 "
+            "their time; in Australia 09:00-20:00 on weekdays and 09:00-17:00 on "
+            "Saturdays). The call waits and dials automatically when their hours "
+            "open, whatever the campaign's own calling hours.",
+            severity="info", stage="schedule", details=extra,
+            next_eligible_at=_fallback_next(), retry_after_seconds=retry_after_seconds,
+        )
     if "invalid_timezone" in low:
         return BlockReason(
             BlockCode.SCHEDULE_INVALID,
@@ -605,6 +626,16 @@ def classify(
             severity="info", stage="pacing",
             next_eligible_at=_fallback_next(),
             retry_after_seconds=retry_after_seconds, details=extra,
+        )
+
+    # ---- contact data ---------------------------------------------------
+    if low == BlockCode.INVALID_PHONE_NUMBER.value:
+        return BlockReason(
+            BlockCode.INVALID_PHONE_NUMBER,
+            "This contact's phone number is not a valid number, so it will not "
+            "be dialled. Fix the number (with its country code) or remove the "
+            "contact.",
+            severity="error", stage="contact", details=extra,
         )
 
     # ---- safety ---------------------------------------------------------

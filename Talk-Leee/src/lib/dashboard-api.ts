@@ -1,10 +1,12 @@
 import type { MinutesState } from "@/lib/minutes-allowance";
 import type { CampaignVoiceSettingsValue } from "@/components/realtime/types";
 import { sharedHttpClient } from "@/lib/api";
+import { isApiClientError } from "@/lib/http-client";
 import type { CampaignBrief } from "@/lib/campaign-brief";
 
 // Dashboard Types
 export interface DashboardSummary {
+    timezone?: string;
     total_calls: number;
     answered_calls: number;
     failed_calls: number;
@@ -87,6 +89,8 @@ export interface Campaign {
     calls_completed: number;
     calls_failed: number;
     created_at: string;
+    /** The campaign's version; editors send it back as `expected_updated_at`. */
+    updated_at?: string | null;
     started_at?: string;
     completed_at?: string;
     script_config?: CampaignVoiceSettingsValue & {
@@ -145,6 +149,17 @@ export interface CampaignCreate extends CampaignVoiceSettingsValue {
     tts_provider?: string;
     // Per-campaign calling hours + timezone (Phase 3c-v2).
     calling_schedule?: CampaignCallingSchedule;
+}
+
+/**
+ * QA H7 / F3-03: an edit carries the version (`updated_at`, the exact server
+ * string) its editor read. The server refuses a stale one with 409
+ * `campaign_version_conflict` instead of overwriting a newer save.
+ */
+export type CampaignUpdate = CampaignCreate & { expected_updated_at?: string };
+
+export function isCampaignVersionConflict(error: unknown): boolean {
+    return isApiClientError(error) && error.status === 409 && error.code === "campaign_version_conflict";
 }
 
 /**
@@ -476,10 +491,11 @@ class DashboardApi {
     private get client() { return sharedHttpClient(); }
 
     // Dashboard
-    async getDashboardSummary(): Promise<DashboardSummary> {
+    async getDashboardSummary(tz?: string): Promise<DashboardSummary> {
         return this.client.request({
             path: "/dashboard/summary",
             method: "GET",
+            params: tz ? { tz } : undefined,
         });
     }
 
@@ -510,7 +526,18 @@ class DashboardApi {
         return { campaign: response.campaign };
     }
 
-    async updateCampaign(id: string, data: CampaignCreate): Promise<{ campaign: Campaign }> {
+    async duplicateCampaign(id: string): Promise<{ campaign: Campaign }> {
+        const response = await this.client.request<{ campaign: Campaign | null }>({
+            path: `/campaigns/${id}/duplicate`,
+            method: "POST",
+        });
+        if (!response?.campaign?.id) {
+            throw new Error("Campaign duplication failed. The backend did not return a duplicated campaign.");
+        }
+        return { campaign: response.campaign };
+    }
+
+    async updateCampaign(id: string, data: CampaignUpdate): Promise<{ campaign: Campaign }> {
         const response = await this.client.request<{ campaign: Campaign | null }>({
             path: `/campaigns/${id}`,
             method: "PUT",
@@ -730,17 +757,18 @@ class DashboardApi {
     }
 
     // Calls
-    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}, signal?: AbortSignal): Promise<{ calls: Call[]; total: number }> {
-        const response = await this.client.request<{ items: (CallListItem & { summary?: string })[]; total: number }>({
+    //
+    // The two list modes below differ only in how they ask for rows; every row
+    // is mapped the same way.
+    private async fetchCallList<T extends { items: (CallListItem & { summary?: string })[] }>(
+        params: Record<string, string | undefined>,
+        signal?: AbortSignal,
+    ): Promise<{ calls: Call[]; response: T }> {
+        const response = await this.client.request<T>({
             path: "/calls",
             method: "GET",
             signal,
-            params: {
-                page: String(page),
-                page_size: String(pageSize),
-                direction: filters.direction,
-                inbound_campaign_id: filters.inboundCampaignId,
-            },
+            params,
         });
 
         // Map backend CallListItem to frontend Call format
@@ -783,11 +811,45 @@ class DashboardApi {
             transcript_status: item.transcript_status,
             media_state: item.media_state,
         }));
-        
+
+        return { calls, response };
+    }
+
+    /** Offset mode: one numbered page and the total (an OFFSET scan plus COUNT(*) on the server). */
+    async listCalls(page: number = 1, pageSize: number = 20, filters: CallListFilters = {}, signal?: AbortSignal): Promise<{ calls: Call[]; total: number }> {
+        const { calls, response } = await this.fetchCallList<{ items: (CallListItem & { summary?: string })[]; total: number }>({
+            page: String(page),
+            page_size: String(pageSize),
+            direction: filters.direction,
+            inbound_campaign_id: filters.inboundCampaignId,
+        }, signal);
+
         return {
             calls,
             total: response.total,
         };
+    }
+
+    /**
+     * Cursor mode (QA F6-03): newest first, with no OFFSET scan and no total.
+     * Pass null for the first page and the previous page's `nextCursor` for
+     * each following one; `nextCursor` is null on the last page.
+     *   backend/app/api/v1/endpoints/calls.py list_calls
+     *   backend/docs/call_history_pagination.md
+     * The server binds a cursor to the tenant and the exact filter set and
+     * answers 422 otherwise, so a continuation must replay the filters its
+     * cursor was issued under, and a changed filter starts a new chain.
+     */
+    async listCallsCursor(cursor: string | null, pageSize: number = 20, filters: CallListFilters = {}, signal?: AbortSignal): Promise<{ calls: Call[]; nextCursor: string | null }> {
+        const { calls, response } = await this.fetchCallList<{ items: (CallListItem & { summary?: string })[]; next_cursor?: string | null }>({
+            pagination: "cursor",
+            cursor: cursor ?? undefined,
+            page_size: String(pageSize),
+            direction: filters.direction,
+            inbound_campaign_id: filters.inboundCampaignId,
+        }, signal);
+
+        return { calls, nextCursor: response.next_cursor ?? null };
     }
 
     async getCall(id: string): Promise<CallDetail> {

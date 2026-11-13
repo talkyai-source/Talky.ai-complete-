@@ -49,6 +49,7 @@ from app.core.security.platform_admin_guard import (
     lock_user_administration, require_current_platform_admin,
 )
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
+from app.domain.services.payg import displayed_subscription_status
 
 from ._serialization import AdminResponseModel
 
@@ -204,13 +205,14 @@ _TENANT_ROW_SELECT = """
 """
 
 
-def _subscription_status(value: Optional[str]) -> str:
+def _subscription_status(value: Optional[str], plan_id: Optional[str] = None) -> str:
     """Preserve the list/admission legacy fallback in every Admin response.
 
     This is a subscription display projection, not payment or call authority.
     Stored values, audit snapshots and formal account holds stay unchanged.
+    A paid prepaid (PAYG) account shows as active, so Admin offers Suspend (G6).
     """
-    return value or "active"
+    return displayed_subscription_status(value, plan_id) or "active"
 
 
 def _calling_rules(value) -> dict:
@@ -262,7 +264,7 @@ def _check_version(row, expected):
         raise HTTPException(status_code=409, detail={
             "code": "tenant_changed",
             "message": "Tenant changed. Refresh and review before applying this change.",
-            "status": _subscription_status(row["subscription_status"]),
+            "status": _subscription_status(row["subscription_status"], row.get("plan_id")),
             "updated_at": row["updated_at"].isoformat() if isinstance(row["updated_at"], datetime) else row["updated_at"],
         })
 
@@ -277,7 +279,7 @@ def _create_response(row, *, created: bool, audit_event_id=None) -> TenantCreate
         minutes_allocated=row["minutes_allocated"] or 0,
         minutes_used=row["minutes_used"] or 0,
         max_concurrent_calls=_max_concurrent(rules),
-        status=_subscription_status(row["subscription_status"]),
+        status=_subscription_status(row["subscription_status"], row.get("plan_id")),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         audit_event_id=str(audit_event_id) if audit_event_id else None,
@@ -451,8 +453,8 @@ async def list_tenants(
     include_archived: bool = Query(
         False, description="Include archived (cancelled) tenants"
     ),
-    limit: int = Query(200, ge=1, le=1000),
-    offset: int = Query(0, ge=0),
+    limit: int = Query(200, ge=1, le=200),
+    offset: int = Query(0, ge=0, le=10000),
     sort_by: Literal["name", "minutes_used"] = "name",
 ):
     """
@@ -517,7 +519,7 @@ async def list_tenants(
                 plan_name=row["plan_name"],
                 minutes_used=row["minutes_used"] or 0,
                 minutes_allocated=row["minutes_allocated"] or 0,
-                status=_subscription_status(row["subscription_status"]),
+                status=_subscription_status(row["subscription_status"], row.get("plan_id")),
                 user_count=row["user_count"] or 0,
                 campaign_count=row["campaign_count"] or 0,
                 max_concurrent_calls=_max_concurrent(
@@ -550,7 +552,7 @@ async def get_tenant(
         if not row:
             raise HTTPException(status_code=404, detail="Tenant not found")
         data = dict(row)
-        data["status"] = _subscription_status(data.pop("subscription_status"))
+        data["status"] = _subscription_status(data.pop("subscription_status"), data.get("plan_id"))
         data["calling_rules"] = _calling_rules(data["calling_rules"])
         data["max_concurrent_calls"] = _max_concurrent(data["calling_rules"])
         return TenantDetailResponse(**data)
@@ -564,7 +566,7 @@ async def get_tenant(
 def _mutation_receipt(row, *, detail, changed, audit_event_id=None):
     return {
         "id": str(row["id"]), "detail": detail, "changed": changed,
-        "status": _subscription_status(row["subscription_status"]),
+        "status": _subscription_status(row["subscription_status"], row.get("plan_id")),
         "updated_at": row["updated_at"],
         "minutes_allocated": row["minutes_allocated"],
         "max_concurrent_calls": _max_concurrent(_calling_rules(row["calling_rules"])),
@@ -580,7 +582,7 @@ async def _mutate_tenant(
         async with acquire_with_tenant(db_client.pool, None) as conn:
             await _lock_operator_write(conn, audit_logger, admin_user)
             current = await conn.fetchrow(
-                "SELECT id,subscription_status,minutes_allocated,calling_rules,updated_at "
+                "SELECT id,subscription_status,plan_id,minutes_allocated,calling_rules,updated_at "
                 "FROM tenants WHERE id=$1 FOR UPDATE", tenant_id,
             )
             if not current:
@@ -600,7 +602,7 @@ async def _mutate_tenant(
                 saved = await conn.fetchrow(
                     "UPDATE tenants SET subscription_status=$2, "
                     "updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond') "
-                    "WHERE id=$1 RETURNING id,subscription_status,minutes_allocated,calling_rules,updated_at",
+                    "WHERE id=$1 RETURNING id,subscription_status,plan_id,minutes_allocated,calling_rules,updated_at",
                     tenant_id, target,
                 )
             else:
@@ -611,7 +613,7 @@ async def _mutate_tenant(
                                      '{max_concurrent_calls}',to_jsonb($3::int)) END,
                        updated_at=GREATEST(clock_timestamp(),updated_at+INTERVAL '1 microsecond')
                        WHERE id=$1
-                       RETURNING id,subscription_status,minutes_allocated,calling_rules,updated_at""",
+                       RETURNING id,subscription_status,plan_id,minutes_allocated,calling_rules,updated_at""",
                     tenant_id, quota.minutes_allocated, quota.max_concurrent_calls,
                 )
             if not saved or saved["id"] != current["id"]:

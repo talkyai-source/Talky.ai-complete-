@@ -7,11 +7,12 @@ This endpoint adds API-version-scoped health info at /api/v1/health.
 """
 import asyncio
 
-from fastapi import APIRouter, Response, status
+from fastapi import APIRouter, HTTPException, Request, Response, status
 from datetime import datetime
 from typing import Dict, Any
 
 from app.core import readiness
+from app.core.security.internal_auth import is_internal_service_request
 
 router = APIRouter(tags=["health"])
 
@@ -48,7 +49,7 @@ async def liveness_probe() -> Dict[str, Any]:
 
 
 @router.get("/healthz/deep")
-async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
+async def deep_readiness_probe(response: Response, request: Request) -> Dict[str, Any]:
     """
     Deep readiness probe — actively pings the pod's hard dependencies.
 
@@ -62,25 +63,35 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
     Policy:
       - DB down / unreachable  → ready=false, HTTP 503 (there is NO fallback
         for Postgres; a pod that can't reach it cannot serve).
-      - Redis down             → reported as "down" but ready stays true. The
-        container is designed to degrade to an in-memory fallback when Redis
-        is unavailable (see ServiceContainer._initialize_redis), so failing
-        closed here would cause spurious pod evictions.
+      - Redis down or disabled → reported as "down"/"disabled". In production
+        ready=false, HTTP 503: the in-memory fallback queues jobs in one
+        process and rate-limits per process (QA F2-16). Elsewhere ready stays
+        true, since development degrades to that fallback by design.
       - Container not started   → ready=false, HTTP 503.
 
     Each ping is capped at ~500ms via asyncio.wait_for; a timeout is treated
     as "down". The handler never raises — any unexpected error degrades to a
     not-ready / down report so the probe itself can't take the pod down.
+    Public callers receive readiness and alert configuration only; dependency
+    details require the configured internal-service token.
     """
     from app.core.container import get_container
 
+    response.headers["Cache-Control"] = "no-store"
+    internal = is_internal_service_request(request)
     container = get_container()
+    from app.core.operational_alerts import alerting_status
+
     result: Dict[str, Any] = {"ready": True, "db": "unknown", "redis": "unknown"}
+    try:
+        result["alerting"] = alerting_status()
+    except Exception:
+        result["alerting"] = "unavailable"
 
     if not container.is_initialized:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
         result.update(ready=False, db="not_initialized", redis="not_initialized")
-        return result
+        return result if internal else {"ready": False, "alerting": result["alerting"]}
 
     # DB — fatal on failure (no fallback exists).
     try:
@@ -92,8 +103,8 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
         result["db"] = "down"
         result["ready"] = False
 
-    # Redis — report only; the in-memory fallback means a dead Redis is
-    # degraded, not fatal, so it does not flip ready=false.
+    # Redis — fatal in production (QA F2-16); elsewhere the in-memory fallback
+    # makes a dead Redis degraded, not fatal.
     try:
         redis_client = container.redis
         if redis_client is None:
@@ -105,10 +116,14 @@ async def deep_readiness_probe(response: Response) -> Dict[str, Any]:
             result["redis"] = "ok"
     except Exception:
         result["redis"] = "down"
+    from app.core.container import redis_required
+
+    if result["redis"] in {"disabled", "down"} and redis_required():
+        result["ready"] = False
 
     if not result["ready"]:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return result
+    return result if internal else {"ready": result["ready"], "alerting": result["alerting"]}
 
 
 # Background-worker liveness registry: worker-name → the Redis key that worker
@@ -159,11 +174,10 @@ async def read_worker_heartbeats(redis_client: Any, *, now: float | None = None)
 
 
 @router.get("/healthz/workers")
-async def workers_health_probe(response: Response) -> Dict[str, Any]:
+async def workers_health_probe(response: Response, request: Request) -> Dict[str, Any]:
     """
-    Background-worker liveness probe (unauthenticated, like the other healthz
-    probes) — the single monitorable signal any uptime checker can watch, no
-    Prometheus/redis-exporter required.
+    Public background-worker liveness signal. Per-worker details require the
+    configured internal-service token; monitoring needs only the aggregate.
 
     Reads each registered worker's Redis heartbeat timestamp and reports
     per-worker ``{name, last_beat_epoch, age_seconds, healthy}`` where healthy
@@ -177,6 +191,7 @@ async def workers_health_probe(response: Response) -> Dict[str, Any]:
     import time as _time
     from app.core.container import get_container
 
+    response.headers["Cache-Control"] = "no-store"
     container = get_container()
     redis_client = (
         getattr(container, "redis", None) if container.is_initialized else None
@@ -188,7 +203,7 @@ async def workers_health_probe(response: Response) -> Dict[str, Any]:
     result: Dict[str, Any] = {"healthy": all_healthy, "workers": workers}
     if not all_healthy:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-    return result
+    return result if is_internal_service_request(request) else {"healthy": all_healthy}
 
 
 @router.get("/health", status_code=status.HTTP_200_OK)
@@ -206,13 +221,16 @@ async def health_check() -> Dict[str, Any]:
 
 
 @router.get("/health/detailed", status_code=status.HTTP_200_OK)
-async def detailed_health_check() -> Dict[str, Any]:
+async def detailed_health_check(request: Request, response: Response) -> Dict[str, Any]:
     """
     Detailed health check for application monitoring.
 
-    Includes container, Redis, and session status.
+    Includes container, Redis, and session status for internal callers only.
     Docker uses the simpler GET /health in main.py.
     """
+    if not is_internal_service_request(request):
+        raise HTTPException(status_code=401, detail="Internal-service authentication required")
+    response.headers["Cache-Control"] = "no-store"
     from app.core.container import get_container
 
     health: Dict[str, Any] = {

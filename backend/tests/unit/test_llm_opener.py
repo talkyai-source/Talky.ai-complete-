@@ -62,6 +62,8 @@ COMPANY = "Allstate"
 GOOD_COLD = "Hi, Sarah at Allstate — cold call about your energy bills?"
 #: The follow-up equivalent: no "cold call" claim, because there wasn't one.
 GOOD_FOLLOW_UP = "Hi, Sarah at Allstate — quick follow-up on your enquiry?"
+#: What every outbound call opens with instead (QA F12-03).
+IDENTITY_OPENER = "Hi, this is Sarah, an AI assistant from Allstate. Who am I speaking with?"
 
 
 def _validate(text: str, persona: str = "lead_gen") -> str:
@@ -718,37 +720,29 @@ def _fake_session(**extra):
     return session
 
 
-def test_a_stashed_opener_is_what_gets_spoken():
+def test_a_stashed_opener_is_never_spoken():
     """`_build_call_greeting` is the ONE place the spoken opener text is chosen
-    — both the pre-synth fast path and the realtime slow-path fallback in
-    `_send_outbound_greeting` arrive here — so reading the stash here is what
-    makes the feature reach the wire."""
+    -- both the pre-synth fast path and the realtime slow-path fallback in
+    `_send_outbound_greeting` arrive here. The generator was written to hide
+    the AI ("You are a person"), so its stash must never replace the identity
+    opener (owner decision 2026-11-05, QA F12-03)."""
     session = _fake_session(_llm_opener_text=GOOD_COLD)
-    assert tconfig._build_call_greeting(session, first_speaker="agent") == GOOD_COLD
+    assert tconfig._build_call_greeting(session, first_speaker="agent") == IDENTITY_OPENER
 
 
-def test_without_a_stash_the_template_is_spoken_unchanged():
-    """Blast radius: a campaign that never generates an opener — which is every
-    campaign until the flag is turned on — gets exactly what it gets today.
-
-    2026-08-11 opener redesign: "what it gets today" is now the bare pickup
-    greeting ("Hi there.", "Hello?"), not a template naming the agent/company —
-    identity moved to the model's own first reply. See
-    telephony_session_config.build_telephony_greeting."""
+def test_without_a_stash_the_identity_opener_is_spoken():
+    """A campaign that never generates an opener -- every campaign while the
+    flag is off -- speaks the identity opener (telephony_session_config.
+    build_identity_opener; owner decision 2026-11-05, QA F12-03)."""
     out = tconfig._build_call_greeting(_fake_session(), first_speaker="agent")
-    assert AGENT not in out and COMPANY not in out
-    assert out != GOOD_COLD
+    assert out == IDENTITY_OPENER
 
 
 @pytest.mark.parametrize("stash", [None, "", "   "])
 def test_a_blank_stash_falls_back_to_the_template(stash):
     session = _fake_session(_llm_opener_text=stash)
     out = tconfig._build_call_greeting(session, first_speaker="agent")
-    # Bare pickup greeting — see test_without_a_stash_the_template_is_spoken_
-    # unchanged above for why this no longer names the agent/company.
-    assert AGENT not in out and COMPANY not in out
-    words = [w for w in out.split() if any(c.isalnum() for c in w)]
-    assert 1 <= len(words) <= 5, f"expected a bare greeting, got: {out!r}"
+    assert out == IDENTITY_OPENER
 
 
 def test_choosing_the_spoken_opener_never_touches_an_llm():
@@ -762,7 +756,7 @@ def test_choosing_the_spoken_opener_never_touches_an_llm():
     session = _fake_session(_llm_opener_text=GOOD_COLD)
     # No llm_provider on the session at all, and it still produces the opener.
     assert not hasattr(session, "llm_provider")
-    assert tconfig._build_call_greeting(session, first_speaker="agent") == GOOD_COLD
+    assert tconfig._build_call_greeting(session, first_speaker="agent") == IDENTITY_OPENER
 
 
 def test_the_answer_path_does_not_import_the_generator():

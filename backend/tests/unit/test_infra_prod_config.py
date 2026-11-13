@@ -70,7 +70,9 @@ def test_python_services_wait_for_the_database_and_never_give_up():
     text = (INFRA / "systemd" / "talky-deps.conf").read_text(encoding="utf-8")
     assert "After=docker.service" in text
     assert "StartLimitIntervalSec=0" in text
-    assert "ExecStartPre=/opt/talky-infra/bin/wait-for-deps" in text
+    # Docker access is restricted to this root-owned pre-start executable;
+    # the application identity never gains docker-group privileges.
+    assert "ExecStartPre=+/opt/talky-infra/bin/wait-for-deps" in text
     assert "Restart=always" in text
 
 

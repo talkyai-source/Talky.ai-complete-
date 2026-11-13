@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Hero } from "@/components/ui/helix-hero";
 
 const SecondaryHero = dynamic(() => import("@/components/home/secondary-hero").then((m) => m.SecondaryHero), {
@@ -114,12 +114,27 @@ const HERO_VIDEO_SRC = "/images/hero-navbar-video.mp4";
 
 type HeroVideoWindow = Window & { __heroVideo?: Promise<Blob | null>; __heroVideoUrl?: string };
 
-function NavbarHeroBackgroundVideo() {
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+function subscribeReducedMotion(onChange: () => void) {
+  const query = window.matchMedia?.(REDUCED_MOTION_QUERY);
+  query?.addEventListener?.("change", onChange);
+  return () => query?.removeEventListener?.("change", onChange);
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.(REDUCED_MOTION_QUERY)?.matches ?? false;
+}
+
+export function NavbarHeroBackgroundVideo() {
   const [videoSrc, setVideoSrc] = useState<string | undefined>(undefined);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const videoARef = useRef<HTMLVideoElement | null>(null);
   const videoBRef = useRef<HTMLVideoElement | null>(null);
   const [isInView, setIsInView] = useState(true);
+  // QA F1-16: with "reduce motion" on, the hero stays on its poster. There is
+  // no autoPlay attribute, so nothing plays before this is known.
+  const reducedMotion = useSyncExternalStore(subscribeReducedMotion, prefersReducedMotion, () => false);
   const [opacityA, setOpacityA] = useState(1);
   const [opacityB, setOpacityB] = useState(0);
   const activeRef = useRef<"A" | "B">("A");
@@ -196,14 +211,14 @@ function NavbarHeroBackgroundVideo() {
     const a = videoARef.current;
     const b = videoBRef.current;
     if (!a || !b || !videoSrc) return;
-    if (!isInView) {
+    if (!isInView || reducedMotion) {
       try { a.pause(); } catch {}
       try { b.pause(); } catch {}
       return;
     }
     if (activeRef.current === "A") safePlay(a);
     else safePlay(b);
-  }, [isInView, videoSrc]);
+  }, [isInView, videoSrc, reducedMotion]);
 
   useEffect(() => {
     const a = videoARef.current;
@@ -273,7 +288,6 @@ function NavbarHeroBackgroundVideo() {
         src={videoSrc}
         data-hero-video=""
         suppressHydrationWarning
-        autoPlay
         muted
         playsInline
         preload="metadata"

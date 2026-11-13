@@ -17,6 +17,8 @@ import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
 import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
 import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
+import { campaignActions, useKnownPermissions } from "@/lib/permissions";
+import { isApiClientError } from "@/lib/http-client";
 import { PHONE_HELP_TEXT, parsePhoneNumber, type CountrySelection } from "@/lib/phone-number";
 import { ContactCapturedDetails } from "@/components/calls/lead-details-panel";
 import { ContactLists } from "@/components/campaigns/contact-lists";
@@ -42,6 +44,7 @@ import {
     X,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import Link from "next/link";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_ROWS = 50_000;
@@ -244,8 +247,9 @@ export default function ContactsPage() {
     const [sentRowMap, setSentRowMap] = useState<Map<number, number>>(() => new Map());
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
-    // A failed campaign-list read is its own state: it is never an empty list.
-    const [campaignsError, setCampaignsError] = useState("");
+    // QA F1-27: a failed campaigns read is not "no campaigns". Kept apart from
+    // the upload card's error so it is never shown as "Create a campaign first".
+    const [campaignsLoadFailure, setCampaignsLoadFailure] = useState<{ requestId?: string } | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Contacts-home state. `campaignHasContacts` (recomputed only on UNFILTERED
@@ -261,6 +265,10 @@ export default function ContactsPage() {
     const [debouncedSearch, setDebouncedSearch] = useState("");
     const [selectedListId, setSelectedListId] = useState<string | null>(null);
     const [showUploadPanel, setShowUploadPanel] = useState(false);
+    // QA F1-21: adding, importing, editing and deleting contacts need
+    // campaigns:update; unknown permissions keep them offered.
+    const allowed = campaignActions(useKnownPermissions());
+    const canChange = allowed.update;
     const [listsRefreshToken, setListsRefreshToken] = useState(0);
 
     // Per-contact add/edit/delete (mirrors the campaign detail page).
@@ -300,15 +308,15 @@ export default function ContactsPage() {
     async function loadCampaigns() {
         try {
             setLoading(true);
-            setCampaignsError("");
             const data = checkCampaignList(await dashboardApi.listCampaigns());
             const outbound = outboundCampaignsOnly(data.campaigns);
             setCampaigns(outbound);
+            setCampaignsLoadFailure(null);
             if (outbound.length > 0) {
                 setSelectedCampaign(outbound[0].id);
             }
         } catch (err) {
-            setCampaignsError(failedReadMessage(err, "Failed to load campaigns"));
+            setCampaignsLoadFailure({ requestId: isApiClientError(err) ? err.requestId : undefined });
         } finally {
             setLoading(false);
         }
@@ -1179,22 +1187,28 @@ export default function ContactsPage() {
 
     return (
         <DashboardLayout title="Contacts" description="Import and manage the contacts for your campaigns">
+            {/* QA F1-15: the Do-Not-Call list had no screen. */}
+            <div className="mb-4 flex justify-end">
+                <Link href="/contacts/do-not-call" className="text-sm font-semibold text-foreground underline-offset-4 hover:underline">
+                    Do-Not-Call list
+                </Link>
+            </div>
             {loading ? (
                 <div className="max-w-5xl">
                     <LoadingState title="Loading campaigns…" />
                 </div>
-            ) : campaignsError ? (
+            ) : campaignsLoadFailure ? (
                 <div className="max-w-5xl">
-                    <ErrorState message={campaignsError} onRetry={loadCampaigns} />
+                    <ErrorState message="Could not load your campaigns." requestId={campaignsLoadFailure.requestId} onRetry={loadCampaigns} />
                 </div>
             ) : campaigns.length === 0 ? (
                 <div className="max-w-5xl space-y-6">
                     <ContactRequirementsGuide />
                     <EmptyState
-                        title="Create a campaign first"
-                        message="Every contact belongs to a campaign so calls, recordings, and results stay organised in the right workspace."
-                        primaryActionLabel="Create a campaign"
-                        primaryActionHref="/campaigns"
+                        title={allowed.create ? "Create a campaign first" : "No campaigns yet"}
+                        message={`Every contact belongs to a campaign so calls, recordings, and results stay organised in the right workspace.${allowed.create ? "" : " Ask an account admin to create one."}`}
+                        primaryActionLabel={allowed.create ? "Create a campaign" : undefined}
+                        primaryActionHref={allowed.create ? "/campaigns" : undefined}
                     />
                 </div>
             ) : !firstLoadDone ? (
@@ -1241,15 +1255,17 @@ export default function ContactsPage() {
                                 />
                             </div>
                         </div>
-                        <Button
-                            className="w-full sm:w-auto xl:shrink-0"
-                            aria-expanded={showUploadPanel}
-                            aria-controls="contacts-upload-panel"
-                            onClick={() => { setShowUploadPanel((v) => !v); clearResult(); }}
-                        >
-                            <Plus className="w-4 h-4" />
-                            Add more contacts
-                        </Button>
+                        {canChange && (
+                            <Button
+                                className="w-full sm:w-auto xl:shrink-0"
+                                aria-expanded={showUploadPanel}
+                                aria-controls="contacts-upload-panel"
+                                onClick={() => { setShowUploadPanel((v) => !v); clearResult(); }}
+                            >
+                                <Plus className="w-4 h-4" />
+                                Add more contacts
+                            </Button>
+                        )}
                     </motion.div>
 
                     {/* Collapsible upload panel + last import result */}
@@ -1281,6 +1297,7 @@ export default function ContactsPage() {
                         refreshToken={listsRefreshToken}
                         selectedListId={selectedListId}
                         onSelectList={setSelectedListId}
+                        readOnly={!canChange}
                     />
 
                     {/* Contacts table */}
@@ -1355,7 +1372,7 @@ export default function ContactsPage() {
                                             </div>
                                             {/* pr-12: keeps Edit/Delete clear of the fixed chat
                                                 launcher's lane while scrolling (Group C, 2026-10). */}
-                                            <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3 pr-12">
+                                            {canChange && <div className="mt-3 flex justify-end gap-2 border-t border-border/60 pt-3 pr-12">
                                                 <button
                                                     type="button"
                                                     onClick={() => startEditContact(contact)}
@@ -1373,7 +1390,7 @@ export default function ContactsPage() {
                                                 >
                                                     {deletingContactId === contact.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
                                                 </button>
-                                            </div>
+                                            </div>}
                                             {contactDeleteError?.id === contact.id ? (
                                                 <p role="alert" className="mt-2 text-sm text-destructive">{contactDeleteError.message}</p>
                                             ) : null}
@@ -1427,7 +1444,7 @@ export default function ContactsPage() {
                                                     )}
                                                 </td>
                                                 <td className="whitespace-nowrap px-4 py-3 text-right">
-                                                    <div className="flex items-center justify-end gap-1">
+                                                    {canChange && <div className="flex items-center justify-end gap-1">
                                                         <button
                                                             type="button"
                                                             onClick={() => startEditContact(contact)}
@@ -1447,7 +1464,7 @@ export default function ContactsPage() {
                                                         >
                                                             {deletingContactId === contact.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                                         </button>
-                                                    </div>
+                                                    </div>}
                                                     {contactDeleteError?.id === contact.id ? (
                                                         <p role="alert" className="mt-1 whitespace-normal text-xs text-destructive">{contactDeleteError.message}</p>
                                                     ) : null}
@@ -1465,6 +1482,28 @@ export default function ContactsPage() {
                 // ─────────────── Empty campaign: add one or import many ───────────────
                 <div className="max-w-5xl space-y-6">
                     <ContactRequirementsGuide />
+                    {!canChange ? (
+                        <div className="content-card space-y-3">
+                            <div>
+                                <h3 className="text-lg font-semibold text-foreground">No contacts in this campaign yet</h3>
+                                <p className="mt-1 text-sm text-muted-foreground">
+                                    Your role can view contacts but not add them. Ask an account admin to add contacts.
+                                </p>
+                            </div>
+                            <Select
+                                value={selectedCampaign}
+                                onChange={(next) => setSelectedCampaign(next)}
+                                ariaLabel="Select campaign"
+                                lightThemeGreen
+                                className="w-full sm:w-64"
+                                selectClassName="rounded-xl border border-border bg-background/70 px-3 py-2 text-sm font-semibold text-foreground shadow-sm outline-none focus:border-border focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 h-auto hover:bg-background/80"
+                            >
+                                {campaigns.map((campaign) => (
+                                    <option key={campaign.id} value={campaign.id}>{campaign.name}</option>
+                                ))}
+                            </Select>
+                        </div>
+                    ) : (<>
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -1491,6 +1530,7 @@ export default function ContactsPage() {
                         {contactEditor}
                     </motion.div>
                     {uploadCard}
+                    </>)}
                     {resultCard}
                 </div>
             )}

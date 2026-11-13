@@ -23,6 +23,7 @@ from __future__ import annotations
 import importlib.util
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -53,10 +54,15 @@ def _migration():
 
 
 class _Txn:
+    def __init__(self, conn):
+        self.conn = conn
+
     async def __aenter__(self):
+        self.conn.depth += 1
         return self
 
     async def __aexit__(self, *exc):
+        self.conn.depth -= 1
         return False
 
 
@@ -65,27 +71,60 @@ class _Recorder:
 
     def __init__(self, fetchrow_result):
         self.statements: list[tuple[str, tuple]] = []
-        self._fetchrow_result = fetchrow_result
+        self._fetchrow_result = {"id": CREDENTIAL_ID, "tenant_id": TENANT,
+                                 "last4": "1111", "label": None, **fetchrow_result}
+        self.depth = 0
+        self.audit_locked = False
+        self.audits = []
 
     def transaction(self):
-        return _Txn()
+        return _Txn(self)
 
     async def execute(self, query, *args):
-        self.statements.append((" ".join(query.split()), args))
+        sql = " ".join(query.split())
+        assert sql.startswith("UPDATE tenant_ai_credentials SET status = 'disabled'")
+        assert self.depth > 0 and self.audit_locked
+        self.statements.append((sql, args))
         return "OK"
 
     async def fetchrow(self, query, *args):
-        self.statements.append((" ".join(query.split()), args))
+        sql = " ".join(query.split())
+        assert sql.startswith(("SELECT ", "INSERT INTO tenant_ai_credentials"))
+        assert self.depth > 0 and self.audit_locked
+        if sql.startswith("SELECT "):
+            assert "FOR UPDATE" in sql
+            assert args[0] == TENANT
+        self.statements.append((sql, args))
         return self._fetchrow_result
+
+
+class _Audit:
+    async def lock_transaction(self, conn):
+        assert conn.depth > 0
+        conn.audit_locked = True
+
+    async def log_in_transaction(self, conn, **event):
+        assert conn.depth > 0 and conn.audit_locked
+        assert event["tenant_id"] == TENANT
+        assert event["resource_id"] == CREDENTIAL_ID
+        assert "ENC:" not in str(event)
+        conn.audits.append(event)
 
 
 @pytest.fixture
 def recorder(monkeypatch):
     holder = {}
 
+    async def valid_probe(provider, api_key):
+        return SimpleNamespace(status="valid", checked_at=datetime(2026, 11, 6, tzinfo=timezone.utc))
+
+    monkeypatch.setattr(ep, "probe_provider_key", valid_probe)
+
     @asynccontextmanager
     async def fake_acquire(pool, tenant_id, **kwargs):
-        yield holder["conn"]
+        assert tenant_id == TENANT
+        async with holder["conn"].transaction():
+            yield holder["conn"]
 
     class _Enc:
         def encrypt(self, plaintext):
@@ -97,7 +136,7 @@ def recorder(monkeypatch):
 
 
 def _user():
-    return SimpleNamespace(tenant_id=TENANT)
+    return SimpleNamespace(tenant_id=TENANT, id="22222222-2222-4222-8222-222222222222", role="tenant_admin")
 
 
 def _verbs(conn):
@@ -123,14 +162,19 @@ async def test_rotation_disables_the_active_row_then_inserts_and_never_deletes(r
         ep.CredentialCreateRequest(provider="groq", api_key="key-aaaa-1111"),
         current_user=_user(),
         db_pool=object(),
+        audit_logger=_Audit(),
     )
 
     # Was ["DELETE", "UPDATE", "INSERT"]: the DELETE erased the previous
     # disabled version on every rotation.
-    assert _verbs(conn) == ["UPDATE", "INSERT"], conn.statements
-    update_sql, update_args = conn.statements[0]
+    assert _verbs(conn) == ["SELECT", "UPDATE", "INSERT"], conn.statements
+    select_sql, select_args = conn.statements[0]
+    assert "tenant_id=$1" in select_sql and "FOR UPDATE" in select_sql
+    assert select_args == (TENANT, "groq", "api_key")
+    update_sql, update_args = conn.statements[1]
     assert "tenant_id = $1" in update_sql and "status = 'active'" in update_sql
     assert update_args[0] == TENANT
+    assert [event["action"] for event in conn.audits] == ["ai_credential.rotate"]
 
 
 @pytest.mark.asyncio
@@ -138,13 +182,14 @@ async def test_revoke_only_flips_the_status_and_never_deletes(recorder):
     target = {"provider": "groq", "credential_kind": "api_key", "status": "active"}
     recorder["conn"] = conn = _Recorder(target)
 
-    await ep.disable_credential(CREDENTIAL_ID, current_user=_user(), db_pool=object())
+    await ep.disable_credential(CREDENTIAL_ID, current_user=_user(), db_pool=object(), audit_logger=_Audit())
 
     assert _verbs(conn) == ["SELECT", "UPDATE"], conn.statements
     update_sql, update_args = conn.statements[1]
     assert "SET status = 'disabled'" in update_sql
     assert "tenant_id = $1" in update_sql and "id = $2" in update_sql
     assert update_args == (TENANT, CREDENTIAL_ID)
+    assert [event["action"] for event in conn.audits] == ["ai_credential.disable"]
 
 
 @pytest.mark.asyncio
@@ -152,9 +197,10 @@ async def test_revoking_an_already_disabled_row_writes_nothing(recorder):
     target = {"provider": "groq", "credential_kind": "api_key", "status": "disabled"}
     recorder["conn"] = conn = _Recorder(target)
 
-    await ep.disable_credential(CREDENTIAL_ID, current_user=_user(), db_pool=object())
+    await ep.disable_credential(CREDENTIAL_ID, current_user=_user(), db_pool=object(), audit_logger=_Audit())
 
     assert _verbs(conn) == ["SELECT"]
+    assert conn.audits == []
 
 
 # --------------------------------------------------------------------------

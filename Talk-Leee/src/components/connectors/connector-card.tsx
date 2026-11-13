@@ -65,6 +65,8 @@ export function ConnectorCard({
     statusPillTheme,
     available = true,
     unavailableReason,
+    mayConnect = true,
+    mayDisconnect = true,
     className,
 }: {
     type: ConnectorProviderType;
@@ -89,6 +91,10 @@ export function ConnectorCard({
     statusPillTheme?: StatusPillTheme;
     available?: boolean;
     unavailableReason?: string;
+    /** The role may start an OAuth connection (connectors:create, QA F1-21). */
+    mayConnect?: boolean;
+    /** The role may remove a connection (connectors:delete, QA F1-21). */
+    mayDisconnect?: boolean;
     className?: string;
 }) {
     const qc = useQueryClient();
@@ -148,17 +154,19 @@ export function ConnectorCard({
         if (status === "expired") return errorMessage?.trim() || CONNECTOR_EXPIRED_TEXT;
         if (status === "error") return errorMessage?.trim() || "Connection needs attention.";
         if (status === "connected") return "Connected.";
+        // QA F1-21: a role that can only view is told why it cannot connect.
+        if (!mayConnect) return "Disconnected. Your role can view connectors but not connect them.";
         return "Disconnected.";
-    }, [available, checking, errorMessage, flowNotice, inlineError, status, unavailableReason]);
+    }, [available, checking, errorMessage, flowNotice, inlineError, mayConnect, status, unavailableReason]);
 
     const authorizeFn = authorizeConnector ?? authorize.mutateAsync;
     const disconnectFn = disconnectConnector ?? disconnect.mutateAsync;
 
     const isBusy = pendingAction !== null;
 
-    const canConnect = available && status === "disconnected";
-    const canReconnect = available && (status === "expired" || status === "error");
-    const canDisconnect = available && (status === "connected" || status === "expired" || status === "error");
+    const canConnect = available && mayConnect && status === "disconnected";
+    const canReconnect = available && mayConnect && (status === "expired" || status === "error");
+    const canDisconnect = available && mayDisconnect && (status === "connected" || status === "expired" || status === "error");
 
     const connectOrReconnect = useCallback(async () => {
         setInlineError(undefined);

@@ -31,7 +31,7 @@ class LiveConversationState:
     last_tool_name: Optional[str] = None
     last_tool_success: Optional[bool] = None
     last_tool_code: Optional[str] = None
-    customer_relationship: Optional[str] = None  # "denied" or unknown
+    customer_relationship: Optional[str] = None  # "denied", "affirmed" or unknown
 
 
 @dataclass(frozen=True)
@@ -149,10 +149,11 @@ def reduce_cascaded_session_live_state(
                 phone_confirmed=bool(getattr(slots, "phone_confirmed", False)),
             ),
         )
-    from app.domain.services.voice_pipeline.speech_guard import caller_denied_relationship
+    from app.domain.services.voice_pipeline.speech_guard import caller_relationship
 
-    if caller_denied_relationship(getattr(session, "conversation_history", ()) or ()):
-        state = replace(state, customer_relationship="denied")
+    relationship = caller_relationship(getattr(session, "conversation_history", ()) or ())
+    if relationship is not None:
+        state = replace(state, customer_relationship=relationship)
     setattr(session, "_live_structured_state", state)
     return state
 

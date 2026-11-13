@@ -44,6 +44,7 @@ PROPOSAL_TOOLS = {
     "schedule_reminder",
     "execute_action_plan",
     "initiate_call",
+    "start_campaign",
 }
 
 # proposal_id -> proposal dict

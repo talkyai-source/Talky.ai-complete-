@@ -34,7 +34,7 @@ type Series = Awaited<ReturnType<typeof extendedApi.getCallAnalytics>>;
 const ISO_DAY = "2026-11-01";
 
 test("FX3b 4.2: the Breakdown table and the mobile list print the day in the chart's date form", async () => {
-    mock.method(extendedApi, "getCallAnalytics", async () => ({ series: [{ date: ISO_DAY, total_calls: 4, answered: 3, failed: 1 }] } as Series));
+    mock.method(extendedApi, "getCallAnalytics", async () => ({ timezone: "UTC", series: [{ date: ISO_DAY, total_calls: 4, answered: 3, failed: 1 }] } as Series));
     render(<Page />);
     await waitFor(() => assert.equal(screen.queryByText("Breakdown") !== null, true), { timeout: SLOW });
     const label = formatUtcDateLabel(ISO_DAY);

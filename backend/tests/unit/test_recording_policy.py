@@ -4,7 +4,8 @@ Covers the policy service's fail-closed behaviours:
 
 1. Missing tenant row → recording off until explicitly configured.
 2. Explicit `disabled` → no recording, no announcement.
-3. `one_party` → record, no announcement.
+3. `one_party` → record, no announcement, except to a callee whose country
+   needs one or can't be placed (QA F12-04).
 4. `two_party` + destination in two-party list → announce.
    `two_party` + destination NOT in list → record without announcement.
 """
@@ -98,12 +99,93 @@ async def test_disabled_mode_blocks_recording():
 
 @pytest.mark.asyncio
 async def test_one_party_records_without_announcement():
+    """A callee in a one-party country (Pakistan): record, no notice."""
+    row = {**_BASE_ROW, "default_consent_mode": CONSENT_ONE_PARTY}
+    svc = RecordingPolicyService(_FakePool(row))
+    decision = await svc.decide(
+        tenant_id="11111111-1111-4111-8111-111111111111", callee_country_code="PK"
+    )
+    assert decision.should_record is True
+    assert decision.announcement_required is False
+    assert decision.reason == "tenant_policy_one_party"
+
+
+# QA F12-04 (QA-CMP-006): a one-party account recorded calls to California,
+# Washington, Florida, Germany, France, the UK, Australia and Canada with no
+# notice. Its one-party assertion can't cover a callee whose own law needs one,
+# whatever the tenant's own two-party list says. A US number places the callee
+# only in "US", which can't rule out a two-party state.
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "callee", ["US-CA", "US-WA", "US-FL", "DE", "FR", "GB", "AU", "CA", "US"]
+)
+async def test_one_party_announces_to_a_callee_whose_law_needs_notice(callee):
+    row = {**_BASE_ROW, "default_consent_mode": CONSENT_ONE_PARTY}
+    svc = RecordingPolicyService(_FakePool(row))
+    decision = await svc.decide(
+        tenant_id="11111111-1111-4111-8111-111111111111", callee_country_code=callee
+    )
+    assert decision.should_record is True
+    assert decision.announcement_required is True
+    assert decision.announcement_text == row["announcement_text"]
+    assert decision.opt_out_dtmf_digit == "9"
+    assert decision.reason == "tenant_policy_one_party_two_party_destination"
+
+
+@pytest.mark.asyncio
+async def test_one_party_unknown_callee_announces():
+    """No readable number on the call: the callee can't be placed → announce."""
     row = {**_BASE_ROW, "default_consent_mode": CONSENT_ONE_PARTY}
     svc = RecordingPolicyService(_FakePool(row))
     decision = await svc.decide(tenant_id="11111111-1111-4111-8111-111111111111")
     assert decision.should_record is True
-    assert decision.announcement_required is False
-    assert decision.reason == "tenant_policy_one_party"
+    assert decision.announcement_required is True
+
+
+@pytest.mark.asyncio
+async def test_one_party_floor_holds_with_an_empty_tenant_list():
+    row = {
+        **_BASE_ROW,
+        "default_consent_mode": CONSENT_ONE_PARTY,
+        "two_party_country_codes": [],
+    }
+    svc = RecordingPolicyService(_FakePool(row))
+    tenant = "11111111-1111-4111-8111-111111111111"
+    uk = await svc.decide(tenant_id=tenant, callee_country_code="GB")
+    pakistan = await svc.decide(tenant_id=tenant, callee_country_code="PK")
+    assert uk.announcement_required is True
+    assert pakistan.announcement_required is False
+
+
+@pytest.mark.asyncio
+async def test_two_party_decision_ignores_the_callee_country():
+    """The callee country only feeds the one-party floor. A two-party tenant
+    still announces on every call whose destination is unknown, as before."""
+    svc = RecordingPolicyService(_FakePool(dict(_BASE_ROW)))
+    decision = await svc.decide(
+        tenant_id="11111111-1111-4111-8111-111111111111", callee_country_code="PK"
+    )
+    assert decision.announcement_required is True
+    assert decision.reason == "tenant_policy_two_party_announce"
+
+
+def test_platform_two_party_list_is_the_policy_table_default():
+    """The floor is the default two_party_country_codes of the policy table."""
+    import re
+    from pathlib import Path
+
+    from app.domain.services.recording_policy_service import PLATFORM_TWO_PARTY_CODES
+
+    sql = (
+        Path(__file__).resolve().parents[2]
+        / "database" / "migrations" / "20260425_add_tenant_recording_policy.sql"
+    ).read_text(encoding="utf-8")
+    default = re.search(
+        r"two_party_country_codes\s+TEXT\[\] NOT NULL DEFAULT ARRAY\[(.*?)\]::TEXT\[\]",
+        sql,
+        re.S,
+    ).group(1)
+    assert set(re.findall(r"'([A-Z-]+)'", default)) == set(PLATFORM_TWO_PARTY_CODES)
 
 
 @pytest.mark.asyncio

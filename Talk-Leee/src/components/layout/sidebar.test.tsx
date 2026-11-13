@@ -13,6 +13,8 @@ loader._load = function (id, ...args) {
     if (id.includes("providers/theme-provider")) return { useTheme: () => ({ theme: "light", setTheme() {}, toggleTheme() {} }) };
     if (id.includes("white-label/white-label-branding-provider")) return { useWhiteLabelBranding: () => null };
     if (id.includes("hooks/useAuth")) return { useAuth: () => ({ user: { id: "u", email: "u@example.com", role: "tenant_admin" }, logout: async () => {} }) };
+    // The menu follows effective permissions (QA F1-21); unknown keeps every entry.
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => ({ isSuccess: false }) };
     if (id.includes("components/ui/viewport-drawer")) return { ViewportDrawer: ({ open, children }: { open: boolean; children?: React.ReactNode }) => (open ? <div aria-label="Sidebar">{children}</div> : null) };
     if (id.includes("components/ui/hover-tooltip")) return { HoverTooltip: () => null, useHoverTooltip: () => ({ show() {}, hide() {}, state: null }) };
     if (id.includes("lib/sidebar-client")) return {

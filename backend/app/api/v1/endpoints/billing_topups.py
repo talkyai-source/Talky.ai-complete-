@@ -23,14 +23,15 @@ a request, and the fact that the UI only ever sends good values is not a control
 — it is a hope.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import csv
 import io
 import logging
 import os
-from typing import Optional
+from typing import Annotated, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
@@ -43,6 +44,7 @@ from app.api.v1.dependencies import (
 )
 from app.core.container import get_container
 from app.core.db_utils import acquire_with_tenant
+from app.utils.csv_safe import csv_safe
 from app.core.security.rbac import Permission, require_permission
 from app.domain.services.billing_catalog import _EXPONENTS
 from app.domain.services.billing_checkout import CheckoutError, billing_return_urls
@@ -50,6 +52,7 @@ from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.billing_service import BillingService
 from app.domain.services.minutes_quota import compute_minutes_status
 from app.domain.services.payg import PurchaseRefused, tenant_purchase_audience
+from app.domain.services.telephony.call_authority import CallAuthorityUnavailable
 from app.domain.services.topup_service import TopupError, TopupService, public_ledger_entry
 from app.domain.services.topup_usage import topup_minutes_left
 
@@ -72,11 +75,18 @@ async def _purchase_audience(tenant_id: str) -> str:
     """Which bundles this account may buy: ``subscriber`` top-ups for a paid
     plan in good standing, ``payg`` bundles for any other account that may
     place calls (owner decision 2026-10-31). Refused accounts get a 409."""
-    async with acquire_with_tenant(get_container().db_pool, tenant_id) as conn:
+    # The formal parent/hold rows belong to other tenants: use the service
+    # read with an explicit bound tenant predicate, as the call guard does.
+    async with acquire_with_tenant(get_container().db_pool, None) as conn:
         try:
             return await tenant_purchase_audience(conn, tenant_id)
         except PurchaseRefused as exc:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=exc.message) from exc
+        except CallAuthorityUnavailable as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Your account could not be checked just now. Please try again.",
+            ) from exc
 
 
 def _service() -> TopupService:
@@ -155,6 +165,19 @@ class BalanceOut(BaseModel):
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def list_packages(current_user: CurrentUser = Depends(get_current_user)):
+    # A bundle the checkout would refuse is not offered (G7): top-ups switched
+    # off, or production Stripe test mode for someone outside the team. The
+    # reason is on GET /billing/config (topups_unavailable_reason).
+    from app.api.v1.endpoints.billing import _is_platform_admin
+    from app.domain.services.billing_mode import topup_availability
+
+    open_, _reason = topup_availability(
+        is_platform_admin=_is_platform_admin(current_user),
+        email=getattr(current_user, "email", None),
+        live_topups_enabled=_live_topups_enabled(),
+    )
+    if not open_:
+        return []
     try:
         audience = await _purchase_audience(_tenant(current_user))
     except HTTPException as exc:
@@ -257,7 +280,7 @@ async def create_topup_checkout(
     try:
         billing_base = billing_return_urls()
     except CheckoutError as e:
-        raise HTTPException(status_code=e.status_code, detail=str(e))
+        raise HTTPException(status_code=e.status_code, detail=safe_exception_message(e, 'The request could not be completed.'))
     success_url = f"{billing_base}?topup=success"
     cancel_url = f"{billing_base}?topup=cancelled"
 
@@ -269,7 +292,7 @@ async def create_topup_checkout(
             audience=audience,
         )
     except TopupError as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=safe_exception_message(e, 'The request could not be completed.'))
 
     try:
         session = await billing.create_topup_checkout_session(
@@ -279,7 +302,7 @@ async def create_topup_checkout(
             minutes=order["minutes"],
             price_cents=order["price_cents"],
             currency=order["currency"],
-            product_name=f"Talky.ai — {order['name']}",
+            product_name=f"Talk-Lee — {order['name']}",
             success_url=success_url,
             cancel_url=cancel_url,
             business_name=getattr(current_user, "business_name", None),
@@ -296,7 +319,7 @@ async def create_topup_checkout(
         )
 
     try:
-        await svc.attach_session(str(order["id"]), session["session_id"])
+        await svc.attach_session(str(order["id"]), session["session_id"], tenant_id=tenant_id)
     except TopupError as e:
         logger.error(
             "topup_session_orphaned order=%s session=%s — a payment on this "
@@ -345,7 +368,7 @@ async def create_topup_checkout(
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def list_orders(
-    limit: int = 25,
+    limit: Annotated[int, Query(ge=1, le=100)] = 25,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     rows = await _service().history(_tenant(current_user), min(max(limit, 1), 100))
@@ -372,7 +395,7 @@ async def list_orders(
     dependencies=[Depends(require_permission(Permission.BILLING_READ))],
 )
 async def list_ledger(
-    limit: int = 100,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
     current_user: CurrentUser = Depends(get_current_user),
 ):
     """Signed movements. A refund shows as its own negative line rather than
@@ -440,7 +463,9 @@ async def reconciliation(
                                       "provider_event_id", "provider_payment_id",
                                       "order_status", "note"])
         writer.writeheader()
-        writer.writerows(records)
+        # Business names and notes are tenant text; a leading = + - @ must
+        # not run as a formula in the reader's spreadsheet (QA F14-01).
+        writer.writerows({key: csv_safe(value) for key, value in rec.items()} for rec in records)
         return StreamingResponse(
             iter([buf.getvalue()]),
             media_type="text/csv",

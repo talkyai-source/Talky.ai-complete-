@@ -41,12 +41,82 @@ import os
 import struct
 import time
 import wave
+from contextlib import AsyncExitStack, asynccontextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import datetime
+from functools import wraps
 from typing import Any, Dict, List, Optional, Tuple
 from uuid import UUID
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _RecordingPoolBudget:
+    remaining: float = 60.0
+
+
+_recording_pool_budget: ContextVar[Optional[_RecordingPoolBudget]] = ContextVar(
+    "recording_pool_budget", default=None,
+)
+
+
+def _with_recording_pool_budget(method):
+    """Share one acquisition/backoff budget across nested recording entry points."""
+    @wraps(method)
+    async def scoped(self, *args, **kwargs):
+        if _recording_pool_budget.get() is not None:
+            return await method(self, *args, **kwargs)
+        token = _recording_pool_budget.set(_RecordingPoolBudget())
+        try:
+            return await method(self, *args, **kwargs)
+        finally:
+            _recording_pool_budget.reset(token)
+    return scoped
+
+
+@asynccontextmanager
+async def _acquire_recording_connection(
+    db_pool, call_id: str, tenant_id: str, *, acquire_context=None,
+):
+    """Retry pool admission only; never replay SQL, commit or storage work."""
+    budget = _recording_pool_budget.get() or _RecordingPoolBudget()
+    backoff = 0.5
+    async with AsyncExitStack() as stack:
+        while budget.remaining > 0:
+            # Existing teardown contexts own their default acquisition cap.
+            # Do not begin one that exceeds the shared remaining budget.
+            if acquire_context is not None and budget.remaining < db._ACQUIRE_TIMEOUT_S:
+                break
+            options = (
+                {"timeout": budget.remaining}
+                if budget.remaining < db._ACQUIRE_TIMEOUT_S else {}
+            )
+            started = time.monotonic()
+            try:
+                conn = await stack.enter_async_context(
+                    acquire_context() if acquire_context is not None
+                    else acquire_with_tenant(db_pool, tenant_id, **options)
+                )
+            except db.DatabasePoolTimeoutError:
+                budget.remaining -= max(0.0, time.monotonic() - started)
+                if budget.remaining <= 0:
+                    break
+                delay = min(backoff, budget.remaining)
+                started = time.monotonic()
+                await asyncio.sleep(delay)
+                budget.remaining -= max(delay, time.monotonic() - started)
+                backoff = min(backoff * 2, 5.0)
+            else:
+                budget.remaining -= max(0.0, time.monotonic() - started)
+                # Body/transaction exit are outside the retry catch, including
+                # an INSERT whose commit result is unknown. Cancellation passes
+                # through and ExitStack preserves connection cleanup.
+                yield conn
+                return
+    logger.error("recording_db_pool_retry_exhausted call=%s", call_id)
+    raise db.DatabasePoolTimeoutError("Recording database acquisition retry budget exhausted")
 
 
 def _bounded_env_float(
@@ -568,7 +638,7 @@ class RecordingService:
                 call_uuid = UUID(str(call_id))
             except (ValueError, TypeError, AttributeError):
                 call_uuid = None
-            async with acquire_with_tenant(self._db, str(tenant_uuid)) as conn:
+            async with _acquire_recording_connection(self._db, call_id, str(tenant_uuid)) as conn:
                 row = await conn.fetchrow(
                     "SELECT id FROM calls WHERE tenant_id = $1 "
                     "AND (id = $2 OR ($2::uuid IS NULL AND external_call_uuid = $3)) "
@@ -583,10 +653,13 @@ class RecordingService:
             from app.domain.services.recording_policy_service import (
                 RecordingPolicyService,
                 consent_satisfied,
+                get_callee_country,
             )
             decision = await RecordingPolicyService(self._db).decide(
                 tenant_id=str(tenant_uuid),
                 destination_country_code=destination_country_code,
+                # The country the live notice decision used (QA F12-04).
+                callee_country_code=get_callee_country(call_id, str(row["id"])),
             )
             allowed = bool(
                 decision.should_record and consent_satisfied(decision, call_id, str(row["id"]))
@@ -601,6 +674,7 @@ class RecordingService:
             logger.warning("recording_retention_admission_unavailable call=%s", call_id)
             return False
 
+    @_with_recording_pool_budget
     async def save_recording(
         self,
         call_id: str,
@@ -629,6 +703,7 @@ class RecordingService:
 
     # ── Main workflow ─────────────────────────────────────────────
 
+    @_with_recording_pool_budget
     async def save_and_link(
         self,
         call_id: str,
@@ -716,6 +791,7 @@ class RecordingService:
 
     # ── Local file fallback ───────────────────────────────────────
 
+    @_with_recording_pool_budget
     async def _save_local(
         self,
         call_id: str,
@@ -780,6 +856,12 @@ class RecordingService:
             )
         except Exception as exc:
             logger.error(f"Local recording save failed for call {call_id}: {exc}", exc_info=True)
+            # A full disk (ENOSPC) used to leave no trace but this log line
+            # (QA F7-04): leave the same 'failed' row the cloud path does.
+            await self._mark_upload_failed(
+                call_id, tenant_id, campaign_id, f"local_write_failed:{type(exc).__name__}",
+                bucket="local", region="local",
+            )
             return None
 
         # Insert DB record so the frontend can find this recording.
@@ -953,7 +1035,7 @@ class RecordingService:
         never silently dropped by a ``UUID()`` parse failure.
         """
         try:
-            async with acquire_with_tenant(self._db, tenant_id) as conn:
+            async with _acquire_recording_connection(self._db, call_id, tenant_id) as conn:
                 try:
                     tenant_uuid = UUID(tenant_id)
                 except (ValueError, AttributeError, TypeError):
@@ -1023,7 +1105,7 @@ class RecordingService:
         if not recording_id:
             return
         try:
-            async with acquire_with_tenant(self._db, tenant_id) as conn:
+            async with _acquire_recording_connection(self._db, call_id, tenant_id) as conn:
                 await conn.execute(
                     """
                     UPDATE calls
@@ -1049,7 +1131,7 @@ class RecordingService:
         be verified.
         """
         try:
-            async with acquire_with_tenant(self._db, tenant_id) as conn:
+            async with _acquire_recording_connection(self._db, call_id, tenant_id) as conn:
                 referenced = await conn.fetchval(
                     """
                     SELECT EXISTS (
@@ -1099,8 +1181,20 @@ class RecordingService:
         tenant_id: str,
         campaign_id: str,
         reason: str,
+        *,
+        bucket: Optional[str] = None,
+        region: Optional[str] = None,
     ) -> None:
-        """Insert a 'failed' row so the failure is visible in the admin panel."""
+        """Insert a 'failed' row so the failure is visible in the admin panel.
+
+        ``bucket``/``region`` default to the cloud store; local-disk saves pass
+        "local", as their success rows do. A campaign id that is not a UUID
+        ("unknown") is stored as NULL rather than losing the row.
+        """
+        try:
+            campaign_uuid = UUID(str(campaign_id))
+        except (ValueError, TypeError, AttributeError):
+            campaign_uuid = None
         try:
             async with acquire_with_tenant(self._db, tenant_id) as conn:
                 # call_id may be a PBX channel id, not a UUID: use the
@@ -1122,10 +1216,10 @@ class RecordingService:
                     """,
                     call_uuid,
                     UUID(tenant_id),
-                    UUID(campaign_id) if campaign_id else None,
-                    self._s3.bucket,
+                    campaign_uuid,
+                    bucket if bucket is not None else self._s3.bucket,
                     f"failed/{call_id}.wav",
-                    self._s3.region,
+                    region if region is not None else self._s3.region,
                 )
         except Exception as exc:
             # Best-effort - don't shadow the original error, but leave a trace.
@@ -1240,4 +1334,5 @@ def make_recording_service(db_pool: Any) -> RecordingService:
     return RecordingService(db_pool=db_pool)
 
 
+from app.core import db
 from app.core.db_utils import acquire_with_tenant

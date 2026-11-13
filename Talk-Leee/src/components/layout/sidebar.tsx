@@ -20,12 +20,7 @@ import {
     Shield,
     CreditCard,
     ScrollText,
-    Key,
-    Webhook,
-    Gauge,
     ShieldCheck,
-    ShieldAlert,
-    Lock,
     ChevronDown,
     Plug,
     MessageSquare,
@@ -41,6 +36,7 @@ import { useWhiteLabelBranding } from "@/components/white-label/white-label-bran
 import { useTheme } from "@/components/providers/theme-provider";
 import { useAuth } from "@/hooks/useAuth";
 import { getAdminUiCapabilities, roleLabel } from "@/lib/admin-access";
+import { permits, useKnownPermissions } from "@/lib/permissions";
 import { getServerSupportStatus, getSupportStatus, subscribeSupportStatus } from "@/lib/support-status-store";
 
 type NavChild = {
@@ -48,6 +44,8 @@ type NavChild = {
     href: string;
     icon: React.ComponentType<{ className?: string }>;
     adminOnly?: boolean;
+    /** Hidden once the effective permissions are known and lack it (QA F1-21). */
+    permission?: string;
 };
 
 type NavItem = {
@@ -55,6 +53,8 @@ type NavItem = {
     href: string;
     icon: React.ComponentType<{ className?: string }>;
     adminOnly?: boolean;
+    /** Hidden once the effective permissions are known and lack it (QA F1-21). */
+    permission?: string;
     children?: NavChild[];
     /** Shown only while GET /support/config says support is on for this account. */
     supportOnly?: boolean;
@@ -64,26 +64,26 @@ type NavItem = {
 
 const navigation: NavItem[] = [
     { name: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { name: "Campaigns", href: "/campaigns", icon: Megaphone },
+    { name: "Campaigns", href: "/campaigns", icon: Megaphone, permission: "campaigns:read" },
     // Exactly one Inbound entry. A second row pointing at /inbound was
     // added by a parallel implementation and removed on 2026-09-01: both
     // rows were named "Inbound", and this list renders with `key={item.name}`,
     // so they collided as duplicate React keys. The duplicate `PhoneIncoming`
     // import that came with it broke `tsc` and `next build` outright.
     // Inbound call history is a direction filter on /calls, not a nav row.
-    { name: "Inbound Campaigns", href: "/inbound-campaigns", icon: PhoneIncoming },
-    { name: "Call History", href: "/calls", icon: Phone },
-    { name: "Contacts", href: "/contacts", icon: Users },
-    { name: "Analytics", href: "/analytics", icon: BarChart2 },
-    { name: "Recordings", href: "/recordings", icon: Volume2 },
+    { name: "Inbound Campaigns", href: "/inbound-campaigns", icon: PhoneIncoming, permission: "inbound:read" },
+    { name: "Call History", href: "/calls", icon: Phone, permission: "calls:read" },
+    { name: "Contacts", href: "/contacts", icon: Users, permission: "campaigns:read" },
+    { name: "Analytics", href: "/analytics", icon: BarChart2, permission: "analytics:read" },
+    { name: "Recordings", href: "/recordings", icon: Volume2, permission: "recordings:read" },
     // Agent Reviews moved to the admin panel (/admin/reviews). Rating a call
     // happens inline next to its play button; READING everyone's reviews is an
     // admin activity, and its endpoint was already require_admin_tenant — so
     // offering it to every user only produced a 403 that looked like a bug.
-    { name: "Connectors", href: "/connectors", icon: Plug },
+    { name: "Connectors", href: "/connectors", icon: Plug, permission: "connectors:read" },
     // Assistant moved out of this group — it's queued for v2 and lives
     // in Settings as a "Coming soon" tile.
-    { name: "AI Options", href: "/ai-options", icon: Cpu },
+    { name: "AI Options", href: "/ai-options", icon: Cpu, permission: "tenants:read" },
     // goals.md §4: Security is a main destination, not a tab three levels down
     // inside Settings. Everything on it — is 2FA on, what is still signed in,
     // who changed that — is looked for in a hurry.
@@ -94,31 +94,23 @@ const navigation: NavItem[] = [
     {
         name: "Billing & Logs", href: "/billing", icon: CreditCard,
         children: [
-            { name: "Billing", href: "/billing", icon: CreditCard },
+            { name: "Billing", href: "/billing", icon: CreditCard, permission: "billing:read" },
             { name: "Audit Logs", href: "/admin/audit-logs", icon: ScrollText, adminOnly: true },
         ],
     },
+    // QA F1-21: Voice Security, Abuse Detection and the Developer Hub (API
+    // keys, webhooks, rate limiting, secrets) are "not available" placeholders
+    // with no served API; they are not listed until they exist.
     {
         name: "Security Center", href: "/admin", icon: Shield, adminOnly: true,
         children: [
             { name: "Audit & Access", href: "/admin", icon: Shield },
-            { name: "Voice Security", href: "/admin/voice-security", icon: ShieldCheck },
-            { name: "Abuse Detection", href: "/admin/abuse-detection", icon: ShieldAlert },
         ],
     },
     {
         name: "Agent Quality", href: "/admin/reviews", icon: MessageSquare, adminOnly: true,
         children: [
             { name: "Agent Reviews", href: "/admin/reviews", icon: MessageSquare },
-        ],
-    },
-    {
-        name: "Developer Hub", href: "/admin/api-keys", icon: Key, adminOnly: true,
-        children: [
-            { name: "API Keys", href: "/admin/api-keys", icon: Key },
-            { name: "Webhooks", href: "/admin/webhooks", icon: Webhook },
-            { name: "Rate Limiting", href: "/admin/rate-limiting", icon: Gauge },
-            { name: "Secrets", href: "/admin/secrets", icon: Lock },
         ],
     },
     { name: "Support", href: "/support", icon: LifeBuoy, supportOnly: true, badge: "support" },
@@ -165,20 +157,26 @@ export function Sidebar({ className }: { className?: string }) {
     const isAdmin = capabilities.canViewAuditLogs;
     const support = useSyncExternalStore(subscribeSupportStatus, getSupportStatus, getServerSupportStatus);
     const supportVisible = support.visible;
+    const permissions = useKnownPermissions();
     const visibleNavigation = useMemo(
         () => {
             return navigation
                 .filter((item) => !item.adminOnly || isAdmin)
                 .filter((item) => !item.supportOnly || supportVisible)
-                .map((item) => {
-                    if (!item.children) return item;
-                    const visibleChildren = item.children.filter((child) => !child.adminOnly || isAdmin);
-                    if (visibleChildren.length === 0) return item;
-                    if (visibleChildren.length === 1) return { ...item, children: undefined };
-                    return { ...item, children: visibleChildren };
+                .filter((item) => permits(permissions, item.permission))
+                .flatMap((item) => {
+                    if (!item.children) return [item];
+                    const visibleChildren = item.children.filter(
+                        (child) => (!child.adminOnly || isAdmin) && permits(permissions, child.permission),
+                    );
+                    // A group with nothing the user may open is not shown at all;
+                    // a single child is reached directly at its own address.
+                    if (visibleChildren.length === 0) return [];
+                    if (visibleChildren.length === 1) return [{ ...item, href: visibleChildren[0].href, children: undefined }];
+                    return [{ ...item, children: visibleChildren }];
                 });
         },
-        [isAdmin, supportVisible]
+        [isAdmin, supportVisible, permissions]
     );
 
     // Automatically expand dropdowns if a child is active

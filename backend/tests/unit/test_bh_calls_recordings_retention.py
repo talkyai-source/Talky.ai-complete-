@@ -28,6 +28,16 @@ class _Conn:
         self.queries.append((query, args))
         return self.rows
 
+    async def fetchval(self, query, *args):
+        assert " ".join(query.split()) == "SELECT to_regclass($1)"
+        assert len(args) == 1 and args[0] in {
+            "public.recordings_s3",
+            "public.tenant_recording_policy",
+            "public.suspension_events",
+            "public.tenants",
+        }
+        return args[0]
+
 
 def _row(tmp_path, *, bucket="local", name="a.wav", create=True):
     path = tmp_path / name

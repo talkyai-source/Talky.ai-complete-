@@ -54,15 +54,13 @@ from typing import Literal, Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
 from app.core.jwt_security import encode_access_token
 from app.core.postgres_adapter import Client
 from app.core.security.lockout import check_account_locked, record_login_attempt
-from app.core.security.principal import load_current_principal, PrincipalUnavailable, assert_expected_identity
+from app.core.security.principal import load_current_principal, PrincipalUnavailable, account_hold_refusal, assert_expected_identity
 from app.core.security.passkeys import (
     generate_authentication_options,
     generate_registration_options,
@@ -76,7 +74,7 @@ from app.core.security.passkeys import (
     verify_authentication,
     verify_registration,
 )
-from app.api.v1.endpoints.auth._shared import issue_cookie_auth
+from app.api.v1.endpoints.auth._shared import issue_cookie_auth, limiter
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
@@ -85,9 +83,10 @@ from app.core.security.sessions import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Rate limiter
+# Rate limiter: the shared auth limiter, keyed by the real client IP. This
+# module had its own Limiter keyed by get_remote_address, which behind nginx is
+# always the proxy's loopback address: one 10/minute bucket for every visitor.
 # ---------------------------------------------------------------------------
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/auth/passkeys", tags=["passkeys"])
 
@@ -545,6 +544,10 @@ async def login_complete(
             assert_expected_identity(request, user_row)
             await require_current_passkey_ceremony(conn, user_id, body.ceremony_id)
         except PrincipalUnavailable as exc:
+            hold = account_hold_refusal(exc)
+            if hold is not None:
+                # The passkey proof already succeeded; name the hold (D4-5).
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=hold) from exc
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid credentials.",

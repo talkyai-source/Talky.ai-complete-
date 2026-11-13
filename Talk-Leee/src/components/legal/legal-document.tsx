@@ -16,6 +16,8 @@ interface LegalDocumentProps {
   summary?: { title: string; text: string };
   intro?: string[];
   blocks: LegalBlock[];
+  /** Rendered after the blocks, for content that needs links. */
+  children?: React.ReactNode;
 }
 
 function Callout({ title, text, tone = "info" }: { title: string; text: string; tone?: "info" | "warning" }) {
@@ -91,7 +93,7 @@ function renderBlock(block: LegalBlock, index: number) {
   }
 }
 
-export function LegalDocument({ title, effectiveDate, lastUpdated, summary, intro, blocks }: LegalDocumentProps) {
+export function LegalDocument({ title, effectiveDate, lastUpdated, summary, intro, blocks, children }: LegalDocumentProps) {
   return (
     <div className="home-navbar-offset min-h-screen flex flex-col bg-cyan-50 dark:bg-black">
       <Navbar />
@@ -108,6 +110,7 @@ export function LegalDocument({ title, effectiveDate, lastUpdated, summary, intr
             </p>
           ))}
           {blocks.map(renderBlock)}
+          {children}
         </article>
       </main>
       <Footer />

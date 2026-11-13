@@ -1,7 +1,7 @@
 "use client";
 
 import { TrendingUp, TrendingDown, Minus, Sparkles, ShieldAlert } from "lucide-react";
-import { ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { ErrorState, LoadingState, failedReadMessage, failedReadRequestId } from "@/components/states/page-states";
 import type { CallSummaryObj, CallSummaryEnvelope } from "@/lib/dashboard-api";
 import { InfoTip } from "@/components/ui/info-tip";
 
@@ -362,7 +362,7 @@ export function CallSummaryCard({ isLoading, isError, error, data, onRetry }: Ca
     }
 
     if (isError) {
-        return <ErrorState message={failedReadMessage(error, "Failed to load summary.")} onRetry={onRetry} />;
+        return <ErrorState requestId={failedReadRequestId(error)} message={failedReadMessage(error, "Failed to load summary.")} onRetry={onRetry} />;
     }
 
     if (!data) return null;

@@ -24,9 +24,9 @@ def test_ask_ai_has_sensitive_info_boundaries():
 
 def test_ask_ai_knows_the_product():
     assert "AI voice-calling platform" in ASK_AI_SYSTEM_PROMPT  # always-known summary
-    # The always-available fact sheet covers features and plans.
-    for token in ("voice cloning", "knowledge base", "timezone-aware",
-                  "Basic", "Professional", "Enterprise"):
+    # The always-available fact sheet covers features. Plans and prices come
+    # from the live price list at session start (QA F11-05).
+    for token in ("voice cloning", "knowledge base", "timezone-aware"):
         assert token in TALKY_PRODUCT_INFO
 
 

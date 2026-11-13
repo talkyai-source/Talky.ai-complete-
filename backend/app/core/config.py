@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict
 from functools import lru_cache
 from urllib.parse import urlsplit, urlunsplit
-from pydantic import SecretStr, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _BACKEND_ROOT = Path(__file__).resolve().parents[2]
@@ -72,6 +72,11 @@ class Settings(BaseSettings):
     # API Settings
     api_prefix: str = "/api/v1"
 
+    # Legal supplies the identifiers/text; enable only after the acceptance UI ships.
+    legal_acceptance_required: bool = False
+    legal_terms_version: str | None = Field(default=None, max_length=128)
+    legal_privacy_version: str | None = Field(default=None, max_length=128)
+
     # CORS — populated from CORS_ORIGINS env var (comma-separated or a JSON
     # array). Falls back to FRONTEND_URL if CORS_ORIGINS is not set. The str
     # arm lets a comma-separated value reach _split_cors_origins: for a plain
@@ -88,9 +93,18 @@ class Settings(BaseSettings):
     kms_provider: str = "local"
     jwt_secret: str | None = None
     secret_key: str | None = None
+    # Enable only after administrators enrol and complete a fresh MFA login.
+    platform_admin_mfa_required: bool = False
     # Dedicated write-only Alertmanager ingestion credential; not user/internal auth.
     alertmanager_ingest_token: SecretStr | None = None
     alertmanager_source_id: str = "platform-alertmanager"
+    # Operational systemd notifications; presence does not certify delivery.
+    talky_alert_webhook_url: SecretStr | None = None
+    talky_alert_email_to: str | None = None
+    # Empty until the operator verifies carrier source and assertion rewriting.
+    inbound_caller_id_trusted_endpoints: str = Field(
+        default="", validation_alias="TALKY_CALLER_ID_TRUSTED_ENDPOINTS"
+    )
     # AH-Phase-C: previous signing key during graceful rotation.
     # When the operator rotates `JWT_SECRET`, the previous value is
     # moved into `JWT_SECRET_PREVIOUS` for one window of (access TTL
@@ -117,15 +131,24 @@ class Settings(BaseSettings):
     database_url: str | None = None
 
     # Email Service (Microsoft 365 SMTP via GoDaddy)
+    brand_name: str = "Talk-Lee"
+    from_email: str | None = None  # Production requires an owned talkleeai.com address.
     email_user: str | None = None  # noreply@talkleeai.com
     email_pass: str | None = None  # App Password or M365 password
 
     # JWT Configuration
     jwt_expiry_hours: int = 24  # Default 24-hour token expiry
+    auth_short_lived_tokens_required: bool = False  # Opt-in 15-minute body/JWT cutover.
     jwt_algorithm: str = "HS256"  # HMAC SHA-256 (OWASP recommended)
     jwt_issuer: str | None = None  # Optional issuer claim (iss)
     jwt_audience: str | None = None  # Optional audience claim (aud)
     jwt_leeway_seconds: int = 60  # Clock skew tolerance (60 seconds)
+
+    @field_validator("environment", mode="before")
+    @classmethod
+    def _normalize_environment(cls, value: Any) -> Any:
+        # Read one way everywhere (QA F2-15): " Production " is production.
+        return value.strip().lower() if isinstance(value, str) else value
 
     @field_validator("jwt_secret", "secret_key", "jwt_secret_previous", mode="before")
     @classmethod

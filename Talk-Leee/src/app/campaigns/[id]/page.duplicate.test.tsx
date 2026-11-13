@@ -23,7 +23,7 @@ type Shared = typeof import("@/lib/campaign-duplicate");
 const sharedCalls: string[] = [];
 let sharedOverride: Shared["duplicateCampaign"] | null = null;
 loader._load = function (id, ...args) {
-    if (id === "next/navigation") return { useParams: () => ({ id: route.id }), useRouter: () => router };
+    if (id === "next/navigation") return { useParams: () => ({ id: route.id }), useRouter: () => router, useSearchParams: () => new URLSearchParams() };
     if (id.includes("lib/campaign-duplicate")) {
         const real = originalLoad.call(this, id, ...args) as Shared;
         return {

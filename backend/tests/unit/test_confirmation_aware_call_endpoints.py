@@ -444,7 +444,7 @@ async def test_campaign_bulk_hangup_separates_attempts_from_confirmations(monkey
     )
     monkeypatch.setattr(telephony_bridge, "_adapter", bound_test_adapter(Adapter()))
 
-    result = await telephony_bridge.hangup_calls_for_campaign(str(uuid4()))
+    result = await telephony_bridge.hangup_calls_for_campaign(str(uuid4()), tenant_id=str(uuid4()))
 
     assert result == {
         "status": "partial",
@@ -469,7 +469,7 @@ async def test_campaign_bulk_lookup_failure_is_not_zero_success(monkeypatch):
         lambda: SimpleNamespace(db_pool=None),
     )
 
-    result = await telephony_bridge.hangup_calls_for_campaign(str(uuid4()))
+    result = await telephony_bridge.hangup_calls_for_campaign(str(uuid4()), tenant_id=str(uuid4()))
 
     assert result["status"] == "lookup_failed"
     assert result["lookup_error"] == "database_unavailable"

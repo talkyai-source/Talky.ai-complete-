@@ -60,7 +60,7 @@ class _FakeDNCConn:
 
     async def fetchrow(self, *a, **k):
         return {
-            "id": "1", "tenant_id": _TENANT_ID, "normalized_number": "+15551234567",
+            "id": "1", "tenant_id": _TENANT_ID, "normalized_number": "+14155550100",
             "source": "caller_opt_out", "reason": "x",
             "expires_at": None, "created_at": None,
         }
@@ -116,7 +116,7 @@ async def test_purge_runs_all_three_steps():
     client = _FakeClient(rows=[{"id": "j1"}, {"id": "j2"}])
     res = await purge_lead_on_opt_out(
         db_pool=pool, db_client=client,
-        tenant_id=_TENANT_ID, lead_id="lead-1", phone_number="+1 (555) 123-4567",
+        tenant_id=_TENANT_ID, lead_id="lead-1", phone_number="+1 (415) 555-0100",
         call_id="call-9",
     )
     assert res["dnc_added"] is True
@@ -128,7 +128,11 @@ async def test_purge_runs_all_three_steps():
     jobs = next((sql, args) for sql, args in pool.conn.executed if "UPDATE dialer_jobs" in sql)
     assert OPT_OUT_REASON in jobs[1]
     assert set(jobs[1][-1]) == {"pending", "queued", "retry_scheduled"}
-    assert sum(sql.startswith("SET LOCAL") for sql, _ in pool.conn.executed) == 3
+    assert [sql for sql, _ in pool.conn.executed if sql.startswith("SET LOCAL app.")] == [
+        f"SET LOCAL app.current_tenant_id = '{_TENANT_ID}'",
+    ] * 3
+    assert sum(sql.startswith("SET LOCAL statement_timeout = ") for sql, _ in pool.conn.executed) == 3
+    assert sum(sql.startswith("SET LOCAL lock_timeout = ") for sql, _ in pool.conn.executed) == 3
 
 
 @pytest.mark.asyncio

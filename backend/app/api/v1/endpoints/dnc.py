@@ -16,6 +16,7 @@ Endpoints
                                    (includes global entries)
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import logging
 from datetime import datetime
@@ -25,7 +26,14 @@ import asyncpg
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
-from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_pool, require_admin
+from app.api.v1.dependencies import (
+    CurrentUser,
+    get_audit_logger,
+    get_current_user,
+    get_db_pool,
+    require_admin,
+)
+from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.domain.services.dnc_service import (
     KNOWN_SOURCES,
     SOURCE_BULK_IMPORT,
@@ -55,6 +63,7 @@ class DNCEntryResponse(BaseModel):
 
 
 class DNCAddRequest(BaseModel):
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     e164: str = Field(..., description="Phone number — any format; normalised server-side.")
     source: str = Field(default=SOURCE_MANUAL_ADMIN, max_length=64)
     reason: Optional[str] = Field(default=None, max_length=512)
@@ -62,6 +71,7 @@ class DNCAddRequest(BaseModel):
 
 
 class DNCBulkImportRequest(BaseModel):
+    default_country: Optional[str] = Field(None, min_length=2, max_length=2)
     numbers: List[str] = Field(..., min_length=1, max_length=10_000)
     source: str = Field(default=SOURCE_BULK_IMPORT, max_length=64)
     reason: Optional[str] = Field(default=None, max_length=512)
@@ -114,7 +124,7 @@ def _to_response(entry: DNCEntry) -> DNCEntryResponse:
 @router.get("/", response_model=List[DNCEntryResponse])
 async def list_dnc_entries(
     include_global: bool = Query(default=False, description="Include cross-tenant DNC entries."),
-    limit: int = Query(default=200, ge=1, le=1000),
+    limit: int = Query(default=200, ge=1, le=200),
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
 ) -> List[DNCEntryResponse]:
@@ -129,6 +139,7 @@ async def add_dnc_entry(
     payload: DNCAddRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ) -> DNCEntryResponse:
     """Add a number to the tenant's DNC list. Idempotent — adding
     the same number twice just refreshes `updated_at`."""
@@ -141,12 +152,15 @@ async def add_dnc_entry(
             tenant_id=tenant_id,
             e164=payload.e164,
             source=payload.source,
+            default_country=payload.default_country,
             reason=payload.reason,
             expires_at=payload.expires_at,
-            added_by=str(current_user.user_id) if current_user.user_id else None,
+            added_by=str(current_user.id) if current_user.id else None,
+            audit=audit,
+            actor_role=getattr(current_user, "role", None),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=422, detail=[{"row": 1, "field": "e164", "message": "Invalid phone number for the selected country"}]) from exc
     logger.info(
         "dnc_entry_added tenant=%s number=%s source=%s",
         tenant_id, entry.normalized_number, entry.source,
@@ -159,14 +173,37 @@ async def bulk_import(
     payload: DNCBulkImportRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ) -> DNCBulkImportResponse:
     tenant_id = _require_tenant(current_user)
     svc = DNCService(db_pool)
-    result = await svc.bulk_import(
+    try:
+        result = await svc.bulk_import(
+            tenant_id=tenant_id,
+            numbers=payload.numbers,
+            default_country=payload.default_country,
+            source=payload.source,
+            reason=payload.reason,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=[{
+            "row": 1, "field": "default_country", "message": "Use a supported ISO alpha-2 country",
+        }]) from exc
+    # One summary row after the import (QA F12-10). Holding the audit chain
+    # lock across a 10,000-number import would stall every audited write.
+    await audit.log(
+        event_type=AuditEvent.CONFIG_CHANGED,
+        action="dnc.bulk_import",
+        actor_id=current_user.id,
+        actor_role=getattr(current_user, "role", None),
         tenant_id=tenant_id,
-        numbers=payload.numbers,
-        source=payload.source,
-        reason=payload.reason,
+        resource_type="dnc_list",
+        metadata={
+            "source": payload.source,
+            "accepted_count": result["accepted_count"],
+            "skipped_count": result["skipped_count"],
+            "invalid_count": result["invalid_count"],
+        },
     )
     logger.info(
         "dnc_bulk_import tenant=%s source=%s accepted=%d skipped=%d invalid=%d",
@@ -181,6 +218,7 @@ async def caller_opt_out(
     payload: DNCCallerOptOutRequest,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ) -> DNCEntryResponse:
     """Record an in-call opt-out. Called by the voice pipeline when
     it detects a stop request (DTMF opt-out, "stop calling me"
@@ -192,9 +230,12 @@ async def caller_opt_out(
             tenant_id=tenant_id,
             e164=payload.e164,
             call_id=payload.call_id,
+            audit=audit,
+            actor_id=str(current_user.id) if current_user.id else None,
+            actor_role=getattr(current_user, "role", None),
         )
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
     logger.warning(
         "dnc_caller_opt_out tenant=%s number=%s call=%s",
         tenant_id, entry.normalized_number, payload.call_id,
@@ -221,13 +262,20 @@ async def remove_dnc_entry(
     entry_id: str,
     current_user: CurrentUser = Depends(get_current_user),
     db_pool: asyncpg.Pool = Depends(get_db_pool),
+    audit: AuditLogger = Depends(get_audit_logger),
 ):
     """Remove a DNC entry. Only entries owned by the current tenant
     can be deleted — global (tenant_id=NULL) entries are managed by
     the operator via direct DB access."""
     tenant_id = _require_tenant(current_user)
     svc = DNCService(db_pool)
-    removed = await svc.remove(tenant_id=tenant_id, entry_id=entry_id)
+    removed = await svc.remove(
+        tenant_id=tenant_id,
+        entry_id=entry_id,
+        audit=audit,
+        actor_id=str(current_user.id) if current_user.id else None,
+        actor_role=getattr(current_user, "role", None),
+    )
     logger.info(
         "dnc_entry_removed tenant=%s id=%s removed=%s",
         tenant_id, entry_id, removed,

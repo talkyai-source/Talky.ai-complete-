@@ -5,7 +5,8 @@ enforced the per-session max duration by silently tearing the call down —
 the caller was cut off mid-sentence with no warning at all.
 
 The nudge injects ONE system-level instruction into the live conversation
-``CALL_WRAP_UP_LEAD_SECONDS`` (default 20) before the *effective* deadline,
+``CALL_WRAP_UP_LEAD_SECONDS`` (default 45, always wider than the 30 s
+watchdog tick, QA F3-05) before the *effective* deadline,
 reusing the injection channel each pipeline mode already has:
 
   * cascaded  — a ``MessageRole.SYSTEM`` entry appended to
@@ -109,30 +110,53 @@ async def _drain(coros: list) -> None:
 # Lead-seconds env parsing / clamping
 # ---------------------------------------------------------------------------
 
-def test_wrap_up_lead_defaults_to_20_when_unset(monkeypatch):
+def test_wrap_up_lead_defaults_to_45_when_unset(monkeypatch):
     monkeypatch.delenv("CALL_WRAP_UP_LEAD_SECONDS", raising=False)
-    assert lifecycle._wrap_up_lead_seconds() == 20
+    assert lifecycle._wrap_up_lead_seconds() == 45
 
 
+# The floor is wider than the 30 s watchdog tick (QA F3-05): a window the
+# watchdog can step over is a window that can never fire.
 @pytest.mark.parametrize(
     "raw,expected",
     [
-        ("30", 30),
-        ("5", 5),
+        ("40", 40),
+        ("35", 35),
         ("60", 60),
-        ("1", 5),        # below the floor → clamped up
-        ("0", 5),
-        ("-10", 5),
+        ("30", 35),      # not wider than the tick → clamped up
+        ("5", 35),
+        ("0", 35),
+        ("-10", 35),
         ("600", 60),     # above the ceiling → clamped down
         ("61", 60),
-        ("banana", 20),  # unparseable → default
-        ("", 20),
-        ("  25  ", 25),
+        ("banana", 45),  # unparseable → default
+        ("", 45),
+        ("  50  ", 50),
     ],
 )
-def test_wrap_up_lead_is_bounded_5_to_60(monkeypatch, raw, expected):
+def test_wrap_up_lead_is_bounded_35_to_60(monkeypatch, raw, expected):
     monkeypatch.setenv("CALL_WRAP_UP_LEAD_SECONDS", raw)
     assert lifecycle._wrap_up_lead_seconds() == expected
+
+
+def test_every_call_is_nudged_before_its_deadline_whatever_the_tick_phase(monkeypatch):
+    """QA F3-05: the duration watchdog wakes every 30 s. A 20 s window let a
+    call reach its cap between two wake-ups without ever being nudged."""
+    monkeypatch.delenv("CALL_WRAP_UP_LEAD_SECONDS", raising=False)
+    lead = lifecycle._wrap_up_lead_seconds()
+    tick = getattr(lifecycle, "_DURATION_WATCHDOG_TICK_S", 30)
+    missed = [
+        phase
+        for phase in range(tick)
+        if not any(
+            lifecycle._collect_wrap_up_candidates(
+                [("call-a", _cascaded_session(age_s=age))],
+                max_duration_s=600, soft_cap_s=300, lead_s=lead,
+            )
+            for age in range(phase, 300, tick)
+        )
+    ]
+    assert missed == []
 
 
 # ---------------------------------------------------------------------------

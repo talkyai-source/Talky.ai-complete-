@@ -13,7 +13,7 @@ export default function PrivacyPage() {
     <LegalDocument
       title="Privacy Policy"
       effectiveDate="17 May 2026"
-      lastUpdated="17 May 2026"
+      lastUpdated="11 November 2026"
       summary={{
         title: "Summary",
         text: "Talk-Lee is an AI voice agent platform. We collect the minimum data necessary to operate the service. We do not sell your personal data to any third party under any circumstances. You have full rights over your data including access, correction, portability, and deletion.",

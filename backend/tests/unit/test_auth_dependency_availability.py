@@ -9,11 +9,17 @@ import pytest
 from fastapi import Depends, FastAPI
 
 from app.api.v1 import dependencies as dep
+from app.core import jwt_security
 from app.core.security import principal
 
 
 @pytest.fixture
 def auth_boundary(monkeypatch):
+    # A token is judged invalid by its signature check, which needs a secret;
+    # with none configured the decoder answers 503 instead. Run alone, this
+    # file had no secret: the full run passed only because an earlier test
+    # left one behind.
+    monkeypatch.setattr(jwt_security, "_require_secret", lambda: "synthetic-test-secret")
     application = FastAPI()
 
     @application.get("/me")

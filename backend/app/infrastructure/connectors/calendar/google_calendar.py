@@ -150,8 +150,17 @@ class GoogleCalendarConnector(CalendarProvider):
             )
             
             if response.status_code != 200:
-                logger.error(f"Token refresh failed: {response.text}")
-                raise ValueError(f"Token refresh failed: {response.text}")
+                from app.infrastructure.connectors.google_errors import google_api_error_from_response
+                error = google_api_error_from_response(
+                    "google_calendar", response, "refresh_tokens", token_endpoint=True,
+                )
+                logger.error("Calendar token refresh failed status=%s category=%s",
+                             response.status_code, error.category)
+                raise ConnectorProviderError(
+                    provider="google_calendar", operation="refresh_tokens", category=error.category,
+                    message=f"Google Calendar refresh returned HTTP {response.status_code}",
+                    status_code=response.status_code, retry_after=error.retry_after,
+                )
             
             token_data = response.json()
             

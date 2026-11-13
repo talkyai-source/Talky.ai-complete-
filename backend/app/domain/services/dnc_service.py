@@ -31,6 +31,7 @@ Design
 from __future__ import annotations
 
 import logging
+import json
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any, Optional
@@ -39,8 +40,7 @@ from asyncpg import InsufficientPrivilegeError
 
 from app.core.db_utils import acquire_with_tenant
 from app.domain.services.phone_number_normalizer import (
-    is_strict_e164,
-    normalize_e164_digits,
+    normalize_suppression_key,
 )
 
 logger = logging.getLogger(__name__)
@@ -74,40 +74,31 @@ class DNCEntry:
     created_at: Optional[datetime]
 
 
-def normalize_e164(raw: str) -> str:
-    """THE canonical form of ``dnc_entries.normalized_number``.
-
-    Thin wrapper over ``phone_number_normalizer.normalize_e164_digits`` --
-    deliberately the EXACT function ``CallGuard._normalize_phone_number``
-    uses to look the row up.  A DNC row that is not byte-identical to the
-    guard's lookup key is a row that never blocks anything, which is how
-    "(415) 555-1234" used to be stored as ``+4155551234`` and queried as
-    ``+14155551234``.
-
-    Never raises (falsy -> ``""``), so it can also be used on read paths.
-    It CAN return non-E.164 junk (``"+"`` for ``"abc"``); every write path
-    gates on :func:`app.domain.services.phone_number_normalizer.is_strict_e164`
-    before persisting.
-    """
-    return normalize_e164_digits(raw)
+def normalize_e164(raw: str, default_country: str = "US") -> str:
+    """Shared canonical suppression key, identical to CallGuard reads."""
+    return normalize_suppression_key(raw, default_country)
 
 
-def normalize_e164_for_storage(raw: str) -> str:
-    """Normalise and REJECT anything that is not strict E.164.
+def normalize_e164_for_storage(raw: str, default_country: str = "US") -> str:
+    """Reject invalid destinations without appending extension digits."""
+    from app.domain.services.phone_number_normalizer import normalize_phone_number
+    try:
+        return normalize_phone_number(raw, default_country)
+    except ValueError as exc:
+        raise ValueError("DNC entry requires a valid phone number in E.164 format") from exc
 
-    The gate every ``dnc_entries`` writer shares. Raises ``ValueError`` with
-    a message safe to surface to an API caller.
-    """
-    normalized = normalize_e164(raw)
-    if not normalized:
-        raise ValueError("DNC entry requires a valid phone number")
-    if not is_strict_e164(normalized):
-        raise ValueError(
-            f"DNC entry requires a valid E.164 phone number "
-            f"(got {raw!r} -> {normalized!r}); include the country code, "
-            f"e.g. +14155551234"
-        )
-    return normalized
+
+async def _write_country(conn, tenant_id, requested):
+    from app.domain.services.phone_number_normalizer import campaign_country
+    if requested is not None:
+        return campaign_country(requested=requested, fallback="US")
+    # tenants.id is the tenant boundary; global suppressions default to US.
+    rules = await conn.fetchval(
+        "SELECT calling_rules FROM tenants WHERE id = $1::uuid", tenant_id,
+    ) if tenant_id is not None else None
+    if isinstance(rules, str):
+        rules = json.loads(rules)
+    return campaign_country(account_rules=rules, fallback="US")
 
 
 class DNCService:
@@ -130,13 +121,17 @@ class DNCService:
         reason: Optional[str] = None,
         expires_at: Optional[datetime] = None,
         added_by: Optional[str] = None,
+        audit: Any = None,
+        actor_role: Optional[str] = None,
+        default_country: Optional[str] = "US",
     ) -> DNCEntry:
         """Add or refresh the same tenant/number/source suppression.
 
         Different sources remain independent. Caller opt-out is permanent,
-        including a refresh of an older expiring caller-opt-out entry.
+        including a refresh of an older expiring caller-opt-out entry. With an
+        ``audit`` logger the change is audited in its own transaction (QA
+        F12-10).
         """
-        normalized = normalize_e164_for_storage(e164)
         if source == SOURCE_CALLER_OPT_OUT:
             expires_at = None
         if source not in KNOWN_SOURCES:
@@ -145,6 +140,10 @@ class DNCService:
         async with acquire_with_tenant(
             self._db, str(tenant_id) if tenant_id is not None else None
         ) as conn:
+            country = await _write_country(conn, tenant_id, default_country)
+            normalized = normalize_e164_for_storage(e164, country)
+            if audit is not None:
+                await audit.lock_transaction(conn)  # before any row lock
             row = await conn.fetchrow(
                 """
                 INSERT INTO dnc_entries
@@ -188,6 +187,11 @@ class DNCService:
                     reason,
                     expires_at,
                 )
+            if audit is not None and row is not None:
+                await _audit_dnc_change(
+                    audit, conn, "dnc.entry.add", row, tenant_id=tenant_id,
+                    actor_id=added_by, actor_role=actor_role, after=True,
+                )
         if row is None:
             raise RuntimeError("DNC insert+refresh returned nothing — DB state inconsistent")
         return _row_to_entry(row)
@@ -198,6 +202,9 @@ class DNCService:
         tenant_id: str,
         e164: str,
         call_id: Optional[str] = None,
+        audit: Any = None,
+        actor_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
     ) -> DNCEntry:
         """Shortcut for the in-call opt-out path. Used by the voice
         pipeline when it detects a stop request (DTMF opt-out, STOP
@@ -209,6 +216,9 @@ class DNCService:
             e164=e164,
             source=SOURCE_CALLER_OPT_OUT,
             reason=reason,
+            added_by=actor_id,
+            audit=audit,
+            actor_role=actor_role,
         )
 
     async def bulk_import(
@@ -218,6 +228,7 @@ class DNCService:
         numbers: list[str],
         source: str,
         reason: Optional[str] = None,
+        default_country: Optional[str] = "US",
     ) -> dict:
         """Acknowledge active suppressions, not attempted INSERT statements.
 
@@ -235,9 +246,10 @@ class DNCService:
         async with acquire_with_tenant(
             self._db, str(tenant_id) if tenant_id is not None else None
         ) as conn:
+            country = await _write_country(conn, tenant_id, default_country)
             for raw in numbers:
                 try:
-                    normalized = normalize_e164_for_storage(raw)
+                    normalized = normalize_e164_for_storage(raw, country)
                 except ValueError:
                     invalid.append(raw)
                     continue
@@ -286,16 +298,67 @@ class DNCService:
             "invalid": invalid,
         }
 
-    async def remove(self, *, tenant_id: str, entry_id: str) -> bool:
+    async def remove(
+        self,
+        *,
+        tenant_id: str,
+        entry_id: str,
+        audit: Any = None,
+        actor_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ) -> bool:
         """Delete an entry owned by this tenant. Returns True if a row
-        was actually deleted (absent rows return False — idempotent)."""
+        was actually deleted (absent rows return False — idempotent).
+
+        With an ``audit`` logger the removed entry, number included, is
+        audited in the same transaction: removing an opt-out used to leave no
+        trace at all (QA F12-10)."""
         async with acquire_with_tenant(self._db, str(tenant_id)) as conn:
-            result = await conn.execute(
-                "DELETE FROM dnc_entries WHERE tenant_id = $1 AND id = $2",
+            if audit is not None:
+                await audit.lock_transaction(conn)  # before the row lock
+            row = await conn.fetchrow(
+                "DELETE FROM dnc_entries WHERE tenant_id = $1 AND id = $2 "
+                "RETURNING id, tenant_id, normalized_number, source, reason, "
+                "expires_at, created_at",
                 tenant_id,
                 entry_id,
             )
-        return result.endswith(" 1") if isinstance(result, str) else False
+            if audit is not None and row is not None:
+                await _audit_dnc_change(
+                    audit, conn, "dnc.entry.remove", row, tenant_id=tenant_id,
+                    actor_id=actor_id, actor_role=actor_role, after=False,
+                )
+        return row is not None
+
+    async def remove_any(
+        self,
+        *,
+        entry_id: str,
+        audit: Any,
+        actor_id: Optional[str] = None,
+        actor_role: Optional[str] = None,
+    ) -> bool:
+        """Platform-admin removal by id: any tenant's entry or the platform list.
+
+        The admin route resolves the entry before its tenant is known. The
+        removed entry, number included, is audited in the same transaction,
+        chain lock first (QA F12-10: this alias deleted with no trace).
+        """
+        async with acquire_with_tenant(self._db, None) as conn:
+            await audit.lock_transaction(conn)  # before the row lock
+            row = await conn.fetchrow(
+                "DELETE FROM dnc_entries WHERE id = $1 "
+                "RETURNING id, tenant_id, normalized_number, source, reason, "
+                "expires_at, created_at",
+                entry_id,
+            )
+            if row is not None:
+                await _audit_dnc_change(
+                    audit, conn, "dnc.entry.remove", row,
+                    tenant_id=str(row["tenant_id"]) if row["tenant_id"] else None,
+                    actor_id=actor_id, actor_role=actor_role, after=False,
+                )
+        return row is not None
 
     # ──────────────────────────────────────────────────────────────────
     # Read path
@@ -353,6 +416,28 @@ class DNCService:
                 normalized,
             )
         return row is not None
+
+
+async def _audit_dnc_change(audit, conn, action, row, *, tenant_id, actor_id, actor_role, after):
+    """One audit row for a DNC entry change, in the caller's transaction."""
+    from app.domain.services.audit_logger import AuditEvent
+
+    state = {
+        key: row[key]
+        for key in ("normalized_number", "source", "reason", "expires_at", "created_at")
+    }
+    await audit.log_in_transaction(
+        conn,
+        event_type=AuditEvent.CONFIG_CHANGED,
+        action=action,
+        actor_id=actor_id,
+        actor_role=actor_role,
+        tenant_id=tenant_id,
+        resource_type="dnc_entry",
+        resource_id=row["id"],
+        before_state=None if after else state,
+        after_state=state if after else None,
+    )
 
 
 def _row_to_entry(row: Any) -> DNCEntry:

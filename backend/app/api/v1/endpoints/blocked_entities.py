@@ -1,15 +1,17 @@
 """
 Admin Blocked Entities Management
 """
+from app.core.error_handlers import safe_exception_message
 import logging
 from datetime import datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.core.postgres_adapter import Client
 from app.api.v1.dependencies import get_db_client, require_admin_tenant, CurrentUser
+from app.api.v1.validation import bounded_text
 
 # TENANT-SCOPED router over `dnc_entries`. A customer managing their own
 # do-not-call/blocked list is a core self-service (and compliance) feature, so
@@ -34,9 +36,10 @@ class BlockedEntity(BaseModel):
 
 
 class CreateBlockedEntityRequest(BaseModel):
-    entity_type: str = Field(..., min_length=1)
-    value: str = Field(..., min_length=1)
-    reason: Optional[str] = None
+    # QA F2-13: bounded before the DNC write.
+    entity_type: bounded_text(32, min_length=1)
+    value: bounded_text(64, min_length=1)
+    reason: Optional[bounded_text(1_000)] = None
 
 
 @router.get("/blocked-entities", response_model=List[BlockedEntity])
@@ -86,7 +89,7 @@ async def block_entity(
     try:
         normalized = normalize_e164_for_storage(request.value)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+        raise HTTPException(status_code=400, detail=safe_exception_message(exc, 'The request could not be completed.')) from exc
 
     try:
         import uuid

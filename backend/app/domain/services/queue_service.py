@@ -212,6 +212,42 @@ class DialerQueueService:
         except Exception as e:
             logger.error(f"Failed to enqueue job {job.job_id}: {e}")
             return False
+
+    async def enqueue_jobs(self, jobs: List[DialerJob]) -> List[bool]:
+        """Publish at most 100 jobs in one pipeline, preserving per-push truth.
+
+        A transport failure has unknown delivery and propagates to the outbox
+        caller; it must not be retried through the single-job path. Individual
+        Redis command failures are returned alongside confirmed successes.
+        """
+        if len(jobs) > 100:
+            raise ValueError("dialer enqueue batch exceeds 100 jobs")
+        if not jobs:
+            return []
+        # Serialize the complete batch before any command can be sent.
+        payloads = [json.dumps(job.to_redis_dict()) for job in jobs]
+        if not self._initialized:
+            await self.initialize()
+        async with self._redis.pipeline(transaction=False) as pipeline:
+            for job, payload in zip(jobs, payloads):
+                if job.priority >= self.HIGH_PRIORITY_THRESHOLD:
+                    pipeline.lpush(self.PRIORITY_QUEUE, payload)
+                else:
+                    pipeline.rpush(
+                        self.TENANT_QUEUE_PREFIX.format(tenant_id=job.tenant_id), payload,
+                    )
+            replies = await pipeline.execute(raise_on_error=False)
+        if len(replies) != len(jobs):
+            raise RuntimeError("dialer batch acceptance was not exact")
+        accepted = [type(reply) is int and reply > 0 for reply in replies]
+        count = sum(accepted)
+        if count:
+            try:
+                await self._redis.hincrby(self.STATS_KEY, "total_enqueued", count)
+            except Exception:
+                # Queue acceptance is already known; a metric cannot undo it.
+                logger.warning("dialer_batch_stats_failed accepted=%d", count)
+        return accepted
     
     async def dequeue_job(
         self,

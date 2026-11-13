@@ -1,6 +1,8 @@
 """Admin call monitoring, history, detail, and live-call control."""
 
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
+from app.api.v1.validation import MAX_OFFSET, MAX_PAGE_SIZE, ResourceUUID, pagination_offset
 
 import asyncio
 import json
@@ -8,10 +10,10 @@ import logging
 import re
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
-from typing import Any, List, Literal, Mapping, Optional
+from typing import Annotated, Any, List, Literal, Mapping, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
 
 from app.core.postgres_adapter import Client
@@ -26,6 +28,7 @@ from app.core.db_utils import acquire_with_tenant
 from ._serialization import AdminResponseModel
 from app.domain.services.dialer.job_states import LIVE_CALL_STATUSES
 from app.domain.services.call_status import CallOutcome
+from app.domain.services.caller_identity import caller_identity_projection
 from app.domain.services.audit_logger import AuditEvent, AuditLogger
 from app.infrastructure.connectors.crm.base import AmbiguousCRMCallReference, valid_crm_activity_id
 from app.services.connector_resolver import resolve_active_connector, verify_reviewed_connector
@@ -325,6 +328,9 @@ def _admin_crm_projection(row: dict) -> AdminCRMReceipt:
 class AdminCallDetail(AdminResponseModel):
     """Full call detail for admin view"""
 
+    caller_id_verified: bool = False
+    caller_id_attestation: Optional[Literal["A", "B", "C"]] = None
+
     id: str
     tenant_id: str
     tenant_name: str
@@ -483,15 +489,15 @@ async def get_live_calls(
         return items
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch live calls: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch live calls.'))
 
 
 @router.get("/calls/history", response_model=CallHistoryResponse)
 async def get_call_history(
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
-    page: int = 1,
-    page_size: int = 20,
+    page: Annotated[int, Query(ge=1, le=MAX_OFFSET + 1)] = 1,
+    page_size: Annotated[int, Query(ge=1, le=MAX_PAGE_SIZE)] = 20,
     search: Optional[str] = None,
     status: Optional[str] = None,
     tenant_id: Optional[str] = None,
@@ -504,13 +510,14 @@ async def get_call_history(
 
     Query params:
         - page: Page number (1-indexed)
-        - page_size: Items per page (max 100)
+        - page_size: Items per page (max 200); maximum offset 10000
         - search: Search by phone number
         - status: Filter by call status
         - tenant_id: Filter by tenant
         - from_date: Start date (YYYY-MM-DD)
         - to_date: End date (YYYY-MM-DD)
     """
+    offset = pagination_offset(page, page_size)
     try:
         # Build query
         query = db_client.table("calls").select(
@@ -541,13 +548,10 @@ async def get_call_history(
         if to_date:
             query = query.lte("created_at", to_date + "T23:59:59Z")
 
-        # Calculate offset
-        offset = (page - 1) * min(page_size, 100)
-
         # Execute with pagination
         response = (
             query.order("created_at", desc=True)
-            .range(offset, offset + min(page_size, 100) - 1)
+            .range(offset, offset + page_size - 1)
             .execute()
         )
         if getattr(response, "error", None):
@@ -667,12 +671,12 @@ async def get_call_history(
         return CallHistoryResponse(items=items, page=page, page_size=page_size, total=total)
 
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch call history: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch call history.'))
 
 
 @router.get("/calls/{call_id}", response_model=AdminCallDetail)
 async def get_admin_call_detail(
-    call_id: str,
+    call_id: ResourceUUID,
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
 ):
@@ -824,6 +828,7 @@ async def get_admin_call_detail(
             crm_deliveries = []
 
         return AdminCallDetail(
+            **caller_identity_projection(call),
             **_admin_termination_projection(db_client, call),
             id=call["id"],
             tenant_id=call.get("tenant_id", ""),
@@ -875,7 +880,7 @@ async def get_admin_call_detail(
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch call detail: {str(e)}")
+        raise HTTPException(status_code=500, detail=safe_exception_message(e, 'Failed to fetch call detail.'))
 
 
 @router.get("/calls/{call_id}/crm-deliveries/{provider}/inspection", response_model=AdminCRMInspection)
@@ -950,7 +955,7 @@ async def inspect_admin_crm_delivery(
 
 @router.post("/calls/{call_id}/terminate")
 async def terminate_call(
-    call_id: str,
+    call_id: ResourceUUID,
     admin_user: CurrentUser = Depends(require_platform_admin),
     db_client: Client = Depends(get_db_client),
     audit_logger: AuditLogger = Depends(get_audit_logger),
@@ -1264,5 +1269,5 @@ async def terminate_call(
             return confirmed_result
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to terminate call: {str(e)}",
+            detail=safe_exception_message(e, 'Failed to terminate call.'),
         ) from e

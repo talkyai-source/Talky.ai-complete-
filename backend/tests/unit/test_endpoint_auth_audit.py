@@ -60,6 +60,8 @@ _AUTH_FLOWS = {
     "POST /api/v1/auth/refresh": "rotates refresh-cookie; pre-auth by design",
     "POST /api/v1/auth/forgot-password": "reset-code request; pre-auth, enumeration-safe + rate-limited",
     "POST /api/v1/auth/reset-password": "reset-code redemption; pre-auth (code in body)",
+    "POST /api/v1/auth/invites/preview": "team invite preview (QA D4-2); pre-auth, token in body, rate-limited",
+    "POST /api/v1/auth/invites/accept": "team invite acceptance (QA D4-2); pre-auth account creation, token in body, rate-limited",
 }
 
 # Webhook callbacks from third parties / internal — these use payload

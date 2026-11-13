@@ -1,5 +1,6 @@
 [Unit]
-Description=Talky.ai Worker Health Watch (heartbeat probe)
+OnFailure=talky-notify@%n.service
+Description=Talky.ai bounded worker and operational health checks
 After=network.target talky-api.service
 # One-shot, triggered by talky-healthwatch.timer. Do NOT add Restart= here —
 # a failed run surfaces via exit code + a "HEALTHWATCH CRITICAL" journald
@@ -7,8 +8,23 @@ After=network.target talky-api.service
 
 [Service]
 Type=oneshot
+User=talky
+Group=talky
 WorkingDirectory=/opt/talky/backend
-ExecStart=/bin/bash /opt/talky/backend/deploy/healthwatch.sh
+EnvironmentFile=-/opt/talky/backend/.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=TALKY_HEALTHWATCH_RETRIES=2
+Environment=TALKY_HEALTHWATCH_RETRY_DELAY=5
+Environment=TALKY_HEALTHWATCH_TIMEOUT=5
+ExecStart=/bin/bash /opt/talky/backend/deploy/healthwatch.sh --extended
+TimeoutStartSec=55
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+UMask=0077
+OOMScoreAdjust=500
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=talky-healthwatch

@@ -18,6 +18,8 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const nothing = () => null;
 loader._load = function (id, ...args) {
+    // Their side reads effective permissions (QA F1-21); unknown offers every action.
+    if (id.includes("lib/queries/inbound-queries")) return { useEffectivePermissions: () => ({ isSuccess: false, data: undefined }) };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("components/campaigns/contact-lists")) return { ContactLists: nothing };
     if (id.includes("components/calls/lead-details-panel")) return { ContactCapturedDetails: nothing };
@@ -61,7 +63,7 @@ test("FX2b3: a campaign-list read that fails with a JavaScript error shows 'Plea
     mock.method(dashboardApi, "listCampaigns", async () => { throw jsError(); });
     mock.method(dashboardApi, "listContacts", async () => ({ items: [], total: 0 }));
     render(<Page />);
-    await waitFor(() => assert.equal(shown("Please retry."), true), { timeout: SLOW });
+    await waitFor(() => assert.equal(shown("Could not load your campaigns."), true), { timeout: SLOW });
     assert.equal(shown(/Cannot read properties/), false);
 });
 
@@ -77,7 +79,7 @@ test("an unexpected campaign-list answer is shown as an error, not a crash and n
     mock.method(dashboardApi, "listCampaigns", async () => ({ campaigns: null }));
     mock.method(dashboardApi, "listContacts", async () => ({ items: [], total: 0 }));
     render(<Page />);
-    await waitFor(() => assert.equal(shown("Please retry."), true), { timeout: SLOW });
+    await waitFor(() => assert.equal(shown("Could not load your campaigns."), true), { timeout: SLOW });
     assert.equal(shown("Invalid response format"), false, "the app's technical sentence is not shown");
     assert.equal((await retryButton()) !== null, true);
     assert.equal(shown("Create a campaign first"), false);
@@ -91,14 +93,14 @@ test("a failed campaign-list read shows the server's message with Retry, never '
     });
     mock.method(dashboardApi, "listContacts", async () => ({ items: [CONTACT], total: 1 }));
     render(<Page />);
-    await waitFor(() => assert.equal(shown("Campaign service is unavailable."), true), { timeout: SLOW });
+    await waitFor(() => assert.equal(shown("Could not load your campaigns."), true), { timeout: SLOW });
     assert.equal(shown("Something went wrong"), true);
     assert.equal(shown("Create a campaign first"), false);
     fail = false;
     fireEvent.click(await retryButton());
     await waitFor(() => assert.equal(contactListed(), true), { timeout: SLOW });
     assert.equal(list.mock.callCount(), 2);
-    assert.equal(shown("Campaign service is unavailable."), false);
+    assert.equal(shown("Could not load your campaigns."), false);
 });
 
 test("a failed contacts read shows the shared ErrorState with Retry outside the empty-campaign layout", async () => {

@@ -16,6 +16,7 @@ the line's real registration, and ``run_trunk_test`` strings the checks together
 answer POST /trunks/{id}/test returns.
 """
 from __future__ import annotations
+from app.core.error_handlers import safe_exception_message
 
 import asyncio
 import hashlib
@@ -491,9 +492,9 @@ def _blocking_register(
             return finish("stale" if stale else "rejected", code, reason, f"SIP {code} {reason}".strip())
         return finish(_classify_final(code), code, reason, f"SIP {code} {reason}".strip())
     except socket.gaierror as exc:
-        return finish("dns_failure", detail=str(exc))
+        return finish("dns_failure", detail=safe_exception_message(exc, 'The request could not be completed.'))
     except OSError as exc:  # ICMP unreachable, no route, ...
-        return finish("error", detail=str(exc) or type(exc).__name__)
+        return finish("error", detail=safe_exception_message(exc, 'The request could not be completed.') or type(exc).__name__)
     finally:
         try:
             s.close()

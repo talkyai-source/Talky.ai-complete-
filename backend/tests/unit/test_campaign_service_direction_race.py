@@ -29,6 +29,10 @@ class _UpdateQuery:
         self.filters.append((column, value))
         return self
 
+    def in_(self, column, values):
+        self.filters.append((column, list(values)))
+        return self
+
     def execute(self):
         return SimpleNamespace(data=self.rows)
 
@@ -88,6 +92,8 @@ async def test_start_endpoint_maps_typed_direction_error_without_message_matchin
 
     monkeypatch.setattr(campaigns, "_get_campaign_service", lambda _db: _Service())
     monkeypatch.setattr(campaigns, "_reject_inbound_campaign_mutation", lambda *_a, **_k: None)
+    # The account may call (D4-7 gate); this test is about the direction race.
+    monkeypatch.setattr(campaigns, "_require_account_can_call", AsyncMock(return_value=None))
     monkeypatch.setattr(
         "app.domain.services.minutes_quota.tenant_minutes_status",
         AsyncMock(return_value=SimpleNamespace(exhausted=False, state="known")),
@@ -123,8 +129,10 @@ async def test_outbound_lifecycle_refuses_conversion_winner_before_side_effects(
 
     db = _DB(rows=[])
     service = CampaignService(db)
+    # A running campaign, so the D3-17 state check passes and the race is
+    # the direction change alone.
     service.get_campaign = AsyncMock(  # type: ignore[method-assign]
-        return_value={"id": "campaign-1", "direction": "outbound"}
+        return_value={"id": "campaign-1", "direction": "outbound", "status": "running"}
     )
     cancel_jobs = AsyncMock()
     hangup_calls = AsyncMock()

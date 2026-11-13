@@ -401,6 +401,7 @@ async def fetch_tenant_accounted_usage_seconds(
     *,
     tenant_id: str,
     exclude_call_id: Optional[str] = None,
+    window_start: Any = None,
 ) -> int:
     """Return quota seconds including every independently billable leg.
 
@@ -414,6 +415,9 @@ async def fetch_tenant_accounted_usage_seconds(
     Call admission and transfer authorization both invoke this while holding
     the concurrency limiter's tenant advisory transaction lock. Keeping the SQL
     in one function prevents either gate from forgetting the second PSTN leg.
+
+    ``window_start`` is the allowance month's start (purchase-anchored for a
+    paid plan); omitted, the calendar month.
     """
 
     value = await conn.fetchval(
@@ -440,7 +444,7 @@ async def fetch_tenant_accounted_usage_seconds(
                 )
                 FROM calls c
                 WHERE c.tenant_id=$1
-                  AND c.created_at >= date_trunc('month',NOW())
+                  AND c.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW()))
                   AND ($2::uuid IS NULL OR c.id <> $2::uuid)
                   AND NOT c.is_test
             ),0)
@@ -463,7 +467,7 @@ async def fetch_tenant_accounted_usage_seconds(
                 FROM call_legs leg
                 JOIN calls parent ON parent.id=leg.call_id
                 WHERE parent.tenant_id=$1
-                  AND parent.created_at >= date_trunc('month',NOW())
+                  AND parent.created_at >= COALESCE($3::timestamptz, date_trunc('month',NOW()))
                   AND ($2::uuid IS NULL OR parent.id <> $2::uuid)
                   AND NOT parent.is_test
                   AND leg.leg_type='transfer'
@@ -471,8 +475,57 @@ async def fetch_tenant_accounted_usage_seconds(
         """,
         tenant_id,
         exclude_call_id,
+        window_start,
     )
     return max(0, int(value or 0))
+
+
+@dataclass(frozen=True)
+class InboundAllowance:
+    """What an inbound leg may still reserve. ``None`` minutes = unlimited plan."""
+
+    allocated_minutes: Optional[int]
+    accounted_seconds: int
+    remaining_seconds: Optional[int]
+
+
+async def tenant_inbound_allowance(
+    conn: Any,
+    *,
+    tenant_id: str,
+    exclude_call_id: Optional[str] = None,
+) -> InboundAllowance:
+    """The outbound meter's allowance, less every live inbound reservation.
+
+    Inbound used to read ``tenants.minutes_allocated`` alone: bought minutes
+    were ignored, an admin zero meant unlimited, and usage restarted on the
+    calendar month while a paid plan renews from its purchase date (QA
+    F13-04). The allowance (plan minutes plus unused bought minutes, and the
+    unlimited rule) now comes from ``minutes_quota.allowance_minutes``.
+    Locks the tenant row, as the previous quota read did. Raises
+    ``MeteringUnavailable`` when the allowance cannot be established.
+    """
+    from app.domain.services.minutes_quota import (
+        ALLOWANCE_ROW_COLUMNS,
+        allowance_minutes,
+    )
+
+    row = await conn.fetchrow(
+        f"""SELECT {ALLOWANCE_ROW_COLUMNS}
+             FROM tenants t LEFT JOIN plans p ON p.id=t.plan_id
+            WHERE t.id=$1
+            FOR UPDATE OF t""",
+        tenant_id,
+    )
+    allocated = await allowance_minutes(conn, tenant_id, row)
+    accounted = await fetch_tenant_accounted_usage_seconds(
+        conn,
+        tenant_id=tenant_id,
+        exclude_call_id=exclude_call_id,
+        window_start=row["window_start"],
+    )
+    remaining = None if allocated is None else max(0, allocated * 60 - accounted)
+    return InboundAllowance(allocated, accounted, remaining)
 
 
 async def _settle_transfer_usage(
@@ -996,24 +1049,25 @@ async def authorize_inbound_transfer(
                     "inbound_transfer_deadline_exhausted",
                     "The parent call has no reserved runtime remaining.",
                 )
-            quota = await conn.fetchrow(
-                "SELECT minutes_allocated FROM tenants WHERE id=$1 FOR UPDATE",
-                row["tenant_id"],
-            )
-            if not quota:
+            from app.domain.services.minutes_quota import MeteringUnavailable
+
+            try:
+                allowance = await tenant_inbound_allowance(
+                    conn,
+                    tenant_id=str(row["tenant_id"]),
+                )
+            except MeteringUnavailable:
                 raise InboundTransferError(
                     "inbound_transfer_billing_unavailable",
                     "Tenant quota is unavailable.",
                     status_code=503,
-                )
-            allocated_minutes = int(quota["minutes_allocated"] or 0)
-            accounted_seconds = await fetch_tenant_accounted_usage_seconds(
-                conn,
-                tenant_id=str(row["tenant_id"]),
-            )
+                ) from None
+            # The policy snapshot keeps 0 for an unlimited plan, as before.
+            allocated_minutes = allowance.allocated_minutes or 0
+            accounted_seconds = allowance.accounted_seconds
             if (
-                allocated_minutes > 0
-                and accounted_seconds + reservation_seconds > allocated_minutes * 60
+                allowance.remaining_seconds is not None
+                and reservation_seconds > allowance.remaining_seconds
             ):
                 raise InboundTransferError(
                     "insufficient_transfer_minutes",

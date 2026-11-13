@@ -117,12 +117,12 @@ CONTACT_FIELDS: tuple[ContactField, ...] = (
         "phone_number", "Phone number", "phone_number", "phone",
         aliases=("phone", "telephone", "tel", "number", "primary phone",
                  "contact number", "msisdn"),
-        validator=_valid_phone, max_len=32, example="+447700900123",
+        validator=_valid_phone, max_len=32, example="+442079460123",
     ),
     ContactField(
         "mobile_number", "Mobile", None, "phone",
         aliases=("mobile", "cell", "cellphone", "cell phone", "mobile phone"),
-        validator=_valid_phone, max_len=32, example="+447700900124",
+        validator=_valid_phone, max_len=32, example="+442079460124",
     ),
     ContactField(
         "business_number", "Business number", "business_number", "phone",

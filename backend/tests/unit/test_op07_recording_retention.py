@@ -152,6 +152,56 @@ async def test_policy_revocation_during_encoding_prevents_storage(fixture, entry
 
 
 @pytest.mark.asyncio
+async def test_a_full_disk_leaves_a_failed_recording_row(fixture, monkeypatch):
+    """QA F7-04: a local write hitting ENOSPC returned None with one log line,
+    and nothing marked the recording failed."""
+    import errno
+
+    def full_disk(*args):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr(recording, "_write_wav_file", full_disk)
+    assert await invoke(fixture, "local") is None
+    fixture.service._mark_upload_failed.assert_awaited_once()
+    assert fixture.service._mark_upload_failed.await_args.kwargs.get("bucket") == "local"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_row_is_written_without_a_cloud_store(monkeypatch):
+    executed = []
+
+    class _Conn:
+        async def execute(self, query, *args):
+            executed.append((query, args))
+
+    @asynccontextmanager
+    async def scoped(pool, tenant):
+        yield _Conn()
+
+    monkeypatch.setattr(recording, "acquire_with_tenant", scoped)
+    service = recording.RecordingService(object(), s3_client=None)
+    service._resolve_call_uuid = AsyncMock(return_value=UUID(CALL))
+    await service._mark_upload_failed(
+        CALL, TENANT, "unknown", "local_write_failed", bucket="local", region="local",
+    )
+    assert len(executed) == 1
+    query, args = executed[0]
+    assert "'failed'" in query
+    assert args[2] is None  # "unknown" campaign → NULL, not a lost row
+    assert args[3] == "local" and args[5] == "local"
+
+
+@pytest.mark.asyncio
+async def test_save_gate_decides_for_the_callee_country_of_the_notice_decision(fixture):
+    """QA F12-04: the live notice decision records the callee's country beside
+    the disclosure state; the save-time gate re-runs the decision with it, so
+    both ends agree on whether a one-party tenant owed a notice."""
+    policy.record_callee_country("PK", CALL)
+    assert await invoke(fixture, "cloud")
+    assert fixture.decide.await_args.kwargs.get("callee_country_code") == "PK"
+
+
+@pytest.mark.asyncio
 async def test_teardown_database_failure_never_creates_disk_only_orphan(fixture, monkeypatch):
     from app.domain.services.telephony.recording import _save_call_recording
 

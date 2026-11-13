@@ -57,6 +57,57 @@ def _check_role_ceiling(actor_role, target_role):
         raise HTTPException(status_code=403, detail="Cannot modify a member above your own tier")
 
 
+def _membership_state(row):
+    if not row:
+        return None
+    return {name: row[name] for name in
+            ("id", "user_id", "tenant_id", "role_id", "is_primary", "status")}
+
+
+# QA F1-15: the Team screen's limits, held here for every route.
+# is_primary marks a member's home workspace (one per person,
+# idx_tu_user_primary), not an owner; only the platform team changes it.
+_HOME_WORKSPACE_DETAIL = "Only the platform team can change a member's home workspace."
+# The roles that administer a workspace: what _current_target_admin accepts.
+_WORKSPACE_ADMIN_ROLES = (UserRole.TENANT_ADMIN.value, UserRole.PARTNER_ADMIN.value)
+
+
+def _refuse_own_membership(row, current_user):
+    # A slip would leave the workspace without an administrator; another one does it.
+    if row and str(row["user_id"]) == str(current_user.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="You cannot change your own membership. Ask another administrator.",
+        )
+
+
+async def _keep_an_administrator(conn, row, *, role_name=None, new_status=None, removing=False):
+    """Refuse a change that would leave the workspace with no active administrator."""
+    if row["status"] != "active" or row["current_role"] not in _WORKSPACE_ADMIN_ROLES:
+        return
+    if not removing and (role_name is None or role_name in _WORKSPACE_ADMIN_ROLES) and (
+        new_status is None or new_status == "active"
+    ):
+        return
+    others = await conn.fetch(
+        """
+        SELECT tu.id FROM tenant_users tu
+        JOIN roles r ON r.id = tu.role_id
+        WHERE tu.tenant_id = $1 AND tu.id <> $2
+          AND tu.status = 'active' AND r.name = ANY($3::text[])
+        FOR UPDATE OF tu
+        """,
+        row["tenant_id"],
+        row["id"],
+        list(_WORKSPACE_ADMIN_ROLES),
+    )
+    if not others:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This is the workspace's last active administrator. Make someone else an administrator first.",
+        )
+
+
 @router.get("/tenant-users", response_model=List[TenantMemberResponse])
 async def list_tenant_members(
     tenant_id: Optional[str] = Query(None, description="Tenant ID (defaults to user's tenant)"),
@@ -129,6 +180,7 @@ async def add_user_to_tenant(
     request: AddTenantUserRequest,
     current_user: CurrentUser = Depends(require_role(UserRole.TENANT_ADMIN)),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> TenantUserResponse:
     """
     Add a user to a tenant with a specific role.
@@ -151,16 +203,32 @@ async def add_user_to_tenant(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Cannot grant a role above your own tier",
         )
+    if request.is_primary and user_role != UserRole.PLATFORM_ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_HOME_WORKSPACE_DETAIL)
 
     async with acquire_with_tenant(db_client.pool, str(request.tenant_id)) as conn:
+        await audit_logger.lock_transaction(conn)
         user_role = await _current_target_admin(conn, current_user, request.tenant_id)
         _check_role_ceiling(user_role, request.role_name)
-        existing_role = await conn.fetchval(
-            """SELECT r.name FROM tenant_users tu JOIN roles r ON r.id=tu.role_id
-               WHERE tu.user_id=$1 AND tu.tenant_id=$2""",
+        before = await conn.fetchrow(
+            """SELECT tu.*, r.name AS current_role FROM tenant_users tu JOIN roles r ON r.id=tu.role_id
+               WHERE tu.user_id=$1 AND tu.tenant_id=$2 FOR UPDATE OF tu""",
             request.user_id, request.tenant_id,
         )
-        _check_role_ceiling(user_role, existing_role)
+        _check_role_ceiling(user_role, before["current_role"] if before else None)
+        # An existing membership is re-activated with the requested role.
+        _refuse_own_membership(before, current_user)
+        # A new member joins by accepting an emailed invite (rbac/tenant_invites).
+        # A workspace admin may not attach someone else's account by its id
+        # alone: no consent, and the member list then showed that person's name
+        # and email. The platform team keeps the direct path.
+        if before is None and normalize_role(current_user.role) != UserRole.PLATFORM_ADMIN:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Invite new members by email; they join when they accept the invite.",
+            )
+        if before:
+            await _keep_an_administrator(conn, before, role_name=request.role_name, new_status="active")
         # Verify user exists
         user_row = await conn.fetchrow(
             "SELECT id FROM user_profiles WHERE id = $1",
@@ -225,6 +293,13 @@ async def add_user_to_tenant(
             "SELECT id, name, description, level, is_system_role, tenant_scoped FROM roles WHERE id = $1",
             result["role_id"],
         )
+        if _membership_state(before) != _membership_state(result):
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.USER_UPDATED, action="rbac.member.add",
+                actor_id=current_user.id, actor_role=current_user.role,
+                tenant_id=result["tenant_id"], resource_type="tenant_user", resource_id=result["id"],
+                before_state=_membership_state(before), after_state=_membership_state(result),
+            )
 
     return TenantUserResponse(
         id=str(result["id"]),
@@ -267,6 +342,7 @@ async def update_tenant_user(
         else str(current_user.tenant_id)
     )
     async with acquire_with_tenant(db_client.pool, rls_tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
         # Get current record
         current = await conn.fetchrow(
             """
@@ -275,8 +351,11 @@ async def update_tenant_user(
             JOIN tenants t ON t.id = tu.tenant_id
             JOIN roles r ON r.id = tu.role_id
             WHERE tu.id = $1
+              AND ($2::uuid IS NULL OR tu.tenant_id = $2::uuid)
+            FOR UPDATE OF tu
             """,
             tenant_user_id,
+            rls_tenant_id,
         )
 
         if not current:
@@ -295,6 +374,11 @@ async def update_tenant_user(
 
         user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
         _check_role_ceiling(user_role, current["current_role"])
+
+        if request.is_primary is not None and user_role != UserRole.PLATFORM_ADMIN:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=_HOME_WORKSPACE_DETAIL)
+        if request.role_name is not None or request.status is not None or request.is_primary is not None:
+            _refuse_own_membership(current, current_user)
 
         # Build update
         updates = []
@@ -339,15 +423,17 @@ async def update_tenant_user(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No fields to update",
             )
+        await _keep_an_administrator(conn, current, role_name=request.role_name, new_status=request.status)
 
         updates.append("updated_at = NOW()")
         values.append(tenant_user_id)
+        values.append(current["tenant_id"])
 
         # Execute update
         query = f"""
             UPDATE tenant_users
             SET {', '.join(updates)}
-            WHERE id = ${param_idx}
+            WHERE id = ${param_idx} AND tenant_id = ${param_idx + 1}
             RETURNING id, user_id, tenant_id, role_id, is_primary, status, invited_at, joined_at
         """
 
@@ -359,18 +445,16 @@ async def update_tenant_user(
             result["role_id"],
         )
 
-    # --- log role change event (Day 8) -----------------------------------------
-    if request.role_name:
-        await audit_logger.log(
+        await audit_logger.log_in_transaction(
+            conn,
             event_type=AuditEvent.USER_UPDATED,
             actor_id=current_user.id,
-            actor_type="user",
-            tenant_id=current_user.tenant_id,
-            resource_type="user",
-            resource_id=str(result["user_id"]),
-            action="role_updated",
-            description=f"User role updated to {request.role_name}",
-            metadata={"tenant_user_id": tenant_user_id, "new_role": request.role_name},
+            actor_role=current_user.role,
+            tenant_id=result["tenant_id"],
+            resource_type="tenant_user",
+            resource_id=result["id"],
+            action="rbac.member.update",
+            before_state=_membership_state(current), after_state=_membership_state(result),
         )
 
     return TenantUserResponse(
@@ -397,6 +481,7 @@ async def remove_user_from_tenant(
     tenant_user_id: str,
     current_user: CurrentUser = Depends(require_role(UserRole.TENANT_ADMIN)),
     db_client: Client = Depends(get_db_client),
+    audit_logger: AuditLogger = Depends(get_audit_logger),
 ) -> Dict[str, str]:
     """
     Remove a user from a tenant (soft delete - sets status to 'removed').
@@ -412,6 +497,7 @@ async def remove_user_from_tenant(
         else str(current_user.tenant_id)
     )
     async with acquire_with_tenant(db_client.pool, rls_tenant_id) as conn:
+        await audit_logger.lock_transaction(conn)
         # Get current record
         current = await conn.fetchrow(
             """
@@ -420,8 +506,11 @@ async def remove_user_from_tenant(
             JOIN tenants t ON t.id = tu.tenant_id
             JOIN roles r ON r.id = tu.role_id
             WHERE tu.id = $1
+              AND ($2::uuid IS NULL OR tu.tenant_id = $2::uuid)
+            FOR UPDATE OF tu
             """,
             tenant_user_id,
+            rls_tenant_id,
         )
 
         if not current:
@@ -438,24 +527,28 @@ async def remove_user_from_tenant(
                     detail="Can only remove users from your own tenant",
                 )
 
-            # Can't remove yourself if you're the primary admin
-            if str(current["user_id"]) == current_user.id and current["is_primary"]:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Cannot remove yourself as primary tenant member",
-                )
-
+        _refuse_own_membership(current, current_user)
         user_role = await _current_target_admin(conn, current_user, current["tenant_id"])
         _check_role_ceiling(user_role, current["current_role"])
+        await _keep_an_administrator(conn, current, removing=True)
 
         # Soft delete
         await conn.execute(
             """
             UPDATE tenant_users
             SET status = 'removed', updated_at = NOW()
-            WHERE id = $1
+            WHERE id = $1 AND tenant_id = $2
             """,
             tenant_user_id,
+            current["tenant_id"],
         )
+        if current["status"] != "removed":
+            await audit_logger.log_in_transaction(
+                conn, event_type=AuditEvent.USER_UPDATED, action="rbac.member.remove",
+                actor_id=current_user.id, actor_role=current_user.role,
+                tenant_id=current["tenant_id"], resource_type="tenant_user", resource_id=current["id"],
+                before_state=_membership_state(current),
+                after_state={**_membership_state(current), "status": "removed"},
+            )
 
     return {"detail": "User removed from tenant successfully"}

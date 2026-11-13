@@ -10,9 +10,12 @@ this is the cheap check that it did, run on each sentence before TTS:
   numbers written as words ("one thousand seven hundred and sixty rupees",
   "two point five million", "two lakh"): models that write for speech spell
   prices out (test call f5dcac8e);
-* it passes when the same value appears anywhere in the turn's grounding:
-  the system prompt, the knowledge the model read, action results, or the
-  conversation so far (a caller's own figure may be repeated back);
+* it passes when the same value appears in what the agent was given: the
+  system prompt, the knowledge the model read, action results, or what the
+  agent itself already said on this call. Never the caller's own words: a
+  price or discount the caller names is not confirmed by saying it back
+  (QA F3-04: "Yes, that's 50 pounds a month."). A percentage is matched only
+  against percentages ("30 percent off" is not sourced by "30 seconds");
 * otherwise the sentence is withheld and an honest line is spoken instead,
   once per turn.
 
@@ -88,6 +91,17 @@ def _is_figure(text: str, start: int, end: int) -> bool:
     if match and (_currency_word(match.group(1)) or (match.group(1).lower() == "per" and match.group(2))):
         return True
     return False
+
+
+def _is_percent(text: str, start: int, end: int) -> bool:
+    after = text[end:]
+    if after.lstrip()[:1] == "%":
+        return True
+    match = _WORD_AFTER.match(after)
+    return bool(match) and (
+        match.group(1).lower() in ("percent", "percentage")
+        or (match.group(1).lower() == "per" and bool(match.group(2)))
+    )
 
 
 def _digit_numbers(text: str):
@@ -224,6 +238,11 @@ def _values_in(text: str) -> frozenset[Decimal]:
     return frozenset(values)
 
 
+@lru_cache(maxsize=256)
+def _percent_values_in(text: str) -> frozenset[Decimal]:
+    return frozenset(full for start, end, _, _, full in _numbers(text) if _is_percent(text, start, end))
+
+
 def grounded_values(sources: Iterable[object]) -> set[Decimal]:
     values: set[Decimal] = set()
     for source in sources:
@@ -242,13 +261,15 @@ def ungrounded_figures(sentence: str, sources: Sources) -> tuple[list[str], list
     for start, end, text, _, full in sorted(_numbers(sentence)):
         figure = _is_figure(sentence, start, end)
         if figure or full >= 10:
-            candidates.append((text, full, figure))
+            candidates.append((text, full, figure, figure and _is_percent(sentence, start, end)))
     if not candidates:
         return [], []
-    known = grounded_values(sources() if callable(sources) else sources)
+    texts = [str(s) for s in (sources() if callable(sources) else sources) if s]
+    known = grounded_values(texts)
+    percents = frozenset().union(*(_percent_values_in(t) for t in texts))
     figures, bare = [], []
-    for text, full, figure in candidates:
-        if full not in known:
+    for text, full, figure, percent in candidates:
+        if full not in (percents if percent else known):
             (figures if figure else bare).append(text)
     return figures, bare
 

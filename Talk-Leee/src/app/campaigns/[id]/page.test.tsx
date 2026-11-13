@@ -12,9 +12,14 @@ const loader = Module as unknown as { _load: (id: string, ...args: unknown[]) =>
 const originalLoad = loader._load;
 const nothing = () => null;
 // Stable identity like the real router: loadData depends on it.
-const router = { push() {}, replace() {} };
+const router = { push() {}, replace(_href: string) {} };
+// The query string the page sees (QA F1-31's knowledge_error flag).
+let search = "";
 loader._load = function (id, ...args) {
-    if (id === "next/navigation") return { useParams: () => ({ id: "camp-1" }), useRouter: () => router };
+    if (id === "next/navigation") return {
+        useParams: () => ({ id: "camp-1" }), useRouter: () => router,
+        useSearchParams: () => new URLSearchParams(search),
+    };
     if (id.includes("components/layout/dashboard-layout")) return { DashboardLayout: ({ children }: { children: React.ReactNode }) => <>{children}</> };
     if (id.includes("components/campaigns/smart-csv-import")) return { SmartCsvImport: nothing };
     if (id.includes("components/campaigns/contact-lists")) return { ContactLists: nothing, ActiveContactsSummary: nothing };
@@ -42,7 +47,7 @@ try {
 // Generous: the full suite runs many files in parallel on a loaded machine.
 const SLOW = 15_000;
 
-afterEach(() => { cleanup(); mock.restoreAll(); });
+afterEach(() => { cleanup(); mock.restoreAll(); search = ""; });
 
 const campaign = {
     id: "camp-1", name: "Spring push", status: "running", direction: "outbound" as const,
@@ -154,4 +159,26 @@ test("a per-contact reason does not read as the whole campaign not dialing", asy
     render(<Page />);
     await waitFor(() => assert.ok(screen.getByRole("button", { name: /Stop/ })), { timeout: SLOW });
     assert.equal(screen.queryByText(/Not dialing/), null);
+});
+
+// QA F1-31 (QA-UI-075): when the wizard's knowledge upload fails it opens the
+// new campaign with ?knowledge_error=1, and nothing read it, so the failure
+// was silent.
+test("a failed knowledge upload is reported on the new campaign until dismissed", async () => {
+    search = "knowledge_error=1";
+    mockRunningCampaign({});
+    const replace = mock.method(router, "replace", () => {});
+    render(<Page />);
+    const notice = await screen.findByText(/Your knowledge file was not added/, undefined, { timeout: SLOW });
+    assert.equal(notice.closest("[role='alert']") !== null, true);
+    fireEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await waitFor(() => assert.equal(screen.queryByText(/Your knowledge file was not added/), null));
+    assert.deepEqual(replace.mock.calls.at(-1)?.arguments, ["/campaigns/camp-1"]);
+});
+
+test("without the flag there is no knowledge notice", async () => {
+    mockRunningCampaign({});
+    render(<Page />);
+    await screen.findByText("Spring push", undefined, { timeout: SLOW });
+    assert.equal(screen.queryByText(/Your knowledge file was not added/), null);
 });

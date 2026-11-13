@@ -194,7 +194,7 @@ export default function MarketingAutomationIndustryPage() {
   const plans = [
     {
       name: "Starter",
-      price: "Free / 14-Day Trial",
+      price: "See pricing",
       description: "Perfect for agencies exploring AI automation.",
       features: [
         "1 Client Workspace",
@@ -203,7 +203,7 @@ export default function MarketingAutomationIndustryPage() {
         "Appointment Booking",
         "Email Support",
       ],
-      cta: "Start Free",
+      cta: "Get Started",
       href: "/auth/register",
       primary: true,
     },

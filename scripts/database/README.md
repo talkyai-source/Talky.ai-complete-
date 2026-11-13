@@ -1,5 +1,10 @@
 # Database recovery tools
 
+For the current production flat-dump pipeline, see [encrypted DB/media copies](OFFHOST.md)
+and [prepared PITR tools/proposed owner-approved targets](PITR.md). The historical
+bundle workflow below is not the installed producer and does not replace its
+verified-principal snapshot guard.
+
 These tools prepare and verify the database part of the production deliverables.
 They do not move production data automatically, change the application endpoint,
 run migrations, replay queues or start calls. A local test receipt is not a

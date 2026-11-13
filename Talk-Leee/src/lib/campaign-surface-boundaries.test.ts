@@ -37,9 +37,9 @@ test("the dashboard filters the mixed campaign response before rendering it", ()
     const source = pageSource("dashboard/page.tsx");
 
     assert.match(source, /setCampaigns\(outboundCampaignsOnly\(campaignsData\.campaigns \?\? \[\]\)\)/);
-    assert.match(source, /getCallAnalytics\(month\.from, month\.to, "day", "outbound", false\)/);
-    assert.match(source, /getCallAnalytics\(month\.from, month\.to, "hour", "outbound", false\)/);
-    assert.match(source, /getCallAnalyticsByCampaign\(month\.from, month\.to, "day", "outbound", false\)/);
+    assert.match(source, /getCallAnalytics\(month\.from, month\.to, "day", "outbound", false, summaryData\.timezone\)/);
+    assert.match(source, /getCallAnalytics\(month\.from, month\.to, "hour", "outbound", false, summaryData\.timezone\)/);
+    assert.match(source, /getCallAnalyticsByCampaign\(month\.from, month\.to, "day", "outbound", false, summaryData\.timezone\)/);
     assert.match(source, /Real outbound call volume over time/);
     assert.match(source, /Recent Outbound Campaigns/);
 });
@@ -73,10 +73,13 @@ test("campaign detail initial loads discard superseded responses before navigati
 
 test("a successful analytics reload clears a prior request error", () => {
     const source = pageSource("analytics/page.tsx");
-    const response = source.indexOf("const response = await extendedApi.getCallAnalytics");
+    const response = source.indexOf("let response = zone ? null : await extendedApi.getCallAnalytics");
     const success = source.indexOf("setData(response.series)", response);
     const clear = source.indexOf('setError("")', response);
+    const clearReference = source.indexOf("setErrorRequestId(undefined)", response);
 
     assert.notEqual(response, -1);
+    assert.notEqual(success, -1);
     assert.ok(clear > response && clear <= success);
+    assert.ok(clearReference > response && clearReference <= success);
 });

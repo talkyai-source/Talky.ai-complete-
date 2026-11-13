@@ -1,5 +1,12 @@
 """Round-2 follow-up on issue #6 (review finding, 2026-09-24).
 
+CURRENT CONTRACT (owner decision 2026-11-05, QA F12-03, 644750c2): the instant greeting was
+disconnected (01195ba4). On a caller-first outbound call the callee's pickup words get the identity
+opener, spoken through voice_session.pipeline; it ends on a question, so the model runs no second
+turn on those words (turn_ender.py:465-486, caller_first_disclosure.py). Any other first words still
+get the normal model turn. The tests below pin that; the narrative that follows is the history of the
+double-reply defect they were first written for.
+
 THE DEFECT
 ----------
 Round 1 (test_instant_opener_continues_to_llm.py) made turn_ender.py fall
@@ -36,7 +43,7 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from app.domain.models.conversation import Message, MessageRole
+from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession, CallState
 from app.domain.services.voice_pipeline.turn_ender import TurnEnder
 from app.domain.services.voice_pipeline.turn_runner import TurnRunner
@@ -66,17 +73,6 @@ class _FakeVoiceSession:
         self.call_session = call_session
 
 
-async def _fake_send_outbound_greeting_with_identity(voice_session) -> None:
-    """Reproduces the LLM-opener-enabled shape: identity + trailing question
-    -> `_looks_like_bare_pickup_greeting` is False -> `_has_introduced=True`,
-    exactly as agent_first.py's real `_send_outbound_greeting` sets it."""
-    session = voice_session.call_session
-    session.conversation_history.append(
-        Message(role=MessageRole.ASSISTANT, content=voice_session._presynth_greeting_text)
-    )
-    session._has_introduced = True
-
-
 def _pipeline_stub(llm_reply="Sure, sixty seconds is fine."):
     p = MagicMock()
     p._is_repetitive_transcript = lambda text: False
@@ -98,58 +94,45 @@ def _pipeline_stub(llm_reply="Sure, sixty seconds is fine."):
 async def test_an_introducing_greeting_returns_instead_of_running_a_second_llm_turn(
     monkeypatch,
 ):
-    """The LLM-opener-enabled greeting already carries identity and a
-    question — the second LLM turn on the SAME "Hello?" must NOT run."""
+    """The identity opener answers the pickup words and ends on a question —
+    the model must NOT also run a turn on the SAME "Hello?"
+    (turn_ender.py:465-486; the opener is built by caller_first_disclosure.py:101-107,
+    644750c2 / QA F12-03, which replaced the instant-opener greeting)."""
     session = _session()
     voice_session = _FakeVoiceSession(session)
     session._voice_session_ref = voice_session
     pipeline = _pipeline_stub()
 
-    monkeypatch.setattr(
-        "app.domain.services.telephony.modes.agent_first._send_outbound_greeting",
-        _fake_send_outbound_greeting_with_identity,
-    )
-
+    voice_session.pipeline = pipeline
     await TurnEnder(pipeline).handle(session, None, user_text="Hello?")
 
     assert pipeline._run_turn.await_args is None, (
-        "an introducing greeting must not be followed by a second LLM turn "
-        "on the same utterance"
+        "the identity opener answers the pickup words; the model must not also reply"
     )
-    roles = [m.role for m in session.conversation_history]
-    assert roles == [MessageRole.ASSISTANT], (
-        f"expected only the greeting in history, got {roles!r}"
-    )
-    assert session._has_introduced is True
+    spoken = pipeline.synthesize_and_send_audio.await_args.args[1]
+    assert "an AI assistant from" in spoken
+    # The caller's words come first, then the opener (caller_first_disclosure.py:89, 106).
+    assert [(m.role, m.content) for m in session.conversation_history] == [
+        (MessageRole.USER, "Hello?"), (MessageRole.ASSISTANT, spoken),
+    ]
+    assert session._has_introduced is True  # caller_first_disclosure.py:107
 
 
 @pytest.mark.asyncio
 async def test_a_bare_greeting_still_falls_through_to_the_llm_turn(monkeypatch):
-    """Round-1 behaviour is unchanged for the bare "Hi, hello." pickup:
-    _has_introduced stays False, so the normal LLM turn still runs."""
+    """Only pickup words get the identity opener (caller_first_disclosure.py:30-49, 75-77);
+    anything else on a caller-first call still gets the normal model turn."""
     session = _session()
     voice_session = _FakeVoiceSession(session)
-    voice_session._presynth_greeting_text = "Hi, hello."
     session._voice_session_ref = voice_session
     pipeline = _pipeline_stub()
 
-    async def _fake_bare_greeting(vs):
-        s = vs.call_session
-        s.conversation_history.append(
-            Message(role=MessageRole.ASSISTANT, content=vs._presynth_greeting_text)
-        )
-        s._has_introduced = False
-
-    monkeypatch.setattr(
-        "app.domain.services.telephony.modes.agent_first._send_outbound_greeting",
-        _fake_bare_greeting,
-    )
-
-    await TurnEnder(pipeline).handle(session, None, user_text="Hello?")
+    voice_session.pipeline = pipeline
+    # 644750c2: only pickup words get the identity opener; anything else gets the normal model turn.
+    await TurnEnder(pipeline).handle(session, None, user_text="I am busy right now, what is this about?")
 
     assert pipeline._run_turn.await_args is not None, (
-        "a bare (non-introducing) greeting must still fall through to the "
-        "LLM turn"
+        "first words that are not pickup words must still reach the LLM turn"
     )
     roles = [m.role for m in session.conversation_history]
-    assert roles[:2] == [MessageRole.ASSISTANT, MessageRole.USER]
+    assert roles[:2] == [MessageRole.USER, MessageRole.ASSISTANT]

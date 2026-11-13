@@ -253,7 +253,11 @@ class GmailConnector(EmailProvider):
                     response.status_code,
                     error.category,
                 )
-                raise error
+                raise ConnectorProviderError(
+                    provider="gmail", operation="refresh_tokens", category=error.category,
+                    message=f"Gmail refresh returned HTTP {response.status_code}",
+                    status_code=response.status_code, retry_after=error.retry_after,
+                )
             
             token_data = response.json()
             

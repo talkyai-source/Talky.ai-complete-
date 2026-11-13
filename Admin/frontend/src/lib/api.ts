@@ -1898,8 +1898,11 @@ class ApiClient {
     }
 
     // Auth Endpoints
-    async login(email: string, password: string, ownsOperation?: () => boolean) {
-        return this.credentialRequest<LoginResponse>('/auth/login', { email, password }, ownsOperation);
+    // `turnstileToken` is the single-use Cloudflare Turnstile token. The backend only checks it
+    // when AUTH_TURNSTILE_REQUIRED is on, so without one the body is exactly the old one.
+    async login(email: string, password: string, ownsOperation?: () => boolean, turnstileToken?: string) {
+        return this.credentialRequest<LoginResponse>('/auth/login',
+            { email, password, ...(turnstileToken ? { turnstile_token: turnstileToken } : {}) }, ownsOperation);
     }
 
     async verifyMfaChallenge(challengeToken: string, factor: { code: string } | { recovery_code: string }, ownsOperation?: () => boolean) {
@@ -2067,7 +2070,7 @@ class ApiClient {
 
     // Configuration Endpoints
     // NOTE: there is no /admin/configuration endpoint on the backend yet, so these
-    // will 404 until one is added. SystemConfigPage is not currently routed in App.tsx.
+    // will 404 until one is added. The System Configuration page that used them was removed (QA F1-33).
     async getConfiguration() {
         return this.request<SystemConfiguration>('/admin/configuration');
     }

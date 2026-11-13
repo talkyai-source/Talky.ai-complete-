@@ -2,6 +2,7 @@
 
 import { remainingMinutesLabel } from "@/lib/minutes-allowance";
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { ErrorState, LoadingState } from "@/components/states/page-states";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +18,7 @@ import DeviceList from "@/components/auth/device-list";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TelephonyProvidersSection } from "@/components/settings/telephony-providers-section";
 import { RecordingPolicySection } from "@/components/settings/recording-policy-section";
+import { ProviderKeysSection } from "@/components/settings/provider-keys-section";
 import { useAuth } from "@/lib/auth-context";
 import { useAccessToken } from "@/lib/auth-hooks";
 import { api } from "@/lib/api";
@@ -112,6 +114,17 @@ export default function SettingsPage() {
                  * Connectors used to live in this same row as a Quick-link
                  * tile and was promoted to a top-level sidebar item.
                  */}
+                {/* QA F1-15: who is in this workspace, and their roles. */}
+                <Link
+                    href="/team"
+                    className="block rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm transition-colors hover:bg-background/90 dark:border-white/10 dark:bg-white/5"
+                >
+                    <span className="text-sm font-semibold text-foreground">Team</span>
+                    <span className="mt-1 block text-sm text-muted-foreground">
+                        See who is in this workspace and their roles. Admins can change a role or remove someone.
+                    </span>
+                </Link>
+
                 <div
                     className="rounded-2xl border border-border bg-background/70 p-4 backdrop-blur-sm dark:border-white/10 dark:bg-white/5"
                     aria-label="Assistant — Coming soon"
@@ -374,6 +387,8 @@ export default function SettingsPage() {
                         </Tabs>
                     </CardContent>
                 </Card>
+                <ProviderKeysSection tenantId={user?.tenant_id} userId={user?.id}
+                    canEdit={["tenant_admin", "partner_admin", "platform_admin", "admin", "owner", "super_admin"].includes(String(user?.role ?? ""))} />
             </div>
         </DashboardLayout>
     );

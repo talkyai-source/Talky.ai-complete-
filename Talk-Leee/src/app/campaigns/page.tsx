@@ -21,7 +21,8 @@ import { queryKeys, useOutboundCampaigns } from "@/lib/api-hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNotificationMutation } from "@/lib/notification-mutations";
 import { useNotificationsActions } from "@/lib/notifications-client";
-import { failedReadMessage } from "@/components/states/page-states";
+import { isApiClientError } from "@/lib/http-client";
+import { campaignActions, useKnownPermissions } from "@/lib/permissions";
 
 export default function CampaignsPage() {
     const { create: createNotification } = useNotificationsActions();
@@ -29,7 +30,9 @@ export default function CampaignsPage() {
     const campaignsQuery = useOutboundCampaigns();
     const campaigns = useMemo(() => campaignsQuery.data ?? [], [campaignsQuery.data]);
     const loading = campaignsQuery.isLoading;
-    const error = campaignsQuery.isError ? failedReadMessage(campaignsQuery.error, "Failed to load campaigns") : "";
+    const error = campaignsQuery.isError ? "Could not load campaigns." : "";
+    // QA F1-21: offer only the campaign actions this role may take.
+    const allowed = campaignActions(useKnownPermissions());
 
     // Result of the last Start / Resume, Pause or Stop. `campaignId` = it was
     // asked from that campaign's details modal and is shown there; null = it
@@ -124,12 +127,13 @@ export default function CampaignsPage() {
     return (
         <DashboardLayout title="Campaigns" description="Sorting, filtering, bulk actions, and live ops signals">
             <div className="space-y-6">
-                <CommandBar campaigns={campaigns} onPause={handlePauseMany} onResume={handleResume} onExport={() => setExportOpen(true)} />
+                <CommandBar campaigns={campaigns} onPause={handlePauseMany} onResume={handleResume} onExport={() => setExportOpen(true)} allowed={allowed} />
                 {notice && notice.campaignId === null ? <CampaignControlNoticeBox notice={notice.notice} testId="campaign-list-notice" /> : null}
                 <CampaignPerformanceTable
                     campaigns={campaigns}
                     loading={loading}
                     error={error}
+                    errorRequestId={isApiClientError(campaignsQuery.error) ? campaignsQuery.error.requestId : undefined}
                     onRetry={() => { void campaignsQuery.refetch(); }}
                     onPause={handlePause}
                     onStop={handleStop}
@@ -139,6 +143,7 @@ export default function CampaignsPage() {
                     onNoticeDismiss={handleNoticeDismiss}
                     onDelete={handleDelete}
                     onDuplicate={handleDuplicate}
+                    allowed={allowed}
                     exportOpen={exportOpen}
                     onExportOpenChange={setExportOpen}
                 />

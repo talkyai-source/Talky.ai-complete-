@@ -54,7 +54,7 @@ afterEach(() => {
 async function mount() {
     globalThis.WebSocket = class { constructor() { throw new Error("no socket in tests"); } } as unknown as typeof WebSocket;
     mock.method(dashboardApi, "getDashboardSummary", async () => ({
-        total_calls: 4, answered_calls: 0, failed_calls: 4, minutes_used: 0, minutes_remaining: 100, active_campaigns: 0,
+        timezone: "UTC", total_calls: 4, answered_calls: 0, failed_calls: 4, minutes_used: 0, minutes_remaining: 100, active_campaigns: 0,
         outcome_breakdown: { no_answer: 2, timeout: 1, goal_not_achieved: 1 },
     }));
     mock.method(dashboardApi, "listCampaigns", async () => ({ campaigns: [] }));

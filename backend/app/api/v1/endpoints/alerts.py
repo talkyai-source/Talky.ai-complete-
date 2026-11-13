@@ -62,6 +62,8 @@ class AlertOut(BaseModel):
 class AlertsListResponse(BaseModel):
     items: list[AlertOut]
     next_cursor: Optional[str] = None
+    tenant_id: str
+    user_id: str
 
 
 class AckRequest(BaseModel):
@@ -190,7 +192,8 @@ async def list_alerts(
         last = page[-1]
         next_cursor = _encode_cursor(last["created_at"], last["event_id"])
 
-    return AlertsListResponse(items=items, next_cursor=next_cursor)
+    return AlertsListResponse(items=items, next_cursor=next_cursor,
+                              tenant_id=str(current_user.tenant_id), user_id=str(current_user.id))
 
 
 @router.post("/{alert_id}/ack", response_model=AlertOut)

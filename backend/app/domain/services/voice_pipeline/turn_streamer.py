@@ -29,9 +29,7 @@ from fastapi import WebSocket
 from app.core.db_utils import acquire_with_tenant
 from app.domain.models.conversation import MessageRole
 from app.domain.models.session import CallSession
-from app.domain.services.ask_ai_constants import (
-    TALKY_PRODUCT_INFO as _ASK_AI_PRODUCT_INFO,
-)
+from app.domain.services.ask_ai_constants import ask_ai_fact_sheet
 from app.domain.services.end_session_action import (
     build_end_session_tool_instructions,
     parse_end_session_action,
@@ -277,7 +275,14 @@ class TurnStreamer:
         # Resolve available tools and runtime facts for the single prompt assembler.
 
         # The demo's small fact sheet is always available; the model decides relevance.
-        ask_ai_block = _ASK_AI_PRODUCT_INFO if session.campaign_id == "ask-ai" else None
+        # The demo's prices are the live list read at session start (QA
+        # F11-05); the figure guard grounds on this prompt, so a remembered
+        # or invented price is withheld.
+        ask_ai_block = (
+            ask_ai_fact_sheet(getattr(session, "_ask_ai_price_list", None))
+            if session.campaign_id == "ask-ai"
+            else None
+        )
 
         # The conversational model selects sections from its scoped catalog.
         # No literal search, lexical threshold, or recovery model runs before it.
@@ -418,12 +423,15 @@ class TurnStreamer:
             ))
 
         def _figure_sources():
-            # Everything the model was given or heard this turn (HAL-2).
+            # What the model was given, and what the agent itself already said
+            # (HAL-2). Never the caller's words: "Yes, that's 50 pounds a
+            # month." must not be sourced by the caller asking "so it's 50
+            # pounds?" (QA F3-04).
             evidence = getattr(session, "_knowledge_evidence", None) or {}
             return (
                 system_prompt, evidence.get("text"),
                 *getattr(session, "_knowledge_grounding", []), *turn_grounding,
-                *(m.content for m in session.conversation_history),
+                *(m.content for m in session.conversation_history if m.role != MessageRole.USER),
                 *(json.dumps(r, default=str) for r in action_results_for_session(session).values()),
             )
         # Canonical history source: TTS submissions that returned without

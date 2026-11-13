@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from app.api.v1.dependencies import CurrentUser, get_db_pool, require_platform_admin
 from app.api.v1.endpoints.auth import limiter
 from app.core.errors import ApiError
+from app.api.v1.validation import MAX_OFFSET
 from app.domain.services import contact_enquiry_service as service
 
 logger = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ async def list_contact_enquiries(
     current_user: CurrentUser = Depends(require_platform_admin),
     pool: asyncpg.Pool = Depends(get_db_pool),
     status: service.EnquiryStatus | None = None,
-    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0),
+    limit: int = Query(50, ge=1, le=100), offset: int = Query(0, ge=0, le=MAX_OFFSET),
     enquiry_id: UUID | None = None,
 ):
     try:

@@ -37,6 +37,7 @@ from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
 
+from app.core.log_redact import error_reference
 from app.core.security.rbac import (
     Permission,
     check_permission,
@@ -1060,9 +1061,15 @@ async def campaign_test_websocket(
         except WebSocketDisconnect:
             logger.info("campaign_test_ws disconnected campaign=%s", str(campaign_id)[:8])
         except Exception as e:  # noqa: BLE001
-            logger.error("campaign_test_ws error: %s", e, exc_info=True)
+            # QA F2-07: the exception text stays in the log, under a reference
+            # the user can quote; the page gets a fixed message.
+            reference = error_reference()
+            logger.error("campaign_test_ws error ref=%s: %s", reference, e, exc_info=True)
             try:
-                await websocket.send_json({"type": "error", "message": str(e)})
+                await websocket.send_json({
+                    "type": "error", "reference": reference,
+                    "message": f"The test call stopped because of a problem on our side. Please try again (reference {reference}).",
+                })
                 await websocket.close(code=1011, reason="server error")
             except Exception:  # noqa: BLE001
                 pass

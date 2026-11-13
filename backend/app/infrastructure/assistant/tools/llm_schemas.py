@@ -9,6 +9,7 @@ the 6 campaign-admin tools added in feat/assistant-campaign-tools.
 from copy import deepcopy
 
 from app.services.scripts.knowledge.sections import SECTION_TOOL_PARAMETERS
+from app.infrastructure.assistant.tools.date_ranges import SINCE_DESCRIPTION, TZ_DESCRIPTION, UNTIL_DESCRIPTION
 
 _CAMPAIGN_SECTION_PARAMETERS = deepcopy(SECTION_TOOL_PARAMETERS)
 _CAMPAIGN_SECTION_PARAMETERS["properties"]["campaign_id"] = {"type": "string", "description": "Campaign UUID"}
@@ -19,11 +20,14 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_dashboard_stats",
-            "description": "Call statistics for one day - total calls, success rate, active campaigns. Pass campaign_id when the user asks about one campaign; without it the numbers cover every campaign in the account.",
+            "description": "Call statistics for an explicit since/until range or one local day (default today in the effective timezone). Pass campaign_id for one campaign. Call metrics use applied_range; active_campaigns is the current account snapshot, not a historical count.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "date_str": {"type": "string", "description": "Date in YYYY-MM-DD format, defaults to today"},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
+                    "since": {"type": "string", "description": SINCE_DESCRIPTION + " Do not combine with date_str."},
+                    "until": {"type": "string", "description": UNTIL_DESCRIPTION + " Do not combine with date_str."},
                     "campaign_id": {"type": "string", "description": "Only this campaign's calls (id from get_campaigns)"}
                 },
                 "required": []
@@ -46,12 +50,15 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_leads",
-            "description": "Get leads/contacts list with optional filters. Set only_leads=true to return just the qualified leads. Each lead includes is_lead and follow_up_note.",
+            "description": "Get leads/contacts with optional created_at since/until range. Set only_leads=true for qualified contacts; use get_qualified_leads for when they qualified. Each lead includes is_lead and follow_up_note.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "campaign_id": {"type": "string", "description": "Filter by campaign ID"},
                     "status": {"type": "string", "description": "Filter by status"},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
+                    "since": {"type": "string", "description": SINCE_DESCRIPTION},
+                    "until": {"type": "string", "description": UNTIL_DESCRIPTION},
                     "only_leads": {"type": ["boolean", "string"], "description": "Only return contacts flagged as qualified leads", "default": False},
                     "limit": {"type": "integer", "description": "Max leads to return (max 100)", "default": 25}
                 },
@@ -79,11 +86,14 @@ GROQ_TOOL_SCHEMAS = [
         "type": "function",
         "function": {
             "name": "get_qualified_leads",
-            "description": "Recently-qualified leads (newest first) WITH phone numbers and follow-up notes. Use for 'any new leads?', 'who qualified today/during this campaign?', or to alert the client about qualified leads — always read out name + number + follow-up.",
+            "description": "Recently-qualified leads (newest first) WITH phone numbers and follow-up notes. Pass since/until to filter qualified_at for 'who qualified today/in this range'; without bounds there is no date filter. Always read out name + number + follow-up.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "campaign_id": {"type": "string", "description": "Optional: only leads from this campaign"},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
+                    "since": {"type": "string", "description": SINCE_DESCRIPTION},
+                    "until": {"type": "string", "description": UNTIL_DESCRIPTION},
                     "limit": {"type": "integer", "description": "Max leads to return (default 10)"}
                 },
                 "required": []
@@ -191,7 +201,10 @@ GROQ_TOOL_SCHEMAS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "today_only": {"type": ["boolean", "string"], "description": "Only show today's calls", "default": True},
+                    "today_only": {"type": ["boolean", "string"], "description": "Only show today's local calls in the effective timezone when since/until are absent; an explicit bound overrides this default", "default": True},
+                    "tz": {"type": "string", "description": TZ_DESCRIPTION},
+                    "since": {"type": "string", "description": SINCE_DESCRIPTION},
+                    "until": {"type": "string", "description": UNTIL_DESCRIPTION},
                     "limit": {"type": "integer", "default": 10},
                     "campaign_id": {"type": "string", "description": "Only this campaign's calls (id from get_campaigns)"}
                 },
