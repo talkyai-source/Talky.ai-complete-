@@ -54,9 +54,12 @@ describe("AuthCallbackPage", () => {
         });
     }
 
-    test("a provider error in the URL is still shown", async () => {
+    // Forms audit A-F12: the error is still reported, but in the page's own
+    // words. The description comes from the address, which anyone can write.
+    test("a provider error in the URL is still reported, in the page's own words", async () => {
         global.fetch = (async () => new Response("{}", { status: 401 })) as typeof fetch;
         renderAt("/auth/callback#error=access_denied&error_description=Access%20was%20denied");
-        await waitFor(() => assert.ok(screen.getByText("Access was denied")));
+        await waitFor(() => assert.ok(screen.getByText(/The sign-in provider reported a problem/)));
+        assert.equal(screen.queryByText("Access was denied"), null);
     });
 });
