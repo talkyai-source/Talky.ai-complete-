@@ -23,6 +23,7 @@ type Phase =
     | { kind: "checking" }
     | { kind: "missing" }
     | { kind: "invalid" }
+    | { kind: "failed"; message: string }
     | { kind: "form"; invite: InvitePreview }
     | { kind: "done"; email: string };
 
@@ -55,28 +56,43 @@ export default function AcceptInvitePage() {
     const [submitting, setSubmitting] = useState(false);
     const legal = useLegalAcceptance();
 
-    useEffect(() => {
-        let live = true;
-        async function check() {
-            token.current = token.current || tokenFromAddress();
+    // The token stays in the address until the check gets an answer, so a
+    // reload after a network error or a busy server can still find it.
+    async function check(isLive: () => boolean) {
+        token.current = token.current || tokenFromAddress();
+        if (!token.current) {
+            await Promise.resolve();
+            if (isLive()) setPhase({ kind: "missing" });
+            return;
+        }
+        const clearAddress = () => {
             if (window.location.hash) window.history.replaceState(window.history.state, "", window.location.pathname);
-            if (!token.current) {
-                await Promise.resolve();
-                if (live) setPhase({ kind: "missing" });
-                return;
-            }
-            try {
-                const invite = await inviteApi.preview(token.current);
-                if (live) setPhase({ kind: "form", invite });
-            } catch (err) {
-                if (!live) return;
-                if (isApiClientError(err) && err.status === 410) setPhase({ kind: "invalid" });
-                else setError(failureMessage(err));
+        };
+        try {
+            const invite = await inviteApi.preview(token.current);
+            clearAddress();
+            if (isLive()) setPhase({ kind: "form", invite });
+        } catch (err) {
+            if (isApiClientError(err) && err.status === 410) {
+                clearAddress();
+                if (isLive()) setPhase({ kind: "invalid" });
+            } else if (isLive()) {
+                setPhase({ kind: "failed", message: failureMessage(err) });
             }
         }
-        void check();
+    }
+
+    useEffect(() => {
+        let live = true;
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- the check sets state only after awaiting the server (or a microtask)
+        void check(() => live);
         return () => { live = false; };
     }, []);
+
+    function tryAgain() {
+        setPhase({ kind: "checking" });
+        void check(() => true);
+    }
 
     async function join(event: FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -117,9 +133,19 @@ export default function AcceptInvitePage() {
                     <CardHeader>
                         <Heading>Checking your invite</Heading>
                         <CardDescription role="status" className="flex items-center gap-2">
-                            {error ? error : (<><Loader2 className="h-4 w-4 animate-spin" aria-hidden /> One moment…</>)}
+                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> One moment…
                         </CardDescription>
                     </CardHeader>
+                ) : phase.kind === "failed" ? (
+                    <>
+                        <CardHeader>
+                            <Heading>We could not check your invite</Heading>
+                            <CardDescription role="alert">{phase.message}</CardDescription>
+                        </CardHeader>
+                        <CardFooter>
+                            <Button type="button" className="w-full" onClick={tryAgain}>Try again</Button>
+                        </CardFooter>
+                    </>
                 ) : phase.kind === "missing" ? (
                     <CardHeader>
                         <Heading>This link is incomplete</Heading>
