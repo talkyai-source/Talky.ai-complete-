@@ -45,9 +45,9 @@ export const PERSONAS: PersonaSpec[] = [
         slots: [
             { key: "industry", label: "Industry", placeholder: "e.g. roofing", kind: "text", required: true },
             { key: "services_description", label: "Services", placeholder: "What the company does, one sentence", kind: "textarea", required: true },
-            { key: "pricing_info", label: "Pricing", placeholder: "e.g. Zero upfront — you only pay when live", kind: "textarea", required: true },
+            { key: "pricing_info", label: "Pricing", placeholder: "e.g. Zero upfront — you only pay when live", kind: "textarea" },
             { key: "coverage_area", label: "Coverage area", placeholder: "e.g. greater Phoenix within 50 miles", kind: "text", required: true },
-            { key: "company_differentiator", label: "What makes you different", placeholder: "The one reason to pick you", kind: "textarea", required: true },
+            { key: "company_differentiator", label: "What makes you different", placeholder: "The one reason to pick you", kind: "textarea" },
             { key: "value_proposition", label: "Value for the caller", placeholder: "What the caller personally gets", kind: "textarea", required: true },
             { key: "call_reason", label: "Reason for calling", placeholder: "Why are we ringing this lead?", kind: "textarea", required: true },
             { key: "qualification_questions", label: "Qualification questions", help: "One per line", kind: "list", required: true },
