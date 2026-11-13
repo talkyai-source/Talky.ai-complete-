@@ -74,7 +74,7 @@ afterEach(() => {
     else process.env.NEXT_PUBLIC_BEARER_FALLBACK = originalFallback;
 });
 
-for (const pathname of ["/", "/pricing/", "/contact/", "/privacy/", "/docs/getting-started/", "/ai-voices/"]) {
+for (const pathname of ["/", "/pricing/", "/contact/", "/privacy/", "/docs/getting-started/"]) {
     test(`anonymous public page ${pathname} makes no profile or refresh request`, async () => {
         render(tree(pathname));
         await settled();

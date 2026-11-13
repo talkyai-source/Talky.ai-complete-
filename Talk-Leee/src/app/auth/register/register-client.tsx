@@ -15,6 +15,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { AskAiSignInNotice, clearAskAiSignInFlag, hasAskAiSignInFlag } from "@/components/auth/askai-signin-notice";
+import { useTurnstile } from "@/components/auth/turnstile-widget";
 
 type Step = "form" | "otp" | "password";
 
@@ -33,6 +34,9 @@ export default function RegisterClientPage() {
     const [loading, setLoading] = useState(false);
     const [message, setMessage] = useState("");
     const [error, setError] = useState("");
+    // Both the first send and "Resend" start a signup, and Cloudflare accepts
+    // a Turnstile token once, so each gets its own (QA F4-12).
+    const turnstile = useTurnstile("signup");
     const nameInputRef = useRef<HTMLInputElement | null>(null);
     const otpInputRef = useRef<HTMLInputElement | null>(null);
     const passwordInputRef = useRef<HTMLInputElement | null>(null);
@@ -73,11 +77,12 @@ export default function RegisterClientPage() {
         setMessage("");
 
         try {
-            const response = await api.signupStart(
+            const response = await turnstile.run((token) => api.signupStart(
                 formData.name.trim(),
                 formData.businessName.trim(),
                 formData.email.trim(),
-            );
+                token,
+            ));
             setFormData((current) => ({ ...current, email: response.email }));
             setOtpCode("");
             setMessage(response.message || "Verification code sent! Check your email.");
@@ -198,11 +203,12 @@ export default function RegisterClientPage() {
         setMessage("");
 
         try {
-            const response = await api.signupStart(
+            const response = await turnstile.run((token) => api.signupStart(
                 formData.name.trim(),
                 formData.businessName.trim(),
                 formData.email.trim(),
-            );
+                token,
+            ));
             setFormData((current) => ({ ...current, email: response.email }));
             setOtpCode("");
             setMessage(response.message || "New verification code sent!");
@@ -314,6 +320,8 @@ export default function RegisterClientPage() {
                                     </div>
                                 </div>
 
+                                {turnstile.widget}
+
                                 {error ? (
                                     <div id={errorId} role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950 border border-red-200 dark:border-red-800 rounded-md p-3">
                                         {error}
@@ -322,7 +330,7 @@ export default function RegisterClientPage() {
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
-                                <Button type="submit" className="w-full" disabled={loading}>
+                                <Button type="submit" className="w-full" disabled={loading || turnstile.pending}>
                                     {loading ? (
                                         <>
                                             <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
@@ -391,6 +399,8 @@ export default function RegisterClientPage() {
                                         {message}
                                     </div>
                                 ) : null}
+
+                                {turnstile.widget}
                             </CardContent>
 
                             <CardFooter className="flex flex-col gap-4">
@@ -422,7 +432,7 @@ export default function RegisterClientPage() {
                                         type="button"
                                         onClick={handleResend}
                                         className="text-sm text-foreground font-medium hover:underline"
-                                        disabled={loading}
+                                        disabled={loading || turnstile.pending}
                                     >
                                         Didn&apos;t receive it? Resend
                                     </button>

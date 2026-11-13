@@ -40,7 +40,7 @@ export const queryKeys = {
     campaign: (id: string) => ["campaign", id] as const,
     campaignStats: (id: string) => ["campaignStats", id] as const,
     campaignContacts: (campaignId: string, page: number, pageSize: number) => ["campaignContacts", campaignId, page, pageSize] as const,
-    calls: (page: number, pageSize: number, filters?: CallListFilters) => ["calls", page, pageSize, filters?.direction ?? "all", filters?.inboundCampaignId ?? "all"] as const,
+    calls: (cursor: string | null, pageSize: number, filters?: CallListFilters) => ["calls", cursor, pageSize, filters?.direction ?? "all", filters?.inboundCampaignId ?? "all"] as const,
     call: (id: string) => ["call", id] as const,
     callTranscript: (id: string, format: "json" | "text") => ["callTranscript", id, format] as const,
     callSummary: (id: string) => ["callSummary", id] as const,
@@ -624,16 +624,22 @@ export function useCampaignContacts(campaignId: string | undefined, page: number
     });
 }
 
-export function useCalls(page: number, pageSize: number, filters: CallListFilters = {}) {
-    return useQuery<{ calls: Call[]; total: number }>({
-        queryKey: queryKeys.calls(page, pageSize, filters),
-        queryFn: () => dashboardApi.listCalls(page, pageSize, filters),
+/**
+ * One page of call history in the server's cursor mode (QA F6-03). `cursor` is
+ * null for the newest page, else the `nextCursor` of the page before it; a
+ * cursor is only valid for the filters it was issued under, so the caller must
+ * start over (null) whenever a filter changes.
+ */
+export function useCalls(cursor: string | null, pageSize: number, filters: CallListFilters = {}) {
+    return useQuery<{ calls: Call[]; nextCursor: string | null }>({
+        queryKey: queryKeys.calls(cursor, pageSize, filters),
+        queryFn: () => dashboardApi.listCallsCursor(cursor, pageSize, filters),
         placeholderData: keepPreviousData,
         // Keep the history live only while a call is actually changing state.
         // This lets the page raise its one-time review prompt immediately after
         // an active call ends without polling settled history forever.
         refetchInterval: (query) => {
-            const data = query.state.data as { calls: Call[]; total: number } | undefined;
+            const data = query.state.data as { calls: Call[]; nextCursor: string | null } | undefined;
             const hasActiveCall = data?.calls.some((call) => isActiveCallStatus(call.status));
             return hasActiveCall ? 3_000 : false;
         },

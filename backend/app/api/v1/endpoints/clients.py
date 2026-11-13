@@ -5,8 +5,9 @@ CRUD operations for client/contact management
 from app.core.error_handlers import safe_exception_message
 from app.api.v1.validation import ResourceUUID, bounded_text
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, field_validator
 from typing import List, Optional
+from uuid import UUID
 from app.core.postgres_adapter import Client
 
 from app.api.v1.dependencies import get_db_client, CurrentUser
@@ -50,6 +51,19 @@ class ClientResponse(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     tags: List[str] = []
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def _uuid_as_text(cls, value):
+        # asyncpg returns uuid.UUID for the uuid column and pydantic v2 will not
+        # coerce it to str, so every real row failed validation (QA F2-08).
+        return str(value) if isinstance(value, UUID) else value
+
+    @field_validator("tags", mode="before")
+    @classmethod
+    def _null_tags_are_empty(cls, value):
+        # tags is a nullable jsonb column; NULL means no tags.
+        return [] if value is None else value
 
 
 @router.get("/", response_model=List[ClientResponse])

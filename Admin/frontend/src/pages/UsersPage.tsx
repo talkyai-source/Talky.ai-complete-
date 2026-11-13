@@ -466,6 +466,8 @@ function OwnedUsersPage() {
     const [editUser, setEditUser] = useState<AdminUserItem | null>(null);
     const [confirmDelete, setConfirmDelete] = useState<AdminUserItem | null>(null);
     const deleteSelection = useRef<AdminUserItem | null>(null);
+    // Block / Unblock wait here for confirmation; `version` is the directory read the reviewed row came from.
+    const [confirmBlock, setConfirmBlock] = useState<{ user: AdminUserItem; version: number } | null>(null);
     const [showRecovery, setShowRecovery] = useState(false);
     const [formalUser, setFormalUser] = useState<AdminUserItem | null>(null);
     const [membershipUser, setMembershipUser] = useState<AdminUserItem | null>(null);
@@ -544,14 +546,20 @@ function OwnedUsersPage() {
     const roleNames = roles.filter((r) => EDITABLE_ROLES.includes(r.name)).map((r) => r.name);
     const displayedReadVersion = readVersion.current;
 
-    const toggleBlock = async (u: AdminUserItem) => {
-        if (!owns() || displayedReadVersion !== readVersion.current || mutationPending.current || userOutcome.operation || !reviewedUser(u)) return;
+    // Block and Unblock only ask here; the reviewed operation starts when the operator confirms.
+    const askBlock = (u: AdminUserItem) => {
+        if (!owns() || displayedReadVersion !== readVersion.current) return;
+        setConfirmBlock({ user: u, version: displayedReadVersion });
+    };
+
+    const toggleBlock = async (u: AdminUserItem, reviewedVersion: number) => {
+        if (!owns() || reviewedVersion !== readVersion.current || mutationPending.current || userOutcome.operation || !reviewedUser(u)) return;
         mutationPending.current = true;
         setBusyId(u.id);
         setMutationError(null);
         try {
         const saved = await performUserOperation({ kind: 'block', user: u, request: { is_active: !isActive(u), expected_review_token: u.review_token } },
-            () => owns() && displayedReadVersion === readVersion.current);
+            () => owns() && reviewedVersion === readVersion.current);
         if (!owns()) return;
         if (saved) void refreshLatest.current();
         } catch {
@@ -585,7 +593,7 @@ function OwnedUsersPage() {
 
     const reviewNewAction = () => {
         if (!owns() || writesBlocked()) return;
-        setShowAdd(false); setEditUser(null); setConfirmDelete(null); setShowRecovery(false); setMembershipUser(null); deleteSelection.current = null;
+        setShowAdd(false); setEditUser(null); setConfirmDelete(null); setConfirmBlock(null); setShowRecovery(false); setMembershipUser(null); deleteSelection.current = null;
         flashNotice('No unresolved server operations were returned. Review a fresh action before saving.');
         void refreshLatest.current();
     };
@@ -748,7 +756,7 @@ function OwnedUsersPage() {
                                                                     title={active ? 'Block user' : 'Unblock user'}
                                                                     aria-label={`${active ? 'Block' : 'Unblock'} ${u.email}`}
                                                                     disabled={busyId !== null || actionsBlocked || !reviewedUser(u)}
-                                                                    onClick={() => toggleBlock(u)}
+                                                                    onClick={() => askBlock(u)}
                                                                 >
                                                                     {active ? <Ban size={15} /> : <CheckCircle2 size={15} />}
                                                                 </button>
@@ -851,6 +859,16 @@ function OwnedUsersPage() {
                 />
             )}
 
+            {confirmBlock && !actionsBlocked && (
+                <ConfirmationModal isOpen variant="warning" confirmLabel="Confirm"
+                    title={isActive(confirmBlock.user) ? 'Block user' : 'Unblock user'}
+                    message={isActive(confirmBlock.user)
+                        ? `Block ${confirmBlock.user.email}? They will not be able to sign in until the account is unblocked. Nothing is deleted.`
+                        : `Unblock ${confirmBlock.user.email}? They will be able to sign in again.`}
+                    onConfirm={() => { const { user, version } = confirmBlock; setConfirmBlock(null); void toggleBlock(user, version); }}
+                    onCancel={() => setConfirmBlock(null)}
+                    returnFocusFallback={formalReturnFocus} />
+            )}
             {confirmDelete && !actionsBlocked && (
                 <ConfirmationModal isOpen title="Delete user"
                     message={`Remove ${confirmDelete.email}? Unreferenced accounts are permanently deleted; accounts with linked records are deactivated to preserve their history.`}

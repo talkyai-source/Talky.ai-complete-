@@ -15,7 +15,6 @@ test.describe("Accessibility Audit", () => {
 
   const pages = [
     { path: "/", name: "Home" },
-    { path: "/ai-voices", name: "AI Voices" },
     { path: "/auth/login", name: "Login" },
     { path: "/auth/register", name: "Register" },
     { path: "/auth/callback", name: "Auth Callback" },

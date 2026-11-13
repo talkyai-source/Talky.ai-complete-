@@ -13,8 +13,6 @@
  * instance via `sharedHttpClient()` exported from `lib/api.ts`. The
  * only legitimate `createHttpClient` calls are:
  *   - `lib/api.ts`     — the single instance.
- *   - `app/api/voices/route.ts` — server-side Next.js route handler
- *     (Vercel function, no AuthContext, per-request lifecycle).
  *
  * If this test breaks, route the new caller through `sharedHttpClient()`
  * (preferred) or add an entry to the allowlist with a comment
@@ -33,9 +31,6 @@ const ALLOWLIST = new Set<string>([
     "lib/http-client.ts",
     // Owns the single shared instance (sharedHttpClient).
     "lib/api.ts",
-    // Server-side Next.js API route. Per-request lifecycle; runs on
-    // Vercel functions where AuthContext doesn't exist. Acceptable.
-    "app/api/voices/route.ts",
 ]);
 
 const CALL_PATTERN = /\bcreateHttpClient\s*\(/;
@@ -64,7 +59,7 @@ function walk(dir: string): string[] {
     return out;
 }
 
-test("only api.ts (and the server-side route) call createHttpClient", () => {
+test("only api.ts call createHttpClient", () => {
     const violations: string[] = [];
     for (const file of walk(SRC_DIR)) {
         const rel = path.relative(SRC_DIR, file).replace(/\\/g, "/");

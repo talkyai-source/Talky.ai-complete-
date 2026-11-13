@@ -80,9 +80,16 @@ async def create_ticket(pool, actor: SupportActor, *, request_id: UUID, subject:
                         settings: SupportSettings) -> WriteResult:
     tenant_id = actor.require_tenant()
     now = _now()
+    # The request's content, so the same request_id with another body is refused
+    # instead of replaying the first ticket (QA F2-09). Attachments are a set:
+    # attach_files drops repeats and order, so they cannot make a different request.
+    fingerprint = receipts.body_fingerprint(
+        subject=subject, category=category, description=description, conversation_id=conversation_id,
+        related_campaign_id=related_campaign_id, related_call_id=related_call_id,
+        attachment_ids=sorted({str(attachment_id) for attachment_id in attachment_ids}))
     async with acquire_with_tenant(pool, tenant_id, user_id=actor.user_id) as conn:
         replay = await receipts.claim(conn, tenant_id=tenant_id, request_id=request_id,
-                                      actor_id=actor.user_id, operation="ticket.create")
+                                      actor_id=actor.user_id, operation="ticket.create", fingerprint=fingerprint)
         if replay:
             return WriteResult(replay["response"], 200, replayed=True)
         await _require_owned(conn, "campaigns", related_campaign_id, tenant_id)
@@ -127,7 +134,7 @@ async def create_ticket(pool, actor: SupportActor, *, request_id: UUID, subject:
         ticket = await store.fetch_ticket(conn, ticket_id, tenant_id)
         body = await receipts.save(conn, tenant_id=tenant_id, request_id=request_id, actor_id=actor.user_id,
                                    operation="ticket.create", resource_id=ticket_id, status_code=201,
-                                   response=await _ticket_view(conn, ticket, actor, now))
+                                   response=await _ticket_view(conn, ticket, actor, now), fingerprint=fingerprint)
     return WriteResult(body, 201, effects={"ticket_id": ticket_id, "tenant_id": tenant_id, "priority": priority,
                                             "category": category, "from_conversation": conversation_id is not None})
 
