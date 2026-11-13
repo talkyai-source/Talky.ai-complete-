@@ -48,7 +48,7 @@ from app.core.db_utils import acquire_connection
 from app.domain.interfaces.call_control_adapter import CallControlAdapter
 from app.infrastructure.telephony.adapter_factory import CallControlAdapterFactory
 from app.domain.services.call_guard import CallGuard, GuardDecision, GuardResult
-from app.domain.services.abuse_detection import AbuseDetectionService
+from app.domain.services.abuse_observer import AbuseObserver
 from app.domain.services.call_status import TERMINAL_CALL_STATUSES
 from app.api.v1.schemas.telephony_bridge import TransferPayload
 
@@ -2621,16 +2621,13 @@ async def make_call(request: Request, body: MakeCallRequest):
                 effective_first_speaker,
             )
 
-        # Trigger post-call abuse detection (async)
-        try:
-            detector = AbuseDetectionService(
-                db_pool=container.db_pool,
-                redis_client=getattr(container, "redis", None),
-            )
-            # Note: analyze_call_initiated is for pre-call checks
-            # Post-call analysis happens in call completion handler
-        except Exception as e:
-            logger.warning(f"Failed to initialize abuse detector: {e}")
+        # Record-only abuse detection, off the call path (never awaited here).
+        _spawn_abuse_observation(
+            container,
+            tenant_id=str(effective_tenant_id),
+            phone_number=destination,
+            call_id=durable_call_id,
+        )
 
         return JSONResponse(
             {
@@ -2663,6 +2660,42 @@ async def make_call(request: Request, body: MakeCallRequest):
         if recovery_required and proof is not None and durable_call_id is not None:
             raise _incomplete_origination_error(proof) from exc
         raise HTTPException(status_code=500, detail=safe_exception_message(exc, 'The request could not be completed.'))
+
+
+# Abuse detection is record-only and must never touch a call: it runs as a
+# background task with a hard timeout, and ABUSE_DETECTION_ENABLED=false stops it.
+_ABUSE_OBSERVE_TIMEOUT_S = 5.0
+_abuse_observation_tasks: set[asyncio.Task] = set()
+
+
+async def _observe_abuse(container, tenant_id: str, phone_number: str, call_id: Optional[str]) -> None:
+    try:
+        detector = AbuseObserver(
+            db_pool=container.db_pool,
+            redis_client=getattr(container, "redis", None),
+        )
+        await asyncio.wait_for(
+            detector.observe_outbound_call(tenant_id, phone_number, call_id),
+            timeout=_ABUSE_OBSERVE_TIMEOUT_S,
+        )
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - a detector failure must never surface
+        logger.warning("abuse_observe_failed tenant=%s error=%s", tenant_id[:8], type(exc).__name__)
+
+
+def _spawn_abuse_observation(container, *, tenant_id: str, phone_number: str, call_id: Optional[str]) -> None:
+    try:
+        if os.getenv("ABUSE_DETECTION_ENABLED", "true").strip().lower() in {"0", "false", "no", "off"}:
+            return
+        task = asyncio.create_task(
+            _observe_abuse(container, tenant_id, phone_number, call_id),
+            name="abuse-observe",
+        )
+        _abuse_observation_tasks.add(task)
+        task.add_done_callback(_abuse_observation_tasks.discard)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("abuse_observe_not_started error=%s", type(exc).__name__)
 
 
 async def _verify_call_ownership(ctx: CallerContext, call_id: str) -> None:

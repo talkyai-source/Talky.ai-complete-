@@ -506,7 +506,7 @@ def _install_call_path(
     monkeypatch.setattr(telephony_bridge, "_require_call_authority", AsyncMock())
     monkeypatch.setattr(telephony_bridge, "prepare_prewarmed_session", prewarm)
     monkeypatch.setattr(telephony_bridge, "_get_orchestrator", lambda: Orchestrator())
-    monkeypatch.setattr(telephony_bridge, "AbuseDetectionService", lambda **_kwargs: object())
+    monkeypatch.setattr(telephony_bridge, "_spawn_abuse_observation", lambda *_a, **_k: None)
     monkeypatch.setattr(trunk_resolver, "_resolve_campaign_trunk", resolve_campaign_trunk)
     monkeypatch.setattr(trunk_resolver, "_resolve_pool_assignment", resolve_pool_assignment)
     monkeypatch.setattr(readiness, "is_draining", lambda: False)
