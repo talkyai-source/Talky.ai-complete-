@@ -67,3 +67,40 @@ test("two-party fields are disabled unless the mode is two-party", () => {
     assert.equal((screen.getByLabelText("Spoken notice (two-party)") as HTMLInputElement).disabled, true);
     assert.equal((screen.getByLabelText("Countries needing the notice") as HTMLInputElement).disabled, true);
 });
+
+const TWO_PARTY: RecordingPolicy = { ...ONE_PARTY, default_consent_mode: "two_party" };
+
+test("country list can be typed key by key and is split only on save (forms audit B-F3)", async () => {
+    const saved = render(TWO_PARTY);
+    const box = screen.getByLabelText("Countries needing the notice") as HTMLInputElement;
+    let typed = "";
+    for (const ch of "GB, DE") {
+        typed += ch;
+        fireEvent.change(box, { target: { value: typed } });
+        assert.equal(box.value, typed);
+    }
+    fireEvent.click(screen.getByTestId("recording-policy-save"));
+    await waitFor(() => assert.equal(saved.length, 1));
+    assert.deepEqual(saved[0].two_party_country_codes, ["GB", "DE"]);
+});
+
+test("clearing retention to retype does not snap back; clamps on blur (forms audit B-F17)", () => {
+    render(ONE_PARTY);
+    const box = screen.getByLabelText("Keep for (days)") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "" } });
+    assert.equal(box.value, "");
+    fireEvent.change(box, { target: { value: "5000" } });
+    assert.equal(box.value, "5000");
+    fireEvent.blur(box);
+    assert.equal(box.value, "3650");
+});
+
+test("opt-out key accepts only 0-9, * and # (forms audit B-F18)", () => {
+    render(TWO_PARTY);
+    const box = screen.getByLabelText("Opt-out key") as HTMLInputElement;
+    assert.equal(box.getAttribute("pattern"), "[0-9*#]");
+    fireEvent.change(box, { target: { value: "x" } });
+    assert.equal(box.value, "");
+    fireEvent.change(box, { target: { value: "#" } });
+    assert.equal(box.value, "#");
+});
