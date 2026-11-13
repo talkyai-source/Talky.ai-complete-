@@ -219,7 +219,7 @@ test("renders only on the allow-listed public routes, matched exactly", () => {
         navigate("/docs/getting-started");
         assert.ok(popup(), "a listed docs page is permitted");
         navigate("/ai-options");
-        assert.ok(!popup(), "/ai-options is not permitted by /ai-voices");
+        assert.ok(!popup());
         navigate("/contact/");
         assert.ok(popup(), "the trailing-slash form the production router reports is permitted");
         navigate("/contacts/");

@@ -19,7 +19,6 @@ const viewports = [
 
 const publicRoutes = [
     "/",
-    "/ai-voices",
     "/auth/login",
     "/auth/register",
     "/auth/callback",

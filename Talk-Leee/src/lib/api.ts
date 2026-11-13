@@ -175,10 +175,7 @@ export type HangupCallResponse = z.infer<typeof HangupCallResponseSchema>;
  * automatically picked up everywhere.
  *
  * Lazy-initialised on first read so apiBaseUrl() is resolved AFTER
- * any env-var bootstrap has run. The server-side Next.js route at
- * app/api/voices/route.ts intentionally uses its own short-lived
- * client per request (different lifecycle: Vercel function, no
- * AuthContext) — it's the only legitimate exception.
+ * any env-var bootstrap has run.
  */
 let _sharedHttpClient: ReturnType<typeof createHttpClient> | undefined;
 

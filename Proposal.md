@@ -126,22 +126,6 @@ The outcome for you: **reps only see sales-ready conversations**, with consisten
 
 → [Learn more about Automated Lead Qualification](https://talkleeai.com/use-cases/automated-lead-qualification/)
 
-### AI Voices
-
-A library of natural, human-like AI voices. Preview the available voices before choosing one for your campaign, and turn your voice agent into the voice of your brand.
-
-What's included:
-
-- Preview of each voice before selection
-- Google, Cartesia and Deepgram voices included in every subscription
-- ElevenLabs premium voices as a paid add-on
-- Voice cloning for an authentic brand identity
-- Language options that depend on the voice and model you select
-
-The outcome for you: **a consistent customer experience** across inbound and outbound workflows, in a voice that sounds like your brand.
-
-→ [Learn more about AI Voices](https://talkleeai.com/ai-voices/)
-
 ### White-Label Program
 
 Resell Talk-Lee AI under your own brand with dedicated access, and manage your own customers from the partner area: tenants, analytics, billing and branding. Spots are limited.
@@ -159,7 +143,6 @@ Resell Talk-Lee AI under your own brand with dedicated access, and manage your o
 | AI Assist | One assistant for sales, support and operations with CRM integrations | [AI Assist](https://talkleeai.com/ai-assist/) |
 | Customer Services and Support | 24/7 omnichannel support agent using your knowledge base | [Customer Services and Support](https://talkleeai.com/use-cases/customer-services-support/) |
 | Automated Lead Qualification | Instant engagement, structured qualification, scoring and routing | [Automated Lead Qualification](https://talkleeai.com/use-cases/automated-lead-qualification/) |
-| AI Voices | Natural voice library with previews and voice cloning | [AI Voices](https://talkleeai.com/ai-voices/) |
 | White-Label Program | Resell under your own brand with partner administration | [White-Label Program](https://talkleeai.com/docs/partners/) |
 
 ---
@@ -309,7 +292,6 @@ Talk-Lee AI is operated by Talk-Lee Limited.
 - [AI Voice Agent](https://talkleeai.com/ai-voice-agent/)
 - [AI Voice Dialer](https://talkleeai.com/ai-voice-dialer/)
 - [AI Assist](https://talkleeai.com/ai-assist/)
-- [AI Voices](https://talkleeai.com/ai-voices/)
 - [Use Cases](https://talkleeai.com/use-cases/)
 - [Customer Services and Support](https://talkleeai.com/use-cases/customer-services-support/)
 - [Automated Lead Qualification](https://talkleeai.com/use-cases/automated-lead-qualification/)

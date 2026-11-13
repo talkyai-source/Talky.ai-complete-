@@ -11,17 +11,6 @@ API responses, and placeholder content found in the frontend codebase.
 1. TEST FILES WITH MOCKED FETCH RESPONSES
 ================================================================================
 
-File Path: src/app/ai-voices/page.test.tsx
-Line Range: 29-48
-Description: Mock voice data containing 2 voice objects (Sarah, Michael) with
-properties like id, name, description, initial, color, bg, and previewUrl.
-Used to test voice list rendering after API fetch.
-
-File Path: src/app/ai-voices/page.test.tsx
-Line Range: 90-100
-Description: Single mock voice object (Sarah) used to test play state toggling
-functionality in voice preview component.
-
 File Path: src/components/connectors/connector-card.test.ts
 Line Range: 75-76
 Description: Mock API response with hardcoded authorization URL
@@ -322,25 +311,6 @@ to verify Input component's onChange handler.
 ================================================================================
 4. MOCKS AND MOCK SETUP
 ================================================================================
-
-File Path: src/app/ai-voices/page.test.tsx
-Line Range: 17-20
-Description: Global fetch mock setup returning { ok: true, json: async () => [] }
-for default empty voices array response.
-
-File Path: src/app/ai-voices/page.test.tsx
-Line Range: 50-53
-Description: Global fetch mock override returning mockVoices array in test case
-for voice rendering test.
-
-File Path: src/app/ai-voices/page.test.tsx
-Line Range: 102-105
-Description: Global fetch mock returning single mockVoices array for play state
-toggle test.
-
-File Path: src/app/ai-voices/page.test.tsx
-Line Range: 72-74
-Description: Global fetch mock throwing "API Error" for error handling test case.
 
 File Path: src/lib/http-client.test.ts
 Line Range: 8-11

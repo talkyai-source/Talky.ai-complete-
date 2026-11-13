@@ -25,7 +25,6 @@ export function Navbar() {
   const pathname = usePathname();
   const router = useRouter();
   const isHome = pathname === "/";
-  const isAiVoices = pathname === "/ai-voices" || pathname.startsWith("/ai-voices/");
   const isUseCasesPage = pathname.startsWith("/use-cases");
   const isIndustriesPage = pathname.startsWith("/industries");
   const isProductsPage =
@@ -48,7 +47,7 @@ export function Navbar() {
   const isDocsPage = pathname === "/docs" || pathname.startsWith("/docs/");
   // Every standalone marketing page shares one navbar treatment.
   const isStandalonePage =
-    isAiVoices || isUseCasesPage || isIndustriesPage || isProductsPage || isPricingPage || isContactPage || isBookDemoPage || isLegalPage || isDocsPage;
+    isUseCasesPage || isIndustriesPage || isProductsPage || isPricingPage || isContactPage || isBookDemoPage || isLegalPage || isDocsPage;
   const mobileMenuRef = useRef<HTMLDetailsElement | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { theme, toggleTheme } = useTheme();
