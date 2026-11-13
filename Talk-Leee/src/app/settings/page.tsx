@@ -62,6 +62,9 @@ export default function SettingsPage() {
         setProfileBusiness(user?.business_name ?? "");
     }, [user?.name, user?.business_name]);
 
+    // Only a tenant admin or above may rename the business (the server refuses others).
+    const canEditBusinessName = ["tenant_admin", "partner_admin", "platform_admin", "admin", "owner", "super_admin"].includes(String(user?.role ?? ""));
+
     const profileDirty =
         (user?.name ?? "") !== profileName.trim() ||
         (user?.business_name ?? "") !== profileBusiness.trim();
@@ -284,6 +287,7 @@ export default function SettingsPage() {
                                                     id="profileName"
                                                     value={profileName}
                                                     onChange={(e) => setProfileName(e.target.value)}
+                                                    maxLength={100}
                                                     placeholder="Your full name"
                                                 />
                                             </div>
@@ -293,6 +297,9 @@ export default function SettingsPage() {
                                                     id="profileBusiness"
                                                     value={profileBusiness}
                                                     onChange={(e) => setProfileBusiness(e.target.value)}
+                                                    maxLength={100}
+                                                    readOnly={!canEditBusinessName}
+                                                    disabled={!canEditBusinessName}
                                                     placeholder="Acme Inc."
                                                 />
                                             </div>

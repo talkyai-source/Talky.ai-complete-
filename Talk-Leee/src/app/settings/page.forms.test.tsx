@@ -67,3 +67,18 @@ test("B-F12: a too-small value is clamped to 1200 on blur", () => {
     fireEvent.blur(box);
     assert.deepEqual(settingsCalls, [{ toastDurationMs: 1200 }]);
 });
+
+test("B-F19: a non-admin cannot edit Business name; names are limited to 100", () => {
+    role = "member";
+    render(<Page />);
+    const business = screen.getByLabelText("Business name") as HTMLInputElement;
+    assert.equal(business.disabled, true);
+    assert.equal(business.readOnly, true);
+    assert.equal((screen.getByLabelText("Name") as HTMLInputElement).maxLength, 100);
+    assert.equal(business.maxLength, 100);
+});
+
+test("B-F19: a tenant admin can edit Business name", () => {
+    render(<Page />);
+    assert.equal((screen.getByLabelText("Business name") as HTMLInputElement).disabled, false);
+});
