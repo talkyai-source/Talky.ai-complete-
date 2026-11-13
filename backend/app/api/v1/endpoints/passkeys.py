@@ -54,8 +54,6 @@ from typing import Literal, Any, Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
-from slowapi import Limiter
-from slowapi.util import get_remote_address
 
 from app.api.v1.dependencies import CurrentUser, get_current_user, get_db_client
 from app.core.db_utils import acquire_with_tenant
@@ -76,7 +74,7 @@ from app.core.security.passkeys import (
     verify_authentication,
     verify_registration,
 )
-from app.api.v1.endpoints.auth._shared import issue_cookie_auth
+from app.api.v1.endpoints.auth._shared import issue_cookie_auth, limiter
 from app.core.security.sessions import (
     SESSION_COOKIE_NAME,
     create_session,
@@ -85,9 +83,10 @@ from app.core.security.sessions import (
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Rate limiter
+# Rate limiter: the shared auth limiter, keyed by the real client IP. This
+# module had its own Limiter keyed by get_remote_address, which behind nginx is
+# always the proxy's loopback address: one 10/minute bucket for every visitor.
 # ---------------------------------------------------------------------------
-limiter = Limiter(key_func=get_remote_address)
 
 router = APIRouter(prefix="/auth/passkeys", tags=["passkeys"])
 

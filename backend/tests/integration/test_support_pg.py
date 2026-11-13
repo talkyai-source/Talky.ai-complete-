@@ -39,10 +39,13 @@ async def test_request_id_replay_returns_the_original_result(support_db):
     body = {"request_id": new_request_id(), "subject": "Billing question", "category": "billing",
             "description": "Where do I download invoices?"}
     first = await db.http("a_user", "POST", "/support/tickets", json=body)
-    replay = await db.http("a_user", "POST", "/support/tickets", json={**body, "subject": "Changed"})
+    replay = await db.http("a_user", "POST", "/support/tickets", json=body)
     assert first.status_code == 201 and replay.status_code == 200
     assert replay.headers["Idempotent-Replay"] == "true"
     assert replay.json() == first.json()
+    # The same request_id with other content is refused, not answered with the first ticket (QA F2-09).
+    changed = await db.http("a_user", "POST", "/support/tickets", json={**body, "subject": "Changed"})
+    assert changed.status_code == 409 and changed.json()["error"]["code"] == "request_id_conflict"
     count = await db.owner.fetchval("SELECT count(*) FROM support_tickets WHERE tenant_id = $1", db.tenants["a"])
     assert count == 1
     reused = await db.http("a_user", "POST", f"/support/tickets/{first.json()['id']}/resolve",

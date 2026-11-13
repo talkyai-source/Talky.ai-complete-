@@ -15,7 +15,7 @@ import os
 import uuid
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Literal, Optional, List, Dict, Any
+from typing import Literal, Optional, List, Dict, Any, Sequence
 from dataclasses import dataclass
 
 from app.core.postgres_adapter import Client
@@ -368,6 +368,19 @@ class CampaignService:
             # dedup below prevents double-dialing, so re-entry is safe.
             campaign_was_running = campaign.get("status") == "running"
 
+            # The write that flips the campaign to running is a compare-and-set
+            # against the status read here: of two overlapping starts exactly one
+            # wins it, and the other is "already running" before it can dispatch
+            # (QA F2-09). A campaign read as running has no transition to win (its
+            # repeat Start only repairs the pending outbox) and allow_running
+            # callers re-enter it on purpose, so both keep the plain write.
+            observed_status = campaign.get("status")
+            start_from = (
+                (observed_status,)
+                if observed_status and not (campaign_was_running or allow_running)
+                else None
+            )
+
             # 2. Resolve tenant_id
             tenant_id = tenant_id or campaign.get("tenant_id") or "default-tenant"
 
@@ -418,7 +431,8 @@ class CampaignService:
                 if campaign_was_running and not allow_running:
                     raise CampaignStateError("Campaign is already running")
                 await self._update_campaign_status(
-                    campaign_id, "running", tenant_id=scoping_tenant_id
+                    campaign_id, "running", tenant_id=scoping_tenant_id,
+                    from_statuses=start_from,
                 )
                 return StartCampaignResult(
                     success=True,
@@ -583,10 +597,12 @@ class CampaignService:
                     total_leads=self._restart_total_leads(campaign, len(leads)),
                     tenant_id=scoping_tenant_id,
                     stamp_started_at=not campaign.get("started_at"),
+                    from_statuses=start_from,
                 )
             else:
                 await self._update_campaign_status(
-                    campaign_id, status="running", tenant_id=scoping_tenant_id
+                    campaign_id, status="running", tenant_id=scoping_tenant_id,
+                    from_statuses=start_from,
                 )
 
             # 7a. D3-14: a large start answers now. Every job is already a
@@ -1651,6 +1667,21 @@ class CampaignService:
         rows = getattr(response, "data", None) or []
         return bool(rows) and rows[0].get("status") == "running"
 
+    async def _refuse_lost_start(self, campaign_id, tenant_id, observed_statuses) -> None:
+        """The guarded start UPDATE matched no row: another start won it, or the
+        campaign changed since this start read it. Say which (QA F2-09)."""
+        current = await self.get_campaign(campaign_id, tenant_id=tenant_id)
+        if current.get("direction", "outbound") == "outbound":
+            if current.get("status") == "running":
+                raise CampaignStateError("Campaign is already running")
+            if current.get("status") not in observed_statuses:
+                raise CampaignStateError(
+                    "Campaign changed while it was starting. Check its status and start it again."
+                )
+        raise CampaignDirectionError(
+            "Campaign direction changed; outbound start was refused"
+        )
+
     async def _update_campaign_status(
         self,
         campaign_id: str,
@@ -1658,6 +1689,7 @@ class CampaignService:
         total_leads: Optional[int] = None,
         tenant_id: Optional[str] = None,
         stamp_started_at: bool = True,
+        from_statuses: Optional[Sequence[str]] = None,
     ) -> None:
         """Update campaign status and metadata.
 
@@ -1667,6 +1699,11 @@ class CampaignService:
         the "default-tenant" literal fallback used for job creation — that
         fallback string would not match a real row's tenant_id and would
         silently zero out this update.
+
+        ``from_statuses`` makes the write a compare-and-set: the row changes
+        only while its status is still one of them (start passes the status it
+        read). A miss is refused by ``_refuse_lost_start``; None keeps the
+        plain write.
         """
         update_data = {"status": status}
         if stamp_started_at:
@@ -1682,10 +1719,14 @@ class CampaignService:
         )
         if scoped_tenant:
             query = query.eq("tenant_id", scoped_tenant)
+        if from_statuses is not None:
+            query = query.in_("status", list(from_statuses))
         response = query.eq("direction", "outbound").execute()
         if getattr(response, "error", None):
             raise CampaignError("Failed to update campaign status")
         if not getattr(response, "data", None):
+            if from_statuses is not None:
+                await self._refuse_lost_start(campaign_id, tenant_id, from_statuses)
             raise CampaignDirectionError(
                 "Campaign direction changed; outbound start was refused"
             )

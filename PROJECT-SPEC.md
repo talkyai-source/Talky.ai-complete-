@@ -323,7 +323,7 @@ REST.
 **Authenticated app:** `/dashboard`, `/campaigns` (+ `/new`, `/[id]`, `/[id]/edit`),
 `/calls` (+ `/[id]`), `/recordings`, `/contacts`, `/analytics`, `/billing`
 (+ `/plans`, `/invoices`, `/invoices/[id]`), `/settings`, `/notifications`,
-`/meetings`, `/reminders`, `/email`, `/connectors`, `/ai-options`, `/ai-voices`,
+`/meetings`, `/reminders`, `/email`, `/connectors`, `/ai-options`,
 `/assistant` (+ `/actions`, `/meetings`, `/reminders`)
 
 **Auth:** `/auth/login`, `/auth/register`, `/auth/forgot-password`, `/auth/callback`

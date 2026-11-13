@@ -28,6 +28,7 @@ from app.domain.services.telephony.trunk_runtime import evaluate_trunk_runtime
 from app.infrastructure.metrics.provider_observations import read_recent
 
 IO_TIMEOUT_SECONDS = 0.5
+FAILING_KEY = "talky:healthwatch:failing"  # read by app.core.operational_alerts
 _MAX_TRUNKS = 1000
 _UNAVAILABLE = {"status": "unavailable", "reason": "observation_unavailable"}
 _TRUNK_STATE = """
@@ -230,6 +231,20 @@ async def _redis_client():
                           socket_timeout=1, socket_connect_timeout=1, max_connections=2)
 
 
+async def _record_failing_checks(redis, result):
+    """Name the failing checks for the failure alert (talky-notify@), which
+    alerts again at once when this set changes. Names only, never values."""
+    failing = sorted(key for key, value in result.items()
+                     if key != "provider_error_rate" and value["status"] in {"alert", "unavailable", "unconfigured"})
+    try:
+        if failing:
+            await asyncio.wait_for(redis.set(FAILING_KEY, ",".join(failing), ex=600), IO_TIMEOUT_SECONDS)
+        else:
+            await asyncio.wait_for(redis.delete(FAILING_KEY), IO_TIMEOUT_SECONDS)
+    except Exception:
+        pass
+
+
 async def run():
     pool, redis = None, None
     result = {}
@@ -268,6 +283,7 @@ async def run():
             except Exception:
                 pass
             result.update(await check_database(pool, redis, now=now))
+            await _record_failing_checks(redis, result)
     except TimeoutError:
         result["monitor"] = {"status": "unavailable", "reason": "monitor_deadline_exceeded"}
     finally:

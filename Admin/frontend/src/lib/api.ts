@@ -2070,7 +2070,7 @@ class ApiClient {
 
     // Configuration Endpoints
     // NOTE: there is no /admin/configuration endpoint on the backend yet, so these
-    // will 404 until one is added. SystemConfigPage is not currently routed in App.tsx.
+    // will 404 until one is added. The System Configuration page that used them was removed (QA F1-33).
     async getConfiguration() {
         return this.request<SystemConfiguration>('/admin/configuration');
     }

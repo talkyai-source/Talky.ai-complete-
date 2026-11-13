@@ -34,7 +34,6 @@ const sidebarViewports = [
 
 const auditRoutes = [
     "/",
-    "/ai-voices",
     "/auth/login",
     "/auth/register",
     "/auth/callback",

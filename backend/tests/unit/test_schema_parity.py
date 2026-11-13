@@ -211,3 +211,19 @@ def test_non_disposable_or_non_loopback_target_is_refused_before_any_process(par
     with pytest.raises(parity.ParityError):
         parity.run_parity(dsn, backend_root=BACKEND, output_dir=tmp_path, runner=processes)
     assert processes.calls == []
+
+
+ATTVER = "ALTER TABLE ONLY public.example ALTER COLUMN id SET (pg_attver={});\n"
+
+
+def test_the_per_database_pg_attver_counter_is_not_a_schema_difference(parity):
+    """CI's PostgreSQL 15.20 dumps a per-column pg_attver counter (12 Nov 2026)."""
+    table = "CREATE TABLE public.example (id uuid);\n"
+    assert parity.compare_dumps(table + ATTVER.format(327942592), table + ATTVER.format(338756792)) == ""
+
+
+def test_a_missing_pg_attver_line_or_a_real_option_beside_it_stays_visible(parity):
+    table = "CREATE TABLE public.example (id uuid);\n"
+    assert parity.compare_dumps(table + ATTVER.format(1), table)
+    with_option = "ALTER TABLE ONLY public.example ALTER COLUMN id SET (n_distinct=1, pg_attver={});\n"
+    assert parity.compare_dumps(table + with_option.format(1), table + with_option.format(2))

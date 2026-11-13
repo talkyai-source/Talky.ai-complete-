@@ -26,7 +26,7 @@ export default function BookADemoPage() {
           </div>
           <iframe
             src="https://calendar.google.com/calendar/appointments/schedules/AcZssZ3VEktu7gPGKJcZVfxi45o6GcDdU8RYpSelY9EDJqje_tQn9L6ts1TX0FtnfDH1HyNVeDkBLXM8?gv=true"
-            className="dark:bg-white dark:[filter:invert(1)_hue-rotate(180deg)]"
+            className="bg-white rounded-2xl dark:[filter:invert(1)_hue-rotate(180deg)]"
             style={{ border: 0 }}
             width="100%"
             height={700}

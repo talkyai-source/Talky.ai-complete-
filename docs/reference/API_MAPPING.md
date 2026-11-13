@@ -594,7 +594,6 @@ These paths are intercepted by `app/api/v1/[...path]/route.ts` and handled local
 | `POST` | `/api/v1/email/send` | `sendEmail()` via nodemailer | Local email |
 | `POST` | `/api/v1/billing/webhooks/stripe` | Stripe signature verification | Local billing |
 | `GET`  | `/api/white-label/branding/*` | `app/api/white-label/branding/*` | Local branding |
-| `GET`  | `/api/voices` | Proxies to backend `/voices` or `/ai/voices` | Proxy + map |
 
 ---
 

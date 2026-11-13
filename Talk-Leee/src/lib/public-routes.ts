@@ -16,7 +16,6 @@ export const PUBLIC_ROUTES = [
   "/ai-assist",
   "/ai-voice-agent",
   "/products",
-  "/ai-voices",
   "/contact",
   "/book-a-demo",
   "/pricing",
