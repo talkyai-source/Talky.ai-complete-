@@ -33,7 +33,7 @@ function deferred<T>() {
   const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-async function setup({ strict = false, remember = false, navigationThrows = false } = {}) {
+async function setup({ strict = false, navigationThrows = false } = {}) {
   localStorage.clear(); clearFreshLoginGrace();
   const pending = deferred<typeof response>();
   const seen = { requests: 0, destinations: [] as string[], reloads: 0,
@@ -49,7 +49,6 @@ async function setup({ strict = false, remember = false, navigationThrows = fals
   </PathnameContext.Provider></AppRouterContext.Provider>;
   const view = render(strict ? <StrictMode>{element}</StrictMode> : element);
   await waitFor(() => assert.equal(auth.loading, false));
-  if (remember) fireEvent.click(screen.getByRole("checkbox", { name: "Remember me" }));
   fireEvent.change(screen.getByLabelText("Email"), { target: { value: "a@example.test" } });
   fireEvent.submit(screen.getByLabelText("Email").closest("form")!);
   const password = await screen.findByLabelText("Password", {}, { timeout: 3000 });
@@ -139,7 +138,7 @@ test("actual password HTTP queue rejects an unmounted owner before dispatch", as
 });
 
 test("blocked preference storage cannot interrupt successful cookie-capable sign-in", async () => {
-  const f = await setup({ remember: true }); await submit();
+  const f = await setup(); await submit();
   const blocked = { configurable: true, get() { throw new Error("Synthetic storage unavailable"); } };
   Object.defineProperty(originalWindow, "localStorage", blocked); Object.defineProperty(globalThis, "localStorage", blocked);
   f.pending.resolve(response); await settle();
@@ -203,4 +202,12 @@ test("FX3a2 login: Continue with password and Sign in with passkey", async () =>
   assert.equal(screen.queryByRole("button", { name: "Continue with Password" }) !== null, false);
   assert.equal(screen.queryByRole("button", { name: "Sign in with passkey" }) !== null, true);
   assert.equal(screen.queryByRole("button", { name: "Sign in with Passkey" }) !== null, false);
+});
+
+test("A-F4 sign-in has no Remember me checkbox and stores no such preference", async () => {
+  const f = await setup(); await submit();
+  assert.equal(screen.queryByRole("checkbox"), null);
+  assert.equal(screen.queryByText("Remember me"), null);
+  f.pending.resolve(response); await settle();
+  assert.equal(localStorage.getItem("remember_me"), null);
 });

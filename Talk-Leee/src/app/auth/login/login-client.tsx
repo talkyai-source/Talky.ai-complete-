@@ -105,7 +105,6 @@ export default function LoginClientPage() {
     const [email, setEmail] = useState(searchParams?.get("email") ?? "");
     const [password, setPassword] = useState("");
     const [showPassword, setShowPassword] = useState(false);
-    const [rememberMe, setRememberMe] = useState(false);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [emailError, setEmailError] = useState("");
@@ -190,9 +189,6 @@ export default function LoginClientPage() {
                 // /auth/refresh which sends the cookie via credentials: 'include'.
                 // The legacy localStorage write was Phase A-era plumbing that
                 // never got cleaned up.
-                if (rememberMe) {
-                    try { localStorage.setItem("remember_me", "true"); } catch { /* An optional preference cannot prevent sign-in. */ }
-                }
 
                 // Seed AuthContext.user from the login response BEFORE the
                 // navigation to /dashboard. React 18 batches state updates,
@@ -266,7 +262,7 @@ export default function LoginClientPage() {
                 }
             }
         },
-        [router, rememberMe, applyLoginResult, searchParams],
+        [router, applyLoginResult, searchParams],
     );
 
     // ─── Step navigation ─────────────────────────────────────────────
@@ -487,19 +483,6 @@ export default function LoginClientPage() {
                                                 </p>
                                             )}
                                         </div>
-
-                                        {/* Remember me */}
-                                        <label className="flex items-center gap-2 cursor-pointer select-none">
-                                            <input
-                                                type="checkbox"
-                                                checked={rememberMe}
-                                                onChange={(e) => setRememberMe(e.target.checked)}
-                                                className="h-4 w-4 rounded border-input text-primary focus:ring-ring focus:ring-offset-background accent-primary"
-                                            />
-                                            <span className="text-sm text-muted-foreground">
-                                                Remember me
-                                            </span>
-                                        </label>
 
                                         {error && (
                                             <div
