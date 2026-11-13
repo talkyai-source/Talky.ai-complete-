@@ -109,3 +109,18 @@ test("explicit nonproduction activation is qualification only and does not promi
     await waitFor(() => assert.ok(notificationsStore.getSnapshot().notifications.some(n => /qualification/.test(n.message || ""))));
     assert.equal(notificationsStore.getSnapshot().notifications.some(n => /calls will route/.test(n.message || "")), false);
 });
+
+test("a caller ID that is not a phone number is refused before saving; a valid one is sent (forms audit B-F22)", async () => {
+    const writes = mount(response());
+    await screen.findByRole("heading", { name: "Twilio" });
+    const twilio = within(card("Twilio"));
+    fireEvent.change(twilio.getByLabelText("Account SID"), { target: { value: "ACtest" } });
+    fireEvent.change(twilio.getByLabelText("Caller ID / From number"), { target: { value: "not a number" } });
+    fireEvent.click(twilio.getByRole("button", { name: "Save" }));
+    await waitFor(() => assert.ok(notificationsStore.getSnapshot().notifications.some(n => /should be a phone number/.test(n.message || ""))));
+    assert.equal(writes.length, 0);
+    fireEvent.change(twilio.getByLabelText("Caller ID / From number"), { target: { value: "+15551234567" } });
+    fireEvent.click(twilio.getByRole("button", { name: "Save" }));
+    await waitFor(() => assert.equal(writes.length, 1));
+    assert.equal((writes[0].body as { from_number?: string }).from_number, "+15551234567");
+});
