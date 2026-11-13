@@ -620,6 +620,10 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             setError("Select a voice from the active global TTS provider before saving the campaign.");
             return;
         }
+        if (!formData.name.trim()) {
+            setError("Add a campaign name.");
+            return;
+        }
         const agentNames = parseAgentNames(agentNamesRaw);
         if (agentNames.length === 0) {
             setError("Add at least one agent name (up to three — we rotate per call).");
@@ -660,7 +664,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
         const payload = {
             ...voiceSelection,
-            name: formData.name,
+            name: formData.name.trim(),
             description: formData.description || undefined,
             system_prompt: formData.system_prompt,
             voice_id: formData.voice_id,
