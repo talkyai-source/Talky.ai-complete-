@@ -11,7 +11,7 @@ export default function BillingPage() {
   const { user } = useAuth();
   const scope = user?.tenant_id && user.id ? `${user.tenant_id}:${user.id}` : undefined;
   return (
-    <DashboardLayout title="Billing & usage" description="Manage your plan, minutes, top-ups, invoices, and account activity.">
+    <DashboardLayout title="Billing" description="Manage your plan, minutes, top-ups, invoices, and account activity.">
       {scope && <BillingCheckoutReturn key={scope} scope={scope} />}
       <BillingOverview
         scope={scope}

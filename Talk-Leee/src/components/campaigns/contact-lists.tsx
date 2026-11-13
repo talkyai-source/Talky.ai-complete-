@@ -13,13 +13,15 @@
  * Self-fetching so it can be dropped onto both the /contacts home and the
  * campaign detail page. Fail-soft: a failed fetch shows an inline error strip
  * and never blanks the surrounding page. Toggles are optimistic with
- * revert-on-error + a toast; calls confirm() then toast the result.
+ * revert-on-error + a toast; calls ask in the confirm dialog, then toast the result.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertCircle, Loader2, Phone, Users } from "lucide-react";
+import { Loader2, Phone, Users } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ErrorState, LoadingState } from "@/components/states/page-states";
 import { dashboardApi, ContactList } from "@/lib/dashboard-api";
 import { isApiClientError } from "@/lib/http-client";
 import { useNotificationsActions } from "@/lib/notifications-client";
@@ -67,6 +69,8 @@ export function ContactLists({
     const [error, setError] = useState("");
     const [togglingId, setTogglingId] = useState<string | null>(null);
     const [callingId, setCallingId] = useState<string | null>(null);
+    // The list the "Call this list" dialog is asking about.
+    const [callTarget, setCallTarget] = useState<ContactList | null>(null);
     const readiness = useCampaignReadiness([campaignId], lists.some((list) => list.id !== UNGROUPED_LIST_ID));
 
     // Keep callbacks in refs so they aren't effect dependencies (parents often
@@ -82,9 +86,11 @@ export function ContactLists({
             setLoading(true);
             setError("");
             const data = await dashboardApi.listContactLists(campaignId);
-            setLists(Array.isArray(data) ? data : []);
-        } catch (err) {
-            setError(errText(err, "Failed to load contact lists"));
+            // An answer that is not a list is a failed read, not an empty one.
+            if (!Array.isArray(data)) throw new Error("Failed to load contact lists");
+            setLists(data);
+        } catch {
+            setError("Failed to load contact lists");
         } finally {
             setLoading(false);
         }
@@ -131,11 +137,6 @@ export function ContactLists({
 
     async function handleCall(list: ContactList) {
         if (list.id === UNGROUPED_LIST_ID || callingId || !readiness.ready) return;
-        const ok = window.confirm(
-            `Call all eligible contacts in “${list.name}” now?\n\n` +
-            "This places REAL outbound calls immediately — just like starting the campaign.",
-        );
-        if (!ok) return;
         setCallingId(list.id);
         try {
             const res = await dashboardApi.callContactList(list.id);
@@ -174,23 +175,12 @@ export function ContactLists({
     }
 
     if (loading) {
-        return (
-            <div className="flex items-center gap-2 rounded-2xl border border-border bg-muted/30 px-4 py-6 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" /> Loading contact lists…
-            </div>
-        );
+        return <LoadingState title="Loading contact lists…" />;
     }
 
-    // Fail-soft: an error strip, but never a blanked page.
+    // Fail-soft: an error state in this panel, but never a blanked page.
     if (error) {
-        return (
-            <div className="flex items-center justify-between gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">
-                <span className="flex items-center gap-2">
-                    <AlertCircle className="h-4 w-4 shrink-0" /> {error}
-                </span>
-                <Button variant="outline" size="sm" onClick={() => void load()}>Retry</Button>
-            </div>
-        );
+        return <ErrorState message={error} onRetry={load} />;
     }
 
     if (lists.length === 0) return null;
@@ -279,7 +269,7 @@ export function ContactLists({
                                         size="sm"
                                         variant={active ? "default" : "outline"}
                                         disabled={Boolean(callingId) || !readiness.ready}
-                                        onClick={() => void handleCall(list)}
+                                        onClick={() => setCallTarget(list)}
                                     >
                                         {callingId === list.id ? (
                                             <Loader2 className="h-4 w-4 animate-spin" />
@@ -299,6 +289,22 @@ export function ContactLists({
                     );
                 })}
             </div>
+            {/* handleCall reports its own result as a toast and never rejects,
+                so the dialog closes once the request has answered. */}
+            <ConfirmDialog
+                open={callTarget !== null}
+                onOpenChange={(open) => { if (!open) setCallTarget(null); }}
+                intent="cancel"
+                title="Call this list"
+                description=""
+                warningText={callTarget
+                    ? `Call all eligible contacts in “${callTarget.name}” now?\n\n` +
+                      "This places REAL outbound calls immediately — just like starting the campaign."
+                    : ""}
+                className="whitespace-pre-line"
+                confirmLabel="Call this list"
+                onConfirm={() => (callTarget ? handleCall(callTarget) : undefined)}
+            />
         </div>
     );
 }

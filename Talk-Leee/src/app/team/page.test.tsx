@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import Module from "node:module";
 import { afterEach, mock, test } from "node:test";
 import React from "react";
+import { z } from "zod";
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { backendApi } from "@/lib/backend-api";
 import type { RbacRole, TenantMember } from "@/lib/models";
@@ -142,6 +143,27 @@ test("a tenant admin reads active, pending and suspended members and sees every 
     // Already suspended: Deactivate has nothing to do.
     assert.equal(row("tu-5").getByRole("button", { name: "Deactivate" }).hasAttribute("disabled"), true);
     assert.equal(row("tu-5").getByRole("button", { name: "Remove" }).hasAttribute("disabled"), false);
+});
+
+test("FX2b4: a member read that fails with a JavaScript error shows 'Please retry.', never the raw text", async () => {
+    currentUser = TENANT_ADMIN;
+    mock.method(backendApi.team, "members", async () => (undefined as unknown as TenantMember[]).map((item) => item));
+    mockRoles();
+    renderWithQueryClient(<Page />);
+
+    await waitFor(() => assert.ok(screen.getByRole("alert")), { timeout: SLOW });
+    assert.equal(screen.getByRole("alert").textContent, "Please retry.");
+    present(screen.queryByRole("button", { name: "Retry" }));
+});
+
+test("FX2b4: a roles answer the app could not read shows 'Please retry.', never the validation dump", async () => {
+    currentUser = TENANT_ADMIN;
+    mockMembers();
+    mock.method(backendApi.team, "roles", async () => { throw new z.ZodError([{ code: "custom", path: [], message: "Invalid input: expected array" }]); });
+    renderWithQueryClient(<Page />);
+
+    const box = await screen.findByTestId("team-roles-error", undefined, { timeout: SLOW });
+    assert.equal(box.textContent, "Please retry.");
 });
 
 test("a failed read shows the server's message in the error state and never a list", async () => {

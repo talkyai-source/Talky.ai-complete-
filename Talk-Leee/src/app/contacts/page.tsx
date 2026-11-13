@@ -8,6 +8,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { dashboardApi, Campaign, Contact } from "@/lib/dashboard-api";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
+import { humanizeOutcome } from "@/lib/call-outcome-label";
+import { checkCampaignList, checkContactsPage } from "@/lib/contacts-response";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
@@ -38,7 +42,6 @@ import {
     X,
 } from "lucide-react";
 import { motion } from "framer-motion";
-import Link from "next/link";
 
 const MAX_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
 const MAX_ROWS = 50_000;
@@ -159,7 +162,7 @@ function parseCsvText(text: string, country: CountrySelection): ParseSummary {
             valid: 0,
             invalid: 0,
             headerError: headers.length
-                ? `Couldn't find a phone column. Found: ${headers.join(", ")}. Add a column like 'phone_number', 'Phone', 'Mobile', or 'To Number'.`
+                ? `Couldn't find a phone column. Found: ${headers.join(", ")}. Add a column like 'phone number', 'Phone', 'Mobile', or 'To Number'.`
                 : "File is empty.",
         };
     }
@@ -179,7 +182,7 @@ function parseCsvText(text: string, country: CountrySelection): ParseSummary {
         let error: string | undefined;
         if (!numbers.ok) error = numbers.error;
         else if (!isLikelyValidEmail(email)) error = "email looks invalid";
-        else if (seen.has(e164)) error = "duplicate phone_number in this file";
+        else if (seen.has(e164)) error = "duplicate phone number in this file";
 
         if (!error) seen.add(e164);
         const ok = !error;
@@ -241,6 +244,8 @@ export default function ContactsPage() {
     const [sentRowMap, setSentRowMap] = useState<Map<number, number>>(() => new Map());
     const [error, setError] = useState("");
     const [loading, setLoading] = useState(true);
+    // A failed campaign-list read is its own state: it is never an empty list.
+    const [campaignsError, setCampaignsError] = useState("");
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Contacts-home state. `campaignHasContacts` (recomputed only on UNFILTERED
@@ -267,6 +272,12 @@ export default function ContactsPage() {
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
     const [savingContact, setSavingContact] = useState(false);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
+    // A failed add / edit, shown in the form it came from.
+    const [contactFormError, setContactFormError] = useState("");
+    // The contact the Remove contact dialog is asking about.
+    const [removeTarget, setRemoveTarget] = useState<{ id: string; phone: string } | null>(null);
+    // A failed delete, shown in the row it came from.
+    const [contactDeleteError, setContactDeleteError] = useState<{ id: string; message: string } | null>(null);
 
     const parsed = useMemo(
         () => (fileText === null ? null : parseCsvText(fileText, importCountry)),
@@ -289,14 +300,15 @@ export default function ContactsPage() {
     async function loadCampaigns() {
         try {
             setLoading(true);
-            const data = await dashboardApi.listCampaigns();
+            setCampaignsError("");
+            const data = checkCampaignList(await dashboardApi.listCampaigns());
             const outbound = outboundCampaignsOnly(data.campaigns);
             setCampaigns(outbound);
             if (outbound.length > 0) {
                 setSelectedCampaign(outbound[0].id);
             }
         } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to load campaigns");
+            setCampaignsError(failedReadMessage(err, "Failed to load campaigns"));
         } finally {
             setLoading(false);
         }
@@ -342,19 +354,21 @@ export default function ContactsPage() {
         const superseded = () => seq !== contactsRequestSeq.current;
         try {
             setContactsLoading(true);
-            setContactsError("");
-            const res = await dashboardApi.listContacts(selectedCampaign, 1, 50, {
+            // A previous failure stays on screen until a read succeeds, so a
+            // retry never flashes the empty-campaign layout.
+            const res = checkContactsPage(await dashboardApi.listContacts(selectedCampaign, 1, 50, {
                 listId: selectedListId,
                 search: debouncedSearch,
-            });
+            }), selectedCampaign);
             if (superseded()) return;
+            setContactsError("");
             setContacts(res.items);
             // Only an UNFILTERED load is authoritative for "does this campaign
             // have any contacts at all".
             if (unfiltered) setCampaignHasContacts(res.total > 0);
         } catch (err) {
             if (superseded()) return;
-            setContactsError(err instanceof Error ? err.message : "Failed to load contacts");
+            setContactsError(failedReadMessage(err, "Failed to load contacts"));
         } finally {
             if (!superseded()) {
                 setContactsLoading(false);
@@ -377,6 +391,7 @@ export default function ContactsPage() {
         if (!contactFormValid) return;
         try {
             setSavingContact(true);
+            setContactFormError("");
             const payload = contactPayload(contactForm, formCountry);
             if (editingContact) {
                 await dashboardApi.updateContact(selectedCampaign, editingContact.id, payload);
@@ -391,13 +406,14 @@ export default function ContactsPage() {
             setListsRefreshToken((t) => t + 1);
             await loadContacts();
         } catch (err) {
-            alert(err instanceof Error ? err.message : `Failed to ${editingContact ? "update" : "add"} contact`);
+            setContactFormError(err instanceof Error ? err.message : `Failed to ${editingContact ? "update" : "add"} contact`);
         } finally {
             setSavingContact(false);
         }
     }
 
     function startAddContact() {
+        setContactFormError("");
         setEditingContact(null);
         setContactForm(EMPTY_CONTACT_FORM);
         setShowContactDetails(false);
@@ -405,6 +421,7 @@ export default function ContactsPage() {
     }
 
     function closeContactForm() {
+        setContactFormError("");
         setShowAddContact(false);
         setShowContactDetails(false);
         setEditingContact(null);
@@ -416,6 +433,7 @@ export default function ContactsPage() {
         const mobileNumber = contact.mobile_number && contact.mobile_number !== contact.phone_number
             ? contact.mobile_number
             : "";
+        setContactFormError("");
         setEditingContact(contact);
         setContactForm({
             phone_number: contact.phone_number || "",
@@ -446,16 +464,18 @@ export default function ContactsPage() {
         setShowAddContact(true);
     }
 
-    async function handleDeleteContact(contactId: string, phone: string) {
-        if (!confirm(`Remove ${phone} from this campaign? It will no longer be dialed.`)) return;
+    // Runs from the Remove contact dialog's confirm button. A failure is shown
+    // in the contact's own row, so the dialog always closes.
+    async function removeContact(contactId: string) {
         try {
+            setContactDeleteError(null);
             setDeletingContactId(contactId);
             await dashboardApi.deleteContact(selectedCampaign, contactId);
             setContacts((prev) => prev.filter((c) => c.id !== contactId));
             setListsRefreshToken((t) => t + 1);
             loadContacts().catch(() => {});
         } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to delete contact");
+            setContactDeleteError({ id: contactId, message: err instanceof Error ? err.message : "Failed to delete contact" });
         } finally {
             setDeletingContactId(null);
         }
@@ -743,7 +763,7 @@ export default function ContactsPage() {
 
                             <div className="group rounded-2xl border border-border bg-muted/60 p-4 shadow-sm">
                                 <h4 className="text-sm font-semibold text-foreground mb-2">CSV Format</h4>
-                                <p className="text-xs text-muted-foreground mb-2">Required column: <span className="font-semibold text-foreground">phone_number</span>. Use either <span className="font-semibold text-foreground">full_name</span> or <span className="font-semibold text-foreground">first_name, last_name</span>; email and company_name are optional. Extra columns are stored as custom fields.</p>
+                                <p className="text-xs text-muted-foreground mb-2">Required column: <span className="font-semibold text-foreground">phone number</span>. Use either <span className="font-semibold text-foreground">full name</span> or <span className="font-semibold text-foreground">first name, last name</span>; email and company name are optional. Extra columns are stored as custom fields.</p>
                                 <code className="inline-flex rounded-lg border border-border bg-background/70 px-2 py-1 text-xs font-semibold text-foreground">
                                     phone_number,full_name,email,company_name
                                 </code>
@@ -825,7 +845,7 @@ export default function ContactsPage() {
                                 {uploading ? (
                                     <><Loader2 className="w-4 h-4 animate-spin" />Uploading...</>
                                 ) : (
-                                    <><Upload className="w-4 h-4" />{parsed?.valid ? `Upload ${parsed.valid.toLocaleString()} contacts` : "Upload Contacts"}</>
+                                    <><Upload className="w-4 h-4" />{parsed?.valid ? `Upload ${parsed.valid.toLocaleString()} ${parsed.valid === 1 ? "contact" : "contacts"}` : "Upload Contacts"}</>
                                 )}
                             </Button>
                         </div>
@@ -852,7 +872,7 @@ export default function ContactsPage() {
                             {result && (
                             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
                                 <div className="rounded-2xl border border-border bg-muted/60 p-3 text-center shadow-sm">
-                                    <p className="text-2xl font-black tabular-nums text-foreground">{result.total_rows}</p>
+                                    <p className="text-2xl font-black tabular-nums text-foreground">{result.total_rows + rejectedRows.length}</p>
                                     <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Total Rows</p>
                                 </div>
                                 <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-center shadow-sm">
@@ -864,7 +884,7 @@ export default function ContactsPage() {
                                     <p className="text-xs font-semibold uppercase tracking-wide text-yellow-700/80 dark:text-yellow-300/80">Duplicates</p>
                                 </div>
                                 <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-center shadow-sm">
-                                    <p className="text-2xl font-black tabular-nums text-red-700 dark:text-red-300">{result.failed}</p>
+                                    <p className="text-2xl font-black tabular-nums text-red-700 dark:text-red-300">{result.failed + rejectedRows.length}</p>
                                     <p className="text-xs font-semibold uppercase tracking-wide text-red-700/80 dark:text-red-300/80">Failed</p>
                                 </div>
                             </div>
@@ -873,7 +893,7 @@ export default function ContactsPage() {
                             {result && result.imported > 0 && (
                                 <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-emerald-700 dark:text-emerald-300">
                                     <CheckCircle className="h-4 w-4" />
-                                    Successfully imported {result.imported} contacts
+                                    Successfully imported {result.imported} {result.imported === 1 ? "contact" : "contacts"}
                                 </div>
                             )}
 
@@ -1141,6 +1161,9 @@ export default function ContactsPage() {
                 )}
             </div>
 
+            {contactFormError ? (
+                <p role="alert" className="mb-3 text-sm text-destructive">{contactFormError}</p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
                 <Button type="submit" size="sm" disabled={savingContact || !contactFormValid}>
                     {savingContact ? <Loader2 className="h-4 w-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
@@ -1157,27 +1180,30 @@ export default function ContactsPage() {
     return (
         <DashboardLayout title="Contacts" description="Import and manage the contacts for your campaigns">
             {loading ? (
-                <div className="flex h-64 items-center justify-center" role="status" aria-live="polite">
-                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" aria-hidden />
-                    <span className="sr-only">Loading campaigns…</span>
+                <div className="max-w-5xl">
+                    <LoadingState title="Loading campaigns…" />
+                </div>
+            ) : campaignsError ? (
+                <div className="max-w-5xl">
+                    <ErrorState message={campaignsError} onRetry={loadCampaigns} />
                 </div>
             ) : campaigns.length === 0 ? (
                 <div className="max-w-5xl space-y-6">
                     <ContactRequirementsGuide />
-                    <div className="content-card text-center">
-                        <h2 className="text-lg font-bold text-foreground">Create a campaign first</h2>
-                        <p className="mx-auto mt-2 max-w-xl text-sm text-muted-foreground">
-                            Every contact belongs to a campaign so calls, recordings, and results stay organised in the right workspace.
-                        </p>
-                        <Button asChild className="mt-5">
-                            <Link href="/campaigns">Create a campaign</Link>
-                        </Button>
-                    </div>
+                    <EmptyState
+                        title="Create a campaign first"
+                        message="Every contact belongs to a campaign so calls, recordings, and results stay organised in the right workspace."
+                        primaryActionLabel="Create a campaign"
+                        primaryActionHref="/campaigns"
+                    />
                 </div>
             ) : !firstLoadDone ? (
-                <div className="flex h-64 items-center justify-center" role="status" aria-live="polite">
-                    <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" aria-hidden />
-                    <span className="sr-only">Loading contacts…</span>
+                <div className="max-w-5xl">
+                    <LoadingState title="Loading contacts…" />
+                </div>
+            ) : contactsError && !campaignHasContacts ? (
+                <div className="max-w-5xl">
+                    <ErrorState message={contactsError} onRetry={loadContacts} />
                 </div>
             ) : campaignHasContacts ? (
                 // ─────────────── Contacts HOME ───────────────
@@ -1284,21 +1310,12 @@ export default function ContactsPage() {
 
                         {contactEditor}
 
-                        {contactsError && (
-                            <div role="alert" className="mb-4 flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-                                <AlertCircle className="h-4 w-4" /> {contactsError}
-                            </div>
-                        )}
-
-                        {contactsLoading ? (
-                            <div className="flex items-center justify-center py-10" role="status" aria-live="polite">
-                                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden />
-                                <span className="sr-only">Loading contacts…</span>
-                            </div>
+                        {contactsError ? (
+                            <ErrorState message={contactsError} onRetry={loadContacts} />
+                        ) : contactsLoading ? (
+                            <LoadingState title="Loading contacts…" />
                         ) : contacts.length === 0 ? (
-                            <div className="py-10 text-center text-muted-foreground">
-                                No contacts match your search or filter.
-                            </div>
+                            <EmptyState kind="search" title="No contacts match your search or filter." />
                         ) : (
                             <>
                             <div className="space-y-3 md:hidden">
@@ -1332,7 +1349,7 @@ export default function ContactsPage() {
                                                     </span>
                                                 ) : (
                                                     <span className="shrink-0 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                                                        {contact.last_call_result || contact.status}
+                                                        {humanizeOutcome(contact.last_call_result || contact.status)}
                                                     </span>
                                                 )}
                                             </div>
@@ -1349,7 +1366,7 @@ export default function ContactsPage() {
                                                 </button>
                                                 <button
                                                     type="button"
-                                                    onClick={() => handleDeleteContact(contact.id, contact.phone_number)}
+                                                    onClick={() => setRemoveTarget({ id: contact.id, phone: contact.phone_number })}
                                                     disabled={deletingContactId === contact.id}
                                                     aria-label={`Delete ${contact.phone_number}`}
                                                     className="inline-flex h-11 w-11 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-destructive/30 hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
@@ -1357,6 +1374,9 @@ export default function ContactsPage() {
                                                     {deletingContactId === contact.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Trash2 className="h-4 w-4" aria-hidden />}
                                                 </button>
                                             </div>
+                                            {contactDeleteError?.id === contact.id ? (
+                                                <p role="alert" className="mt-2 text-sm text-destructive">{contactDeleteError.message}</p>
+                                            ) : null}
                                         </article>
                                     );
                                 })}
@@ -1402,7 +1422,7 @@ export default function ContactsPage() {
                                                         </span>
                                                     ) : (
                                                         <span className="rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                                                            {contact.last_call_result || contact.status}
+                                                            {humanizeOutcome(contact.last_call_result || contact.status)}
                                                         </span>
                                                     )}
                                                 </td>
@@ -1419,7 +1439,7 @@ export default function ContactsPage() {
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleDeleteContact(contact.id, contact.phone_number)}
+                                                            onClick={() => setRemoveTarget({ id: contact.id, phone: contact.phone_number })}
                                                             disabled={deletingContactId === contact.id}
                                                             aria-label={`Delete ${contact.phone_number}`}
                                                             title="Remove contact"
@@ -1428,6 +1448,9 @@ export default function ContactsPage() {
                                                             {deletingContactId === contact.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
                                                         </button>
                                                     </div>
+                                                    {contactDeleteError?.id === contact.id ? (
+                                                        <p role="alert" className="mt-1 whitespace-normal text-xs text-destructive">{contactDeleteError.message}</p>
+                                                    ) : null}
                                                 </td>
                                             </tr>
                                         ))}
@@ -1442,11 +1465,6 @@ export default function ContactsPage() {
                 // ─────────────── Empty campaign: add one or import many ───────────────
                 <div className="max-w-5xl space-y-6">
                     <ContactRequirementsGuide />
-                    {contactsError && (
-                        <div role="alert" className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
-                            <AlertCircle className="h-4 w-4" /> {contactsError}
-                        </div>
-                    )}
                     <motion.div
                         initial={{ opacity: 0, y: 10 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -1476,6 +1494,16 @@ export default function ContactsPage() {
                     {resultCard}
                 </div>
             )}
+            <ConfirmDialog
+                open={removeTarget !== null}
+                onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}
+                intent="delete"
+                title="Remove contact"
+                description=""
+                warningText={removeTarget ? `Remove ${removeTarget.phone} from this campaign? It will no longer be dialed.` : ""}
+                confirmLabel="Remove contact"
+                onConfirm={() => (removeTarget ? removeContact(removeTarget.id) : undefined)}
+            />
         </DashboardLayout>
     );
 }

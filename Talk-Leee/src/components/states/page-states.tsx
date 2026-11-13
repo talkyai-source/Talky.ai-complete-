@@ -16,6 +16,30 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { ZodError } from "zod";
+
+/** ErrorState's own default message, for callers that have to fall back to it. */
+export const ERROR_STATE_DEFAULT_MESSAGE = "Please retry.";
+
+const JS_ERROR_NAMES = new Set(["TypeError", "ReferenceError", "RangeError", "SyntaxError", "EvalError", "URIError"]);
+
+/**
+ * The message for a failed read. An answer the app could not read fails schema
+ * validation; that dump is never shown, the default message is.
+ */
+export function failedReadMessage(err: unknown, fallback: string = ERROR_STATE_DEFAULT_MESSAGE): string {
+    if (err instanceof ZodError) return ERROR_STATE_DEFAULT_MESSAGE;
+    // A JavaScript error (the answer did not have the expected shape) is not a
+    // server message either.
+    if (err instanceof Error && JS_ERROR_NAMES.has(err.name)) return ERROR_STATE_DEFAULT_MESSAGE;
+    // No server answered: the text is the browser's own, not a server message.
+    if (err instanceof Error && (err as { code?: unknown }).code === "network_error") return ERROR_STATE_DEFAULT_MESSAGE;
+    // The app's own "this answer is not valid" sentence is not a server message.
+    if (err instanceof Error && (err as { code?: unknown }).code === "invalid_response") return ERROR_STATE_DEFAULT_MESSAGE;
+    // The app's own time limit ran out ("Request timed out"): not a server message either.
+    if (err instanceof Error && (err as { code?: unknown }).code === "timeout") return ERROR_STATE_DEFAULT_MESSAGE;
+    return err instanceof Error && err.message ? err.message : fallback;
+}
 
 function SkeletonBlock({
     className,
@@ -131,7 +155,7 @@ export function LoadingState({
     lines?: number;
 }) {
     return (
-        <Card>
+        <Card role="status">
             <CardHeader>
                 <CardTitle>{title}</CardTitle>
                 {description ? <CardDescription>{description}</CardDescription> : null}
@@ -145,7 +169,7 @@ export function LoadingState({
 
 export function ErrorState({
     title = "Something went wrong",
-    message = "Please retry.",
+    message = ERROR_STATE_DEFAULT_MESSAGE,
     onRetry,
     retryLabel = "Retry",
     supportHref,
@@ -258,7 +282,7 @@ export function EmptyState({
     className,
 }: {
     title: string;
-    message: string;
+    message?: string;
     kind?: "generic" | "search" | "inbox" | "email" | "uploads" | "connectors";
     hint?: string;
     primaryActionLabel?: string;
@@ -301,7 +325,7 @@ export function EmptyState({
                     </div>
                     <div className="min-w-0">
                         <CardTitle>{title}</CardTitle>
-                        <CardDescription>{message}</CardDescription>
+                        {message ? <CardDescription>{message}</CardDescription> : null}
                         {hint ? <div className="mt-2 text-sm text-muted-foreground">{hint}</div> : null}
                     </div>
                 </div>

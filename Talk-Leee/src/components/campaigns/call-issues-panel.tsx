@@ -18,6 +18,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
+import { ErrorState } from "@/components/states/page-states";
 import {
     AlertTriangle, AlertCircle, Info, Clock, ChevronDown, ChevronRight, RefreshCw,
 } from "lucide-react";
@@ -142,6 +143,8 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
     const [error, setError] = useState<string | null>(null);
     const [open, setOpen] = useState(false);
     const [openGroups, setOpenGroups] = useState<Record<string, boolean>>({});
+    // Bumped by Retry: restarts the poll at once after a failed read.
+    const [retryToken, setRetryToken] = useState(0);
     useEffect(() => {
         let cancelled = false;
         let timer: number | undefined;
@@ -150,6 +153,8 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
             try {
                 const res = await api.listCallIssues({ campaignId, direction });
                 if (cancelled) return;
+                // An answer without an items list is a failed read, not an empty one.
+                if (!Array.isArray(res?.items)) throw new Error("Failed to load call issues");
                 setItems(res.items);
                 setError(null);
             } catch (err) {
@@ -168,7 +173,7 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
             cancelled = true;
             if (timer !== undefined) window.clearTimeout(timer);
         };
-    }, [campaignId, direction]);
+    }, [campaignId, direction, retryToken]);
 
     const groups = useMemo(() => groupIssues(items), [items]);
     const worst = groups[0]?.severity ?? "info";
@@ -180,6 +185,10 @@ function CallIssuesPanelScope({ campaignId, direction, title = "Call issues" }: 
     // reporting an issue — the panel is live, not sticky).
     if (loaded && items.length === 0 && !error) return null;
     if (!loaded && items.length === 0) return null;
+    // Nothing was read at all: a failed read with Retry, not an empty issues bar.
+    if (error && items.length === 0) {
+        return <ErrorState message="Failed to load call issues" onRetry={() => setRetryToken((t) => t + 1)} />;
+    }
 
     const headLook = severityLook(worst);
 

@@ -6,7 +6,7 @@ import { useCallback, useId, useState } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ERROR_STATE_DEFAULT_MESSAGE, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { AttachmentPicker } from "@/components/support/attachment-picker";
 import { RatingCard } from "@/components/support/rating-card";
 import { SupportPageGate } from "@/components/support/support-unavailable";
@@ -150,7 +150,7 @@ function TicketLoader({ ticketId, config }: { ticketId: string; config: SupportC
     const query = useTicket(ticketId, true);
     if (query.isPending) return <LoadingState title="Loading ticket" />;
     if (query.error || !query.data) {
-        return <ErrorState title="This ticket could not be loaded" message={query.error ? describeSupportError(query.error) : "Retry in a moment."} onRetry={() => void query.refetch()} actionHref="/support/tickets" actionLabel="Back to tickets" />;
+        return <ErrorState title="This ticket could not be loaded" message={query.error ? (failedReadMessage(query.error) === ERROR_STATE_DEFAULT_MESSAGE ? ERROR_STATE_DEFAULT_MESSAGE : describeSupportError(query.error)) : "Retry in a moment."} onRetry={() => void query.refetch()} actionHref="/support/tickets" actionLabel="Back to tickets" />;
     }
     return <TicketView ticket={query.data} config={config} refetch={query.refetch} />;
 }

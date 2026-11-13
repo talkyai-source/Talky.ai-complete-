@@ -134,7 +134,9 @@ function mapDevice(s: SessionInfoApi): Device {
  */
 export async function getActiveSessions(_token?: string): Promise<Device[]> {
   const payload = await api.getActiveSessions();
-  return (payload.sessions ?? []).map((s) => mapDevice(s as unknown as SessionInfoApi));
+  // An answer without its session list is a failed read, not "no devices".
+  if (!Array.isArray(payload?.sessions)) throw new Error();
+  return payload.sessions.map((s) => mapDevice(s as unknown as SessionInfoApi));
 }
 
 /**

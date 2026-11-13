@@ -42,7 +42,7 @@ function startRegistration() {
     input("Your Name", "Person");
     input("Business Name", "Example Company");
     input("Work Email", "Person@example.test");
-    fireEvent.click(screen.getByRole("button", { name: "Get Started" }));
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
 }
 
 test("failed delivery and duplicate signup stay on the account form and permit retry", async () => {
@@ -56,12 +56,12 @@ test("failed delivery and duplicate signup stay on the account form and permit r
     renderPage(<RegisterPage />);
     startRegistration();
     assert.match((await screen.findByRole("alert")).textContent!, /Could not send/);
-    assert.equal(screen.queryByLabelText("Verification Code"), null);
-    fireEvent.click(screen.getByRole("button", { name: "Get Started" }));
+    assert.equal(screen.queryByLabelText("Verification code") !== null, false);
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
     await waitFor(() => assert.match(screen.getByRole("alert").textContent!, /already registered/));
     assert.equal(screen.getByRole("link", { name: "Sign in" }).getAttribute("href"), "/auth/login");
-    fireEvent.click(screen.getByRole("button", { name: "Get Started" }));
-    await screen.findByLabelText("Verification Code");
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+    await screen.findByLabelText("Verification code");
     assert.match(screen.getByText(/Enter the verification code sent to/).textContent!, /person@example.test/);
 });
 
@@ -70,15 +70,15 @@ test("expired signup code remains recoverable and successful resend clears the o
     const verify = mock.method(api, "signupVerifyCode", async () => { throw new Error("Invalid or expired verification code."); });
     renderPage(<RegisterPage />);
     startRegistration();
-    await screen.findByLabelText("Verification Code");
-    input("Verification Code", "123");
+    await screen.findByLabelText("Verification code");
+    input("Verification code", "123");
     assert.equal((screen.getByRole("button", { name: "Next" }) as HTMLButtonElement).disabled, true);
-    input("Verification Code", "123456");
+    input("Verification code", "123456");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     assert.match((await screen.findByRole("alert")).textContent!, /expired/);
     assert.deepEqual(verify.mock.calls[0]?.arguments, ["person@example.test", "123456"]);
     fireEvent.click(screen.getByRole("button", { name: /Resend/ }));
-    await waitFor(() => assert.equal((screen.getByLabelText("Verification Code") as HTMLInputElement).value, ""));
+    await waitFor(() => assert.equal((screen.getByLabelText("Verification code") as HTMLInputElement).value, ""));
     assert.equal(screen.queryByLabelText("Password"), null);
 });
 
@@ -88,17 +88,17 @@ test("signup completion expiry lets the user return and request a new code witho
     mock.method(api, "signupComplete", async () => { throw new Error("Signup session expired. Please start again."); });
     renderPage(<RegisterPage />);
     startRegistration();
-    await screen.findByLabelText("Verification Code");
-    input("Verification Code", "123456");
+    await screen.findByLabelText("Verification code");
+    input("Verification code", "123456");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     await screen.findByLabelText("Password");
     input("Password", "a secure password");
     input("Confirm Password", "a secure password");
-    fireEvent.click(screen.getByRole("button", { name: "Create Account" }));
+    fireEvent.click(screen.getByRole("button", { name: "Create account" }));
     assert.match((await screen.findByRole("alert")).textContent!, /session expired/);
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     fireEvent.click(screen.getByRole("button", { name: /Resend/ }));
-    await waitFor(() => assert.equal((screen.getByLabelText("Verification Code") as HTMLInputElement).value, ""));
+    await waitFor(() => assert.equal((screen.getByLabelText("Verification code") as HTMLInputElement).value, ""));
     assert.match(screen.getByText(/Enter the verification code sent to/).textContent!, /person@example.test/);
 });
 
@@ -110,16 +110,16 @@ test("recovery uses honest request wording and permits a new code after expiry",
         return { message: "If an account exists, a reset code has been requested." };
     });
     renderPage(<ForgotPasswordPage />, "email=Person%40example.test");
-    fireEvent.click(screen.getByRole("button", { name: "Send Reset Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
     await screen.findByLabelText("Code");
     assert.match(screen.getByRole("status").textContent!, /If this email is registered/);
     assert.equal(screen.queryByText(/code we sent/), null);
     input("Code", "123"); input("New password", "a secure password"); input("Confirm new password", "a secure password");
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
     assert.match((await screen.findByRole("alert")).textContent!, /6-digit/);
     assert.equal(calls.length, 1);
     input("Code", "123456");
-    fireEvent.click(screen.getByRole("button", { name: "Reset Password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Reset password" }));
     assert.match((await screen.findByRole("alert")).textContent!, /expired/);
     fireEvent.click(screen.getByRole("button", { name: "Request a new code" }));
     await waitFor(() => assert.equal((screen.getByLabelText("Code") as HTMLInputElement).value, ""));
@@ -131,10 +131,10 @@ test("recovery uses honest request wording and permits a new code after expiry",
 test("recovery request failure stays on email form with a retry", async () => {
     mock.method(api, "request", async () => { throw new Error("Service unavailable. Please try again."); });
     renderPage(<ForgotPasswordPage />, "email=person%40example.test");
-    fireEvent.click(screen.getByRole("button", { name: "Send Reset Code" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
     assert.match((await screen.findByRole("alert")).textContent!, /Service unavailable/);
     assert.equal(screen.queryByLabelText("Code"), null);
-    assert.equal((screen.getByRole("button", { name: "Send Reset Code" }) as HTMLButtonElement).disabled, false);
+    assert.equal((screen.getByRole("button", { name: "Send reset code" }) as HTMLButtonElement).disabled, false);
 });
 
 test("callback type alone cannot confirm an account or create a profile", async () => {
@@ -207,6 +207,80 @@ test("cookie-only callback requires normal sign-in and preserves the existing ac
     assert.deepEqual(me.mock.calls[0]?.arguments, []); // Only the existing session's bootstrap.
     assert.equal(window.location.hash, "");
     assert.equal(window.location.pathname, "/auth/callback");
-    fireEvent.click(screen.getByRole("button", { name: "Try Again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     assert.deepEqual(push.mock.calls[0]?.arguments, ["/auth/login"]);
+});
+
+// ── FX3a Task 1: Login / Signup text ─────────────────────────────────────────
+function hasButton(name: string) { return screen.queryByRole("button", { name }) !== null; }
+
+test("FX3a signup: buttons and the code label are sentence case", async () => {
+    mock.method(api, "signupStart", async () => startResponse);
+    mock.method(api, "signupVerifyCode", async () => ({ email: startResponse.email, message: "Verified" }));
+    renderPage(<RegisterPage />);
+    assert.equal(hasButton("Get started"), true);
+    assert.equal(hasButton("Get Started"), false);
+    startRegistration();
+    await screen.findByLabelText("Verification code");
+    assert.equal(screen.queryByLabelText("Verification Code") !== null, false);
+    input("Verification code", "123456");
+    fireEvent.click(screen.getByRole("button", { name: "Next" }));
+    await screen.findByLabelText("Password");
+    assert.equal(hasButton("Create account"), true);
+    assert.equal(hasButton("Create Account"), false);
+});
+
+test("FX3a signup: a browser or app-made error reads Please retry.; a server message is shown as is", async () => {
+    const failures: unknown[] = [
+        new ApiClientError({ code: "network_error", message: "Failed to fetch", url: "/auth/signup/start", method: "POST" }),
+        new ApiClientError({ code: "invalid_response", message: "Invalid response format", url: "/auth/signup/start", method: "POST" }),
+        new ApiClientError({ status: 503, code: "server_error", message: "Server authentication is not configured.", url: "/auth/signup/start", method: "POST" }),
+    ];
+    mock.method(api, "signupStart", async () => { throw failures.shift(); });
+    renderPage(<RegisterPage />);
+    startRegistration();
+    await waitFor(() => assert.equal(screen.getByRole("alert").textContent, "Please retry."));
+    assert.equal(screen.queryByText(/Failed to fetch/) !== null, false);
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+    await waitFor(() => assert.equal(failures.length, 1));
+    await waitFor(() => assert.equal(screen.getByRole("alert").textContent, "Please retry."));
+    assert.equal(screen.queryByText(/Invalid response format/) !== null, false);
+    fireEvent.click(screen.getByRole("button", { name: "Get started" }));
+    await waitFor(() => assert.equal(screen.getByRole("alert").textContent, "Server authentication is not configured."));
+});
+
+test("FX3a password reset: a browser or app-made error reads Please retry.; a server message is shown as is", async () => {
+    const failures: unknown[] = [
+        new ApiClientError({ code: "network_error", message: "Failed to fetch", url: "/auth/forgot-password", method: "POST" }),
+        new ApiClientError({ status: 503, code: "server_error", message: "Redis is unavailable; cannot reset password right now.", url: "/auth/forgot-password", method: "POST" }),
+    ];
+    mock.method(api, "request", async () => { throw failures.shift(); });
+    renderPage(<ForgotPasswordPage />, "email=person%40example.test");
+    fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
+    await waitFor(() => assert.equal(screen.getByRole("alert").textContent, "Please retry."));
+    assert.equal(screen.queryByText(/Failed to fetch/) !== null, false);
+    fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
+    await waitFor(() => assert.equal(screen.getByRole("alert").textContent, "Redis is unavailable; cannot reset password right now."));
+});
+
+test("FX3a callback: the failure heading and button are sentence case", async () => {
+    mock.method(api, "getMe", async () => { throw anonymousSession; });
+    window.history.replaceState({}, "", "/auth/callback?error=access_denied&error_description=The%20request%20was%20denied");
+    renderPage(<CallbackPage />);
+    await screen.findByRole("heading", { name: "Authentication failed" });
+    assert.equal(screen.queryByRole("heading", { name: "Authentication Failed" }) !== null, false);
+    assert.equal(hasButton("Try again"), true);
+    assert.equal(hasButton("Try Again"), false);
+});
+
+// ── FX3a2 Task 2: password reset buttons are sentence case ──────────────────
+test("FX3a2 password reset: Send reset code and Reset password", async () => {
+    mock.method(api, "request", async () => ({ message: "If an account exists, a reset code has been requested." }));
+    renderPage(<ForgotPasswordPage />, "email=person%40example.test");
+    assert.equal(hasButton("Send reset code"), true);
+    assert.equal(hasButton("Send Reset Code"), false);
+    fireEvent.click(screen.getByRole("button", { name: "Send reset code" }));
+    await screen.findByLabelText("Code");
+    assert.equal(hasButton("Reset password"), true);
+    assert.equal(hasButton("Reset Password"), false);
 });

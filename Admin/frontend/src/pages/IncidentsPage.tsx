@@ -23,6 +23,8 @@ function IncidentManagement({ generation }: { generation: number }) {
     const [revision, setRevision] = useState(0);
     const [selected, setSelected] = useState<string | null>(null);
     const [notice, setNotice] = useState<string | null>(null);
+    // The list read failed: the button that reads it again is then a retry.
+    const [listFailed, setListFailed] = useState(false);
     const refreshButton = useRef<HTMLButtonElement>(null);
     const filterChanged = () => { setPage(1); setSelected(null); };
     return <div className="app-layout">
@@ -41,9 +43,9 @@ function IncidentManagement({ generation }: { generation: number }) {
                     <label>Severity <select aria-label="Incident severity" value={severity ?? ''} onChange={(e) => { setSeverity((e.target.value || undefined) as IncidentsParams['severity']); filterChanged(); }}>
                         <option value="">All severities</option><option value="critical">Critical</option><option value="warning">Warning</option><option value="info">Info</option>
                     </select></label>
-                    <button ref={refreshButton} className="btn btn-secondary" onClick={() => setRevision((v) => v + 1)}><RefreshCw size={14} /> Refresh list</button>
+                    <button ref={refreshButton} className="btn btn-secondary" onClick={() => setRevision((v) => v + 1)}><RefreshCw size={14} /> {listFailed ? 'Retry' : 'Refresh list'}</button>
                 </div>
-                    <IncidentResults key={`${status}:${severity}:${page}:${revision}`} params={{ status, severity, page, page_size: 20 }} onSelect={setSelected} onPage={setPage} />
+                    <IncidentResults key={`${status}:${severity}:${page}:${revision}`} params={{ status, severity, page, page_size: 20 }} onSelect={setSelected} onPage={setPage} onFailed={setListFailed} />
                 </div>
                 {selected && <IncidentDetail key={selected} id={selected} generation={generation} returnFallback={refreshButton} onClose={() => setSelected(null)}
                     onChanged={(message) => { setNotice(message); setRevision((v) => v + 1); }} />}
@@ -52,10 +54,12 @@ function IncidentManagement({ generation }: { generation: number }) {
     </div>;
 }
 
-function IncidentResults({ params, onSelect, onPage }: { params: IncidentsParams; onSelect: (id: string) => void; onPage: (page: number) => void }) {
+function IncidentResults({ params, onSelect, onPage, onFailed }: { params: IncidentsParams; onSelect: (id: string) => void; onPage: (page: number) => void;
+    onFailed: (failed: boolean) => void }) {
     const { status, severity, page, page_size } = params;
     const load = useCallback(() => api.getIncidents({ status, severity, page, page_size }), [status, severity, page, page_size]);
     const { data, error, loading } = useAdminRead(load, 30000, validIncidentList);
+    useEffect(() => { onFailed(Boolean(error)); }, [error, onFailed]);
     return <div className="card-body">
         {loading && <p>Loading incidents…</p>}
         {error && <p role="alert">Incident records unavailable: {error}{data ? ' Last retrieved records may be stale; refresh before acting.' : ''}</p>}
@@ -64,7 +68,7 @@ function IncidentResults({ params, onSelect, onPage }: { params: IncidentsParams
             {!data.items.length && !error && <p>No incidents match these filters.</p>}
             <table className="data-table"><thead><tr><th>Incident</th><th>Severity</th><th>Status</th><th>Triggered</th><th>Details</th></tr></thead>
                 <tbody>{data.items.map((item) => <tr key={item.id}>
-                    <td>{item.title}</td><td>{item.severity}</td><td>{item.status}</td><td>{observedAt(item.triggered_at)}</td>
+                    <td>{item.title}</td><td>{item.severity.charAt(0).toUpperCase() + item.severity.slice(1)}</td><td>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</td><td>{observedAt(item.triggered_at)}</td>
                     <td><button className="btn btn-secondary" disabled={Boolean(error)} onClick={() => onSelect(item.id)} aria-label={`View incident ${item.title}`}>View</button></td>
                 </tr>)}</tbody>
             </table>
@@ -112,7 +116,8 @@ function IncidentDetail({ id, generation, returnFallback, onClose, onChanged }: 
         mounted.current = true; void load();
         return () => { mounted.current = false; sequence.current += 1; };
     }, [load]);
-    useDialogFocus(true, dialog, onClose, busy, returnFallback);
+    // Escape belongs to the Acknowledge confirmation while it is open on top.
+    useDialogFocus(true, dialog, () => { if (!confirmAcknowledge) onClose(); }, busy, returnFallback);
 
     const transition = async (target: 'acknowledged' | 'resolved') => {
         if (!owns() || pending.current || loading || readError || needsRead || !item || item.status === 'resolved') return;
@@ -145,7 +150,7 @@ function IncidentDetail({ id, generation, returnFallback, onClose, onChanged }: 
             {actionError && <p role="alert">{actionError}</p>}
             {item && <>
                 <h3>{item.title}</h3><p>{item.description || 'No description recorded.'}</p>
-                <dl><dt>Severity</dt><dd>{item.severity}</dd><dt>Operator status</dt><dd>{item.status}</dd>
+                <dl><dt>Severity</dt><dd>{item.severity.charAt(0).toUpperCase() + item.severity.slice(1)}</dd><dt>Operator status</dt><dd>{item.status.charAt(0).toUpperCase() + item.status.slice(1)}</dd>
                     <dt>Triggered</dt><dd>{observedAt(item.triggered_at)}</dd>
                     <dt>Acknowledged</dt><dd>{item.acknowledged_at ? `${observedAt(item.acknowledged_at)} by ${item.acknowledged_by}` : 'Not recorded'}</dd>
                     <dt>Resolved</dt><dd>{item.resolved_at ? `${observedAt(item.resolved_at)} by ${item.resolved_by}` : 'Not recorded'}</dd>

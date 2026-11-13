@@ -1,6 +1,7 @@
 "use client";
 
-import { Clock, Loader2, Phone, PhoneForwarded, PhoneIncoming, Receipt, Route, RefreshCw, ShieldCheck } from "lucide-react";
+import { Clock, Phone, PhoneForwarded, PhoneIncoming, Receipt, Route, ShieldCheck } from "lucide-react";
+import { ErrorState, LoadingState } from "@/components/states/page-states";
 import Link from "next/link";
 
 import { summarySourceMessage } from "@/components/calls/CallSummaryCard";
@@ -36,17 +37,7 @@ function formatDuration(seconds?: number) {
  * every other panel that loaded fine.
  */
 export function CallLoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
-    return (
-        <div role="alert" className="content-card flex flex-wrap items-center gap-3 border-destructive/30 text-destructive">
-            <span className="text-sm">{message}</span>
-            {onRetry ? (
-                <Button type="button" variant="outline" size="sm" onClick={onRetry}>
-                    <RefreshCw className="h-4 w-4" aria-hidden />
-                    Try again
-                </Button>
-            ) : null}
-        </div>
-    );
+    return <ErrorState message={message} onRetry={onRetry} />;
 }
 
 /**
@@ -56,21 +47,7 @@ export function CallLoadError({ message, onRetry }: { message: string; onRetry?:
  * recovery is a full page reload.
  */
 export function CallsLoadError({ message, onRetry }: { message: string; onRetry?: () => void }) {
-    return (
-        <div role="alert" className="content-card flex flex-wrap items-center gap-3 border-destructive/30 text-destructive">
-            <span className="text-sm">{message}</span>
-            {onRetry ? (
-                <button
-                    type="button"
-                    onClick={onRetry}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-destructive/40 px-2.5 py-1 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/10"
-                >
-                    <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                    Try again
-                </button>
-            ) : null}
-        </div>
-    );
+    return <ErrorState message={message} onRetry={onRetry} />;
 }
 
 export function SummaryPreview({
@@ -84,16 +61,11 @@ export function SummaryPreview({
     isError: boolean;
     data?: CallSummaryEnvelope;
 }) {
-    if (isLoading) {
-        return (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                Loading key points…
-            </div>
-        );
-    }
+    if (isLoading) return <LoadingState title="Loading key points…" />;
 
-    if (isError) return <p className="text-xs text-destructive">Could not load the AI summary.</p>;
+    // No Retry here: a hover preview closes when focus leaves its button, so a
+    // control inside it cannot be reached by keyboard.
+    if (isError) return <ErrorState message="Could not load the AI summary." />;
 
     const sourceMessage = summarySourceMessage(data);
     if (data && (!data.available || !data.summary || data.source_evidence?.summary_current === false)) {
@@ -328,7 +300,7 @@ export function CallPartiesPanel({
                     <Phone className="h-5 w-5" />
                 </div>
                 <div className="min-w-0 flex-1">
-                    <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{inbound ? "Caller ANI" : "Phone Number"}</div>
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">{inbound ? "Caller Phone Number" : "Phone Number"}</div>
                     <div className="mt-0.5 truncate text-sm font-semibold text-foreground">{phoneNumber}</div>
                 </div>
             </div>
@@ -336,7 +308,7 @@ export function CallPartiesPanel({
             {inbound ? (
                 <div className="group flex items-center gap-3 rounded-2xl border border-border bg-muted/60 p-3 shadow-sm">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-background/60 text-foreground"><PhoneIncoming className="h-5 w-5" /></div>
-                    <div className="min-w-0 flex-1"><div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Called DID</div><div className="mt-0.5 truncate text-sm font-semibold text-foreground">{toNumber || "Unavailable"}</div></div>
+                    <div className="min-w-0 flex-1"><div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Called Phone Number</div><div className="mt-0.5 truncate text-sm font-semibold text-foreground">{toNumber || "Unavailable"}</div></div>
                 </div>
             ) : null}
         </>

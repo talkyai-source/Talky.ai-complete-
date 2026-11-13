@@ -51,7 +51,7 @@ test('incident recovery baseline: a valid exact resolved read retires the obsole
     assert.match(dialog().textContent, /Exact incident temporarily unavailable/);
     assert.match(dialog().textContent, /Synthetic resolve delivery lost/);
     unavailable = false; await click('Refresh record'); await settle();
-    assert.match(dialog().textContent, /Operator statusresolved/);
+    assert.match(dialog().textContent, /Operator statusResolved/);
     assert.ok(dialog().textContent.includes(originalActor));
     assert.doesNotMatch(dialog().textContent, /Synthetic resolve delivery lost|Refresh the record before another action|does not repair the system|Cancel resolution/);
     assert.equal(posts().length, 1, 'Recovery must not replay the transition');

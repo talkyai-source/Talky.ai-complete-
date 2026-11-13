@@ -27,7 +27,7 @@ test('a failed pause PUT is surfaced: alert shown, confirm stays open, no paused
     state.route = route({ status: () => response(pauseBody(false)), put: () => response({ detail: 'Forbidden for this role' }, 403) });
     await render(el(C.LiveCalls));
     await settle();
-    await click('Pause All Calls');
+    await click('Pause all calls');
     assert.match(text(), /Pause all calls\?/);
     await click('Yes');
     assert.equal(puts().length, 1);
@@ -43,7 +43,7 @@ test('a successful pause PUT shows the paused banner and closes the confirm', as
     state.route = route({ status: () => response(pauseBody(false)), put: () => response(pauseBody(true, 'Paused from Admin Command Center')) });
     await render(el(C.LiveCalls));
     await settle();
-    await click('Pause All Calls');
+    await click('Pause all calls');
     await click('Yes');
     assert.match(text(), /New outbound calls are paused/);
     assert.doesNotMatch(text(), /Pause all calls\?/);

@@ -6,6 +6,7 @@ import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
 import { BarChart2, TrendingUp, TrendingDown, Calendar, Activity, Percent } from "lucide-react";
 import { motion } from "framer-motion";
 import { Select } from "@/components/ui/select";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
 import { formatUtcDateLabel, UTC_TIMEZONE_LABEL } from "@/lib/utc-date-label";
@@ -62,6 +63,7 @@ export default function AnalyticsPage() {
     const [data, setData] = useState<CallSeriesItem[]>([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState("");
+    const [reload, setReload] = useState(0);
     const [groupBy, setGroupBy] = useState<"day" | "week" | "month">("day");
     const [direction, setDirection] = useState<"outbound" | "inbound" | "all">("outbound");
     const [dateRange, setDateRange] = useState(30);
@@ -75,7 +77,8 @@ export default function AnalyticsPage() {
             try {
                 setLoading(true);
                 const toDate = new Date().toISOString().split("T")[0];
-                const fromDate = new Date(Date.now() - dateRange * 24 * 60 * 60 * 1000)
+                // "Last N days" is exactly N UTC dates: today and the N - 1 before it.
+                const fromDate = new Date(Date.now() - (dateRange - 1) * 24 * 60 * 60 * 1000)
                     .toISOString()
                     .split("T")[0];
 
@@ -87,11 +90,13 @@ export default function AnalyticsPage() {
                     false,
                 );
                 if (cancelled) return;
+                // An answer without its series is a failed read, not "no data".
+                if (!Array.isArray(response?.series)) throw new Error();
                 setError("");
                 setData(response.series);
             } catch (err) {
                 if (cancelled) return;
-                setError(err instanceof Error ? err.message : "Failed to load analytics");
+                setError(failedReadMessage(err, "Failed to load analytics"));
             } finally {
                 if (cancelled) return;
                 setLoading(false);
@@ -103,7 +108,7 @@ export default function AnalyticsPage() {
         return () => {
             cancelled = true;
         };
-    }, [groupBy, dateRange, direction]);
+    }, [groupBy, dateRange, direction, reload]);
 
     const totals = data.reduce(
         (acc, item) => ({
@@ -197,14 +202,9 @@ export default function AnalyticsPage() {
             </motion.div>
 
             {loading ? (
-                <div className="flex items-center justify-center h-64" role="status" aria-live="polite" aria-busy="true">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" aria-hidden />
-                    <span className="sr-only">Loading analytics…</span>
-                </div>
+                <LoadingState title="Loading analytics…" />
             ) : error ? (
-                <div className="rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-600" role="alert" aria-live="assertive">
-                    {error}
-                </div>
+                <ErrorState message={error} onRetry={() => setReload((current) => current + 1)} />
             ) : (
                 <div className="space-y-6">
                     {/* Summary Stats */}
@@ -249,10 +249,7 @@ export default function AnalyticsPage() {
                             <span data-testid="analytics-chart-timezone" className="text-xs font-semibold text-muted-foreground">{UTC_TIMEZONE_LABEL}</span>
                         </div>
                         {data.length === 0 ? (
-                            <div className="text-center py-12 text-muted-foreground">
-                                <Activity className="w-12 h-12 mx-auto mb-4 opacity-50" aria-hidden />
-                                No data for the selected period
-                            </div>
+                            <EmptyState title="No data for the selected period" />
                         ) : (
                             <div className="space-y-4">
                                 {/* Bar Chart */}
@@ -366,7 +363,7 @@ export default function AnalyticsPage() {
                                             {data.map((item, index) => (
                                                 <div
                                                     key={index}
-                                                    className={`${barWidthClass} text-center text-xs text-muted-foreground`}
+                                                    className={`${barWidthClass} flex items-center whitespace-nowrap text-xs text-muted-foreground [writing-mode:vertical-rl]`}
                                                 >
                                                     {formatDate(item.date)}
                                                 </div>
@@ -402,6 +399,7 @@ export default function AnalyticsPage() {
                         {/* Table — 768px and up. Below 768px the stacked cards after it
                             replace it; five columns cannot fit a phone-width card. */}
                         <div className="hidden md:block overflow-x-hidden overflow-y-visible">
+                            {data.length === 0 ? <EmptyState title="No data for the selected period" /> : (
                             <table className="w-full table-fixed">
                                 <thead className="border-b border-border/60">
                                     <tr>
@@ -433,7 +431,7 @@ export default function AnalyticsPage() {
                                             className="bg-muted/40 hover:bg-background transition-[transform,background-color,box-shadow] duration-150 ease-out hover:shadow-sm"
                                             style={{ transformOrigin: "center" }}
                                         >
-                                            <td className="px-4 py-3 text-sm text-muted-foreground truncate">{item.date}</td>
+                                            <td className="px-4 py-3 text-sm text-muted-foreground truncate">{formatDate(item.date)}</td>
                                             <td className="px-4 py-3 text-sm text-right text-foreground font-semibold tabular-nums truncate">{item.total_calls}</td>
                                             <td className="px-4 py-3 text-sm text-right text-emerald-600 tabular-nums truncate">
                                                 {item.answered}
@@ -450,6 +448,7 @@ export default function AnalyticsPage() {
                                     ))}
                                 </tbody>
                             </table>
+                            )}
                         </div>
 
                         {/* Stacked cards — below 768px. One card per date; no hover or
@@ -457,13 +456,13 @@ export default function AnalyticsPage() {
                             the last card clear of the fixed chat button. */}
                         <div className="md:hidden">
                             {data.length === 0 ? (
-                                <p className="py-8 text-center text-sm text-muted-foreground">No data for the selected period</p>
+                                <EmptyState title="No data for the selected period" />
                             ) : (
                                 <ul className="space-y-3" aria-label="Breakdown by date">
                                     {data.map((item, index) => (
                                         <li key={index} className="rounded-xl border border-border/60 bg-muted/40 p-3">
                                             <div className="flex items-baseline justify-between gap-3">
-                                                <span className="min-w-0 break-words text-sm font-medium text-muted-foreground">{item.date}</span>
+                                                <span className="min-w-0 break-words text-sm font-medium text-muted-foreground">{formatDate(item.date)}</span>
                                                 <span className="shrink-0 text-sm font-semibold text-foreground tabular-nums">
                                                     <span className="mr-1.5 text-xs font-normal text-muted-foreground">Rate</span>
                                                     {item.total_calls > 0

@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { InboundCampaignForm } from "@/components/inbound/inbound-campaign-form";
 import { InboundErrorState, InboundLoadingState, InboundPermissionState } from "@/components/inbound/inbound-page-state";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { failedReadMessage } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { getInboundCapabilities } from "@/lib/inbound-permissions";
 import { useEffectivePermissions, useInboundCampaign, useUpdateInboundCampaign } from "@/lib/queries/inbound-queries";
@@ -27,15 +28,15 @@ export default function EditInboundCampaignPage() {
             ) : permissions.isError ? (
                 <InboundErrorState title="Permissions could not be verified" message="Editing is disabled until server permissions can be confirmed." onRetry={() => void permissions.refetch()} />
             ) : !capabilities.canView || !capabilities.canEdit ? (
-                <InboundPermissionState action="edit inbound campaigns" />
+                <InboundPermissionState action="edit inbound campaigns" onRetry={() => void permissions.refetch()} />
             ) : campaignQuery.isLoading ? (
                 <InboundLoadingState />
             ) : campaignQuery.isError || !campaign ? (
-                <InboundErrorState title="Campaign is unavailable" message={campaignQuery.error instanceof Error ? campaignQuery.error.message : "The campaign could not be loaded."} onRetry={() => void campaignQuery.refetch()} />
+                <InboundErrorState title="Campaign is unavailable" message={failedReadMessage(campaignQuery.error, "The campaign could not be loaded.")} onRetry={() => void campaignQuery.refetch()} />
             ) : campaign.status === "active" || campaign.status === "archived" ? (
                 <InboundErrorState
                     title={campaign.status === "active" ? "Deactivate before editing" : "Archived campaigns are read-only"}
-                    message={campaign.status === "active" ? "Live DID routing cannot be edited. Deactivate this campaign, then return to edit the configuration." : "Create a new campaign if this routing configuration is needed again."}
+                    message={campaign.status === "active" ? "Live phone number routing cannot be edited. Deactivate this campaign, then return to edit the configuration." : "Create a new campaign if this routing configuration is needed again."}
                 />
             ) : (
                 <InboundCampaignForm

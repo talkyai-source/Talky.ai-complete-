@@ -8,6 +8,7 @@ import { ExternalLink, Loader2, RotateCcw, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StatusPill, type StatusPillState, type StatusPillTheme } from "@/components/ui/status-pill";
+import { failedReadMessage } from "@/components/states/page-states";
 import { useAuthorizeConnector, useDisconnectConnector, queryKeys } from "@/lib/api-hooks";
 import {
     CONNECTOR_CHECKING_TEXT,
@@ -41,7 +42,7 @@ function openOAuthWindow(url: string) {
 }
 
 function formatError(err: unknown) {
-    if (isApiClientError(err)) return err.message;
+    if (isApiClientError(err)) return failedReadMessage(err, err.message);
     return err instanceof Error ? err.message : "Request failed";
 }
 
@@ -147,7 +148,7 @@ export function ConnectorCard({
         if (status === "expired") return errorMessage?.trim() || CONNECTOR_EXPIRED_TEXT;
         if (status === "error") return errorMessage?.trim() || "Connection needs attention.";
         if (status === "connected") return "Connected.";
-        return "Not connected.";
+        return "Disconnected.";
     }, [available, checking, errorMessage, flowNotice, inlineError, status, unavailableReason]);
 
     const authorizeFn = authorizeConnector ?? authorize.mutateAsync;
@@ -257,7 +258,7 @@ export function ConnectorCard({
             </div>
 
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-xs text-muted-foreground">{provider ? `Provider: ${provider}` : null}</div>
+                <div className="text-xs text-muted-foreground">{provider ? `Provider: ${name}` : null}</div>
 
                 <div className="flex flex-wrap items-center gap-2">
                     {!available ? (
@@ -276,7 +277,7 @@ export function ConnectorCard({
                             ) : (
                                 <ExternalLink className="h-4 w-4" aria-hidden />
                             )}
-                            {pendingAction === "connect" ? "Starting..." : "Connect"}
+                            {pendingAction === "connect" ? "Starting…" : "Connect"}
                         </Button>
                     ) : null}
 
@@ -293,7 +294,7 @@ export function ConnectorCard({
                             ) : (
                                 <RotateCcw className="h-4 w-4" aria-hidden />
                             )}
-                            {pendingAction === "reconnect" ? "Starting..." : "Reconnect"}
+                            {pendingAction === "reconnect" ? "Starting…" : "Reconnect"}
                         </Button>
                     ) : null}
 

@@ -367,7 +367,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
             </ol>
 
             {error && (
-                <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
+                <div role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/50 dark:text-red-300">
                     {error}
                 </div>
             )}
@@ -544,10 +544,10 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
                     <div className="space-y-5">
                         <div className="grid gap-3 sm:grid-cols-2 text-sm">
                             <SummaryRow label="Campaign" value={name} />
-                            <SummaryRow label="Company" value={companyName} />
+                            <SummaryRow label="Brand / company name" value={companyName} />
                             <SummaryRow label="Persona" value={PERSONAS.find((p) => p.value === personaType)?.title ?? personaType} />
-                            <SummaryRow label="Agents" value={agentNames.join(", ")} />
-                            <SummaryRow label="Objective" value={briefDraft.opening_objective} />
+                            <SummaryRow label="Representative names" value={agentNames.join(", ")} />
+                            <SummaryRow label="Opening objective" value={briefDraft.opening_objective} />
                             <SummaryRow label="Decision role" value={briefDraft.decision_maker_role || "— any informed contact —"} />
                             <SummaryRow label="Next actions" value={briefDraft.approved_next_actions.length ? briefDraft.approved_next_actions.join(", ").replaceAll("_", " ") : "— none approved —"} />
                             <SummaryRow label="Objections" value={`${briefDraft.max_objection_attempts} attempts maximum`} />
@@ -595,7 +595,7 @@ export function CampaignWizard({ afterCreateHref, direction = "outbound", draftS
 
 function SummaryRow({ label, value }: { label: string; value: string }) {
     return (
-        <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-start gap-2">
+        <div className="grid grid-cols-[6.5rem_minmax(0,1fr)] items-start gap-2">
             <span className="text-xs uppercase tracking-wide text-muted-foreground">{label}</span>
             <span className="break-words font-medium text-gray-900 dark:text-zinc-100">{value || "—"}</span>
         </div>

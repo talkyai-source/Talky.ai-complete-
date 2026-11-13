@@ -1,10 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, Download, ExternalLink, Loader2, Printer } from "lucide-react";
+import { ArrowLeft, Download, ExternalLink, Printer } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { ErrorState } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
 import { useBillingInvoice, useBillingInvoices } from "@/lib/billing-api";
 import { formatMinorMoney, type BillingInvoice } from "@/lib/billing-read";
 import { formatBillingError } from "@/components/billing/billing-overview";
@@ -17,7 +17,7 @@ export function BillingSupport({ reference }: { reference?: string }) {
 }
 
 export function invoiceDate(value: string | null): string {
-  return value ? new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "Unavailable";
+  return value ? new Date(value).toLocaleDateString() : "Unavailable";
 }
 
 export function InvoiceStatus({ status }: { status: string }) {
@@ -48,8 +48,8 @@ export function BillingInvoiceList() {
   return <div className="space-y-6">
     <Button asChild variant="outline" size="sm"><Link href="/billing"><ArrowLeft className="mr-1 h-4 w-4" aria-hidden /> Back to Billing</Link></Button>
     <Card><CardHeader><CardTitle>Recent invoices</CardTitle><CardDescription>Up to 10 most recent saved invoices for this account.</CardDescription></CardHeader>
-      <CardContent>{query.isLoading ? <p role="status"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden /> Loading invoices…</p> : query.isError ?
-        <ErrorState title="Invoices did not load" message={formatBillingError(query.error)} onRetry={() => void query.refetch()} /> : query.data?.length === 0 ? <p>No invoices recorded.</p> :
+      <CardContent>{query.isLoading ? <LoadingState title="Loading invoices…" /> : query.isError ?
+        <ErrorState title="Invoices did not load" message={formatBillingError(query.error)} onRetry={() => void query.refetch()} /> : query.data?.length === 0 ? <EmptyState title="No invoices recorded." /> :
           <div className="overflow-x-auto"><table className="min-w-full text-sm"><caption className="sr-only">Recent saved invoice amounts and status</caption>
             <thead><tr className="border-b text-left"><th scope="col" className="p-3">Invoice</th><th scope="col" className="p-3">Period</th><th scope="col" className="p-3">Invoice total</th><th scope="col" className="p-3">Paid</th><th scope="col" className="p-3">Remaining</th><th scope="col" className="p-3">Status</th></tr></thead>
             <tbody>{query.data?.map((invoice) => <tr key={invoice.id} className="border-b">
@@ -67,7 +67,7 @@ export function BillingInvoiceList() {
 
 export function BillingInvoiceDetail({ id }: { id: string }) {
   const query = useBillingInvoice(id);
-  if (query.isLoading) return <p role="status"><Loader2 className="mr-2 inline h-4 w-4 animate-spin" aria-hidden /> Loading invoice…</p>;
+  if (query.isLoading) return <LoadingState title="Loading invoice…" />;
   if (query.isError) return <ErrorState title="This invoice did not load" message={formatBillingError(query.error)} onRetry={() => void query.refetch()} actionHref="/billing/invoices" actionLabel="Recent invoices" />;
   if (!query.data) return <Card><CardContent className="py-10 text-center"><h2 className="font-semibold">Invoice not found</h2><p className="mt-2 text-sm text-muted-foreground">This invoice is unavailable for this account.</p><Button asChild className="mt-4"><Link href="/billing/invoices">Recent invoices</Link></Button></CardContent></Card>;
   return <InvoiceFacts invoice={query.data} />;

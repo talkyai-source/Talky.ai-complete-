@@ -91,7 +91,7 @@ test("a failed call load offers a retry that re-runs the request", () => {
 
     assert.ok(screen.getByRole("alert"));
     assert.ok(screen.getByText("Failed to load call details"));
-    screen.getByRole("button", { name: "Try again" }).click();
+    screen.getByRole("button", { name: "Retry" }).click();
     assert.equal(retried, 1);
 });
 
@@ -99,7 +99,7 @@ test("a failed load offers no retry control when the caller cannot re-run it", (
     render(<CallLoadError message="Failed to load call details" />);
 
     assert.ok(screen.getByText("Failed to load call details"));
-    assert.equal(screen.queryByRole("button", { name: "Try again" }), null);
+    assert.equal(screen.queryByRole("button", { name: "Retry" }) === null, true);
 });
 
 test("the billing panel shows the settled seconds the server sent, in the wire's unit", () => {
@@ -170,19 +170,19 @@ test("a billed zero is a real settled figure and is shown, not swallowed", () =>
 // ── CallPartiesPanel — caller and DID render exactly as the wire sent them,
 // never gated on a capability (backend/app/api/v1/endpoints/calls.py:183, :201-202) ──
 
-test("an inbound call shows Caller ANI and the Called DID the wire sent", () => {
+test("an inbound call shows Caller Phone Number and the Called Phone Number the wire sent", () => {
     render(<CallPartiesPanel direction="inbound" phoneNumber="+14155550100" toNumber="+18005550101" />);
-    assert.ok(screen.getByText("Caller ANI"));
+    assert.ok(screen.getByText("Caller Phone Number"));
     assert.ok(screen.getByText("+14155550100"));
-    assert.ok(screen.getByText("Called DID"));
+    assert.ok(screen.getByText("Called Phone Number"));
     assert.ok(screen.getByText("+18005550101"));
 });
 
-test("an outbound call shows Phone Number, never a Called DID row", () => {
+test("an outbound call shows Phone Number, never a Called Phone Number row", () => {
     render(<CallPartiesPanel direction="outbound" phoneNumber="+14155550100" toNumber="+18005550101" />);
     assert.ok(screen.getByText("Phone Number"));
-    assert.equal(screen.queryByText("Caller ANI"), null);
-    assert.equal(screen.queryByText("Called DID"), null);
+    assert.equal(screen.queryByText("Caller Phone Number") !== null, false);
+    assert.equal(screen.queryByText("Called Phone Number") !== null, false);
 });
 
 // ── InboundRouteSnapshot — routing detail gated the same as /inbound-campaigns;

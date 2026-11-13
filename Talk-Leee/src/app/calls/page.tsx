@@ -7,7 +7,8 @@ import { DialAgainButton } from "@/components/calls/dial-again-button";
 import { Phone, PhoneOff, PhoneIncoming, PhoneOutgoing, Clock, CalendarClock, ChevronRight, ChevronDown, FileText, Megaphone, Loader2, Sparkles, Play, Pause, Search, Mic, ThumbsUp } from "lucide-react";
 import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
-import { useCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
+import { EmptyState, LoadingState, failedReadMessage } from "@/components/states/page-states";
+import { useAllCalls, useCallTranscript, useCallSummary } from "@/lib/api-hooks";
 import type { Call } from "@/lib/dashboard-api";
 import { CallSummaryCard } from "@/components/calls/CallSummaryCard";
 import { CallsLoadError, SummaryPreview, distinctDidOptions, inboundCampaignFilterOptions } from "@/components/calls/call-panels";
@@ -138,7 +139,7 @@ function CallHighlight({ call }: { call: Call }) {
 
 function CallParties({ call }: { call: Call }) {
     if (call.direction === "inbound") {
-        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="truncate text-xs text-muted-foreground">to {call.to_number || "assigned DID"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
+        return <><span className="truncate text-sm font-semibold text-foreground">{call.from_number || "Private caller"}</span><span className="break-words text-xs text-muted-foreground">to {call.to_number || "assigned phone number"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
     }
     return <><span className="truncate text-sm font-semibold text-foreground">{call.phone_number}</span><span className="truncate text-xs text-muted-foreground">From {call.from_number || "not recorded"}</span><CapturedContact call={call} /><CallHighlight call={call} /></>;
 }
@@ -301,7 +302,7 @@ function CallRow({
                         className={`inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-xs font-medium transition-colors ${showTranscript ? "border-ring/60 bg-accent text-foreground" : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"}`}
                     >
                         <FileText className="h-4 w-4" aria-hidden />
-                        AI script
+                        Transcript
                     </button>
                     <CallHistoryFormButton
                         value={workflow.form}
@@ -417,8 +418,8 @@ function CallRow({
                         type="button"
                         onClick={() => setShowTranscript((value) => !value)}
                         aria-expanded={showTranscript}
-                        aria-label={showTranscript ? "Hide AI script" : "Show AI script"}
-                        title={showTranscript ? "Hide AI script" : "Show AI script"}
+                        aria-label={showTranscript ? "Hide transcript" : "Show transcript"}
+                        title={showTranscript ? "Hide transcript" : "Show transcript"}
                         className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border transition-colors ${showTranscript ? "border-ring/60 bg-accent text-accent-foreground" : "border-border bg-background text-muted-foreground hover:bg-accent hover:text-foreground"}`}
                     >
                         <FileText className="h-4 w-4" aria-hidden />
@@ -548,16 +549,13 @@ function CallRow({
                         <div className="px-4 py-3">
                             <div className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                 <FileText className="h-3.5 w-3.5" />
-                                AI Script
+                                Transcript
                             </div>
                             {transcriptQuery.isLoading ? (
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Loader2 className="h-4 w-4 animate-spin" />
-                                    Loading transcript…
-                                </div>
+                                <LoadingState title="Loading transcript…" />
                             ) : transcriptQuery.isError ? (
                                 <CallsLoadError
-                                    message={transcriptQuery.error instanceof Error ? transcriptQuery.error.message : "Failed to load transcript."}
+                                    message={failedReadMessage(transcriptQuery.error, "Failed to load transcript.")}
                                     onRetry={() => void transcriptQuery.refetch()}
                                 />
                             ) : transcriptQuery.data?.turns && transcriptQuery.data.turns.length > 0 ? (
@@ -798,7 +796,7 @@ function CampaignSection({
                                     <Clock className="h-4 w-4" role="img" aria-label="Date and time" />
                                 </div>
                                 <div className="text-center">AI Summary</div>
-                                <div className="text-center">AI Script <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
+                                <div className="text-center">Transcript <span className="text-[10px] font-medium normal-case tracking-normal">/ Form</span></div>
                                 <div className="text-center">Actions</div>
                             </div>
                             <div
@@ -881,18 +879,52 @@ export default function CallsPage() {
     }, []);
     const [selectedDid, setSelectedDid] = useState<string | undefined>();
 
+    // The page and every filter live in the address, so a reload or a shared
+    // link shows the same view. Read once after mount, written on each change.
+    const [addressRead, setAddressRead] = useState(false);
+
     useEffect(() => {
         const timer = window.setTimeout(() => {
             const params = new URLSearchParams(window.location.search);
             const requestedDirection = params.get("direction");
             if (requestedDirection === "inbound" || requestedDirection === "outbound") setDirection(requestedDirection);
             setInboundCampaignId(params.get("inbound_campaign_id") || undefined);
+            const requestedFilter = params.get("filter");
+            if (requestedFilter === "leads" || requestedFilter === "issues") setFilter(requestedFilter);
+            setSearch(params.get("search") ?? "");
+            setSelectedDid(params.get("did") || undefined);
+            const requestedPage = Number(params.get("page"));
+            if (Number.isInteger(requestedPage) && requestedPage > 1) setPage(requestedPage);
+            setAddressRead(true);
         }, 0);
         return () => window.clearTimeout(timer);
     }, []);
 
-    const q = useCalls(page, pageSize, { direction: direction === "all" ? undefined : direction, inboundCampaignId });
+    useEffect(() => {
+        if (!addressRead) return;
+        const params = new URLSearchParams(window.location.search);
+        const put = (key: string, value: string | undefined) => {
+            if (value) params.set(key, value);
+            else params.delete(key);
+        };
+        put("page", page > 1 ? String(page) : undefined);
+        put("search", search.trim() ? search : undefined);
+        put("filter", filter === "all" ? undefined : filter);
+        put("direction", direction === "all" ? undefined : direction);
+        put("inbound_campaign_id", inboundCampaignId);
+        put("did", selectedDid);
+        const query = params.toString();
+        const next = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+        if (next !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+            window.history.replaceState(window.history.state, "", next);
+        }
+    }, [addressRead, page, search, filter, direction, inboundCampaignId, selectedDid]);
+
+    const q = useAllCalls();
     const allCalls = useMemo(() => q.data?.calls ?? [], [q.data]);
+    // Every page is read again on a filter change (and on page load / Retry);
+    // the live refresh in between reads the newest page only.
+    const readAllCallsAgain = () => { void q.refetch(); };
 
     useEffect(() => {
         const current = new Map(allCalls.map((call) => [call.id, call.status]));
@@ -909,14 +941,17 @@ export default function CallsPage() {
         }
     }, [allCalls]);
 
-    const didOptions = useMemo(() => distinctDidOptions(allCalls), [allCalls]);
+    // The number filter is about the number that was called: inbound calls
+    // only, read from `to_number` ("for inbound calls this is the called
+    // public DID", lib/dashboard-api.ts). An outbound destination is never a DID.
+    const didOptions = useMemo(() => distinctDidOptions(allCalls.filter((call) => call.direction === "inbound")), [allCalls]);
     const campaignOptions = useMemo(() => inboundCampaignFilterOptions(allCalls), [allCalls]);
     const calls = useMemo(() => {
         const term = search.trim().toLowerCase();
         return allCalls.filter((c) => {
             if (direction !== "all" && c.direction !== direction) return false;
             if (inboundCampaignId && c.inbound_campaign_id !== inboundCampaignId) return false;
-            if (selectedDid && c.to_number !== selectedDid) return false;
+            if (selectedDid && !(c.direction === "inbound" && c.to_number === selectedDid)) return false;
             if (term && ![c.phone_number, c.from_number, c.to_number, c.campaign_name, c.captured_phone, c.captured_email].some((entry) => (entry || "").toLowerCase().includes(term))) return false;
             const v = (c.lead_outcome || "").toLowerCase();
             if (filter === "leads") return callHasCapturedContact(c) || v.startsWith("qualified") || v.startsWith("callback");
@@ -926,52 +961,47 @@ export default function CallsPage() {
             return true;
         });
     }, [allCalls, search, filter, direction, inboundCampaignId, selectedDid]);
-    const total = q.data?.total ?? 0;
-    const error = q.isError ? (q.error instanceof Error ? q.error.message : "Failed to load calls") : "";
-    const groups = useMemo(() => groupByCampaign(calls), [calls]);
+    // Every filter above runs over all of the account's calls, so the pages
+    // and the footer count the rows that match, not the account total.
+    const total = calls.length;
     const totalPages = Math.ceil(total / pageSize);
+    const currentPage = Math.min(page, Math.max(1, totalPages));
+    const pageCalls = useMemo(
+        () => calls.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+        [calls, currentPage],
+    );
+    const error = q.isError ? failedReadMessage(q.error, "Failed to load calls") : "";
+    const groups = useMemo(() => groupByCampaign(pageCalls), [pageCalls]);
     const hasActiveFilters = Boolean(search.trim()) || filter !== "all" || direction !== "all" || Boolean(inboundCampaignId) || Boolean(selectedDid);
 
     return (
         <DashboardLayout title="Call History" description="Review calls, classify leads, capture notes, and complete follow-up forms">
             <CallIssuesBanner />
             {q.isLoading ? (
-                <div role="status" aria-label="Loading call history" className="flex h-64 items-center justify-center">
-                    <div aria-hidden className="h-8 w-8 animate-spin rounded-full border-b-2 border-foreground/60" />
-                </div>
+                <LoadingState title="Loading call history" />
             ) : error ? (
                 <CallsLoadError message={error} onRetry={() => void q.refetch()} />
             ) : allCalls.length === 0 && !hasActiveFilters ? (
-                <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="content-card py-16 text-center"
-                >
-                    <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-muted/40">
-                        <Phone className="h-8 w-8 text-muted-foreground" />
-                    </div>
-                    <h3 className="mb-2 text-lg font-semibold text-foreground">No calls yet</h3>
-                    <p className="text-muted-foreground">Calls will appear here after an outbound campaign starts or an active inbound line receives a call.</p>
-                </motion.div>
+                <EmptyState title="No calls yet" message="Calls will appear here after an outbound campaign starts or an active inbound line receives a call." />
             ) : (
                 <div className="space-y-4">
-                    {/* Search + filter toolbar — client-side over the loaded page */}
+                    {/* Search + filter toolbar — client-side over every call of the account */}
                     <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                         <div className="relative w-full sm:max-w-xs">
                             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                            <label htmlFor="call-history-search" className="sr-only">Search calls by phone number, DID, or campaign</label>
+                            <label htmlFor="call-history-search" className="sr-only">Search calls by phone number or campaign</label>
                             <input
                                 id="call-history-search"
                                 type="text"
                                 value={search}
                                 onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-                                placeholder="Search by phone number…"
+                                placeholder="Search by phone number or campaign…"
                                 className="w-full rounded-lg border border-border bg-background py-2 pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40"
                             />
                         </div>
                         <div className="flex max-w-full flex-wrap items-center gap-2">
                         <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1" role="group" aria-label="Filter calls by direction">
-                            {(["all", "inbound", "outbound"] as const).map((key) => <button key={key} type="button" aria-pressed={direction === key} onClick={() => { setDirection(key); setPage(1); }} className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-colors ${direction === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{key}</button>)}
+                            {(["all", "inbound", "outbound"] as const).map((key) => <button key={key} type="button" aria-pressed={direction === key} onClick={() => { setDirection(key); setPage(1); readAllCallsAgain(); }} className={`rounded-md px-3 py-1 text-xs font-semibold capitalize transition-colors ${direction === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>{key}</button>)}
                         </div>
                         <div className="flex items-center gap-1 rounded-lg border border-border bg-background p-1" role="group" aria-label="Filter calls by outcome">
                             {([
@@ -983,7 +1013,7 @@ export default function CallsPage() {
                                     key={key}
                                     type="button"
                                     aria-pressed={filter === key}
-                                    onClick={() => { setFilter(key); setPage(1); }}
+                                    onClick={() => { setFilter(key); setPage(1); readAllCallsAgain(); }}
                                     className={`rounded-md px-3 py-1 text-xs font-semibold transition-colors duration-150 ease-out ${
                                         filter === key
                                             ? "bg-accent text-accent-foreground"
@@ -994,16 +1024,16 @@ export default function CallsPage() {
                                 </button>
                             ))}
                         </div>
-                        <label htmlFor="call-history-did-filter" className="sr-only">Filter calls by DID</label>
+                        <label htmlFor="call-history-did-filter" className="sr-only">Filter calls by phone number</label>
                         <Select
                             id="call-history-did-filter"
-                            ariaLabel="Filter calls by DID"
+                            ariaLabel="Filter calls by phone number"
                             fitLongestOption
                             value={selectedDid ?? ""}
-                            onChange={(next) => { setSelectedDid(next || undefined); setPage(1); }}
+                            onChange={(next) => { setSelectedDid(next || undefined); setPage(1); readAllCallsAgain(); }}
                             selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
-                            <option value="">All DIDs</option>
+                            <option value="">All phone numbers</option>
                             {didOptions.map((did) => <option key={did} value={did}>{did}</option>)}
                         </Select>
                         <label htmlFor="call-history-campaign-filter" className="sr-only">Filter calls by inbound campaign</label>
@@ -1012,7 +1042,7 @@ export default function CallsPage() {
                             ariaLabel="Filter calls by inbound campaign"
                             fitLongestOption
                             value={inboundCampaignId ?? ""}
-                            onChange={(next) => { setInboundCampaignId(next || undefined); setPage(1); }}
+                            onChange={(next) => { setInboundCampaignId(next || undefined); setPage(1); readAllCallsAgain(); }}
                             selectClassName="h-auto rounded-lg px-3 py-2 pr-9 text-xs font-semibold"
                         >
                             <option value="">All campaigns</option>
@@ -1022,23 +1052,19 @@ export default function CallsPage() {
                     </div>
 
                     {calls.length === 0 ? (
-                        <div className="content-card py-12 text-center">
-                            <p className="text-muted-foreground">No calls match your search or filter.</p>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setSearch("");
-                                    setFilter("all");
-                                    setDirection("all");
-                                    setInboundCampaignId(undefined);
-                                    setSelectedDid(undefined);
-                                    setPage(1);
-                                }}
-                                className="mt-3 text-sm font-semibold text-foreground underline-offset-4 hover:underline"
-                            >
-                                Clear filters
-                            </button>
-                        </div>
+                        <EmptyState
+                            title="No calls match your search or filter."
+                            actionLabel="Clear filters"
+                            onAction={() => {
+                                setSearch("");
+                                setFilter("all");
+                                setDirection("all");
+                                setInboundCampaignId(undefined);
+                                setSelectedDid(undefined);
+                                setPage(1);
+                                readAllCallsAgain();
+                            }}
+                        />
                     ) : (
                         groups.map((g, idx) => (
                             <CampaignSection
@@ -1061,19 +1087,19 @@ export default function CallsPage() {
                             className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
                         >
                             <p className="text-sm text-muted-foreground">
-                                Showing {(page - 1) * pageSize + 1} to {Math.min(page * pageSize, total)} of {total} calls
+                                Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, total)} of {total} calls
                             </p>
                             <div className="flex gap-2">
                                 <button
-                                    onClick={() => setPage((p) => Math.max(1, p - 1))}
-                                    disabled={page === 1}
+                                    onClick={() => setPage(Math.max(1, currentPage - 1))}
+                                    disabled={currentPage === 1}
                                     className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     Previous
                                 </button>
                                 <button
-                                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                                    disabled={page === totalPages}
+                                    onClick={() => setPage(Math.min(totalPages, currentPage + 1))}
+                                    disabled={currentPage === totalPages}
                                     className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm font-semibold text-foreground transition-colors duration-150 ease-out hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50"
                                 >
                                     Next

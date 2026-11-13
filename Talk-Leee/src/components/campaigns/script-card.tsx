@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, ChevronRight, Loader2, MessageSquare, Phone } from "lucide-react";
+import { ErrorState, LoadingState } from "@/components/states/page-states";
+import { ChevronDown, ChevronRight, MessageSquare, Phone } from "lucide-react";
 import {
     extendedApi,
     CampaignCallWithTranscript,
@@ -148,6 +149,8 @@ export function ScriptCard({ campaignId }: ScriptCardProps) {
                     nextPage,
                     PAGE_SIZE
                 );
+                // An answer without an items list is a failed read, not an empty one.
+                if (!Array.isArray(resp?.items)) throw new Error("Failed to load transcripts");
                 setItems(resp.items);
                 setTotal(resp.total);
                 setPage(resp.page);
@@ -187,16 +190,12 @@ export function ScriptCard({ campaignId }: ScriptCardProps) {
             </div>
 
             {error && (
-                <div className="mb-3 p-3 rounded-lg text-sm border bg-red-500/10 border-red-500/30 text-red-700 dark:text-red-400">
-                    {error}
-                </div>
+                <ErrorState className="mb-3" message="Failed to load transcripts" onRetry={() => load(page)} />
             )}
 
             {loading && items.length === 0 ? (
-                <div className="flex items-center justify-center py-10 text-muted-foreground">
-                    <Loader2 className="w-5 h-5 animate-spin" />
-                </div>
-            ) : items.length === 0 ? (
+                <LoadingState />
+            ) : error && items.length === 0 ? null : items.length === 0 ? (
                 <div className="text-center py-8 text-muted-foreground">
                     No calls yet. Transcripts appear here as the campaign makes calls.
                 </div>

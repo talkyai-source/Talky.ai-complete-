@@ -39,7 +39,7 @@ export function Sidebar() {
                 <div className="sidebar-logo-icon">
                     <img src="/logo.svg" alt="Talk-Lee" style={{ width: 20, height: 20 }} />
                 </div>
-                <span className="sidebar-logo-text">Talk-lee</span>
+                <span className="sidebar-logo-text">Talk-Lee</span>
             </div>
 
             <nav className="sidebar-nav">

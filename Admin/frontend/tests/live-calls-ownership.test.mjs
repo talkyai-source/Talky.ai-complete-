@@ -124,7 +124,7 @@ for (const component of ['LiveCalls', 'LiveCallsTable']) {
 test('LiveCalls: a lost pause response cannot claim the emergency pause was not applied', async () => {
     state.route = route(() => response([]), () => response(pause(false)),
         () => response({ detail: 'Commit acknowledgement unavailable' }, 503));
-    await render(el(C.LiveCalls)); await click('Pause All Calls'); await click('Yes');
+    await render(el(C.LiveCalls)); await click('Pause all calls'); await click('Yes');
     assert.match(text(), /Commit acknowledgement unavailable/);
     assert.doesNotMatch(text(), /Calls were NOT paused|Calls were NOT resumed/);
     assert.match(text(), /unconfirmed|unknown|not confirmed/i);
@@ -133,7 +133,7 @@ test('LiveCalls: a lost pause response cannot claim the emergency pause was not 
 test('LiveCalls: double confirmation dispatches once and old-session pause success is discarded', async () => {
     const pending = deferred();
     state.route = route(() => response([]), () => response(pause(false)), () => reply(pending));
-    await render(el(C.LiveCalls)); await click('Pause All Calls');
+    await render(el(C.LiveCalls)); await click('Pause all calls');
     await act(async () => {
         const confirm = [...state.host.querySelectorAll('button')].find(button => button.textContent === 'Yes');
         confirm.click(); confirm.click();
@@ -147,7 +147,7 @@ test('LiveCalls: double confirmation dispatches once and old-session pause succe
 
 test('LiveCalls: a pause confirmation cannot become a resume after another operator pauses', async () => {
     state.route = route(() => response([]));
-    await render(el(C.LiveCalls)); await click('Pause All Calls');
+    await render(el(C.LiveCalls)); await click('Pause all calls');
     state.route = route(() => response([]), () => response(pause(true, 'Other operator')));
     await tick(); await click('Yes');
     assert.equal(state.requests.filter(request => request.method === 'PUT').length, 0);

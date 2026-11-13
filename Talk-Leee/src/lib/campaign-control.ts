@@ -64,7 +64,7 @@ export function outOfMinutesText(minutes: MinutesStatus | null | undefined): str
 export const LIVE_CALLS_ENDED_TEXT = "All live calls were ended.";
 export const LIVE_CALLS_UNCHECKED_TEXT = "Live calls could not be checked. Some may still be ending.";
 export function liveCallsEndingText(count: number): string {
-    return `${count} live calls are still ending.`;
+    return count === 1 ? "1 live call is still ending." : `${count} live calls are still ending.`;
 }
 
 type TerminationStatus = CampaignTerminationSummary["status"];

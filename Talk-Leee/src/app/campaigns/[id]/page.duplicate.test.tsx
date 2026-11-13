@@ -173,8 +173,8 @@ test("after success the copy's page shows the exact success message and the copy
     await waitFor(() => assert.equal(screen.queryByRole("heading", { name: "Spring push - Copy" }) !== null, true), { timeout: SLOW });
     assert.equal(noticeText(), SUCCESS_TEXT);
     assert.equal(screen.getByTestId("campaign-duplicate-notice").getAttribute("role"), "status");
-    const totalLeads = screen.getByText("Total Leads").parentElement!.textContent ?? "";
-    assert.equal(totalLeads.replace("Total Leads", ""), "0", "the Total Leads card shows the copy's own count");
+    const totalLeads = screen.getAllByText("Contacts").find((el) => el.tagName === "P")!.parentElement!.textContent ?? "";
+    assert.equal(totalLeads.replace("Contacts", ""), "0", "the Contacts card shows the copy's own count");
 });
 
 test("a failed lead-fields copy still opens the copy, showing the exact lead-fields message", async () => {

@@ -247,9 +247,9 @@ function OwnedTenantsTable({
         <>
             {savedChange && <div className="success-banner" role="status" aria-label="Saved tenant change">
                 <div>
-                    <p>Saved change confirmed for {savedChange.tenantName} ({savedChange.tenantId}). {savedChange.summary}</p>
+                    <p>Saved change confirmed for {savedChange.tenantName}. {savedChange.summary}</p>
                     <p>This is a saved result, not a current-state check.</p>
-                    {savedChange.version && <p>Saved version: {savedChange.version}</p>}
+                    {savedChange.version && <p>Saved version: {new Date(savedChange.version).toLocaleString()}</p>}
                     <p>{savedChange.auditId ? `Audit reference: ${savedChange.auditId}` : 'The requested state already existed; no new mutation audit was created.'}</p>
                     {savedRefreshError && <p role="alert">Saved change confirmed, but the directory reload failed. Use Refresh to check current state.</p>}
                 </div>
@@ -346,7 +346,7 @@ function OwnedTenantsTable({
                                     </td>
                                     <td>
                                         <span className={getStatusClass(tenant.status)}>
-                                            {tenant.status.charAt(0).toUpperCase() + tenant.status.slice(1)}
+                                            {(tenant.status.charAt(0).toUpperCase() + tenant.status.slice(1)).replace(/_/g, ' ')}
                                         </span>
                                     </td>
                                     <td>

@@ -7,7 +7,7 @@ import { CallIssuesBanner } from "@/components/calls/call-issues-banner";
 import { dashboardApi, DashboardSummary, Campaign } from "@/lib/dashboard-api";
 import { outboundCampaignsOnly } from "@/lib/campaign-direction";
 import { extendedApi, CallSeriesItem } from "@/lib/extended-api";
-import { Clock, Megaphone, ArrowUpRight, Activity, AlertTriangle, PhoneCall, TrendingUp, Bot } from "lucide-react";
+import { Clock, ArrowUpRight, Activity, AlertTriangle, PhoneCall, TrendingUp, Bot } from "lucide-react";
 import Link from "next/link";
 import { motion, animate, useInView, useReducedMotion } from "framer-motion";
 import {
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/dashboard-charts";
 import { HoverTooltip, useHoverTooltip } from "@/components/ui/hover-tooltip";
 import { DialerInsights } from "@/components/dashboard/dialer-insights";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { FirstCallSetup } from "@/components/dashboard/first-call-setup";
 import { computeMinutesUsageFontPx, MINUTES_USAGE_LAYOUT_SPEC } from "@/lib/minutes-usage-layout.mjs";
 import { campaignStatusLabel } from "@/lib/campaign-status";
@@ -702,6 +703,9 @@ function CampaignLinesChart({
     );
 }
 
+const DASHBOARD_SOURCES = ["summary", "campaigns", "daily", "hourly", "byCampaign"] as const;
+type DashboardSource = (typeof DASHBOARD_SOURCES)[number];
+
 export default function DashboardPage() {
     const [summary, setSummary] = useState<DashboardSummary | null>(null);
     const [liveSummary, setLiveSummary] = useState<DashboardSummary | null>(null);
@@ -716,7 +720,9 @@ export default function DashboardPage() {
     const [, setStreamLatencyMs] = useState<number | null>(null);
     const [, setStreamError] = useState("");
     const [loading, setLoading] = useState(true);
-    const [error, setError] = useState("");
+    // One entry per first request that failed. Each card reads only its own
+    // sources, so one failure never replaces the whole page.
+    const [sourceErrors, setSourceErrors] = useState<Partial<Record<DashboardSource, string>>>({});
     const lastValidBarsRef = useRef<DualSeriesPoint[]>([]);
     const lastValidSummaryRef = useRef<DashboardSummary | null>(null);
     const lastAppliedTsRef = useRef<number>(0);
@@ -946,16 +952,16 @@ export default function DashboardPage() {
             goal_achieved: "Qualified",
             answered: "Answered",
             voicemail: "Voicemail",
-            no_answer: "No answer",
+            no_answer: "No Answer",
             busy: "Busy",
             failed: "Failed",
-            timeout: "Timeout",
+            timeout: "Timed Out",
             spam: "Spam",
             invalid: "Invalid",
             unavailable: "Unavailable",
             disconnected: "Disconnected",
             rejected: "Rejected",
-            goal_not_achieved: "Not qualified",
+            goal_not_achieved: "Disqualified",
             unknown: "Unknown",
         };
         const outcomes = Object.entries(outcomeCounts)
@@ -1002,37 +1008,62 @@ export default function DashboardPage() {
         summary,
     ]);
 
-    async function loadData() {
-        try {
-            setLoading(true);
-            setError("");
-            const month = currentUtcMonthRange();
-            const [summaryData, campaignsData, analytics, hourly, byCampaign] = await Promise.all([
-                dashboardApi.getDashboardSummary(),
-                dashboardApi.listCampaigns(),
-                extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false),
-                extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false),
-                extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false),
-            ]);
-            setSummary(summaryData);
-            setLiveSummary(summaryData);
-            setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
-            setSeries(analytics.series ?? []);
-            setHourSeries(hourly.series ?? []);
-            setCampaignSeries(byCampaign.campaigns ?? []);
-        } catch (err) {
-            setError(err instanceof Error ? err.message : "Failed to load dashboard");
-        } finally {
-            setLoading(false);
-        }
+    // Each source is read on its own: a failure is recorded against that
+    // source only, and Retry on a failed card re-reads just its sources.
+    async function loadSources(sources: readonly DashboardSource[]) {
+        const month = currentUtcMonthRange();
+        const read: Record<DashboardSource, () => Promise<void>> = {
+            summary: async () => {
+                const summaryData = await dashboardApi.getDashboardSummary();
+                setSummary(summaryData);
+                setLiveSummary(summaryData);
+            },
+            campaigns: async () => {
+                const campaignsData = await dashboardApi.listCampaigns();
+                setCampaigns(outboundCampaignsOnly(campaignsData.campaigns ?? []));
+            },
+            daily: async () => {
+                const analytics = await extendedApi.getCallAnalytics(month.from, month.to, "day", "outbound", false);
+                setSeries(analytics.series ?? []);
+            },
+            hourly: async () => {
+                const hourly = await extendedApi.getCallAnalytics(month.from, month.to, "hour", "outbound", false);
+                setHourSeries(hourly.series ?? []);
+            },
+            byCampaign: async () => {
+                const byCampaign = await extendedApi.getCallAnalyticsByCampaign(month.from, month.to, "day", "outbound", false);
+                setCampaignSeries(byCampaign.campaigns ?? []);
+            },
+        };
+        await Promise.all(sources.map(async (source) => {
+            try {
+                await read[source]();
+                setSourceErrors((previous) => {
+                    const next = { ...previous };
+                    delete next[source];
+                    return next;
+                });
+            } catch (err) {
+                const message = failedReadMessage(err, "Failed to load dashboard");
+                setSourceErrors((previous) => ({ ...previous, [source]: message }));
+            }
+        }));
     }
 
+    // The shared ErrorState in place of a card whose source failed; null when
+    // every source the card reads has answered.
+    const failedCard = (sources: readonly DashboardSource[], className?: string) => {
+        // A summary that arrived later (the 30-second refresh or the live
+        // stream) is data: it replaces the error card without a click.
+        const failed = sources.filter((source) => sourceErrors[source] && !(source === "summary" && liveSummary));
+        if (failed.length === 0) return null;
+        return <ErrorState className={className} message={sourceErrors[failed[0]]} onRetry={() => loadSources(failed)} />;
+    };
+
     useEffect(() => {
-        // Initial REST fetch on mount; loadData() flips the loading flag
-        // synchronously so the shell shows a spinner before the response
-        // arrives — not state derivable during render.
-        // eslint-disable-next-line react-hooks/set-state-in-effect -- mount data fetch; loadData sets loading/error/series as it resolves
-        loadData();
+        // Initial REST fetch on mount. The shell shows its spinner (loading
+        // starts true) until every source has answered or failed.
+        void loadSources(DASHBOARD_SOURCES).finally(() => setLoading(false));
     }, []);
 
     // liveSummary and liveBars are now driven exclusively by the WebSocket
@@ -1252,7 +1283,7 @@ export default function DashboardPage() {
     // the primary update path; once it gives up (status "offline") or is between
     // reconnect attempts ("retrying"), the displayed stats — minutes-used in
     // particular — would otherwise freeze on the last snapshot. While the stream
-    // is in either state we poll the same summary endpoint loadData() uses and
+    // is in either state we poll the same summary endpoint the first load uses and
     // feed the SAME setter the stream feeds (setLiveSummary), so the KPIs keep
     // refreshing without a socket. Keyed on streamStatus, so the interval is torn
     // down the moment the stream reconnects — and on unmount.
@@ -1412,7 +1443,7 @@ export default function DashboardPage() {
         .slice(0, 6)
         .map((c) => {
             const tone: FeedItem["tone"] = c.status === "running" ? "good" : c.status === "paused" ? "warn" : "neutral";
-            const time = new Date(c.created_at).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            const time = new Date(c.created_at).toLocaleDateString();
             return {
                 id: c.id,
                 title: c.name,
@@ -1457,23 +1488,13 @@ export default function DashboardPage() {
             <FirstCallSetup />
             <CallIssuesBanner />
             {loading ? (
-                <div className="flex items-center justify-center h-64" role="status" aria-live="polite">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-800 dark:border-gray-200" aria-hidden="true" />
-                    <span className="sr-only">Loading dashboard</span>
-                </div>
-            ) : error ? (
-                <div className="content-card border-red-500/30 text-red-600 dark:text-red-400">
-                    <p role="alert">{error}</p>
-                    <button type="button" onClick={() => void loadData()} className="mt-3 rounded-lg border border-current px-3 py-2 text-sm font-semibold focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring">
-                        Retry dashboard
-                    </button>
-                </div>
+                <LoadingState title="Loading dashboard" />
             ) : (
                 <div className="space-y-8">
                     {/* Stats Grid */}
                     <div data-testid="dashboard-kpi-timezone" className="text-xs font-bold text-muted-foreground">{UTC_TIMEZONE_LABEL}</div>
                     <div data-testid="dashboard-kpi-row" className="!mt-2 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 items-stretch">
-                        {kpis.map((k) => (
+                        {failedCard(["summary"], "md:col-span-2 lg:col-span-4") ?? kpis.map((k) => (
                             <KpiCard
                                 key={k.title}
                                 title={k.title}
@@ -1499,7 +1520,7 @@ export default function DashboardPage() {
                         >
                             <div className="flex items-center justify-between gap-3 mb-4">
                                 <div className="min-w-0">
-                                    <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Live Line Chart</h3>
+                                    <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide">Call Volume</h3>
                                     <p className="text-sm text-gray-600 dark:text-muted-foreground font-medium">Real outbound call volume over time</p>
                                 </div>
                                 <div className="flex items-center gap-2 text-xs font-bold text-emerald-700 bg-emerald-100 border border-emerald-200 px-3 py-1.5 rounded-full animate-pulse">
@@ -1576,7 +1597,7 @@ export default function DashboardPage() {
                             ) : null}
 
                             {liveBuckets.length === 0 ? (
-                                <div className="h-40 flex items-center justify-center text-sm text-gray-600 dark:text-muted-foreground font-semibold">Initializing…</div>
+                                <EmptyState title="No series data" />
                             ) : (
                                 <LiveCallsTimeSeriesChart
                                     buckets={liveBuckets}
@@ -1589,6 +1610,7 @@ export default function DashboardPage() {
                             )}
                         </motion.div>
 
+                        {failedCard(["summary"]) ?? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1596,7 +1618,7 @@ export default function DashboardPage() {
                             whileHover={{ scale: 1.01 }}
                             className="flex flex-col rounded-2xl border border-border bg-background/70 backdrop-blur-sm p-6 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out dark:hover:bg-background dark:hover:shadow-md"
                         >
-                            <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide mb-4">Donut Chart</h3>
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide mb-4">Success Rate</h3>
                             <div className="flex flex-1 flex-col min-h-0">
                                 <div className="flex flex-1 items-center justify-center">
                                     <div className="relative w-full max-w-[260px] mx-auto flex items-center justify-center">
@@ -1636,7 +1658,9 @@ export default function DashboardPage() {
                                 </div>
                             </div>
                         </motion.div>
+                        )}
 
+                        {failedCard(["summary"]) ?? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1739,7 +1763,9 @@ export default function DashboardPage() {
                                 </div>
                             </motion.div>
                         </motion.div>
+                        )}
 
+                        {failedCard(["daily"]) ?? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1758,12 +1784,14 @@ export default function DashboardPage() {
                                 </div>
                             </div>
                             {stackedPoints.length === 0 ? (
-                                <div className="h-40 flex items-center justify-center text-sm text-gray-600 dark:text-muted-foreground font-semibold">No series data</div>
+                                <EmptyState title="No series data" />
                             ) : (
                                 <StackedAreaChart points={stackedPoints} />
                             )}
                         </motion.div>
+                        )}
 
+                        {failedCard(["summary", "byCampaign"]) ?? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1884,7 +1912,9 @@ export default function DashboardPage() {
                                 </div>
                             )}
                         </motion.div>
+                        )}
 
+                        {failedCard(["hourly"]) ?? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1904,7 +1934,9 @@ export default function DashboardPage() {
                             </div>
                             <Heatmap rows={heatRows} cols={heatCols} cellValues={heatValues} maxValue={heatMax} />
                         </motion.div>
+                        )}
 
+                        {failedCard(["campaigns"]) ?? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1913,8 +1945,9 @@ export default function DashboardPage() {
                             className="rounded-2xl border border-border bg-background/70 backdrop-blur-sm p-6 shadow-sm transition-[background-color,box-shadow] duration-150 ease-out dark:hover:bg-background dark:hover:shadow-md"
                         >
                             <h3 className="text-xl font-bold text-gray-900 dark:text-foreground uppercase tracking-wide mb-4">Event Stream</h3>
-                            <ActivityFeed items={feedItems} />
+                            {feedItems.length === 0 ? <EmptyState title="No campaigns yet" /> : <ActivityFeed items={feedItems} />}
                         </motion.div>
+                        )}
 
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
@@ -1925,6 +1958,7 @@ export default function DashboardPage() {
                             <DialerInsights />
                         </motion.div>
 
+                        {failedCard(["daily"]) ?? (
                         <motion.div
                             initial={{ opacity: 0, y: 20 }}
                             animate={{ opacity: 1, y: 0 }}
@@ -1944,14 +1978,16 @@ export default function DashboardPage() {
                                 </div>
                             </div>
                             {timelineItems.length === 0 ? (
-                                <div className="text-sm text-gray-600 dark:text-muted-foreground font-semibold py-2">No alerts</div>
+                                <EmptyState title="No alerts" />
                             ) : (
                                 <AlertTimeline items={timelineItems} />
                             )}
                         </motion.div>
+                        )}
                     </div>
 
                     {/* Recent Campaigns */}
+                    {failedCard(["campaigns"]) ?? (
                     <motion.div
                         initial={{ opacity: 0, y: 20 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -1969,16 +2005,7 @@ export default function DashboardPage() {
                             </Link>
                         </div>
                         {(campaigns ?? []).length === 0 ? (
-                            <div className="text-center py-8 text-gray-600 dark:text-muted-foreground">
-                                <Megaphone className="w-12 h-12 mx-auto mb-4 opacity-50 text-gray-500 dark:text-muted-foreground" />
-                                <p className="font-medium">No campaigns yet</p>
-                                <Link
-                                    href="/campaigns/new"
-                                    className="mt-4 inline-block text-sm font-bold text-gray-900 dark:text-foreground dark:hover:underline"
-                                >
-                                    Create your first campaign
-                                </Link>
-                            </div>
+                            <EmptyState title="No campaigns yet" actionLabel="Create your first campaign" actionHref="/campaigns/new" />
                         ) : (
                             <div className="space-y-3">
                                 {(campaigns ?? []).slice(0, 5).map((campaign, index) => (
@@ -2019,6 +2046,7 @@ export default function DashboardPage() {
                             </div>
                         )}
                     </motion.div>
+                    )}
                 </div>
             )}
         </DashboardLayout>

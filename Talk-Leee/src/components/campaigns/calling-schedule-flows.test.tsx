@@ -130,7 +130,7 @@ async function pickTimezone(label: string) {
 }
 
 async function submitForm(container: HTMLElement) {
-    const button = screen.getByRole("button", { name: /Create Campaign|Save Campaign/ }) as HTMLButtonElement;
+    const button = screen.getByRole("button", { name: /Create campaign|Save campaign/ }) as HTMLButtonElement;
     await waitFor(() => assert.equal(button.disabled, false));
     await act(async () => { fireEvent.submit(container.querySelector("form")!); });
 }
@@ -201,7 +201,7 @@ test("TZ2/TZ4 classic form (edit): null saved fields read Not set and are saved 
 
 test("scope: an inbound campaign edited in the classic form gets no schedule editor and sends no calling_schedule", async () => {
     const { container } = mount(<CampaignForm mode="edit" campaignId="campaign-1" direction="inbound" initialData={formInitial()} />);
-    const save = screen.getByRole("button", { name: "Save Campaign" }) as HTMLButtonElement;
+    const save = screen.getByRole("button", { name: "Save campaign" }) as HTMLButtonElement;
     await waitFor(() => assert.equal(save.disabled, false));
     assert.ok(!screen.queryByText("Calling hours"));
     await submitForm(container);
@@ -283,4 +283,72 @@ test("AC-TZ wiring: the edit page feeds calling_config to both editors and the d
     assert.match(detail, /startDialog\.open\(\[campaign\]\);/);
     assert.match(detail, /<CampaignStartDialog dialog=\{startDialog\} \/>/);
     assert.match(startDialog, /<CallingScheduleStartNotice callingConfig=\{dialog\.targets\[0\]\?\.calling_config\} \/>/);
+});
+
+// ── FX3a Task 2.2–2.4: one name per field across the wizard and the form ─────
+test("FX3a wizard: the review step uses the step 1 field names", async () => {
+    window.sessionStorage.setItem("wizard-fx3a", JSON.stringify({
+        step: 0, voiceSelection: REALTIME, name: "AC campaign", companyName: "Acme", agentNamesRaw: "Alex", personaType: "lead_gen",
+    }));
+    mount(<CampaignWizard draftStorageKey="wizard-fx3a" />);
+    await waitFor(() => assert.equal((screen.getByRole("button", { name: /Next: Knowledge/ }) as HTMLButtonElement).disabled, false));
+    fireEvent.click(screen.getByRole("button", { name: /Next: Knowledge/ }));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Next: Review/ })); });
+    await screen.findByRole("button", { name: "Create campaign" });
+    for (const label of ["Brand / company name", "Representative names", "Opening objective"]) {
+        assert.equal(screen.queryByText(label) !== null, true, label);
+    }
+    for (const label of ["Company", "Agents", "Objective"]) {
+        assert.equal(screen.queryByText(label) !== null, false, label);
+    }
+});
+
+test("FX3a classic form: Campaign name, Persona and Create campaign", async () => {
+    mount(<CampaignForm mode="create" initialData={formInitial()} />);
+    await waitFor(() => assert.ok(screen.getByText("Calling hours")));
+    assert.equal(screen.queryByLabelText("Campaign name") !== null, true);
+    assert.equal(screen.queryByLabelText("Campaign Name") !== null, false);
+    assert.equal(screen.queryByText("Persona") !== null, true);
+    assert.equal(screen.queryByText("Agent role") !== null, false);
+    assert.equal(screen.queryByRole("button", { name: "Create campaign" }) !== null, true);
+    assert.equal(screen.queryByRole("button", { name: "Create Campaign" }) !== null, false);
+});
+
+// ── FX3a2 Tasks 2 and 3.3: Save campaign, and the provider shown as AI Options shows it ──
+test("FX3a2 classic form (edit): the button reads Save campaign and the voice provider is capitalised", async () => {
+    mount(<CampaignForm mode="edit" campaignId="campaign-1" direction="outbound" initialData={formInitial({ calling_schedule: LONDON })} />);
+    await waitFor(() => assert.ok(screen.getByText("Calling hours")));
+    assert.equal(screen.queryByRole("button", { name: "Save campaign" }) !== null, true);
+    assert.equal(screen.queryByRole("button", { name: "Save Campaign" }) !== null, false);
+    const line = await waitFor(() => {
+        const found = screen.getByText(/Campaign voices follow your global AI Options TTS provider/);
+        return found;
+    });
+    const provider = Array.from(line.querySelectorAll("span")).find((span) => span.textContent === "cartesia");
+    assert.equal(provider !== undefined, true);
+    assert.equal(provider!.classList.contains("capitalize"), true);
+});
+
+// ── FX3a3 Task 2.5: the model is shown by the name AI Options shows ──────────
+const withTtsModel = async () => ({
+    pipeline_mode: "cascaded", tts_provider: "cartesia", tts_model: "sonic-2",
+}) as unknown as Awaited<ReturnType<typeof aiOptionsApi.getConfig>>;
+const providerLine = () => screen.getByText(/Campaign voices follow your global AI Options TTS provider/).textContent ?? "";
+
+test("FX3a3 classic form: the voice line shows the model's name from the providers list", async () => {
+    aiOptionsApi.getConfig = withTtsModel;
+    aiOptionsApi.getProviders = async () => ({
+        llm: { providers: [], models: [] }, stt: { providers: [], models: [], engines: [] },
+        tts: { providers: ["cartesia"], models: [{ id: "sonic-2", name: "Sonic 2", description: "", provider: "cartesia" }] },
+    }) as unknown as Awaited<ReturnType<typeof aiOptionsApi.getProviders>>;
+    mount(<CampaignForm mode="edit" campaignId="campaign-1" direction="outbound" initialData={formInitial({ calling_schedule: LONDON })} />);
+    await waitFor(() => assert.equal(providerLine().includes("on model Sonic 2."), true));
+    assert.equal(providerLine().includes("sonic-2"), false);
+});
+
+test("FX3a3 classic form: when the providers list cannot be read the model id stays", async () => {
+    aiOptionsApi.getConfig = withTtsModel;
+    aiOptionsApi.getProviders = async () => { throw new Error("providers unavailable"); };
+    mount(<CampaignForm mode="edit" campaignId="campaign-1" direction="outbound" initialData={formInitial({ calling_schedule: LONDON })} />);
+    await waitFor(() => assert.equal(providerLine().includes("on model sonic-2."), true));
 });

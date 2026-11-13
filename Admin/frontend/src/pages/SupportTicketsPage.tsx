@@ -79,7 +79,7 @@ function SupportTicketsContent() {
                         <div className="page-header-actions">
                             <Link className="btn btn-secondary" to="/support/articles">Help articles</Link>
                             <button type="button" className="btn btn-secondary" disabled={loading} onClick={() => void refresh()}>
-                                <RefreshCw size={16} /> Refresh
+                                <RefreshCw size={16} /> {error ? 'Retry' : 'Refresh'}
                             </button>
                         </div>
                     </div>

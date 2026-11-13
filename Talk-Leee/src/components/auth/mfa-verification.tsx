@@ -8,8 +8,11 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, type LoginResponse } from "@/lib/api";
-import { validateTotpCode } from "@/lib/mfa-utils";
 import { ApiClientError, getRequestIdentityGeneration, subscribeRequestIdentityGeneration } from "@/lib/http-client";
+import { validateTotpCode } from "@/lib/mfa-utils";
+
+/** Longest recovery code accepted, as on the Admin sign-in (Admin/frontend/src/lib/auth.tsx:182). */
+const RECOVERY_CODE_MAX_LENGTH = 128;
 
 interface MFAVerificationProps {
   // Issued by POST /auth/login when mfa_required=true. The verify call
@@ -22,6 +25,9 @@ interface MFAVerificationProps {
 
 export default function MFAVerification({ challengeToken, onSuccess, onBackClick, onError }: MFAVerificationProps) {
   const [totpCode, setTotpCode] = useState("");
+  // Two modes, as on the Admin sign-in (Admin/frontend/src/pages/LoginPage.tsx:39-47):
+  // the authenticator code (digits, numeric keypad) or a recovery code (letters allowed).
+  const [recovery, setRecovery] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [timeRemaining, setTimeRemaining] = useState(30);
@@ -72,6 +78,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
       setRestartRequired(false);
       setFinished(false);
       setTotpCode("");
+      setRecovery(false);
       setError("");
       setLoading(false);
     }
@@ -113,14 +120,17 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
       // Defensive: if the login response didn't surface a challenge_token
       // we'd reach this screen with nothing to verify against. Bounce the
       // user back to the credential step rather than silently failing.
-      const errorMsg = "MFA session expired. Please sign in again.";
+      const errorMsg = "Two-factor authentication session expired. Please sign in again.";
       setError(errorMsg);
       onError?.(errorMsg);
       return;
     }
 
-    if (!validateTotpCode(totpCode)) {
-      const errorMsg = "Please enter a valid 6-8 digit code";
+    // A recovery code is sent as `recovery_code`, an authenticator code as
+    // `code` (backend/app/api/v1/endpoints/mfa/schemas.py:45-46).
+    const recoveryCode = totpCode.trim();
+    if (recovery ? (!recoveryCode || recoveryCode.length > RECOVERY_CODE_MAX_LENGTH) : !validateTotpCode(totpCode)) {
+      const errorMsg = recovery ? "Enter the full recovery code." : "Please enter a valid 6-8 digit code";
       setError(errorMsg);
       onError?.(errorMsg);
       return;
@@ -134,7 +144,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
       && currentChallenge.current === operation.challenge;
 
     try {
-      const response = await api.verifyMfaChallenge(challengeToken, totpCode, undefined, {
+      const response = await api.verifyMfaChallenge(challengeToken, recovery ? undefined : totpCode, recovery ? recoveryCode : undefined, {
         signal: operation.controller.signal, ownsOperation,
       });
       if (!ownsOperation()) return;
@@ -181,7 +191,7 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
     <Card>
       <CardHeader className="text-center">
         <CardTitle asChild>
-          <h2>Two-Factor Authentication</h2>
+          <h2>Two-factor authentication</h2>
         </CardTitle>
         <CardDescription>Enter the code from your authenticator app</CardDescription>
       </CardHeader>
@@ -190,21 +200,21 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
         <CardContent className="space-y-4">
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label htmlFor="totp">Authentication Code</Label>
-              <span className="text-xs text-muted-foreground">Expires in {timeRemaining}s</span>
+              <Label htmlFor="totp">{recovery ? "Recovery code" : "Authentication Code"}</Label>
+              {recovery ? null : <span className="text-xs text-muted-foreground">Expires in {timeRemaining}s</span>}
             </div>
             <div className="relative">
               <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden />
               <Input
                 id="totp"
                 type="text"
-                placeholder="000000"
+                placeholder={recovery ? "Enter the complete recovery code" : "000000"}
                 value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, "").slice(0, 8))}
-                className="pl-10 text-center text-lg tracking-widest font-mono"
-                maxLength={8}
-                inputMode="numeric"
-                pattern="[0-9]*"
+                onChange={(e) => setTotpCode(recovery ? e.target.value.slice(0, RECOVERY_CODE_MAX_LENGTH) : e.target.value.replace(/\D/g, "").slice(0, 8))}
+                className={recovery ? "pl-10 font-mono" : "pl-10 text-center text-lg tracking-widest font-mono"}
+                maxLength={recovery ? RECOVERY_CODE_MAX_LENGTH : 8}
+                inputMode={recovery ? "text" : "numeric"}
+                pattern={recovery ? undefined : "[0-9]*"}
                 autoComplete="one-time-code"
                 required
                 disabled={loading || restartRequired || finished || !isPresent}
@@ -213,9 +223,11 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
                 aria-describedby={error ? errorId : undefined}
               />
             </div>
-            <p className="text-xs text-muted-foreground text-center">
-              Open your authenticator app and enter the 6-digit code
-            </p>
+            {recovery ? null : (
+              <p className="text-xs text-muted-foreground text-center">
+                Open your authenticator app and enter the 6-digit code
+              </p>
+            )}
           </div>
 
           {error && (
@@ -233,11 +245,19 @@ export default function MFAVerification({ challengeToken, onSuccess, onBackClick
             <p className="text-xs text-blue-700 dark:text-blue-300">
               Don&apos;t have access to your authenticator? Use a recovery code instead.
             </p>
+            <button
+              type="button"
+              className="mt-2 text-xs font-semibold text-blue-700 underline underline-offset-2 disabled:opacity-50 dark:text-blue-300"
+              disabled={loading || restartRequired || finished || !isPresent}
+              onClick={() => { setRecovery(!recovery); setTotpCode(""); setError(""); }}
+            >
+              {recovery ? "Use authenticator code" : "Use a recovery code"}
+            </button>
           </div>
         </CardContent>
 
         <CardFooter className="flex flex-col gap-3">
-          <Button type="submit" className="w-full" disabled={loading || restartRequired || finished || !isPresent || totpCode.length < 6}>
+          <Button type="submit" className="w-full" disabled={loading || restartRequired || finished || !isPresent || (recovery ? totpCode.trim().length === 0 : totpCode.length < 6)}>
             {loading ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin mr-2" aria-hidden />

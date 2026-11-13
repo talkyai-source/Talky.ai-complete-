@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -22,6 +22,12 @@ function mountLists(ready = true) {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
     clients.push(client);
     render(<QueryClientProvider client={client}><ContactLists campaignId="campaign-a" /></QueryClientProvider>);
+}
+
+// FX2a: "Call this list" asks in the app's confirm dialog, never in a browser confirm.
+const noBrowserConfirm = () => { throw new Error("window.confirm must not be called"); };
+async function confirmInDialog(user: ReturnType<typeof userEvent.setup>) {
+    await user.click(within(await screen.findByRole("dialog")).getByRole("button", { name: "Call this list" }));
 }
 
 const inactiveList: ContactList = {
@@ -69,16 +75,17 @@ test("call-list success applies the server's authoritative active state without 
         started: true,
         message: "Calls queued.",
     });
-    window.confirm = () => true;
+    window.confirm = noBrowserConfirm;
 
     mountLists();
     assert.ok(await screen.findByText("Inactive"));
     await waitFor(() => assert.equal((screen.getByRole("button", { name: "Call this list" }) as HTMLButtonElement).disabled, false));
 
     await user.click(screen.getByRole("button", { name: "Call this list" }));
+    await confirmInDialog(user);
 
     await waitFor(() => assert.ok(screen.getByText("Active")));
-    assert.equal(screen.queryByText("Inactive"), null);
+    assert.equal(screen.queryByText("Inactive") === null, true);
 });
 
 test("partial 503 applies is_active from structured server details", async () => {
@@ -99,16 +106,17 @@ test("partial 503 applies is_active from structured server details", async () =>
             url: `/contact-lists/${inactiveList.id}/call`,
         });
     };
-    window.confirm = () => true;
+    window.confirm = noBrowserConfirm;
 
     mountLists();
     assert.ok(await screen.findByText("Inactive"));
     await waitFor(() => assert.equal((screen.getByRole("button", { name: "Call this list" }) as HTMLButtonElement).disabled, false));
 
     await user.click(screen.getByRole("button", { name: "Call this list" }));
+    await confirmInDialog(user);
 
     await waitFor(() => assert.ok(screen.getByText("Active")));
-    assert.equal(screen.queryByText("Inactive"), null);
+    assert.equal(screen.queryByText("Inactive") === null, true);
 });
 
 test("a pending account-A call-list response cannot publish its private message into B's history", async () => {
@@ -121,10 +129,11 @@ test("a pending account-A call-list response cannot publish its private message 
         started = true;
         return new Promise((resolve) => { resolveCall = resolve; });
     };
-    window.confirm = () => true;
+    window.confirm = noBrowserConfirm;
     mountLists();
     await waitFor(() => assert.equal((screen.getByRole("button", { name: "Call this list" }) as HTMLButtonElement).disabled, false));
     await user.click(screen.getByRole("button", { name: "Call this list" }));
+    await confirmInDialog(user);
     await waitFor(() => assert.equal(started, true));
     await act(async () => { notificationsStore.setIdentity({ tenantId: "tenant-b", userId: "user-b" }); });
     await act(async () => {

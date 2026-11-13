@@ -88,3 +88,13 @@ test("actual synthetic-provider PostgreSQL API capture renders its recorded hist
   }
   assert.equal(screen.queryByText(/Included Minutes|Usage Breakdown|Current plan/), null);
 });
+
+// ── FX3a2 Task 6: one date form ──────────────────────────────────────────────
+test("FX3a2: invoice dates use the app's most used date form", async () => {
+  respond(invoiceFixture());
+  show(<BillingInvoiceDetail id={invoiceFixture().id} />);
+  await screen.findByText("Original purchased service");
+  const text = document.body.textContent ?? "";
+  assert.equal(text.includes(new Date(invoiceFixture().period_start!).toLocaleDateString()), true);
+  assert.equal(/[A-Z][a-z]{2} \d{1,2}, 2026/.test(text), false);
+});

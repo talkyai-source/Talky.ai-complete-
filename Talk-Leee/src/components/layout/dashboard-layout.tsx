@@ -31,9 +31,11 @@ interface DashboardLayoutProps {
     title?: string;
     description?: string;
     requireAuth?: boolean;
+    /** Breadcrumb text for a path segment, keyed by the segment (a campaign id shown as the campaign's name). */
+    breadcrumbLabels?: Record<string, string>;
 }
 
-export function DashboardLayout({ children, title, description, requireAuth = true }: DashboardLayoutProps) {
+export function DashboardLayout({ children, title, description, requireAuth = true, breadcrumbLabels }: DashboardLayoutProps) {
     const pathname = usePathname();
     const router = useRouter();
     const { user, isLoading: authLoading } = useAuth();
@@ -163,7 +165,7 @@ export function DashboardLayout({ children, title, description, requireAuth = tr
                                 </Button>
                             )}
                             <div className="min-w-0">
-                                <Breadcrumbs className={title || description ? "mb-1.5" : undefined} />
+                                <Breadcrumbs className={title || description ? "mb-1.5" : undefined} labels={breadcrumbLabels} />
                                 {title ? (
                                     <h1 className="text-xl md:text-2xl font-semibold text-foreground leading-tight break-words">{title}</h1>
                                 ) : null}

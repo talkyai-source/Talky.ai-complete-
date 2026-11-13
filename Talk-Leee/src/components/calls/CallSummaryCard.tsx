@@ -1,6 +1,7 @@
 "use client";
 
-import { Loader2, AlertCircle, TrendingUp, TrendingDown, Minus, Sparkles, ShieldAlert, RefreshCw } from "lucide-react";
+import { TrendingUp, TrendingDown, Minus, Sparkles, ShieldAlert } from "lucide-react";
+import { ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import type { CallSummaryObj, CallSummaryEnvelope } from "@/lib/dashboard-api";
 import { InfoTip } from "@/components/ui/info-tip";
 
@@ -357,31 +358,11 @@ export function summarySourceMessage(data?: CallSummaryEnvelope): string | null 
 
 export function CallSummaryCard({ isLoading, isError, error, data, onRetry }: CallSummaryCardProps) {
     if (isLoading) {
-        return (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Generating AI summary…
-            </div>
-        );
+        return <LoadingState title="Generating AI summary…" />;
     }
 
     if (isError) {
-        return (
-            <div className="flex flex-wrap items-center gap-2 text-sm text-destructive" role="alert">
-                <AlertCircle className="h-4 w-4 shrink-0" />
-                {error instanceof Error ? error.message : "Failed to load summary."}
-                {onRetry ? (
-                    <button
-                        type="button"
-                        onClick={onRetry}
-                        className="inline-flex items-center gap-1 rounded-md border border-destructive/40 px-2 py-0.5 text-xs font-semibold text-destructive transition-colors hover:bg-destructive/10"
-                    >
-                        <RefreshCw className="h-3.5 w-3.5" aria-hidden />
-                        Retry
-                    </button>
-                ) : null}
-            </div>
-        );
+        return <ErrorState message={failedReadMessage(error, "Failed to load summary.")} onRetry={onRetry} />;
     }
 
     if (!data) return null;

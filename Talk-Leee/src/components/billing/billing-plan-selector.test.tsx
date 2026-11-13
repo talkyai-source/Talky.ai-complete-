@@ -420,3 +420,25 @@ for (const state of ["expired", "failed"]) {
     assert.ok(absent(PENDING)); assert.ok(absent(CONFIRMING));
   });
 }
+
+// ── FX3a2 Task 4: the page is called Plans ───────────────────────────────────
+test("FX3a2: loading and the empty list say plans, not offers", async () => {
+  catalogue = [];
+  mount();
+  assert.equal(screen.queryByText("Loading plans…") !== null, true);
+  assert.equal(screen.queryByText("Loading billing offers…") !== null, false);
+  await waitFor(() => assert.equal(screen.queryByText("No approved plans are currently available.") !== null, true));
+  assert.equal(screen.queryByText("No approved offers are currently available.") !== null, false);
+});
+
+// ── FX3a3 Task 2.2 ───────────────────────────────────────────────────────────
+test("FX3a3: a failed plans read says Plans, not Billing offers", async () => {
+  const request = api.request;
+  api.request = (async (opts: HttpRequestOptions) => {
+    if (opts.path === "/billing/plans") throw new ApiClientError({ status: 503, code: "server_error", message: "Unavailable", url: opts.path, method: "GET" });
+    return request(opts);
+  }) as typeof api.request;
+  mount();
+  await waitFor(() => assert.equal(screen.queryByText("Plans could not be verified. Your current subscription is unchanged.") !== null, true), { timeout: 15_000 });
+  assert.equal(screen.queryByText(/Billing offers could not be verified/) !== null, false);
+});

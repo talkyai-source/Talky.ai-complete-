@@ -106,9 +106,10 @@ test("a failed status call leaves the error box as the only message: no status a
     for (const type of CARDS) {
         absent(card(type).queryByLabelText(/^Status:/), `${type} shows no status`);
         absent(card(type).queryByText(CHECKING), `${type} is no longer checking`);
-        absent(card(type).queryByText("Not connected."));
+        absent(card(type).queryByText("Disconnected."));
     }
-    assert.equal(screen.queryAllByRole("button").length, 0);
+    // FX2a: the failed read now offers Retry; the cards still have no buttons.
+    assert.deepEqual(screen.queryAllByRole("button").map((b) => b.textContent?.trim()), ["Retry"]);
     absent(screen.queryByText(/not enabled by this server/));
 });
 
@@ -253,4 +254,20 @@ test("a return event left in storage by an earlier visit refetches but is not sh
     await pause(900);
     absent(screen.queryByText(ACCESS_DENIED));
     assert.equal(status.mock.callCount() >= 2, true, "the stored event still triggers the refetch, as before");
+});
+
+// ── FX3a Task 4: Connectors text ─────────────────────────────────────────────
+test("FX3a: a disconnected card's details use the status name, and required connectors are listed by their names", async () => {
+    mock.method(backendApi.connectors, "status", async () => ({ items: ANSWER }));
+    searchParams = new URLSearchParams("required=calendar,email");
+    try {
+        renderWithQueryClient(<Page />);
+        await waitFor(() => assert.equal(card("email").queryByLabelText("Status: Disconnected") !== null, true), { timeout: SLOW });
+        assert.equal(card("email").queryByText("Disconnected.") !== null, true);
+        assert.equal(card("email").queryByText("Not connected.") !== null, false);
+        assert.equal(screen.queryByText("Required for this feature: Google Calendar, Gmail.") !== null, true);
+        assert.equal(screen.queryByText("Required for this feature: calendar, email.") !== null, false);
+    } finally {
+        searchParams = new URLSearchParams("");
+    }
 });

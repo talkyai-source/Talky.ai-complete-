@@ -3,7 +3,7 @@
 import { normalizeMinutesAllowance, type MinutesState } from "@/lib/minutes-allowance";
 import React, { createContext, useContext, useEffect, useMemo, useRef, useState, ReactNode, useCallback } from "react";
 import { api } from "@/lib/api";
-import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, ApiClientError } from "@/lib/http-client";
+import { clearFreshLoginGrace, resetSessionExpiredLatch, isWithinFreshLoginGrace, setTokenProvider, isApiClientError, setRequestIdentity, invalidateRequestIdentity, beginRequestIdentityCheck, ApiClientError } from "@/lib/http-client";
 import { consumeLegacyAuthCookie, getBrowserAuthToken, isBearerFallbackEnabled, setBrowserAuthToken } from "@/lib/auth-token";
 import { notificationsStore } from "@/lib/notifications";
 
@@ -346,8 +346,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
                 if (current()) setLoading(false);
             }
         }
-        void loadMe(0);
-        return () => { cancelled = true; };
+        // Requests the page makes before this first check answers wait for it.
+        const settleSignInCheck = beginRequestIdentityCheck();
+        void loadMe(0).finally(settleSignInCheck);
+        return () => { cancelled = true; settleSignInCheck(); };
     }, [setUser]);
 
     // The ONE writer that touches the persisted token + the reactive state.

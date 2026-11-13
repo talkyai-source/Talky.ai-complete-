@@ -43,7 +43,20 @@ test("the range menu and the daily chart show 'Timezone: UTC' and print the UTC 
     // The range menu's label sits in the same pill as the menu.
     assert.equal(screen.getByTestId("analytics-range-timezone").parentElement?.contains(screen.getByRole("combobox", { name: "Select date range" })), true);
     // The bucket "2026-03-01" is Mar 1 in UTC; in Los Angeles the local date would be Feb 28.
-    assert.equal(screen.getAllByText("Mar 1").length >= 1, true);
-    assert.equal(screen.queryByText("Feb 28") !== null, false);
-    assert.equal(screen.getByLabelText(/^Mar 1: total 4/) !== null, true);
+    assert.equal(screen.getAllByText("3/1/2026").length >= 1, true);
+    assert.equal(screen.queryByText("2/28/2026") !== null, false);
+    assert.equal(screen.getByLabelText(/^3\/1\/2026: total 4/) !== null, true);
+});
+
+// ── FX3a2 Task 6 / FX3a3 Task 1: the day label under each bar stays whole on one line ─
+test("FX3a3: the day label under a bar is written down the bar's column on one line, never wrapped", async () => {
+    mock.method(extendedApi, "getCallAnalytics", async () => ({
+        series: [{ date: "2026-03-01", total_calls: 4, answered: 3, failed: 1 }],
+    }));
+    render(<Page />);
+    await waitFor(() => assert.equal(screen.queryByTestId("analytics-chart-timezone") !== null, true), { timeout: SLOW });
+    const label = screen.getAllByText("3/1/2026").find((node) => node.classList.contains("text-xs") && node.classList.contains("whitespace-nowrap"));
+    assert.equal(label !== undefined, true);
+    assert.equal(label!.classList.contains("[writing-mode:vertical-rl]"), true);
+    assert.equal(label!.classList.contains("break-all"), false);
 });

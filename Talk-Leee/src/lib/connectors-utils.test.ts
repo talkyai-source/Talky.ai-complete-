@@ -192,3 +192,11 @@ test("formatLastSync is stable for empty and invalid values", () => {
     assert.equal(formatLastSync("not-a-date"), "not-a-date");
     assert.ok(formatLastSync("2025-01-01T00:00:00Z").length > 0);
 });
+
+// ── FX3a2 Task 3.1 ───────────────────────────────────────────────────────────
+test("FX3a2: a successful return names the connector as its card does", () => {
+    assert.equal(parseConnectorsCallback(new URLSearchParams("status=success&type=calendar")).message, "Google Calendar connected successfully.");
+    assert.equal(parseConnectorsCallback(new URLSearchParams("status=success"), "email").message, "Gmail connected successfully.");
+    assert.equal(parseConnectorsCallback(new URLSearchParams("status=success&type=calendar")).message.startsWith("calendar "), false);
+    assert.equal(parseConnectorsCallback(new URLSearchParams("status=success")).message, "Connector connected successfully.");
+});

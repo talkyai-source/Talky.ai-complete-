@@ -232,6 +232,21 @@ export function invalidateRequestIdentity() {
     _requestIdentity = null;
 }
 
+// The first sign-in check after a page load. A request made while it is
+// pending waits for the answer instead of failing with identity_unverified:
+// it belongs to the same session the check is reading. Account switches and
+// logout never open this window, so they still refuse pending work.
+let _signInCheck: Promise<void> | null = null;
+export function beginRequestIdentityCheck(): () => void {
+    let settle!: () => void;
+    const pending = new Promise<void>(resolve => { settle = resolve; });
+    _signInCheck = pending;
+    return () => {
+        if (_signInCheck === pending) _signInCheck = null;
+        settle();
+    };
+}
+
 export function setTokenProvider(fn: (() => string | null) | null, writer?: (token: string | null) => void) {
     _externalTokenProvider = fn;
     _externalTokenWriter = fn ? writer ?? null : null;
@@ -439,6 +454,18 @@ export function createHttpClient(config: HttpClientConfig) {
         return { token: getToken(), epoch: _identityEpoch, identity: _requestIdentity ? { ..._requestIdentity } : null };
     }
     type RequestScope = ReturnType<typeof captureScope>;
+    function needsVerifiedIdentity(scope: RequestScope, opts: HttpRequestOptions) {
+        const bootstrap = (opts.method ?? "GET") === "GET" && (opts.path === "/auth/me" || opts.path === "/me" || opts.path === "/health");
+        return !!_externalTokenProvider && !scope.identity && !managesSession(opts.path) && !bootstrap;
+    }
+    async function scopeAfterSignInCheck(opts: HttpRequestOptions) {
+        let scope = captureScope();
+        while (_signInCheck && needsVerifiedIdentity(scope, opts)) {
+            await _signInCheck;
+            scope = captureScope();
+        }
+        return scope;
+    }
     // The current token is the scope's own, or one this client rotated it into.
     function tokenStillOurs(scope: RequestScope) {
         const current = getToken();
@@ -522,12 +549,13 @@ export function createHttpClient(config: HttpClientConfig) {
         return res;
     }
 
-    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>, scope = captureScope()) {
+    async function raw<TBody = unknown>(opts: HttpRequestOptions<TBody>, given?: RequestScope) {
+        let scope = given ?? captureScope();
+        if (_signInCheck && needsVerifiedIdentity(scope, opts)) scope = await scopeAfterSignInCheck(opts);
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
-        const bootstrap = method === "GET" && (opts.path === "/auth/me" || opts.path === "/me" || opts.path === "/health");
-        if (_externalTokenProvider && !scope.identity && !managesSession(opts.path) && !bootstrap) {
+        if (needsVerifiedIdentity(scope, opts)) {
             throw new ApiClientError({ code: "identity_unverified", message: "Please wait while your sign-in is checked, then try again.", url, method });
         }
         const headers: Record<string, string> = {};
@@ -623,7 +651,8 @@ export function createHttpClient(config: HttpClientConfig) {
     }
 
     async function request<TResponse = unknown, TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<TResponse> {
-        const scope = captureScope();
+        let scope = captureScope();
+        if (_signInCheck && needsVerifiedIdentity(scope, opts)) scope = await scopeAfterSignInCheck(opts);
         const method = opts.method ?? "GET";
         const queryParams = opts.query ?? opts.params; // Support both query and params
         const url = buildUrl(baseUrl, opts.path, queryParams);
@@ -767,7 +796,8 @@ export function createHttpClient(config: HttpClientConfig) {
      * Throws {@link ApiClientError} on a non-OK response.
      */
     async function requestRaw<TBody = unknown>(opts: HttpRequestOptions<TBody>): Promise<Response> {
-        const scope = captureScope();
+        let scope = captureScope();
+        if (_signInCheck && needsVerifiedIdentity(scope, opts)) scope = await scopeAfterSignInCheck(opts);
         const method = opts.method ?? "GET";
         const url = buildUrl(baseUrl, opts.path, opts.query ?? opts.params);
         const isRefreshCall = managesSession(opts.path);

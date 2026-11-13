@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Select } from "@/components/ui/select";
-import { EmptyState, ErrorState, LoadingState } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { useAuth } from "@/hooks/useAuth";
 import { backendApi } from "@/lib/backend-api";
 import { isApiClientError } from "@/lib/http-client";
@@ -95,14 +95,14 @@ export default function TeamPage() {
                     <CardContent className="space-y-4">
                         {canManage && rolesQuery.isError ? (
                             <div role="alert" className="rounded-2xl border border-red-500/30 bg-background/70 p-4 text-sm text-red-500" data-testid="team-roles-error">
-                                {formatError(rolesQuery.error)}
+                                {failedReadMessage(rolesQuery.error, "Request failed")}
                             </div>
                         ) : null}
 
                         {membersQuery.isPending ? (
                             <LoadingState />
                         ) : membersQuery.isError ? (
-                            <ErrorState message={formatError(membersQuery.error)} onRetry={() => { void membersQuery.refetch(); }} />
+                            <ErrorState message={failedReadMessage(membersQuery.error, "Request failed")} onRetry={() => { void membersQuery.refetch(); }} />
                         ) : members.length === 0 ? (
                             <EmptyState title="Try refreshing the page." message="" />
                         ) : (

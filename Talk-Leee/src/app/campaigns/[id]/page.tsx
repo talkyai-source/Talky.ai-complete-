@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { dashboardApi, Campaign, Contact, ContactList, MinutesStatus } from "@/lib/dashboard-api";
 import type { CampaignActivity, CampaignBlockingReason, ContactMutation } from "@/lib/dashboard-api";
 import { OPTIONAL_CONTACT_FIELDS, contactPayload, contactEditPayload, fetchAllPages, type OptionalContactFieldKey } from "@/lib/contact-fields";
@@ -38,6 +40,7 @@ import {
 import { campaignDisplayStatus } from "@/lib/campaign-status";
 import { CampaignDuplicateStatus, duplicateResultNotice, useCampaignDuplicate } from "@/components/campaigns/campaign-duplicate";
 import { stashDuplicateNotice } from "@/lib/campaign-duplicate";
+import { humanizeOutcome } from "@/lib/call-outcome-label";
 import { inboundCampaignHrefForBase, isOutboundCampaign } from "@/lib/campaign-direction";
 import { inboundApi } from "@/lib/inbound-api";
 import { useEffectivePermissions } from "@/lib/queries/inbound-queries";
@@ -236,6 +239,12 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     const contactFormValid = phoneStatus.ok
         && extraContactFields.every((key) => optionalNumberStatus(key)?.ok ?? true);
     const [deletingContactId, setDeletingContactId] = useState<string | null>(null);
+    // A failed add / edit, shown in the form it came from.
+    const [contactFormError, setContactFormError] = useState("");
+    // The contact the Remove contact dialog is asking about.
+    const [removeTarget, setRemoveTarget] = useState<{ id: string; phone: string } | null>(null);
+    // A failed delete, shown in the row it came from.
+    const [contactDeleteError, setContactDeleteError] = useState<{ id: string; message: string } | null>(null);
     const [editingContact, setEditingContact] = useState<Contact | null>(null);
     const [contactSearch, setContactSearch] = useState("");
     const [contactFilter, setContactFilter] = useState<"all" | "leads">("all");
@@ -282,7 +291,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             setMinutes(minutesData);
         } catch (err) {
             if (superseded()) return;
-            setError(err instanceof Error ? err.message : "Failed to load campaign");
+            setError(failedReadMessage(err, "Failed to load campaign"));
         } finally {
             if (!superseded()) setLoading(false);
         }
@@ -402,6 +411,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         if (!contactFormValid) return;
         try {
             setAddingContact(true);
+            setContactFormError("");
             const payload = editingContact
                 ? contactEditPayload(contactForm, contactCountry)
                 : contactPayload(contactForm, contactCountry);
@@ -416,7 +426,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             setEditingContact(null);
             await loadData();
         } catch (err) {
-            alert(
+            setContactFormError(
                 err instanceof Error
                     ? err.message
                     : `Failed to ${editingContact ? "update" : "add"} contact`,
@@ -427,6 +437,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
     }
 
     function startEditContact(contact: Contact) {
+        setContactFormError("");
         setEditingContact(contact);
         const present = OPTIONAL_CONTACT_FIELDS.filter((f) => Boolean(contact[f.key])).map((f) => f.key);
         setExtraContactFields(present);
@@ -440,23 +451,25 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
         setShowAddContact(true);
     }
 
-    async function handleDeleteContact(contactId: string, phone: string) {
-        if (!confirm(`Remove ${phone} from this campaign? It will no longer be dialed.`)) return;
+    // Runs from the Remove contact dialog's confirm button. A failure is shown
+    // in the contact's own row, so the dialog always closes.
+    async function removeContact(contactId: string) {
         try {
+            setContactDeleteError(null);
             setDeletingContactId(contactId);
             await dashboardApi.deleteContact(campaignId, contactId);
             // Optimistically drop the row; reload stats in the background.
             setContacts((prev) => prev.filter((c) => c.id !== contactId));
             loadData().catch(() => {});
         } catch (err) {
-            alert(err instanceof Error ? err.message : "Failed to delete contact");
+            setContactDeleteError({ id: contactId, message: err instanceof Error ? err.message : "Failed to delete contact" });
         } finally {
             setDeletingContactId(null);
         }
     }
 
     return (
-        <DashboardLayout title={campaign?.name} description={campaign?.description ?? "Campaign stats, contacts, and controls."}>
+        <DashboardLayout title={campaign?.name} description={campaign?.description ?? "Campaign stats, contacts, and controls."} breadcrumbLabels={campaign?.name ? { [campaignId]: campaign.name } : undefined}>
             <motion.div
                 initial={{ opacity: 0, x: -10 }}
                 animate={{ opacity: 1, x: 0 }}
@@ -474,13 +487,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             {/* Keep the last good data on screen during a reload or after a
                 failed one: Pause/Stop must stay reachable while the campaign runs. */}
             {loading && !campaign ? (
-                <div className="flex items-center justify-center h-64">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-foreground/60" />
-                </div>
+                <LoadingState />
             ) : error && !campaign ? (
-                <div className="content-card border-red-500/30 text-red-400">
-                    {error}
-                </div>
+                <ErrorState message={error} onRetry={loadData} />
             ) : campaign ? (
                 <div className="space-y-6">
                     {error ? (
@@ -648,7 +657,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                 </div>
                                 <div>
                                     <p className="text-2xl font-bold text-foreground">{stats?.total_leads || 0}</p>
-                                    <p className="text-sm text-muted-foreground">Total Leads</p>
+                                    <p className="text-sm text-muted-foreground">Contacts</p>
                                 </div>
                             </div>
                         </motion.div>
@@ -767,7 +776,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                 </Button>
                                 <Button size="sm" onClick={() => { setEditingContact(null); setContactForm({ phone_number: "", first_name: "", last_name: "", email: "" }); setShowAddContact(true); }}>
                                     <Plus className="w-4 h-4" />
-                                    Add Contact
+                                    Add contact
                                 </Button>
                             </div>
                         </div>
@@ -916,11 +925,14 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                         </div>
                                     ) : null}
                                 </div>
+                                {contactFormError ? (
+                                    <p role="alert" className="mb-3 text-sm text-destructive">{contactFormError}</p>
+                                ) : null}
                                 <div className="flex gap-2">
                                     <Button type="submit" size="sm" disabled={addingContact || !contactFormValid}>
                                         {addingContact ? <Loader2 className="w-4 h-4 animate-spin" /> : (editingContact ? "Save changes" : "Add")}
                                     </Button>
-                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); }}>
+                                    <Button type="button" variant="outline" size="sm" onClick={() => { setShowAddContact(false); setEditingContact(null); setExtraContactFields([]); setContactFormError(""); }}>
                                         Cancel
                                     </Button>
                                 </div>
@@ -928,9 +940,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                         )}
 
                         {contacts.length === 0 ? (
-                            <div className="text-center py-8 text-muted-foreground">
-                                No contacts yet. Add contacts to start your campaign.
-                            </div>
+                            <EmptyState title="No contacts yet. Add contacts to start your campaign." />
                         ) : (
                           <>
                             {/* Search + lead filter toolbar */}
@@ -989,7 +999,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                 <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">
                                                     {contact.first_name || contact.last_name
                                                         ? `${contact.first_name || ""} ${contact.last_name || ""}`.trim()
-                                                        : "--"}
+                                                        : "Name unavailable"}
                                                     <ContactCapturedDetails leadId={contact.id} />
                                                 </td>
                                                 <td className="px-4 py-3 text-sm whitespace-nowrap">
@@ -1009,7 +1019,7 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                         </div>
                                                     ) : (
                                                         <span className={`px-2 py-0.5 text-xs font-medium rounded-full ${getContactStatusStyle(contact.last_call_result)}`}>
-                                                            {contact.last_call_result}
+                                                            {humanizeOutcome(contact.last_call_result)}
                                                         </span>
                                                     )}
                                                     {contact.latest_analysis_note && (
@@ -1032,9 +1042,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                         </button>
                                                         <button
                                                             type="button"
-                                                            onClick={() => handleDeleteContact(contact.id, contact.phone_number)}
+                                                            onClick={() => setRemoveTarget({ id: contact.id, phone: contact.phone_number })}
                                                             disabled={deletingContactId === contact.id}
-                                                            aria-label={`Delete ${contact.phone_number}`}
+                                                            aria-label={`Remove ${contact.phone_number}`}
                                                             title="Remove contact"
                                                             className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
                                                         >
@@ -1045,6 +1055,9 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
                                                             )}
                                                         </button>
                                                     </div>
+                                                    {contactDeleteError?.id === contact.id ? (
+                                                        <p role="alert" className="mt-1 whitespace-normal text-xs text-destructive">{contactDeleteError.message}</p>
+                                                    ) : null}
                                                 </td>
                                             </tr>
                                         ))}
@@ -1065,6 +1078,16 @@ function CampaignDetailScope({ campaignId }: { campaignId: string }) {
             ) : null}
 
             <CampaignStartDialog dialog={startDialog} />
+            <ConfirmDialog
+                open={removeTarget !== null}
+                onOpenChange={(open) => { if (!open) setRemoveTarget(null); }}
+                intent="delete"
+                title="Remove contact"
+                description=""
+                warningText={removeTarget ? `Remove ${removeTarget.phone} from this campaign? It will no longer be dialed.` : ""}
+                confirmLabel="Remove contact"
+                onConfirm={() => (removeTarget ? removeContact(removeTarget.id) : undefined)}
+            />
         </DashboardLayout>
     );
 }

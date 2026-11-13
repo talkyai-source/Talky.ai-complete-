@@ -3,6 +3,7 @@
 import { remainingMinutesLabel } from "@/lib/minutes-allowance";
 import { useState, useEffect } from "react";
 import { DashboardLayout } from "@/components/layout/dashboard-layout";
+import { ErrorState, LoadingState } from "@/components/states/page-states";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
@@ -49,7 +50,7 @@ export default function SettingsPage() {
     const token = useAccessToken() ?? "";
 
     // Real profile, loaded from /auth/me via AuthContext.
-    const { user, refreshUser } = useAuth();
+    const { user, loading: profileLoading, refreshUser } = useAuth();
     const [profileName, setProfileName] = useState("");
     const [profileBusiness, setProfileBusiness] = useState("");
     const [savingProfile, setSavingProfile] = useState(false);
@@ -210,7 +211,7 @@ export default function SettingsPage() {
                                             >
                                                 {priorities.map((p) => (
                                                     <option key={p} value={p}>
-                                                        {p}
+                                                        {p.charAt(0).toUpperCase() + p.slice(1)}
                                                     </option>
                                                 ))}
                                             </Select>
@@ -255,10 +256,11 @@ export default function SettingsPage() {
                             <TabsContent value="profile" className="space-y-4">
                                 <div className="rounded-2xl border border-gray-200 bg-white p-4 space-y-4 shadow-sm transition-[transform,background-color,box-shadow,border-color] duration-150 ease-out hover:-translate-y-0.5 hover:bg-gray-50 hover:shadow-md dark:border-white/10 dark:bg-white/5 dark:hover:bg-white/10 dark:hover:shadow-[0_10px_30px_rgba(0,0,0,0.22)]">
                                     <div className="text-sm font-semibold text-gray-900 dark:text-zinc-100">Profile Information</div>
-                                    {!user ? (
-                                        <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-                                            <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> Loading profile…
-                                        </div>
+                                    {!user && profileLoading ? (
+                                        <LoadingState title="Loading profile…" />
+                                    ) : !user ? (
+                                        // The profile read has finished without a profile: a failed read.
+                                        <ErrorState onRetry={() => refreshUser()} />
                                     ) : (
                                         <div className="space-y-4">
                                             <div className="space-y-2">

@@ -201,6 +201,8 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
     const [loadingVoices, setLoadingVoices] = useState(true);
     const [previewingVoiceId, setPreviewingVoiceId] = useState<string | null>(null);
     const [globalAiConfig, setGlobalAiConfig] = useState<AIProviderConfig | null>(null);
+    // TTS model id -> the name AI Options shows for it. Empty until (or unless) the providers list is read.
+    const [ttsModelNames, setTtsModelNames] = useState<Record<string, string>>({});
     const previewAudioRef = useRef<HTMLAudioElement | null>(null);
     // Track the Web Audio context too, so the Stop button can interrupt
     // a base64-PCM preview mid-playback (HTMLAudio path uses .pause(),
@@ -447,6 +449,12 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
             }
         }
         void fetchVoices();
+        // The model's display name comes from the same list AI Options shows; a failed read keeps the id.
+        void aiOptionsApi.getProviders()
+            .then((list) => {
+                setTtsModelNames(Object.fromEntries((list?.tts?.models ?? []).map((model) => [model.id, model.name])));
+            })
+            .catch(() => {});
     }, []);
 
     function handleChange(
@@ -613,6 +621,9 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         };
 
         let targetCampaignId = isEdit ? campaignId : createdCampaignId ?? undefined;
+        // True only once the server has accepted the campaign details: an
+        // edit always has an id, so the id alone never proves a save.
+        let detailsSaved = !isEdit && !!targetCampaignId;
         try {
             if (isEdit) {
                 if (!campaignId) {
@@ -620,10 +631,12 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                 }
                 const result = await dashboardApi.updateCampaign(campaignId, payload);
                 targetCampaignId = result.campaign.id;
+                detailsSaved = true;
             } else if (!targetCampaignId) {
                 const result = await dashboardApi.createCampaign(payload);
                 targetCampaignId = result.campaign.id;
                 setCreatedCampaignId(targetCampaignId);
+                detailsSaved = true;
             }
 
             await leadDetailsApi.setCampaignFields(targetCampaignId!, leadFields.fields);
@@ -631,7 +644,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         } catch (err) {
             const detail = err instanceof Error ? err.message : "Failed to save campaign";
             setError(
-                targetCampaignId
+                detailsSaved
                     ? `Campaign details were saved, but its contact-field policy was not. Retry to finish without creating a duplicate. ${detail}`
                     : detail,
             );
@@ -640,7 +653,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
         }
     }
 
-    const submitLabel = isEdit ? "Save Campaign" : "Create Campaign";
+    const submitLabel = isEdit ? "Save campaign" : "Create campaign";
     const submittingLabel = isEdit ? "Saving..." : "Creating...";
 
     return (
@@ -655,7 +668,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                     <CampaignVoiceSettings value={voiceSelection} onChange={setVoiceSelection} />
                     {/* Name */}
                     <div className="space-y-2">
-                        <Label htmlFor="name">Campaign Name</Label>
+                        <Label htmlFor="name">Campaign name</Label>
                         <Input
                             id="name"
                             name="name"
@@ -706,9 +719,9 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                         {globalAiConfig && (
                             <p className="text-xs text-muted-foreground">
                                 Campaign voices follow your global AI Options TTS provider:{" "}
-                                <span className="font-medium text-foreground">{globalAiConfig.tts_provider}</span>{" "}
+                                <span className="font-medium capitalize text-foreground">{globalAiConfig.tts_provider}</span>{" "}
                                 on model{" "}
-                                <span className="font-medium text-foreground">{globalAiConfig.tts_model}</span>.
+                                <span className="font-medium text-foreground">{ttsModelNames[globalAiConfig.tts_model] ?? globalAiConfig.tts_model}</span>.
                             </p>
                         )}
                         {/*
@@ -1046,7 +1059,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
 
                     {/* Persona picker */}
                     <div className="space-y-2">
-                        <Label>Agent role</Label>
+                        <Label>Persona</Label>
                         <p className="text-xs text-muted-foreground">
                             Each role shares our generic voice guardrails (pacing, phrasing, interruption handling). You only fill in the business-specific details.
                         </p>
@@ -1341,7 +1354,7 @@ export function CampaignForm({ mode, campaignId, initialData, afterCreateHref, d
                     </div>
 
                     {error && (
-                        <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
+                        <div role="alert" className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-lg p-3">
                             {error}
                         </div>
                     )}

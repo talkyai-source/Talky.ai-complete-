@@ -69,11 +69,11 @@ export function BillingPlanSelector({ scope, onNavigate = navigate }: { scope: s
   return <div className="space-y-6">
     <PurchaseNotice purchase={purchase} />
     {portalError && <p role="alert">{portalError}</p>}
-    {plansQuery.isLoading || subscriptionQuery.isLoading ? <p role="status">Loading billing offers…</p> : plansQuery.isError || subscriptionQuery.isError ?
-      <div role="alert" className="space-y-3"><p>Billing offers could not be verified. Your current subscription is unchanged.</p><Button variant="outline" onClick={() => { void plansQuery.refetch(); void subscriptionQuery.refetch(); }}>Retry</Button></div> : <>
+    {plansQuery.isLoading || subscriptionQuery.isLoading ? <p role="status">Loading plans…</p> : plansQuery.isError || subscriptionQuery.isError ?
+      <div role="alert" className="space-y-3"><p>Plans could not be verified. Your current subscription is unchanged.</p><Button variant="outline" onClick={() => { void plansQuery.refetch(); void subscriptionQuery.refetch(); }}>Retry</Button></div> : <>
       {managed && <div className="space-y-3 rounded-xl border p-4"><p>Manage your existing paid subscription in the billing portal.</p>{subscription?.billing_portal_available ? <Button disabled={portalBusy} onClick={() => void manage()}>{portalBusy ? "Opening…" : "Manage subscription"}</Button> : <p>Subscription management is unavailable. Contact support before changing your plan.</p>}</div>}
       {annualAvailable && <fieldset className="flex flex-wrap items-center justify-center gap-4"><legend className="mb-2 text-center font-semibold">Billing interval</legend>{(["month", "year"] as const).map(value => <label key={value} className="inline-flex items-center gap-2"><input type="radio" name="billing-interval" value={value} checked={selectedInterval === value} disabled={Boolean(purchase.saved) || purchase.busy} onChange={() => setInterval(value)} />{value === "month" ? "Monthly" : "Yearly"}</label>)}</fieldset>}
-      {plans.length === 0 && <p>No approved offers are currently available.</p>}
+      {plans.length === 0 && <p>No approved plans are currently available.</p>}
       <div className="grid grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">{plans.map(plan => {
         const price = plan.price_options.find(option => option.kind === "free" && option.active) ?? plan.price_options.find(option => option.interval === selectedInterval && option.active);
         const available = Boolean(price?.checkout_available && price.active && (price.kind === "free" || ["live", "test"].includes(plan.billing_mode)));

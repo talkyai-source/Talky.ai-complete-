@@ -87,7 +87,7 @@ test("EP1 upload card: UK selected sends 07400 123456 as +447400123456, 12345 is
     assert.equal(within(ukRow).getAllByRole("cell")[5].textContent, UK_E164, "Saves as column shows the E.164");
     assert.equal(within(badRow).getAllByRole("cell")[5].textContent, INVALID_PHONE_ERROR, "Saves as column shows the row's error");
 
-    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contacts/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
     const lines = sent[0].split("\n");
     assert.equal(lines[0], CONTACT_UPLOAD_COLUMNS.join(","));
@@ -109,8 +109,8 @@ test("EP1 result card maps the backend's clean-file row numbers back to the orig
     fireEvent.change(uploadCardFileInput(), { target: { files: [csvFile(FILE_TEXT)] } });
     await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
     await chooseUnitedKingdom("contacts-import-country");
-    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Upload 1 contacts/ })), { timeout: SLOW });
-    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contacts/ }));
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Upload 1 contact$/ })), { timeout: SLOW });
+    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     const results = await screen.findByTestId("contacts-import-results", undefined, { timeout: SLOW });
     const rows = within(results).getAllByTestId("contacts-import-error-row").map((r) => within(r).getAllByRole("cell").map((c) => c.textContent));
     // Backend row 2 (first data line of the clean CSV) is line 4 of the user's file.
@@ -138,8 +138,8 @@ test("EP2 mapper Import button sends the file through the SAME upload path and C
     fireEvent.change(uploadCardFileInput(), { target: { files: [csvFile(FILE_TEXT)] } });
     await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
     await chooseUnitedKingdom("contacts-import-country");
-    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Upload 1 contacts/ })), { timeout: SLOW });
-    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contacts/ }));
+    await waitFor(() => assert.ok(screen.getByRole("button", { name: /Upload 1 contact$/ })), { timeout: SLOW });
+    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
 
     // The panel closed after the import; reopen it for the mapper (EP2).
@@ -218,7 +218,7 @@ test("EP1: an invalid mobile_number cell is a column-named row error with the or
     const [okRow, badRow] = screen.getAllByTestId("contacts-preview-row");
     assert.equal(within(okRow).getAllByRole("cell")[5].textContent, UK_E164);
     assert.equal(within(badRow).getAllByRole("cell")[0].textContent, "3");
-    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contacts/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Upload 1 contact$/ }));
     await waitFor(() => assert.equal(sent.length, 1), { timeout: SLOW });
     const lines = sent[0].split("\n");
     assert.equal(lines.length, 2);
@@ -254,4 +254,63 @@ test("EP5: an invalid mobile number shows its inline error, blocks Save and send
     const payload = addContact.mock.calls[0].arguments[1] as { phone_number: string; mobile_number: string };
     assert.equal(payload.phone_number, UK_E164);
     assert.equal(payload.mobile_number, "+447400123457");
+});
+
+// ── FX3a Task 3: Contacts text ───────────────────────────────────────────────
+test("FX3a: one contact is singular on the upload button and in the result", async () => {
+    mockHome(async () => okResponse);
+    await openUploadPanel();
+    fireEvent.change(uploadCardFileInput(), { target: { files: [csvFile(FILE_TEXT)] } });
+    await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
+    await chooseUnitedKingdom("contacts-import-country");
+    await waitFor(() => assert.equal(screen.queryByRole("button", { name: "Upload 1 contact" }) !== null, true), { timeout: SLOW });
+    assert.equal(screen.queryByRole("button", { name: /Upload 1 contacts/ }) !== null, false);
+    fireEvent.click(screen.getByRole("button", { name: "Upload 1 contact" }));
+    const results = await screen.findByTestId("contacts-import-results", undefined, { timeout: SLOW });
+    assert.equal((results.textContent ?? "").includes("Successfully imported 1 contact"), true);
+    assert.equal((results.textContent ?? "").includes("Successfully imported 1 contacts"), false);
+});
+
+test("FX3a: several contacts stay plural, and a repeated number is named in plain words", async () => {
+    mockHome(async () => okResponse);
+    await openUploadPanel();
+    const text = ["Phone,First Name", "+447400123456,Ann", "+447400123457,Bob", "+447400123456,Ann again"].join("\n");
+    fireEvent.change(uploadCardFileInput(), { target: { files: [csvFile(text)] } });
+    await screen.findAllByTestId("contacts-preview-row", undefined, { timeout: SLOW });
+    await waitFor(() => assert.equal(screen.queryByRole("button", { name: "Upload 2 contacts" }) !== null, true), { timeout: SLOW });
+    assert.equal(screen.queryAllByText("duplicate phone number in this file").length > 0, true);
+    assert.equal(screen.queryAllByText("duplicate phone_number in this file").length, 0);
+});
+
+test("FX3a: a contact row shows the result label, never the raw code", async () => {
+    mock.method(dashboardApi, "listCampaigns", async () => ({ campaigns: [{ id: "camp-1", name: "Spring push", direction: "outbound" }] }));
+    mock.method(dashboardApi, "listContacts", async () => ({
+        items: [{ id: "lead-1", campaign_id: "camp-1", phone_number: "+447400123456", first_name: "Ann", status: "pending", last_call_result: "no_answer", call_attempts: 1 }],
+        total: 1,
+    }));
+    render(<Page />);
+    await waitFor(() => assert.equal(screen.queryAllByText("No Answer").length > 0, true), { timeout: SLOW });
+    assert.equal(screen.queryAllByText("no_answer").length, 0);
+});
+
+// ── FX3a2 Task 3.2: the column is named in plain words ───────────────────────
+test("FX3a2: the upload help and the missing-column error say phone number", async () => {
+    mockHome(async () => okResponse);
+    await openUploadPanel();
+    const help = screen.getByText(/Required column:/);
+    assert.equal((help.textContent ?? "").startsWith("Required column: phone number."), true);
+    fireEvent.change(uploadCardFileInput(), { target: { files: [csvFile(["Name,Email", "Ann,ann@example.com"].join("\n"))] } });
+    await waitFor(() => assert.equal(screen.queryByText(/Couldn't find a phone column/) !== null, true), { timeout: SLOW });
+    const error = screen.getByText(/Couldn't find a phone column/).textContent ?? "";
+    assert.equal(error.includes("Add a column like 'phone number', 'Phone', 'Mobile', or 'To Number'."), true);
+    assert.equal(error.includes("phone_number"), false);
+});
+
+// ── FX3a3 Task 2.4: the other column names read as phone number does ─────────
+test("FX3a3: the upload help names the name and company columns in plain words", async () => {
+    mockHome(async () => okResponse);
+    await openUploadPanel();
+    const help = screen.getByText(/Required column:/).textContent ?? "";
+    assert.equal(help.includes("Use either full name or first name, last name; email and company name are optional."), true, help);
+    assert.equal(/full_name|first_name|last_name|company_name/.test(help), false);
 });

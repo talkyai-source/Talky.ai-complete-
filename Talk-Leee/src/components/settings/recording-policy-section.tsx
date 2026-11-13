@@ -1,12 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select } from "@/components/ui/select";
+import { ErrorState, failedReadMessage } from "@/components/states/page-states";
 import { sharedHttpClient } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useNotificationsActions } from "@/lib/notifications-client";
@@ -39,7 +40,10 @@ function formatError(err: unknown) {
 }
 
 export async function fetchRecordingPolicy(signal?: AbortSignal): Promise<RecordingPolicy> {
-    return (await sharedHttpClient().request({ path: "/recordings/policy", timeoutMs: 12_000, signal })) as RecordingPolicy;
+    const policy = (await sharedHttpClient().request({ path: "/recordings/policy", timeoutMs: 12_000, signal })) as RecordingPolicy;
+    // An answer that does not say whether a policy is saved is a failed read.
+    if (typeof policy?.configured !== "boolean") throw new Error();
+    return policy;
 }
 
 export async function saveRecordingPolicy(input: RecordingPolicyInput): Promise<RecordingPolicy> {
@@ -58,11 +62,14 @@ export function RecordingPolicyView({
     error,
     canEdit,
     onSave,
+    onRetry,
     saving,
 }: {
     policy: RecordingPolicy | undefined;
     isLoading?: boolean;
+    /** The policy read failed. No form is shown: its defaults may be untrue. */
     error?: string | null;
+    onRetry?: () => void | Promise<void>;
     canEdit: boolean;
     onSave: (input: RecordingPolicyInput) => Promise<unknown>;
     saving?: boolean;
@@ -97,6 +104,10 @@ export function RecordingPolicyView({
         }
     };
 
+    if (error) {
+        return <ErrorState message={error} onRetry={onRetry} />;
+    }
+
     return (
         <Card data-testid="recording-policy">
             <CardHeader>
@@ -108,7 +119,6 @@ export function RecordingPolicyView({
                 </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-                {error ? <div className="rounded-2xl border border-red-500/30 bg-background/70 p-4 text-sm text-red-500">{error}</div> : null}
                 {isLoading && !policy ? <div className="h-4 w-1/2 animate-pulse rounded bg-foreground/10" /> : null}
 
                 {policy ? (
@@ -224,22 +234,24 @@ export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
 
+    const load = useCallback((signal?: AbortSignal) => fetchRecordingPolicy(signal)
+        .then((p) => {
+            setPolicy(p);
+            setError(null);
+        })
+        .catch((err) => {
+            if (signal?.aborted) return;
+            setError(failedReadMessage(err, "Request failed"));
+        })
+        .finally(() => {
+            if (!signal?.aborted) setIsLoading(false);
+        }), []);
+
     useEffect(() => {
         const ctrl = new AbortController();
-        fetchRecordingPolicy(ctrl.signal)
-            .then((p) => {
-                setPolicy(p);
-                setError(null);
-            })
-            .catch((err) => {
-                if (ctrl.signal.aborted) return;
-                setError(formatError(err));
-            })
-            .finally(() => {
-                if (!ctrl.signal.aborted) setIsLoading(false);
-            });
+        void load(ctrl.signal);
         return () => ctrl.abort();
-    }, []);
+    }, [load]);
 
     const onSave = async (input: RecordingPolicyInput) => {
         setSaving(true);
@@ -263,6 +275,7 @@ export function RecordingPolicySection({ canEdit }: { canEdit: boolean }) {
             error={error}
             canEdit={canEdit}
             onSave={onSave}
+            onRetry={() => load()}
             saving={saving}
         />
     );

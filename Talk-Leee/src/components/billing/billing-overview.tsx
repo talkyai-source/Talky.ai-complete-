@@ -22,7 +22,7 @@ import {
   TrendingUp,
   XCircle,
 } from "lucide-react";
-import { ErrorState } from "@/components/states/page-states";
+import { EmptyState, ErrorState, LoadingState, failedReadMessage } from "@/components/states/page-states";
 import { api } from "@/lib/api";
 import { isApiClientError } from "@/lib/http-client";
 import { useTopupBalance } from "@/lib/topup-api";
@@ -86,7 +86,7 @@ type OverageAlertRow = {
 
 function formatDate(iso: string | null | undefined) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleDateString();
 }
 
 function formatDateRange(start: string | null | undefined, end: string | null | undefined) {
@@ -114,9 +114,9 @@ export function formatBillingError(err: unknown): string {
   if (isApiClientError(err)) {
     if (err.status === 403) return "You do not have permission to view billing for this account.";
     if (err.status === 401) return "Your session has expired.";
-    return err.message;
+    return failedReadMessage(err, "The request did not complete.");
   }
-  return err instanceof Error ? err.message : "The request did not complete.";
+  return failedReadMessage(err, "The request did not complete.");
 }
 
 function statusBadge(state: string) {
@@ -206,11 +206,7 @@ export function BillingOverview({ topupSlot, scope }: { topupSlot?: ReactNode; s
   if (initialLoading) {
     return (
       <div className="space-y-6">
-        <Card>
-          <CardContent className="flex items-center justify-center py-16 text-muted-foreground">
-            <Loader2 className="mr-2 h-5 w-5 animate-spin" aria-hidden /> Loading billing data…
-          </CardContent>
-        </Card>
+        <LoadingState title="Loading billing data…" />
       </div>
     );
   }
@@ -459,9 +455,7 @@ function CallStats({
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="flex items-center justify-center py-6 text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading call stats…
-          </div>
+          <LoadingState title="Loading call stats…" />
         ) : failed ? (
           // Zeros here would read as "you made no calls". We do not know that.
           <SectionLoadError what="Call stats" error={error} onRetry={onRetry} />
@@ -510,13 +504,11 @@ function UsageSummarySection({
       </CardHeader>
       <CardContent>
         {loading ? (
-          <div className="flex items-center justify-center py-8 text-muted-foreground">
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden /> Loading daily usage…
-          </div>
+          <LoadingState title="Loading daily usage…" />
         ) : failed ? (
           <SectionLoadError what="Daily usage" error={error} onRetry={onRetry} />
         ) : daily.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No call activity in the last 30 days.</div>
+          <EmptyState title="No call activity in the last 30 days." />
         ) : (
           <>
             <div className="relative h-32 overflow-hidden rounded-2xl border border-border/70 bg-muted/20 px-3 pb-3 pt-5">
@@ -687,7 +679,7 @@ function RecentInvoices({
           // never been billed. Say what happened instead.
           <SectionLoadError what="Your invoices" error={error} onRetry={onRetry} />
         ) : invoices.length === 0 ? (
-          <div className="py-8 text-center text-sm text-muted-foreground">No invoices yet.</div>
+          <EmptyState title="No invoices yet." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border bg-card/50">
             <table className="min-w-full text-sm">
@@ -704,7 +696,7 @@ function RecentInvoices({
                   <tr key={inv.id} className="border-b border-border last:border-b-0 hover:bg-muted/20 transition-colors">
                     <td className="px-4 py-3">
                       <Link href={`/billing/invoices/${inv.id}`} className="inline-block py-1 -my-1 font-semibold text-foreground hover:underline">
-                        {inv.stripe_invoice_id || inv.id.slice(0, 8)}
+                        {inv.invoice_number || inv.stripe_invoice_id || inv.id.slice(0, 8)}
                       </Link>
                     </td>
                     <td className="px-4 py-3 text-muted-foreground">{formatDate(inv.period_start)} – {formatDate(inv.period_end)}</td>
