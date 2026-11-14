@@ -43,17 +43,34 @@ export function DisplayCurrencyProvider({ children }: { children: ReactNode }) {
   return <DisplayCurrencyContext.Provider value={value}>{children}</DisplayCurrencyContext.Provider>;
 }
 
+/** The visitor's display currency, or null when they are shown dollars only. */
+export function useDisplayCurrency(): DisplayCurrency | null {
+  return useContext(DisplayCurrencyContext);
+}
+
 /**
- * The estimate for one dollar price, for example "≈ £75/month". Renders nothing
- * for a visitor who is shown dollars only, so the page is unchanged for them.
+ * One price, in the visitor's own currency first. A visitor who is shown
+ * dollars only gets the dollar price alone, so the page is unchanged for them
+ * (and in the server HTML). Anyone else gets the local estimate in the
+ * headline's place, for example "≈ £75/month", and the dollar amount that is
+ * actually charged directly under it.
  */
-export function LocalEstimate({ usd, suffix = "", className }: { usd: number; suffix?: string; className?: string }) {
-  const display = useContext(DisplayCurrencyContext);
-  if (!display) return null;
+export function LocalFirstPrice({ usd, usdText, suffix = "", className, chargedClassName }: {
+  usd: number;
+  usdText: string;
+  suffix?: string;
+  className?: string;
+  chargedClassName?: string;
+}) {
+  const display = useDisplayCurrency();
+  if (!display) return <p className={className}>{usdText}</p>;
   return (
-    <span className={className} data-testid="local-estimate">
-      ≈ {formatEstimate(usd, display.rate, display.currency)}{suffix}
-    </span>
+    <>
+      <p className={className} data-testid="local-estimate">
+        ≈ {formatEstimate(usd, display.rate, display.currency)}{suffix}
+      </p>
+      <p className={chargedClassName} data-testid="charged-in-usd">{usdText} charged in US dollars</p>
+    </>
   );
 }
 
