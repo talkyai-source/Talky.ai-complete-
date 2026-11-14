@@ -62,7 +62,7 @@ class NotificationService:
         self.email_enabled = os.getenv("EMAIL_ENABLED", "true").lower() == "true"
         self.email_provider = "smtp"
         self.sendgrid_api_key = os.getenv("SENDGRID_API_KEY", "")
-        self.smtp_host = account_mail.EmailService.SMTP_HOST
+        self.smtp_host = account_mail.account_smtp_host()
         self.smtp_port = account_mail.EmailService.SMTP_PORT
         self.smtp_user = settings.email_user
         self.smtp_password = settings.email_pass
