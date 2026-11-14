@@ -8656,7 +8656,7 @@
       "category": "platform_account_enforcement"
     },
     {
-      "id": "2b348d0f969d8ebc6de0a4a99b4a2418a0d969b7ff9468fab98050dbca104188",
+      "id": "8e1e77fc53f6049380ebf0bcb2623d5ad8807b9564e1e2dd8186c17bc771f2e4",
       "file": "app/domain/services/billing_webhook_reconciliation.py",
       "function": "BillingReconciliation.list_unresolved",
       "line": 47,
@@ -8664,12 +8664,12 @@
       "tables": [
         "processed_webhook_events"
       ],
-      "sql": "SELECT event_id,event_type,state,provider_mode,attempt_count,last_error_code,received_at FROM processed_webhook_events WHERE state<>'completed' ORDER BY received_at,event_id LIMIT $1",
+      "sql": "SELECT event_id,event_type,state,provider_mode,attempt_count,last_error_code,received_at FROM processed_webhook_events WHERE state NOT IN ('completed','dismissed') ORDER BY received_at,event_id LIMIT $1",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:47.",
+      "reason": "This helper is exposed by scripts/reconcile_billing_webhooks.py, an operator CLI rather than a tenant HTTP route. It observes or reconciles one verified provider event/notification across platform billing; inspect checks provider identity, account, mode and stored payload hash. Mutating CLI modes require explicit resource IDs and review inputs. A receipt an operator dismissed is closed and is left alone too. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:47.",
       "category": "operator_billing_reconciliation"
     },
     {
@@ -11740,20 +11740,20 @@
       "category": "platform_catalog"
     },
     {
-      "id": "d2a843257899f8719f8a3ffd8f0ab2fc167f687d30c98298396277de80f26c81",
+      "id": "e488fc395748894855b34524e2ef368948db41bb2cc821cbaf700d45d09a0a61",
       "file": "app/domain/services/billing_webhooks.py",
       "function": "BillingWebhookProcessor._record_failure",
-      "line": 160,
+      "line": 168,
       "method": "execute",
       "tables": [
         "processed_webhook_events"
       ],
-      "sql": "UPDATE processed_webhook_events SET state=CASE WHEN state='legacy_unverified' THEN state ELSE $2 END, attempt_count=attempt_count+1,last_error_code=$3 WHERE event_id=$1 AND state<>'completed' AND (state<>'needs_review' OR $2='needs_review')",
+      "sql": "UPDATE processed_webhook_events SET state=CASE WHEN state='legacy_unverified' THEN state ELSE $2 END, attempt_count=attempt_count+1,last_error_code=$3 WHERE event_id=$1 AND state NOT IN ('completed','dismissed') AND (state<>'needs_review' OR $2='needs_review')",
       "scoped": false,
       "unresolved": false,
       "bypass": true,
       "count": 1,
-      "reason": "Failure retention updates the selected global provider-event receipt by event_id and preserves completed/needs_review states. Some failures occur before any tenant is resolved, so a fabricated tenant filter would discard failure evidence. Exact reviewed operation: execute; app/domain/services/billing_webhooks.py:160.",
+      "reason": "Failure retention updates the selected global provider-event receipt by event_id and preserves completed/needs_review states. Some failures occur before any tenant is resolved, so a fabricated tenant filter would discard failure evidence. A receipt an operator dismissed is closed and is left alone too. Exact reviewed operation: execute; app/domain/services/billing_webhooks.py:168.",
       "category": "system_provider_receipt"
     },
     {
@@ -12533,6 +12533,57 @@
       "count": 1,
       "reason": "Owner decision D4-2 (11 Nov 2026): an email that already has an account in any workspace is refused, so this checks the globally unique normalized account email, as signup does. A tenant predicate would miss accounts in other workspaces. Only existence is read. The caller was authorized for its own tenant in the same transaction (_current_target_admin). Exact reviewed operation: fetchval; app/api/v1/endpoints/rbac/tenant_invites.py:115.",
       "category": "individually_reviewed"
+    },
+    {
+      "id": "31a7633501386a576bdefaf0fcffb2e47473cb43d10d81813ee42900ffc7af4c",
+      "file": "app/domain/services/billing_webhook_reconciliation.py",
+      "function": "BillingReconciliation.dismiss",
+      "line": 260,
+      "method": "fetchrow",
+      "tables": [
+        "processed_webhook_events"
+      ],
+      "sql": "SELECT state FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "category": "operator_billing_reconciliation",
+      "count": 1,
+      "reason": "Operator CLI only (scripts/reconcile_billing_webhooks.py dismiss). Locks ONE global provider-event receipt by its event_id before deciding; receipts are platform rows whose tenant_id is NULL until reconciliation, so a tenant filter would hide exactly the receipts that need review. Exact reviewed operation: fetchrow; app/domain/services/billing_webhook_reconciliation.py:260."
+    },
+    {
+      "id": "6673aaa6bec14521464cb1a2eb9964c1be1b2901e751da8371a42d313274497a",
+      "file": "app/domain/services/billing_webhook_reconciliation.py",
+      "function": "BillingReconciliation.dismiss",
+      "line": 270,
+      "method": "execute",
+      "tables": [
+        "billing_webhook_review_log"
+      ],
+      "sql": "INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason) VALUES($1,$2,'dismiss',$3)",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "category": "operator_billing_reconciliation",
+      "count": 1,
+      "reason": "Operator CLI only. Writes the audit row (operator, decision, reason) for ONE receipt named by event_id, in the same transaction as the state change; the review log is a platform table with no tenant column. Exact reviewed operation: execute; app/domain/services/billing_webhook_reconciliation.py:270."
+    },
+    {
+      "id": "a93b8bbcbfba8fcd55e268b703be23325b5f985719cea8aa1e350384eb48be94",
+      "file": "app/domain/services/billing_webhook_reconciliation.py",
+      "function": "BillingReconciliation.dismiss",
+      "line": 275,
+      "method": "fetch",
+      "tables": [
+        "processed_webhook_events"
+      ],
+      "sql": "UPDATE processed_webhook_events SET state='dismissed' WHERE event_id=$1 AND state='needs_review' RETURNING event_id",
+      "scoped": false,
+      "unresolved": false,
+      "bypass": true,
+      "category": "operator_billing_reconciliation",
+      "count": 1,
+      "reason": "Operator CLI only. Closes ONE global provider-event receipt, named by event_id and only from needs_review; the caller requires exactly one returned row. tenant_id can be NULL on an unreconciled receipt, so it cannot be part of the predicate. Exact reviewed operation: fetch; app/domain/services/billing_webhook_reconciliation.py:275."
     }
   ]
 }

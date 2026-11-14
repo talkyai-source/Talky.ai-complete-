@@ -46,7 +46,7 @@ class BillingReconciliation:
         async with acquire_with_tenant(self.pool, None, timeout=5) as conn:
             rows = await conn.fetch(
                 """SELECT event_id,event_type,state,provider_mode,attempt_count,last_error_code,received_at
-                   FROM processed_webhook_events WHERE state<>'completed'
+                   FROM processed_webhook_events WHERE state NOT IN ('completed','dismissed')
                    ORDER BY received_at,event_id LIMIT $1""",
                 max(1, min(limit, 100)),
             )
@@ -247,6 +247,40 @@ class BillingReconciliation:
             "financial_effects_applied": False,
             "reviewed": report,
         }
+
+    async def dismiss(self, event_id, *, operator, reason):
+        """Close one needs_review receipt WITHOUT replay; no business effect is applied."""
+        if not operator.strip() or len(operator) > 200 or not 12 <= len(reason.strip()) <= 2000:
+            raise ValueError(
+                "An identified operator and substantive reconciliation reason are required"
+            )
+        async with acquire_with_tenant(self.pool, None, timeout=5) as conn:
+            if not await lock_event(conn, event_id):
+                raise BillingWebhookRetryable("event_busy")
+            receipt = await conn.fetchrow(
+                "SELECT state FROM processed_webhook_events WHERE event_id=$1 FOR UPDATE", event_id
+            )
+            if receipt is None:
+                raise ValueError("No receipt exists for this event")
+            if receipt["state"] == "dismissed":
+                return {"event_id": event_id, "state": "dismissed", "changed": False,
+                        "financial_effects_applied": False}
+            if receipt["state"] != "needs_review":
+                raise ValueError("Only a needs_review receipt can be dismissed")
+            await conn.execute(
+                """INSERT INTO billing_webhook_review_log(event_id,operator,decision,reason)
+                   VALUES($1,$2,'dismiss',$3)""",
+                event_id, operator.strip(), reason.strip(),
+            )
+            updated = await conn.fetch(
+                """UPDATE processed_webhook_events SET state='dismissed'
+                   WHERE event_id=$1 AND state='needs_review' RETURNING event_id""",
+                event_id,
+            )
+            if len(updated) != 1:
+                raise ValueError("Exactly one receipt must change; nothing was recorded")
+        return {"event_id": event_id, "state": "dismissed", "changed": True,
+                "financial_effects_applied": False}
 
     async def refresh_details(self, event_id, *, operator, reason):
         """Append current provider observations; never replay financial handlers."""
