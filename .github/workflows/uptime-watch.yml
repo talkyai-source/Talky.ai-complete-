@@ -1,0 +1,33 @@
+name: Outside uptime watch
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: uptime-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Check site and API from outside the server
+    if: github.repository == 'talkyai-source/Talky.ai-complete-'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Run outside checks and update the uptime issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: python scripts/uptime_watch.py
