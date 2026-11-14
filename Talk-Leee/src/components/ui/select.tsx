@@ -6,6 +6,15 @@ import { ChevronDown } from "lucide-react";
 import React, { useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
+type SelectOption = { value: string; label: string; disabled: boolean; group?: string };
+
+function sameOptions(a: SelectOption[], b: SelectOption[]): boolean {
+    return a.length === b.length && a.every((option, index) => {
+        const other = b[index];
+        return option.value === other.value && option.label === other.label && option.disabled === other.disabled && option.group === other.group;
+    });
+}
+
 export function Select({
     value,
     onChange,
@@ -45,11 +54,11 @@ export function Select({
     const { theme } = useTheme();
     const enhanceLight = Boolean(lightThemeGreen && theme === "light");
 
-    const options = useMemo(() => {
+    const readOptions = useMemo(() => {
         // Reads direct <option> children AND options nested in <optgroup>, in
         // markup order, so grouped options are never silently dropped.
         type OptionEl = React.ReactElement<{ value?: string; disabled?: boolean; children?: React.ReactNode }>;
-        const out: Array<{ value: string; label: string; disabled: boolean; group?: string }> = [];
+        const out: SelectOption[] = [];
         const pushOption = (opt: OptionEl, group?: string) => {
             const rawLabel = opt.props.children;
             out.push({
@@ -73,6 +82,16 @@ export function Select({
         }
         return out;
     }, [children]);
+    // `children` is a new array on every render of the parent, so the list
+    // read from it is too. The effects below take the options as a dependency
+    // and set state, so with the fresh list they ran again, and scheduled a
+    // render of their own, after every render of the parent: each key typed
+    // into any other field on the page. When keys arrived faster than React
+    // could finish that extra render, its loop guard counted fifty in a row
+    // and threw from the field's onChange, losing the key (14 Nov 2026). The
+    // same list is kept until an option really changes.
+    const [options, setOptions] = useState(readOptions);
+    if (options !== readOptions && !sameOptions(options, readOptions)) setOptions(readOptions);
 
     const selectedIndex = Math.max(
         0,
