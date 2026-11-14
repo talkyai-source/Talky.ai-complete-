@@ -15,7 +15,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { extendedApi, BulkImportResponse } from "@/lib/extended-api";
 import { sharedHttpClient } from "@/lib/api";
 import { parseContactsCsv, type ContactRow } from "@/lib/contact-csv";
-import { contactPayload, EMPTY_CONTACT_FORM, type ContactFormState } from "@/lib/contact-form";
+import { contactOptionalFieldProblem, contactPayload, contactTimezoneError, EMPTY_CONTACT_FORM, supportedTimeZones, type ContactFormState } from "@/lib/contact-form";
 import { buildContactsUpload, parseRowNumbers, uploadFileFromCsv, type RowNumbers } from "@/lib/contact-upload-csv";
 import { campaignActions, useKnownPermissions } from "@/lib/permissions";
 import { isApiClientError } from "@/lib/http-client";
@@ -303,7 +303,15 @@ export default function ContactsPage() {
         () => (contactForm.business_number.trim() ? parsePhoneNumber(contactForm.business_number, formCountry) : null),
         [contactForm.business_number, formCountry],
     );
-    const contactFormValid = phoneStatus.ok && (mobileStatus?.ok ?? true) && (businessStatus?.ok ?? true);
+    const timeZones = useMemo(() => supportedTimeZones(), []);
+    const timezoneError = useMemo(() => contactTimezoneError(contactForm.timezone, timeZones), [contactForm.timezone, timeZones]);
+    // Optional fields sit in a collapsible section, so the reason Add/Save is
+    // grey is also shown beside the button.
+    const optionalFieldProblem = useMemo(
+        () => contactOptionalFieldProblem(contactForm, formCountry, timeZones),
+        [contactForm, formCountry, timeZones],
+    );
+    const contactFormValid = phoneStatus.ok && optionalFieldProblem === null;
 
     async function loadCampaigns() {
         try {
@@ -1126,7 +1134,19 @@ export default function ContactsPage() {
                                 value={contactForm.timezone}
                                 onChange={(event) => setContactForm((previous) => ({ ...previous, timezone: event.target.value }))}
                                 placeholder="America/New_York"
+                                list="contact-timezone-options"
+                                autoComplete="off"
+                                aria-invalid={timezoneError ? true : undefined}
+                                aria-describedby={timezoneError ? "contact-timezone-error" : undefined}
                             />
+                            <datalist id="contact-timezone-options">
+                                {timeZones.map((zone) => (
+                                    <option key={zone} value={zone} />
+                                ))}
+                            </datalist>
+                            {timezoneError ? (
+                                <p id="contact-timezone-error" role="alert" className="mt-1 text-xs text-destructive">{timezoneError}</p>
+                            ) : null}
                         </div>
                         <div>
                             <Label htmlFor="contact-preferred-method">Preferred Contact Method</Label>
@@ -1171,6 +1191,9 @@ export default function ContactsPage() {
 
             {contactFormError ? (
                 <p role="alert" className="mb-3 text-sm text-destructive">{contactFormError}</p>
+            ) : null}
+            {optionalFieldProblem ? (
+                <p id="contact-optional-problem" role="alert" className="mb-3 text-sm text-destructive">{optionalFieldProblem}</p>
             ) : null}
             <div className="flex flex-wrap gap-2">
                 <Button type="submit" size="sm" disabled={savingContact || !contactFormValid}>

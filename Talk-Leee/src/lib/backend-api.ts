@@ -569,7 +569,15 @@ export const backendApi = {
                 return parseOrThrow(ListResponseSchema(EmailTemplateResponseSchema), data);
             },
         },
-        send: async (input: { to: string[]; templateId: string; subject?: string; html?: string }): Promise<EmailSendResponse> => {
+        send: async (input: { to: string[]; templateId: string; subject?: string; html: string }): Promise<EmailSendResponse> => {
+            // The API sends exactly `body_html` / `body` (it renders a template only when it also gets
+            // template_context, which the dialog never sends). `body` is the plain-text twin of the HTML.
+            const body = input.html
+                .replace(/<(style|script)[\s\S]*?<\/\1>/gi, "")
+                .replace(/<br\s*\/?>|<\/(p|div|h[1-6]|li|tr)>/gi, "\n")
+                .replace(/<[^>]+>/g, "")
+                .replace(/&nbsp;/g, " ").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&")
+                .replace(/[ \t]+/g, " ").replace(/\n\s*\n+/g, "\n\n").trim();
             const data = await httpClient().request({
                 path: backendEndpoints.emailSend.path,
                 method: backendEndpoints.emailSend.method,
@@ -577,7 +585,8 @@ export const backendApi = {
                     to: input.to,
                     template_id: input.templateId,
                     subject: input.subject,
-                    html: input.html,
+                    body,
+                    body_html: input.html,
                 },
                 timeoutMs: 30_000,
             });
